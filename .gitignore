@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# IDE
+.vs/
+.vscode/
+*.suo
+
+# Test results
+TestResults/
+*.trx
+
+# Packaging output (Velopack, installers)
+Releases/
+publish/
