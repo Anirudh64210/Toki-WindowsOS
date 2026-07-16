@@ -12,3 +12,4 @@ Read them in order:
 6. [The black window, and why the PC got slow](06-black-window-fixed.md) — the see-through-window vs ghost-mode conflict, and rebuilding the window to be solid, fast, and stable.
 7. [Toki turns talking into text](07-toki-understands-speech.md) — on-device speech-to-text, both sides transcribed and labelled, echo removed.
 8. [Toki remembers, and pulls out the useful bits](08-remembering-meetings.md) — local database, first-pass notes, the searchable Library, and manual notes.
+9. [Toki writes the notes like a person would](09-ai-written-notes.md) — the on-device AI writer, three-pass notes, safety net, and the GPU control.

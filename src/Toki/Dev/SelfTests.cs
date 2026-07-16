@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using Toki.Audio;
 using Toki.Detection;
+using Toki.Llm;
 using Toki.Storage;
 using Toki.Transcription;
 
@@ -37,6 +38,7 @@ static class SelfTests
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
                 "--seed" => Seed(),
+                "--llmtest" => LlmTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -89,6 +91,53 @@ static class SelfTests
         Console.WriteLine($"[--loopbacktest] PASS — play {Path.GetFileName(path)} and you should hear that app.");
         if (cap.PeakLevel < 0.005f)
             Console.WriteLine("  note: peak is near silence — the app may not have played audio during the test.");
+        return 0;
+    }
+
+    static int LlmTest()
+    {
+        if (!ModelManager.QwenInstalled)
+        {
+            Console.WriteLine("[--llmtest] Qwen3-4B not installed — downloading (~2.5 GB, one time)...");
+            var last = -5;
+            var progress = new Progress<double>(p =>
+            {
+                var pct = (int)(p * 100);
+                if (pct >= last + 5) { Console.WriteLine($"  download {pct}%"); last = pct; }
+            });
+            try { ModelManager.EnsureQwenAsync(progress).GetAwaiter().GetResult(); }
+            catch (Exception ex) { return Fail($"Qwen download failed: {ex.Message}"); }
+            Console.WriteLine("  model ready.");
+        }
+
+        var transcript = new List<TranscriptSegment>
+        {
+            new(Speaker.Them, 0, 4000, "So where are we on the launch — what's left before we can ship?"),
+            new(Speaker.You, 4200, 9000, "Tool's basically done. The only blockers are the brand tokens and wiring the Make webhook."),
+            new(Speaker.Them, 9200, 13000, "Okay. Let's move the ship date to Thursday then, and keep the email capture optional."),
+            new(Speaker.You, 13200, 17000, "Sounds good. I'll wire the webhook this week. Priya, can you confirm the brand font and hex tomorrow?"),
+            new(Speaker.Them, 17200, 20000, "Yep, I'll get you the font and colors by tomorrow. Which analytics platform are we pointing events at?"),
+        };
+
+        Console.WriteLine("[--llmtest] loading Qwen + writing notes (three passes, TL;DR last)...");
+        var sw = Stopwatch.StartNew();
+        // Run off the UI thread — LLamaSharp's async continuations would otherwise
+        // deadlock against this thread being blocked on the result.
+        var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(transcript)).GetAwaiter().GetResult();
+        sw.Stop();
+        if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
+
+        Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms ({(LlmService.Instance.LocalLoaded ? "local Qwen" : "?")})");
+        Console.WriteLine($"  TL;DR: {notes.Tldr}");
+        Console.WriteLine($"  DECISIONS ({notes.Decisions.Count}):");
+        foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
+        foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
+        Console.WriteLine($"  OPEN QUESTIONS ({notes.Questions.Count}):");
+        foreach (var q in notes.Questions) Console.WriteLine($"    - {q}");
+
+        if (TextValidator.IsDegenerate(notes.Tldr)) return Fail("TL;DR is degenerate (CJK / repetition).");
+        Console.WriteLine("[--llmtest] PASS — notes generated, English, no degeneration. Read them: do they match the transcript?");
         return 0;
     }
 

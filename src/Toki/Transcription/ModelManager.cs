@@ -23,6 +23,14 @@ public sealed class ModelManager
     public static string ModelsRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Toki", "Models");
 
+    // Notes LLM: Qwen3-4B-Instruct-2507, Q4_K_M GGUF (~2.5GB, single file).
+    public const string QwenUrl =
+        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
+    public static string QwenPath => Path.Combine(ModelsRoot, "Qwen3-4B-Instruct-2507-Q4_K_M.gguf");
+    public static bool QwenInstalled => File.Exists(QwenPath);
+    public static Task EnsureQwenAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(QwenUrl, QwenPath, progress, ct);
+
     /// <summary>Absolute path to a file inside an installed model (e.g. the encoder).</summary>
     public static string PathTo(ModelSpec spec, string file) =>
         Path.Combine(ModelsRoot, spec.Folder, file);

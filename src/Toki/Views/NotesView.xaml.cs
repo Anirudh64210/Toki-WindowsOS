@@ -13,6 +13,8 @@ public partial class NotesView : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => Populate();
+        // Re-render when notes are upgraded (heuristic → LLM) while on screen.
+        App.NotesUpdated += () => { if (IsLoaded) Populate(); };
     }
 
     void Populate()
