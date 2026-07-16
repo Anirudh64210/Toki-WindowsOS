@@ -61,10 +61,14 @@ public static partial class NoteExtractor
     {
         // Prefer a decision (a topic-y statement) over the TL;DR, which may open
         // with a question; fall back to the TL;DR's first sentence.
+        // Prefer an LLM-written title when present (concise + context-aware).
+        if (!string.IsNullOrWhiteSpace(notes.Title) && IsValidTitle(notes.Title!))
+            return CapWords(notes.Title!, 8);
+
         var candidate = (notes.Decisions.Count > 0 ? FirstMeaningful(notes.Decisions[0]) : null)
                         ?? FirstSentence(notes.Tldr);
         if (candidate is not null && IsValidTitle(candidate))
-            return Truncate(candidate, 48);
+            return CapWords(candidate, 7);
 
         var name = string.IsNullOrWhiteSpace(app) ? "Note" : Pretty(app!);
         return $"{name} — {when:MMM d}";
@@ -148,8 +152,17 @@ public static partial class NoteExtractor
         return (double)ascii / t.Length > 0.8;              // mostly ASCII
     }
 
-    static string Truncate(string s, int max) =>
-        s.Length <= max ? s.TrimEnd('.', ',', ' ') : s[..max].TrimEnd(' ', ',') + "…";
+    /// <summary>Concise title: drop leading filler, keep the first N meaningful words.</summary>
+    static string CapWords(string s, int maxWords)
+    {
+        var clean = s.Trim().TrimEnd('.', ',', ':', ';', ' ');
+        // Drop a leading "We agreed to " / "The decision is " style lead-in.
+        clean = Regex.Replace(clean, @"^(we (agreed|decided|will|should)|the (decision|plan|team)|let'?s|going to|it was decided)\s+(to\s+)?",
+            "", RegexOptions.IgnoreCase);
+        clean = clean.Length > 0 ? char.ToUpperInvariant(clean[0]) + clean[1..] : s;
+        var words = clean.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length <= maxWords ? clean : string.Join(' ', words.Take(maxWords)).TrimEnd(',') + "…";
+    }
 
     static string Pretty(string app)
     {

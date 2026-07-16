@@ -34,7 +34,7 @@
                 <StackPanel x:Name="LocalOptions">
                     <StackPanel Orientation="Horizontal" Margin="2,10,0,0">
                         <CheckBox x:Name="GpuToggle" VerticalAlignment="Center" Click="OnGpuToggle"/>
-                        <TextBlock Text="Use GPU (faster; needs a 6GB+ graphics card)" Style="{StaticResource Body}"
+                        <TextBlock Text="Use graphics card when it helps (automatic, faster)" Style="{StaticResource Body}"
                                    FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"/>
                     </StackPanel>
                     <TextBlock Style="{StaticResource Dim}" FontSize="9.5" Margin="2,3,0,0"

@@ -83,9 +83,17 @@ public partial class App : Application
         Log($"startup args=[{string.Join(" ", e.Args)}]");
         GhostDisabled = e.Args.Contains("--noghost");
 
-        // Configure the LLM native backend BEFORE any LLamaSharp call: prefer
-        // Vulkan (any GPU), fall back to CPU if the GPU lib/device can't load.
-        try { LLama.Native.NativeLibraryConfig.All.WithVulkan(true).WithAutoFallback(true); }
+        // Decide how to run the model on THIS machine (GPU layers + context) BEFORE
+        // any LLamaSharp call. Load the Vulkan backend ONLY when we actually intend to
+        // offload — enabling it at 0 layers is the slowest possible path (see LlmRuntime).
+        Llm.LlmRuntime.Resolve();
+        Log($"llm runtime: {Llm.LlmRuntime.Reason}");
+        try
+        {
+            var cfg = LLama.Native.NativeLibraryConfig.All;
+            if (Llm.LlmRuntime.UseVulkan) cfg.WithVulkan(true).WithAutoFallback(true);
+            else cfg.WithVulkan(false);
+        }
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
@@ -170,11 +178,18 @@ public partial class App : Application
             State.TryGo(PillState.Home);
         }
 
+        // Dev: open the Library window directly for inspection.
+        if (e.Args.Contains("--library"))
+            Dispatcher.BeginInvoke(() => LibraryWindow.ShowLibrary());
+        if (e.Args.Contains("--newnote"))
+            Dispatcher.BeginInvoke(() => LibraryWindow.ShowNewNote());
+
         StartMeetingDetection();
 
-        // Warm the ASR engine ahead of the first meeting so a stop never waits on
-        // model load (lesson 2). Off the UI thread; no-op if the model isn't installed.
+        // Warm both engines ahead of the first meeting so a stop never waits on model
+        // load (lesson 2). Off the UI thread; no-ops if a model isn't installed.
         System.Threading.Tasks.Task.Run(() => TranscriptionService.Instance.Warm());
+        LlmService.Instance.Warm();
     }
 
     void StartMeetingDetection()
@@ -247,7 +262,7 @@ public partial class App : Application
             catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
 
             IReadOnlyList<TranscriptSegment>? transcript = null;
-            var minShow = System.Threading.Tasks.Task.Delay(2200); // let the loader be seen
+            var minShow = System.Threading.Tasks.Task.Delay(1200); // let the loader be seen
             try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
 
@@ -276,6 +291,31 @@ public partial class App : Application
             }
             minShow.Wait();
 
+            // Write the good AI notes BEFORE revealing the Notes screen, so the rough
+            // heuristic draft (raw transcript lines) never flashes. The Summarizing
+            // animation stays up while this runs — the user waits once and sees the
+            // finished notes. Returns fast (heuristic kept) when there's no AI model;
+            // a timeout guards a stuck generation so the pill can never hang. We're on
+            // a background thread here, so blocking on the result is safe.
+            if (meeting is not null && transcript is { Count: > 0 })
+            {
+                try
+                {
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(150));
+                    var llmNotes = LlmService.Instance.WriteNotesAsync(transcript, cts.Token).GetAwaiter().GetResult();
+                    if (llmNotes is not null)
+                    {
+                        Store.ReplaceNotes(meeting.Id, llmNotes);
+                        meeting.Notes = llmNotes;
+                        meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
+                        Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
+                        MarkdownMirror.Write(meeting);
+                        Log($"notes written by LLM for meeting {meeting.Id}");
+                    }
+                }
+                catch (Exception ex) { Log($"LLM notes failed (kept heuristic): {ex.Message}"); }
+            }
+
             Current.Dispatcher.BeginInvoke(() =>
             {
                 LastTranscript = transcript;
@@ -283,32 +323,7 @@ public partial class App : Application
                 if (transcript is { Count: 0 }) State.TryGo(PillState.NoSpeech);
                 else State.TryGo(PillState.Notes);
             });
-
-            // Upgrade heuristic → LLM notes quietly in the background (slow on CPU).
-            // The Notes screen shows the heuristic notes immediately and refreshes
-            // in place when the better notes are ready.
-            if (meeting is not null)
-                UpgradeNotesWithLlm(meeting, transcript!);
         });
-    }
-
-    static async void UpgradeNotesWithLlm(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> transcript)
-    {
-        try
-        {
-            var llmNotes = await System.Threading.Tasks.Task.Run(() =>
-                LlmService.Instance.WriteNotesAsync(transcript));
-            if (llmNotes is null) return; // heuristic-only mode or no model → keep heuristic notes
-
-            Store.ReplaceNotes(meeting.Id, llmNotes);
-            meeting.Notes = llmNotes;
-            meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
-            Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
-            MarkdownMirror.Write(meeting);
-            Log($"upgraded notes to LLM for meeting {meeting.Id}");
-            RaiseNotesUpdated();
-        }
-        catch (Exception ex) { Log($"LLM notes upgrade failed (kept heuristic): {ex.Message}"); }
     }
 
     static void BeginRecording(DetectedApp? app)
@@ -405,7 +420,8 @@ public partial class App : Application
         menu.Items.Add(Item("Demo: notes ready", () => State.ForceForDemo(PillState.Notes)));
         menu.Items.Add(Item("Demo: nothing was said", () => State.ForceForDemo(PillState.NoSpeech)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Library", () => State.ForceForDemo(PillState.Library)));
+        menu.Items.Add(Item("Library", () => LibraryWindow.ShowLibrary()));
+        menu.Items.Add(Item("New note", () => LibraryWindow.ShowNewNote()));
         menu.Items.Add(Item("Settings", () => State.ForceForDemo(PillState.Settings)));
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Restart Toki", RestartApp));

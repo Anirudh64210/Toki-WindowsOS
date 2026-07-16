@@ -16,9 +16,13 @@ public sealed class ActionItem
 /// <summary>The structured notes for a meeting (heuristic floor now; LLM-written in M6).</summary>
 public sealed class NoteSet
 {
+    /// <summary>A concise, context-aware meeting title (LLM-written when available).</summary>
+    public string? Title { get; set; }
     public string Tldr { get; set; } = "";
+    /// <summary>Key discussion points (stored in the legacy "decisions" table).</summary>
     public List<string> Decisions { get; set; } = [];
     public List<ActionItem> Actions { get; set; } = [];
+    /// <summary>Retired from the UI (M6.1); kept for older saved meetings.</summary>
     public List<string> Questions { get; set; } = [];
 }
 

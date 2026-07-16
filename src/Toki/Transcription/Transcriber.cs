@@ -26,8 +26,8 @@ public sealed class Transcriber : IDisposable
         config.ModelConfig.Transducer.Joiner = ModelManager.PathTo(ModelManager.Parakeet, "joiner.int8.onnx");
         config.ModelConfig.Tokens = ModelManager.PathTo(ModelManager.Parakeet, "tokens.txt");
         config.ModelConfig.ModelType = "nemo_transducer"; // required for Parakeet TDT
-        config.ModelConfig.NumThreads = Math.Clamp(Environment.ProcessorCount / 2, 2, 4);
-        config.ModelConfig.Provider = "cpu";
+        config.ModelConfig.NumThreads = ThreadCount();
+        config.ModelConfig.Provider = Environment.GetEnvironmentVariable("TOKI_ASR_PROVIDER") ?? "cpu";
         config.DecodingMethod = "greedy_search";
         _recognizer = new OfflineRecognizer(config);
     }
@@ -81,6 +81,15 @@ public sealed class Transcriber : IDisposable
     /// <summary>SentencePiece detokenize: the ▁ marker denotes a word boundary (space).</summary>
     static string Detokenize(string joined) =>
         joined.Replace("▁", " ").Replace("  ", " ").Trim();
+
+    // ASR is CPU-bound; use most cores. The two streams run in parallel, so each
+    // recognizer gets ~half so they don't oversubscribe. Env override for tuning.
+    static int ThreadCount()
+    {
+        if (Environment.GetEnvironmentVariable("TOKI_ASR_THREADS") is { } s && int.TryParse(s, out var n) && n > 0)
+            return n;
+        return Math.Clamp(Environment.ProcessorCount / 2, 3, 8);
+    }
 
     public void Dispose() => _recognizer.Dispose();
 }

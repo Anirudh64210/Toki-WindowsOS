@@ -33,19 +33,34 @@ public class LlmNotesTests
     ];
 
     [Fact]
-    public async Task ThreePassProducesCleanNotes()
+    public async Task CombinedPassProducesCleanNotes()
     {
+        // One structured generation returns all three sections; a second call titles it.
         var llm = new FakeLlm(user =>
-            user.Contains("decisions") ? "- Ship on Thursday\n- Keep email capture optional"
-            : user.Contains("action items") ? "- Wire the webhook | owner: You | due: This week"
-            : user.Contains("summary") ? "The team agreed to ship Thursday; the webhook is the last blocker."
+            user.Contains("Write a title") ? "Ship Thursday"
+            : user.Contains("KEY POINTS") ?
+                "KEY POINTS\n- Ship on Thursday\n- Keep email capture optional\n\n"
+                + "ACTION ITEMS\n- Wire the webhook | owner: You | due: This week\n\n"
+                + "SUMMARY\nThe team agreed to ship Thursday; the webhook is the last blocker."
             : "NONE");
 
         var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
-        Assert.Contains(notes.Decisions, d => d.Contains("Thursday"));
+        Assert.Contains(notes.Decisions, d => d.Contains("Thursday"));   // "Decisions" holds key points
         Assert.Single(notes.Actions, a => a.Text.Contains("webhook") && a.Owner == "You" && a.Due == "This week");
         Assert.Contains("Thursday", notes.Tldr);
-        Assert.NotEmpty(notes.Questions); // from heuristic
+        Assert.Equal("Ship Thursday", notes.Title);
+        Assert.Empty(notes.Questions); // open-questions section retired
+    }
+
+    [Fact]
+    public async Task PlaceholderOwnerDueAreDropped()
+    {
+        var llm = new FakeLlm(user =>
+            user.Contains("Write a title") ? "Do the thing"
+            : "KEY POINTS\nNONE\n\nACTION ITEMS\n- Do the thing | owner: - | due: ->\n\nSUMMARY\nOne task remains.");
+
+        var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
+        Assert.Single(notes.Actions, a => a.Text.Contains("thing") && a.Owner is null && a.Due is null);
     }
 
     [Fact]

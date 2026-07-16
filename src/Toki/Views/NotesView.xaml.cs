@@ -44,36 +44,20 @@ public partial class NotesView : UserControl
         foreach (var seg in transcript) Body.Children.Add(TranscriptRow(seg));
     }
 
-    void RenderNotes(MeetingRecord m)
-    {
-        if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
-            Body.Children.Add(new TextBlock
-            {
-                Style = (Style)FindResource("Body"), FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xC9, 0xC9, 0xC7)),
-                Margin = new Thickness(0, 8, 0, 0), Text = m.Notes.Tldr,
-            });
+    void RenderNotes(MeetingRecord m) => NoteRenderer.Meeting(Body, m, spacious: false);
 
-        if (m.Notes.Decisions.Count > 0)
+    void OnCopy(object sender, RoutedEventArgs e)
+    {
+        if (App.CurrentMeeting is { } m && m.Transcript.Count > 0)
         {
-            Body.Children.Add(Header("✓  DECISIONS", "Green"));
-            foreach (var d in m.Notes.Decisions) Body.Children.Add(Bullet(d));
+            try { Clipboard.SetText(NoteRenderer.TranscriptText(m)); CopyBtn.Content = "✓"; } catch { }
         }
-        if (m.Notes.Actions.Count > 0)
-        {
-            Body.Children.Add(Header("→  ACTION ITEMS", "Blue"));
-            foreach (var a in m.Notes.Actions) Body.Children.Add(ActionRow(a));
-        }
-        if (m.Notes.Questions.Count > 0)
-        {
-            Body.Children.Add(Header("?  OPEN QUESTIONS", "Purple"));
-            foreach (var q in m.Notes.Questions) Body.Children.Add(Bullet(q));
-        }
-        if (m.Transcript.Count > 0)
-        {
-            Body.Children.Add(Header("▤  TRANSCRIPT", "TextDim"));
-            foreach (var s in m.Transcript) Body.Children.Add(TranscriptRow(s));
-        }
+    }
+
+    void OnMaximise(object sender, RoutedEventArgs e)
+    {
+        LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id);
+        App.State.TryGo(PillState.Hidden);
     }
 
     static string Meta(MeetingRecord m)
@@ -95,61 +79,11 @@ public partial class NotesView : UserControl
         return $"{(int)d.TotalDays} days ago";
     }
 
-    TextBlock Header(string text, string colorKey) => new()
-    {
-        Text = text, Style = (Style)FindResource("SectionHeader"),
-        Foreground = (Brush)FindResource(colorKey),
-    };
-
-    TextBlock Bullet(string text) => new()
-    {
-        Style = (Style)FindResource("Body"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 5),
-        Text = "•  " + text,
-    };
-
     TextBlock Dim(string text) => new()
     {
         Style = (Style)FindResource("Body"), FontSize = 12,
         Foreground = (Brush)FindResource("TextDim"), Margin = new Thickness(0, 12, 0, 0), Text = text,
     };
-
-    FrameworkElement ActionRow(ActionItem a)
-    {
-        var check = new CheckBox { IsChecked = a.Done, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 8, 0) };
-        check.Checked += (_, _) => Toggle(a, true);
-        check.Unchecked += (_, _) => Toggle(a, false);
-
-        var textBlock = new TextBlock { Text = a.Text, Style = (Style)FindResource("Body"), FontSize = 11.5 };
-        var tags = new StackPanel { Orientation = Orientation.Horizontal };
-        if (!string.IsNullOrWhiteSpace(a.Owner)) tags.Children.Add(Tag(a.Owner!, "Chip", "TextDim"));
-        if (!string.IsNullOrWhiteSpace(a.Due)) tags.Children.Add(Tag(a.Due!, "AmberDark", "Amber"));
-
-        var right = new StackPanel();
-        right.Children.Add(textBlock);
-        if (tags.Children.Count > 0) right.Children.Add(tags);
-
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 9) };
-        row.Children.Add(check);
-        row.Children.Add(right);
-        return row;
-    }
-
-    Border Tag(string text, string bgKey, string fgKey) => new()
-    {
-        Background = (Brush)FindResource(bgKey), CornerRadius = new CornerRadius(4),
-        Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 4, 6, 0),
-        Child = new TextBlock
-        {
-            Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold,
-            Foreground = (Brush)FindResource(fgKey), FontFamily = (FontFamily)FindResource("UiFont"),
-        },
-    };
-
-    void Toggle(ActionItem a, bool done)
-    {
-        a.Done = done;
-        if (a.Id > 0) try { App.Store.SetActionDone(a.Id, done); } catch { /* non-fatal */ }
-    }
 
     FrameworkElement TranscriptRow(TranscriptSegment seg)
     {

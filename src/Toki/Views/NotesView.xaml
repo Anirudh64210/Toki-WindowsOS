@@ -16,15 +16,16 @@
                 <TextBlock x:Name="Title" Text="Transcript" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
                 <TextBlock x:Name="Subtitle" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
-            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="✕" Click="OnClose"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button x:Name="CopyBtn" Style="{StaticResource IconButton}" Content="⧉" FontSize="13"
+                        ToolTip="Copy transcript" Click="OnCopy"/>
+                <Button Style="{StaticResource IconButton}" Content="⤢" FontSize="13" Margin="4,0,0,0"
+                        ToolTip="Open in Library window" Click="OnMaximise"/>
+                <Button Style="{StaticResource IconButton}" Content="✕" Margin="4,0,0,0" Click="OnClose"/>
+            </StackPanel>
         </Grid>
 
-        <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceHi}" CornerRadius="10"
-                Padding="11,7" Margin="0,11,0,0">
-            <TextBlock Text="Search this transcript — you: / them:" Style="{StaticResource Dim}"/>
-        </Border>
-
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
             <StackPanel x:Name="Body"/>
         </ScrollViewer>
     </DockPanel>
