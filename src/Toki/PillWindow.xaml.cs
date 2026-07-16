@@ -1,28 +1,28 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Threading;
+using System.Windows.Interop;
 using Toki.State;
 using Toki.Views;
 
 namespace Toki;
 
 /// <summary>
-/// The single overlay window. A transparent host stays fixed at bottom-center
-/// (transparent pixels are click-through); only the inner Shell border morphs
-/// its width/height between states - never a second overlay window.
-/// In Collapsed, Toki peeks over the pill's top edge and rises on hover.
+/// The single overlay: an opaque, hardware-accelerated, borderless window that IS
+/// the pill (DWM rounds its corners). It resizes to the current state's content
+/// and sits bottom-center. Not a layered/transparent window — that both forced
+/// slow software rendering AND conflicted with ghost mode (WDA_EXCLUDEFROMCAPTURE
+/// on a layered window produced the black-rectangle glitch).
 /// </summary>
 public partial class PillWindow : Window
 {
-    // Logical-pixel sizes per state, from Toki-ProductDesign/.
+    // Logical-pixel content sizes per state, from Toki-ProductDesign/.
     static readonly Dictionary<PillState, (double W, double H)> Sizes = new()
     {
-        [PillState.Collapsed]     = (112, 30),
+        [PillState.Collapsed]     = (132, 40),
         [PillState.MeetingPrompt] = (300, 74),
         [PillState.RecordingBar]  = (236, 52),
         [PillState.RecordingOpen] = (372, 234),
@@ -34,85 +34,93 @@ public partial class PillWindow : Window
         [PillState.Settings]      = (404, 440),
     };
 
-    const double PeekRest = 12;   // Toki sitting low, just peeking
-    const double PeekRisen = 0;   // Toki lifted out on hover
+    const double BottomGap = 14;  // above the taskbar
+    const double TopMargin = 12;  // never touch the top edge
+    const double CornerRadius = 22;
 
-    // Panel states the user reads: clicking outside or pressing Esc dismisses
-    // them. Recording/summarizing/prompt are deliberately excluded — they must
-    // not vanish on a stray click.
     static readonly HashSet<PillState> PanelStates =
         [PillState.Home, PillState.Library, PillState.Settings, PillState.Notes, PillState.NoSpeech];
 
     readonly AppState _state;
     readonly Dictionary<PillState, UserControl> _views = new();
-    readonly TranslateTransform _peekSlide = new(0, PeekRest);
     Interop.InputMonitor? _input;
-    long _panelShownTick;   // for a brief grace period against instant dismissal
+    long _panelShownTick;
+    IntPtr _hwnd;
+
+    // Window bounds in physical pixels, for the (off-thread) click-outside hook.
+    int _rectL, _rectT, _rectR, _rectB;
 
     public PillWindow(AppState state)
     {
         InitializeComponent();
-        PeekBlob.RenderTransform = _peekSlide;
         _state = state;
         _state.StateChanged += (o, n) => Dispatcher.Invoke(() => OnStateChanged(o, n));
-        PositionBottomCenter();
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SystemParameters.WorkArea))
-                Dispatcher.Invoke(PositionBottomCenter);
+            if (e.PropertyName == nameof(SystemParameters.WorkArea) && IsVisible)
+                Dispatcher.Invoke(() => { PositionBottomCenter(); ApplyRoundedRegion(); CacheWindowRect(); });
         };
+        LocationChanged += (_, _) => CacheWindowRect();
+        SizeChanged += (_, _) => CacheWindowRect();
     }
-
-    // ---- Ghost mode: visible to the user, invisible to screen capture/share ----
-
-    const int GwlExStyle = -20;
-    const int WsExToolWindow = 0x00000080;   // keep out of alt-tab / task switcher
-    const uint WdaExcludeFromCapture = 0x11;  // Win10 2004+: DWM omits window from captures
-
-    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
-    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
-    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int newLong);
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        var hwnd = new WindowInteropHelper(this).Handle;
+        _hwnd = new WindowInteropHelper(this).Handle;
         try
         {
-            // Ghost: Toki won't appear in screen recordings or shared screens,
-            // so it never leaks onto a call it's quietly taking notes on.
-            SetWindowDisplayAffinity(hwnd, WdaExcludeFromCapture);
-            SetWindowLong(hwnd, GwlExStyle, GetWindowLong(hwnd, GwlExStyle) | WsExToolWindow);
+            if (!App.GhostDisabled)
+                SetWindowDisplayAffinity(_hwnd, WdaExcludeFromCapture); // reliable on non-layered windows
+            SetWindowLong(_hwnd, GwlExStyle, GetWindowLong(_hwnd, GwlExStyle) | WsExToolWindow);
+            ApplyRoundedRegion(); // DWM won't round a borderless window — clip it ourselves
         }
-        catch (Exception ex) { App.Log($"ghost-mode setup failed (non-fatal): {ex.Message}"); }
+        catch (Exception ex) { App.Log($"window setup failed (non-fatal): {ex.Message}"); }
 
-        // Dismiss on a real click outside the pill, or Esc — via global hooks,
-        // never focus events (which fire spuriously and flickered the pill shut).
         _input = new Interop.InputMonitor(
-            isDismissable: () => PanelStates.Contains(_state.Current)
-                                 && Environment.TickCount64 - _panelShownTick > 500,
-            isInsidePanel: IsPointInsideShell,
-            dismiss: () => Dispatcher.BeginInvoke(() => _state.ForceForDemo(PillState.Hidden)));
+            isArmed: () => PanelStates.Contains(_state.Current)
+                           && Environment.TickCount64 - _panelShownTick > 500,
+            isInsidePanel: PointInWindow,
+            dismiss: () => Dispatcher.BeginInvoke(() =>
+            {
+                App.Log($"dismiss: click outside pill (rect {_rectL},{_rectT},{_rectR},{_rectB})");
+                _state.ForceForDemo(PillState.Hidden);
+            }));
     }
 
-    bool IsPointInsideShell(Point screenDevicePoint)
+    bool PointInWindow(int x, int y) =>
+        (_rectR <= _rectL) || (x >= _rectL && x <= _rectR && y >= _rectT && y <= _rectB);
+
+    void CacheWindowRect()
     {
-        try
-        {
-            const double margin = 6;
-            var tl = Shell.PointToScreen(new Point(0, 0));
-            var br = Shell.PointToScreen(new Point(Shell.ActualWidth, Shell.ActualHeight));
-            return screenDevicePoint.X >= tl.X - margin && screenDevicePoint.X <= br.X + margin
-                && screenDevicePoint.Y >= tl.Y - margin && screenDevicePoint.Y <= br.Y + margin;
-        }
-        catch { return true; } // if unsure, don't dismiss
+        if (_hwnd != IntPtr.Zero && GetWindowRect(_hwnd, out var r))
+            (_rectL, _rectT, _rectR, _rectB) = (r.Left, r.Top, r.Right, r.Bottom);
     }
 
+    /// <summary>
+    /// Place the window bottom-centered using PHYSICAL pixels (Win32), which is
+    /// robust to any resolution/DPI — WPF's logical Left/Top mis-scale at 125%+.
+    /// </summary>
     void PositionBottomCenter()
     {
-        var wa = SystemParameters.WorkArea;
-        Left = wa.Left + (wa.Width - Width) / 2;
-        Top = wa.Bottom - Height;
+        if (_hwnd == IntPtr.Zero) return;
+        UpdateLayout();
+        if (!GetWindowRect(_hwnd, out var wr)) return;
+        int winW = wr.Right - wr.Left, winH = wr.Bottom - wr.Top;
+        var work = PhysicalWorkArea();
+        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        int gap = (int)Math.Round(BottomGap * dpi);
+        int x = work.Left + ((work.Right - work.Left) - winW) / 2;
+        int y = work.Bottom - winH - gap;
+        SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    static RECT PhysicalWorkArea()
+    {
+        var r = new RECT();
+        SystemParametersInfo(SpiGetWorkArea, 0, ref r, 0); // physical px for a per-monitor-aware app
+        if (r.Right <= r.Left) { r.Right = 1920; r.Bottom = 1080; } // sane fallback
+        return r;
     }
 
     UserControl ViewFor(PillState s)
@@ -138,99 +146,84 @@ public partial class PillWindow : Window
 
     void OnStateChanged(PillState old, PillState next)
     {
-        if (next == PillState.Hidden)
-        {
-            HideAnimated();
-            return;
-        }
+        if (next == PillState.Hidden) { HideAnimated(); return; }
 
-        Host.Content = ViewFor(next);
+        var fromHidden = old == PillState.Hidden || !IsVisible;
+        Host.Children.Clear();
+        Host.Children.Add(ViewFor(next));
         if (PanelStates.Contains(next)) _panelShownTick = Environment.TickCount64;
 
-        // Templates use a fixed large radius; only the tiny ambient pill is a capsule.
-        Shell.CornerRadius = new CornerRadius(next == PillState.Collapsed ? 18 : 26);
-
         var (w, h) = Sizes[next];
-        var dur = TimeSpan.FromMilliseconds(280);
-        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.35 };
-        Shell.BeginAnimation(WidthProperty, new DoubleAnimation(w, dur) { EasingFunction = ease });
-        Shell.BeginAnimation(HeightProperty, new DoubleAnimation(h, dur) { EasingFunction = ease });
+        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
+        var work = PhysicalWorkArea();
+        // Never exceed the screen — tall panels clamp and scroll internally.
+        var availH = (work.Bottom - work.Top) / dpi - BottomGap - TopMargin;
+        Width = w;
+        Height = Math.Min(h, availH);
 
-        Host.Opacity = 0;
-        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
-        {
-            BeginTime = TimeSpan.FromMilliseconds(old == PillState.Hidden ? 60 : 120),
-        });
-
-        // Toki peeks only while ambient.
-        PeekBlob.BeginAnimation(OpacityProperty, new DoubleAnimation(
-            next == PillState.Collapsed ? 1 : 0,
-            TimeSpan.FromMilliseconds(next == PillState.Collapsed ? 350 : 100))
-        {
-            BeginTime = TimeSpan.FromMilliseconds(next == PillState.Collapsed ? 250 : 0),
-        });
-
-        if (old == PillState.Hidden || !IsVisible)
-            ShowAnimated(w, h);
+        if (fromHidden) Show();
+        PositionBottomCenter();   // physical-pixel placement, DPI-proof
+        ApplyRoundedRegion();
+        MorphContent();
+        CacheWindowRect();
     }
 
-    void ShowAnimated(double w, double h)
+    /// <summary>Clip the rectangular window to a rounded-rect region (physical px).</summary>
+    void ApplyRoundedRegion()
     {
-        // Land at the target size instantly when arriving from hidden - the
-        // slide-in is the entrance; morphing is for state-to-state changes.
-        Shell.BeginAnimation(WidthProperty, null);
-        Shell.BeginAnimation(HeightProperty, null);
-        Shell.Width = w;
-        Shell.Height = h;
+        if (_hwnd == IntPtr.Zero) return;
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            if (!GetWindowRect(_hwnd, out var r)) return;
+            int w = r.Right - r.Left, h = r.Bottom - r.Top;
+            var d = (int)Math.Round(CornerRadius * 2 * dpi); // ellipse diameter
+            var rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d);
+            SetWindowRgn(_hwnd, rgn, true); // OS takes ownership of the region
+        }
+        catch (Exception ex) { App.Log($"region failed (non-fatal): {ex.Message}"); }
+    }
 
-        Show();
-        App.Log($"ShowAnimated: shown at {Left},{Top} size {w}x{h}, IsVisible={IsVisible}");
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
-            App.Log($"  post-layout Shell actual = {Shell.ActualWidth}x{Shell.ActualHeight}"));
+    void MorphContent()
+    {
+        // Buttery: content settles in with a soft pop + fade (window bg stays dark).
+        HostScale.ScaleX = HostScale.ScaleY = 0.97;
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        ShellSlide.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(30, 0, TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
-        Shell.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
+        var dur = new Duration(TimeSpan.FromMilliseconds(200));
+        HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, dur) { EasingFunction = ease });
+        HostScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, dur) { EasingFunction = ease });
+        Host.Opacity = 0;
+        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(160))));
     }
 
     void HideAnimated()
     {
-        PeekBlob.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(100)));
-        var slide = new DoubleAnimation(0, 24, TimeSpan.FromMilliseconds(150))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
-        };
-        slide.Completed += (_, _) => Hide();
-        ShellSlide.BeginAnimation(TranslateTransform.YProperty, slide);
-        Shell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(150)));
-    }
-
-    void OnShellMouseEnter(object sender, MouseEventArgs e)
-    {
-        if (_state.Current != PillState.Collapsed) return;
-        // The signature moment: Toki rises out of the pill on hover.
-        _peekSlide.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(PeekRisen, TimeSpan.FromMilliseconds(240))
-            {
-                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.7 },
-            });
-    }
-
-    void OnShellMouseLeave(object sender, MouseEventArgs e)
-    {
-        if (_state.Current != PillState.Collapsed) return;
-        _peekSlide.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(PeekRest, TimeSpan.FromMilliseconds(280))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            });
+        var fade = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(110)));
+        fade.Completed += (_, _) => Hide();
+        Host.BeginAnimation(OpacityProperty, fade);
     }
 
     void OnKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
-            _state.ForceForDemo(PillState.Hidden);
+        if (e.Key == Key.Escape) _state.ForceForDemo(PillState.Hidden);
     }
-}
 
+    // ---- interop ----
+    const int GwlExStyle = -20;
+    const int WsExToolWindow = 0x00000080;
+    const uint WdaExcludeFromCapture = 0x11;
+
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int newLong);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr hRgn, bool redraw);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int w, int h);
+    [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, ref RECT pv, uint winIni);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    const uint SpiGetWorkArea = 0x0030;
+    const uint SwpNoSize = 0x0001, SwpNoZOrder = 0x0004, SwpNoActivate = 0x0010;
+
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+}

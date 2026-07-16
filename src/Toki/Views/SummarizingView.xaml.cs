@@ -7,92 +7,171 @@ using Toki.State;
 
 namespace Toki.Views;
 
+/// <summary>
+/// The "working on your notes" loader: Toki stays alive (breathing, blinking,
+/// bobbing) while a motif beside it changes through the stages of understanding
+/// a meeting — listening, reading, organizing, writing. Clean, rounded, spaced.
+/// Placeholder pacing for now; M6 drives the stages off the real passes.
+/// </summary>
 public partial class SummarizingView : UserControl
 {
-    static readonly string[] Steps =
-    [
-        "Merging the two streams", "Reading the transcript",
-        "Finding action items", "Writing the TL;DR",
-    ];
-    readonly DispatcherTimer _stepTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+    sealed record Stage(string Label, Action Start);
+
+    readonly DispatcherTimer _stageTimer = new() { Interval = TimeSpan.FromMilliseconds(1750) };
     readonly DispatcherTimer _dotTimer = new() { Interval = TimeSpan.FromMilliseconds(380) };
     readonly TranslateTransform _tokiBob = new();
-    int _step;
+    Stage[] _stages = [];
+    int _stage;
     int _dots;
 
     public SummarizingView()
     {
         InitializeComponent();
         Toki.RenderTransform = _tokiBob;
-        StartAnimations();
+        _stages =
+        [
+            new("Listening back",   StartListen),
+            new("Reading it over",  StartRead),
+            new("Finding to-dos",   StartOrganize),
+            new("Writing it up",    StartWrite),
+        ];
 
-        _dotTimer.Tick += (_, _) =>
+        _dotTimer.Tick += (_, _) => { _dots = (_dots + 1) % 4; Dots.Text = new string('.', _dots); };
+        _stageTimer.Tick += (_, _) =>
         {
-            _dots = (_dots + 1) % 4;
-            Dots.Text = new string('.', _dots);
-        };
-
-        // Placeholder pipeline: cycle status lines, then hand over to Notes.
-        // M6 replaces this with the real three-pass summarizer, which advances
-        // these steps as each pass actually completes.
-        _stepTimer.Tick += (_, _) =>
-        {
-            _step++;
-            if (_step < Steps.Length)
-            {
-                StatusText.Text = Steps[_step];
-            }
+            _stage++;
+            if (_stage < _stages.Length) EnterStage(_stage);
             else
             {
-                _stepTimer.Stop();
+                _stageTimer.Stop();
                 _dotTimer.Stop();
-                // A silent meeting saves nothing (lesson 7): friendly empty state.
+                // A silent meeting saves nothing (lesson 7).
                 App.State.TryGo(App.LastRecordingSilent ? PillState.NoSpeech : PillState.Notes);
             }
         };
 
         Loaded += (_, _) =>
         {
-            _step = 0;
-            _dots = 0;
-            StatusText.Text = Steps[0];
-            _stepTimer.Start();
+            _stage = 0; _dots = 0;
+            StartAmbient();
+            EnterStage(0);
+            _stageTimer.Start();
             _dotTimer.Start();
         };
-        Unloaded += (_, _) => { _stepTimer.Stop(); _dotTimer.Stop(); };
+        Unloaded += (_, _) =>
+        {
+            _stageTimer.Stop();
+            _dotTimer.Stop();
+            StopAllMotifs();
+            _tokiBob.BeginAnimation(TranslateTransform.YProperty, null);
+            GlowScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            GlowScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            Glow.BeginAnimation(OpacityProperty, null);
+        };
     }
 
-    void StartAnimations()
+    static readonly Duration Fast = new(TimeSpan.FromMilliseconds(300));
+    static SineEase Smooth => new() { EasingMode = EasingMode.EaseInOut };
+    static readonly RepeatBehavior Loop = RepeatBehavior.Forever;
+
+    void StartAmbient()
     {
-        var loop = RepeatBehavior.Forever;
-        var smooth = new SineEase { EasingMode = EasingMode.EaseInOut };
-
-        // Sparkle spins.
-        SparkleSpin.BeginAnimation(RotateTransform.AngleProperty,
-            new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(2400)) { RepeatBehavior = loop });
-
-        // Toki bobs.
         _tokiBob.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(0, -7, TimeSpan.FromMilliseconds(620))
-            { AutoReverse = true, RepeatBehavior = loop, EasingFunction = smooth });
-
-        // Glow pulses (scale + opacity) in time with the bob.
-        GlowScale.BeginAnimation(ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.82, 1.12, TimeSpan.FromMilliseconds(1240))
-            { AutoReverse = true, RepeatBehavior = loop, EasingFunction = smooth });
-        GlowScale.BeginAnimation(ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.82, 1.12, TimeSpan.FromMilliseconds(1240))
-            { AutoReverse = true, RepeatBehavior = loop, EasingFunction = smooth });
+            new DoubleAnimation(0, -6, new Duration(TimeSpan.FromMilliseconds(700)))
+            { AutoReverse = true, RepeatBehavior = Loop, EasingFunction = Smooth });
+        var pulse = new DoubleAnimation(0.85, 1.12, new Duration(TimeSpan.FromMilliseconds(1300)))
+        { AutoReverse = true, RepeatBehavior = Loop, EasingFunction = Smooth };
+        GlowScale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
+        GlowScale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
         Glow.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(0.55, 1.0, TimeSpan.FromMilliseconds(1240))
-            { AutoReverse = true, RepeatBehavior = loop, EasingFunction = smooth });
+            new DoubleAnimation(0.5, 1.0, new Duration(TimeSpan.FromMilliseconds(1300)))
+            { AutoReverse = true, RepeatBehavior = Loop, EasingFunction = Smooth });
+    }
 
-        // A sheet lifts off the stack and settles, like pages being read.
-        var lift = new DoubleAnimationUsingKeyFrames { RepeatBehavior = loop, Duration = TimeSpan.FromMilliseconds(1800) };
-        lift.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0.0)));
-        lift.KeyFrames.Add(new EasingDoubleKeyFrame(-9, KeyTime.FromPercent(0.35), smooth));
-        lift.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0.7), smooth));
-        lift.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1.0)));
-        TopPageLift.BeginAnimation(TranslateTransform.YProperty, lift);
+    void EnterStage(int i)
+    {
+        StatusText.Text = _stages[i].Label;
+        StopAllMotifs(); // only the active motif should animate — saves CPU
+        var motifs = new FrameworkElement[] { MotifListen, MotifRead, MotifOrganize, MotifWrite };
+        for (var m = 0; m < motifs.Length; m++)
+            motifs[m].BeginAnimation(OpacityProperty, new DoubleAnimation(m == i ? 1 : 0, Fast));
+        _stages[i].Start();
+
+        // Progress fill advances smoothly across the four stages.
+        var frac = (i + 1) / (double)_stages.Length;
+        var target = Math.Max(10, Track.ActualWidth * frac);
+        ProgressFill.BeginAnimation(WidthProperty,
+            new DoubleAnimation(target, new Duration(TimeSpan.FromMilliseconds(500)))
+            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    }
+
+    void StopAllMotifs()
+    {
+        foreach (var r in new[] { Ring1, Ring2, Ring3 })
+        {
+            r.BeginAnimation(OpacityProperty, null);
+            ((ScaleTransform)r.RenderTransform).BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            ((ScaleTransform)r.RenderTransform).BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        }
+        ReadHighlightMove.BeginAnimation(TranslateTransform.YProperty, null);
+        Check1.BeginAnimation(OpacityProperty, null);
+        Check2.BeginAnimation(OpacityProperty, null);
+        Check3.BeginAnimation(OpacityProperty, null);
+        WriteLine.BeginAnimation(WidthProperty, null);
+    }
+
+    // ---- motif animations ----
+
+    void StartListen()
+    {
+        Ring((ScaleTransform)Ring1.RenderTransform, Ring1, 0);
+        Ring((ScaleTransform)Ring2.RenderTransform, Ring2, 466);
+        Ring((ScaleTransform)Ring3.RenderTransform, Ring3, 933);
+
+        static void Ring(ScaleTransform st, UIElement e, int delayMs)
+        {
+            var dur = new Duration(TimeSpan.FromMilliseconds(1400));
+            var begin = TimeSpan.FromMilliseconds(delayMs);
+            var grow = new DoubleAnimation(0.5, 2.6, dur) { RepeatBehavior = Loop, BeginTime = begin };
+            st.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+            st.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+            e.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0.9, 0, dur) { RepeatBehavior = Loop, BeginTime = begin });
+        }
+    }
+
+    void StartRead()
+    {
+        ReadHighlightMove.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(-18, 18, new Duration(TimeSpan.FromMilliseconds(850)))
+            { AutoReverse = true, RepeatBehavior = Loop, EasingFunction = Smooth });
+    }
+
+    void StartOrganize()
+    {
+        Tick(Check1, 0);
+        Tick(Check2, 400);
+        Tick(Check3, 800);
+
+        static void Tick(UIElement check, int atMs)
+        {
+            var frames = new DoubleAnimationUsingKeyFrames { RepeatBehavior = Loop, Duration = new Duration(TimeSpan.FromMilliseconds(1650)) };
+            frames.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            frames.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs))));
+            frames.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs + 220))));
+            frames.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1500))));
+            frames.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1650))));
+            check.BeginAnimation(UIElement.OpacityProperty, frames);
+        }
+    }
+
+    void StartWrite()
+    {
+        var frames = new DoubleAnimationUsingKeyFrames { RepeatBehavior = Loop, Duration = new Duration(TimeSpan.FromMilliseconds(1400)) };
+        frames.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        frames.KeyFrames.Add(new EasingDoubleKeyFrame(52, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1000)), Smooth));
+        frames.KeyFrames.Add(new LinearDoubleKeyFrame(52, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1250))));
+        frames.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1400))));
+        WriteLine.BeginAnimation(WidthProperty, frames);
     }
 }

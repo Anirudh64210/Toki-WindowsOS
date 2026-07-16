@@ -143,6 +143,62 @@ Owner asks: it must never crash, it should be a double-click app for testing, de
 
 **Still to verify with Sid (by ear):** join a real Google Meet, accept the prompt, talk, hang up → watch auto-stop, then play `you.wav`/`them.wav` from the recordings folder.
 
+## M3.1 — Never-hang + animation redo (2026-07-15)
+
+Owner feedback: Toki must **never hang** (always alive, responds only when summoned), and the animations should be buttery/cute like the Mac app — the loading screen especially should feel alive, not just glowing papers.
+
+**Never hang**
+- **Root cause fixed:** `StopRecording` used to block the UI thread up to 3s joining the capture worker (which also stalled the input hook → whole app frozen). Capture now starts *and* stops on background threads; the UI advances instantly.
+- **Non-invasive input:** dropped the global keyboard hook (it saw every keystroke); the remaining mouse hook does zero UI work — it reads a **cached** shell rectangle, so it can never lag system input.
+- **Relaunch surfaces the running instance** (named event) instead of silently exiting, so double-clicking a running Toki brings it up. Tray **Restart Toki** added.
+
+**Animation redo**
+- The loader is now a **cycling character scene**: Toki (breathing/blinking/bobbing, soft glow) beside a motif that changes through the stages — pulsing **rings** (Listening back) → a **document with a sweeping highlight** (Reading it over) → **checkboxes ticking** one by one (Finding to-dos) → a **pen drawing an underline** (Writing it up) — with a filling progress bar. Clean, rounded, spaced.
+- Morph tuned buttery (gentle 340ms ease with a hint of spring).
+
+**Verified**
+- 21/21 tests, 0 crashes across all states.
+- Live-captured the loader at 4 moments (via a dev `--noghost` flag) — the four stages visibly cycle with distinct animated motifs.
+- Published app launches, single instance, relaunch re-surfaces it.
+
+## M3.2 — Black-window + slowness fix (2026-07-15)
+
+Owner reported: ghost mode works (recording doesn't capture Toki 👍), but the PC gets slow/buggy and a **black rectangle** pops up. Screenshot analysed.
+
+**Root cause (confirmed via Microsoft docs/issue tracker):** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` is **incompatible with `AllowsTransparency=True`** (layered) WPF windows — the combination produces the black rectangle, and the transparent window also forced slow **software** rendering. Separately, the click-away mouse hook ran on the **UI thread**, so when rendering stalled, *all* mouse input across Windows lagged.
+
+**Fixes**
+- **Pill is now a non-layered, hardware-accelerated window** with native **DWM rounded corners** + subtle border. Opaque, GPU-composited, sized to the current state's content and anchored bottom-center. Ghost mode (`WDA_EXCLUDEFROMCAPTURE`) works *reliably* on non-layered windows — no more black rectangle.
+- **Mouse hook moved to its own dedicated thread** with its own message loop, so UI load can never lag system-wide input. Callback does pure arithmetic against a cached window rect.
+- **Animations pause when hidden** — `TokiBlob`, `Waveform`, and the loader stop when off-screen (cached views were animating forever in the background). Fixed a blink-timer handler leak too.
+- **Loader only animates the active stage** (previous stages' motifs were still animating invisibly).
+
+**Verified**
+- Ghost still works: a `PrintWindow` capture of the running window comes back blank (excluded).
+- CPU: idle Home 3.8% → 1.8%; summarizing 6.5% → 5.3% (now GPU-composited). Hidden ≈ 0 (animations paused).
+- 21/21 tests, 0 crashes. Home stays open with no interaction (click-away only fires on a real outside click).
+- New window renders as a clean rounded opaque pill.
+
+**Trade-off:** dropped the layered window's soft outer shadow and very-large corner radius; DWM gives clean anti-aliased ~8px corners. Stability + ghost reliability were the priority.
+
+## M3.3 — UI fixes: rounded corners + content fit (2026-07-15)
+
+Owner reported: sharp corners (not rounded), Library/Notes content cut off, record button pushed off-screen.
+
+- **Sharp corners fixed** — DWM corner rounding doesn't apply to a borderless (`WindowStyle=None`) window, so the pill had square corners. Replaced with a `SetWindowRgn(CreateRoundRectRgn)` region at radius 22 (re-applied on every resize), which also brings back the larger pill radius the design wants.
+- **Content cut-off fixed** — when the window became size-to-content, the content host stopped stretching the view to fill it, so views rendered at their natural (larger) size and clipped (Stop/Star buttons, right-edge text, bottom items). Switched the host to a `Grid` that stretches the view to the exact window size; text now wraps and tall panels (Notes) scroll internally. Also clamp window height to the work area so it never runs under the taskbar.
+- **Verified** with DPI-aware window captures (the machine is at 125% scaling — my earlier non-DPI-aware captures were grabbing only the top-left corner, which faked "cut off"). Home, RecordingOpen, and Notes all render fully with rounded corners; the layout log confirmed `view == host` size. 21/21 tests, 0 crashes.
+
+## M3.4 — DPI-proof positioning (2026-07-15)
+
+Owner (with screenshots): the recording bar floated in the **middle of the screen** and Notes ran off the **bottom** — on their 125%-scaled display.
+
+- **Root cause:** the window was positioned with WPF's logical `Left`/`Top`, which mis-scale on a per-monitor-DPI-aware app at 125%+ — so nothing landed where intended.
+- **Fix:** position in **physical pixels via Win32** — read the real work area (`SystemParametersInfo(SPI_GETWORKAREA)`), the window's physical size (`GetWindowRect`), and place it with `SetWindowPos`. Fully dynamic/self-adjusting for any resolution or DPI. Window height is clamped to the physical work area so tall panels never run under the taskbar (they scroll internally).
+- Removed the window-`Top` slide animation (it fought the physical placement); entrance is now the content pop+fade.
+
+**Verified** (position logs + DPI-aware captures, screen 1920×1080, work-area bottom 1020): recording bar bottom-edge at 1002, Notes bottom-edge at 1002 — both sit just above the taskbar, centered. Recording bar and summarizing render correctly with rounded corners. 21/21 tests, 0 crashes.
+
 ## M4 — Transcription (next)
 
 sherpa-onnx Parakeet whole-file per stream, streaming preview, whisper.cpp failure-only fallback, cross-stream echo de-dup, merge. `--asrtest`. (See ARCHITECTURE "Lessons from open-source notetakers" for the plan.)

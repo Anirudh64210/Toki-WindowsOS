@@ -8,11 +8,13 @@ namespace Toki.Controls;
 
 /// <summary>
 /// Decorative animated waveform (fixed bar pattern, looping scale animation).
+/// Animates only while visible so a cached-but-hidden view costs nothing.
 /// M4 replaces this with bars driven by real audio levels.
 /// </summary>
 public partial class Waveform : UserControl
 {
     static readonly double[] Heights = [6, 12, 8, 16, 10, 18, 7, 14, 9, 16, 6, 11];
+    readonly List<ScaleTransform> _scales = new();
 
     public Waveform()
     {
@@ -32,13 +34,24 @@ public partial class Waveform : UserControl
             };
             var scale = new ScaleTransform(1, 1);
             bar.RenderTransform = scale;
-            var anim = new DoubleAnimation(1.0, 0.35, TimeSpan.FromMilliseconds(300 + i * 37))
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-            };
-            scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+            _scales.Add(scale);
             Bars.Children.Add(bar);
         }
+        IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Stop(); };
+        Unloaded += (_, _) => Stop();
+    }
+
+    void Run()
+    {
+        for (var i = 0; i < _scales.Count; i++)
+            _scales[i].BeginAnimation(ScaleTransform.ScaleYProperty,
+                new DoubleAnimation(1.0, 0.35, TimeSpan.FromMilliseconds(300 + i * 37))
+                { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+    }
+
+    void Stop()
+    {
+        foreach (var s in _scales)
+            s.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
 }

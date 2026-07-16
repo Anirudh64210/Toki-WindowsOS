@@ -21,7 +21,11 @@ public partial class App : Application
     /// <summary>Set on Stop: true when nothing audible was captured (→ friendly empty state).</summary>
     public static bool LastRecordingSilent { get; private set; }
 
+    /// <summary>Dev only: <c>--noghost</c> disables screen-capture exclusion so tools can grab the window.</summary>
+    public static bool GhostDisabled { get; private set; }
+
     static System.Threading.Mutex? _singleInstance;
+    static System.Threading.EventWaitHandle? _showSignal;
     static MeetingDetector? _detector;
     static RecordingSession? _session;
 
@@ -38,6 +42,7 @@ public partial class App : Application
         InstallGlobalExceptionHandlers();
 
         Log($"startup args=[{string.Join(" ", e.Args)}]");
+        GhostDisabled = e.Args.Contains("--noghost");
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
         var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest");
@@ -67,15 +72,25 @@ public partial class App : Application
             return;
         }
 
-        // One Toki only — a second launch would fight over the hotkey and stack
-        // duplicate pills. If we're not first, just exit quietly.
+        // One Toki only. A second launch signals the running instance to show
+        // itself (so double-clicking a running Toki brings it up) and then exits.
         _singleInstance = new System.Threading.Mutex(initiallyOwned: true, "Toki.SingleInstance", out var isFirst);
+        _showSignal = new System.Threading.EventWaitHandle(
+            false, System.Threading.EventResetMode.AutoReset, "Toki.ShowSignal");
         if (!isFirst)
         {
-            Log("another instance already running — exiting");
+            Log("another instance already running — signalling it to show, exiting");
+            _showSignal.Set();
             Shutdown();
             return;
         }
+        // First instance: listen for future launches asking us to surface.
+        var signalThread = new System.Threading.Thread(() =>
+        {
+            while (_showSignal.WaitOne())
+                Dispatcher.BeginInvoke(() => State.ForceForDemo(PillState.Home)); // always surface
+        }) { IsBackground = true, Name = "Toki.ShowSignalWaiter" };
+        signalThread.Start();
 
         _pill = new PillWindow(State);
         _hotkey = new HotkeyManager(_pill, ToggleHome);
@@ -147,21 +162,32 @@ public partial class App : Application
 
     public static void StopRecording()
     {
-        var youPeak = _session?.YouPeak ?? 0;
-        var themPeak = _session?.ThemPeak ?? 0;
-        try { _session?.Stop(); } catch (Exception ex) { Log($"stop recording: {ex.Message}"); }
+        var session = _session;
         _session = null;
         _detector?.EndRecording();
-        LastRecordingSilent = Math.Max(youPeak, themPeak) < 0.01f;
+        LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
+
+        // UI advances instantly; capture is finalized off the UI thread so
+        // joining the capture worker can NEVER freeze the pill (this was the hang).
         State.TryGo(PillState.Summarizing);
+        if (session is not null)
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try { session.Stop(); } catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
+            });
     }
 
     static void BeginRecording(DetectedApp? app)
     {
         try
         {
-            _session = new RecordingSession(app);
-            _session.Start();
+            var session = new RecordingSession(app);
+            _session = session;
+            // Start capture off the UI thread too — device init can take ~100ms.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try { session.Start(); } catch (Exception ex) { Log($"begin recording (bg): {ex.Message}"); }
+            });
         }
         catch (Exception ex) { Log($"begin recording failed (non-fatal): {ex.Message}"); }
     }
@@ -182,12 +208,30 @@ public partial class App : Application
         };
     }
 
+    static void RestartApp()
+    {
+        try
+        {
+            // Release single-instance ownership first so the fresh process becomes
+            // the owner instead of just signalling this dying one.
+            _singleInstance?.Dispose();
+            _singleInstance = null;
+            var exe = Environment.ProcessPath;
+            if (exe is not null)
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Log($"restart failed: {ex.Message}"); }
+        Current.Shutdown();
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _detector?.Stop();
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
         _hotkey?.Dispose();
         _tray?.Dispose();
+        _showSignal?.Dispose();
+        _singleInstance?.Dispose();
         base.OnExit(e);
     }
 
@@ -230,6 +274,7 @@ public partial class App : Application
         menu.Items.Add(Item("Library", () => State.ForceForDemo(PillState.Library)));
         menu.Items.Add(Item("Settings", () => State.ForceForDemo(PillState.Settings)));
         menu.Items.Add(new Separator());
+        menu.Items.Add(Item("Restart Toki", RestartApp));
         menu.Items.Add(Item("Quit Toki", () =>
         {
             _tray?.Dispose();
