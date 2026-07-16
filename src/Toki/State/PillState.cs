@@ -18,4 +18,5 @@ public enum PillState
     Home,
     Library,
     Settings,
+    ManualNote,
 }

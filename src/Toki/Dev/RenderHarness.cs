@@ -32,6 +32,13 @@ static class RenderHarness
     public static void RenderAll(string dir)
     {
         Directory.CreateDirectory(dir);
+        // Give the Notes screen a real meeting to render (latest in the store).
+        try
+        {
+            var latest = new Storage.MeetingStore().List().FirstOrDefault(x => x.Kind == Storage.MeetingKind.Meeting);
+            if (latest is not null) App.CurrentMeeting = new Storage.MeetingStore().Get(latest.Id);
+        }
+        catch { /* no store yet — Notes renders its fallback */ }
         foreach (var (state, w, h) in Shots)
         {
             var view = Build(state);

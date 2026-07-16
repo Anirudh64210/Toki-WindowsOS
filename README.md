@@ -218,6 +218,21 @@ On-device speech-to-text with **Parakeet TDT 0.6b v2** via **sherpa-onnx**.
 
 **Deferred:** live streaming preview (streaming zipformer) and the whisper.cpp error-only fallback are stubbed (fallback logs + skips for now) — both are follow-ups; the core accurate transcription works.
 
-## M5 — Storage + heuristic notes + Library (next)
+## M5 — Storage + heuristic notes + Library (2026-07-15)
 
-SQLite schema (meetings, notes, action items, manual notes with `kind`), heuristic extraction, Library window with search/edit/export, manual "New note", Markdown mirror. `--dbtest`, `--notestest`.
+**Built**
+- `MeetingStore` — SQLite at `%APPDATA%\Toki\toki.db` (meetings, transcript, decisions, questions, action_items; manual notes share the `meetings` table via `kind`). Save/Get/List/Search/SetActionDone/UpdateTitleAndBody/Delete (cascade). `you:`/`them:` search filters.
+- `NoteExtractor` — deterministic "notes floor" (no model): TL;DR, decisions, action items (with owner + due heuristics), open questions; heuristic title with validation + `<app> — <date>` fallback (lesson 9). 7 unit tests.
+- `MarkdownMirror` — every meeting also written to `%APPDATA%\Toki\Notes\*.md` (user-inspectable, export-ready).
+- Wired: on transcription, notes are extracted and the meeting saved to DB + Markdown, then the Notes screen shows the structured notes (TL;DR / Decisions / checkable Action items / Open questions / Transcript).
+- **Library** with real data: searchable meeting cards (date, tldr, open-actions/people tags), open → notes, delete-with-confirm, **+ New note**.
+- **Manual notes**: editable title + freeform body, auto-saved, searchable alongside meetings (brief's NEW feature). `--dbtest`, `--notestest`, `--seed`.
+
+**Verified**
+- `--dbtest`: insert/search(you:/them:)/update/delete round-trip + cascade.
+- `--notestest`: planted transcript → echo removed, decisions/actions(+owner/due)/questions extracted, clean title.
+- Live DPI-aware captures of Library (3 seeded items), Notes (full structured notes), and the manual-note editor — all render correctly. 36/36 tests.
+
+## M6 — LLM notes (next)
+
+LLamaSharp + Qwen3-4B, three-pass notes (TL;DR last), sampler params + degeneration validators (lesson 8), model selection, BYO API key. `--llmtest`. Then live transcription preview.

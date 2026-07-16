@@ -174,3 +174,13 @@ A milestone is done only when its real artifact has been seen/heard (brief, less
 
 - **CI pipeline** — needs a GitHub remote; added when the repo is pushed (M0 note in README).
 - **Outlook calendar, teams features, "Ask Toki" chat** — explicitly out of v1 scope.
+
+## Storage & notes (M5)
+
+Local SQLite (`MeetingStore`, `%APPDATA%\Toki\toki.db`): `meetings` (with `kind` = meeting|manual), `transcript`, `decisions`, `questions`, `action_items` (all child rows cascade-delete). Manual notes reuse the `meetings` table (freeform `body`), so they're searchable alongside meetings — the brief's new manual-note feature with a `kind` column. `you:`/`them:` search scopes to transcript lines by speaker.
+
+`NoteExtractor` is the deterministic **notes floor** (brief §5): cue-based classification of sentences into decisions / actions (with owner + due heuristics) / open questions, a bounded TL;DR, and a validated heuristic title (lesson 9: no separate title LLM pass; `<app> — <date>` fallback). Always available, instant, no model — this is what a missing/failed LLM degrades to. M6 layers LLM-written notes on top of the same `NoteSet` shape.
+
+`MarkdownMirror` writes each meeting to `%APPDATA%\Toki\Notes\*.md` — the DB is source of truth; the Markdown is a user-inspectable, sync-friendly mirror/export (the open-source-notetaker research's "every meeting is a file you own").
+
+Verification note: data-driven views populate on `Loaded`, which does NOT fire in the offscreen `--render` harness — verify them with live DPI-aware `PrintWindow` captures (`--state library/notes/manualnote --noghost`) instead.

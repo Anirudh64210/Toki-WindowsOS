@@ -18,9 +18,10 @@ public sealed class AppState
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
         [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Library],
         [PillState.NoSpeech]      = [PillState.Hidden, PillState.Home],
-        [PillState.Home]          = [PillState.Hidden, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings],
-        [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings],
+        [PillState.Home]          = [PillState.Hidden, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings, PillState.ManualNote],
+        [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings, PillState.Notes, PillState.ManualNote],
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library],
+        [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
     };
 
     public PillState Current { get; private set; } = PillState.Hidden;

@@ -8,6 +8,7 @@ using Toki.Audio;
 using Toki.Detection;
 using Toki.Interop;
 using Toki.State;
+using Toki.Storage;
 using Toki.Transcription;
 
 namespace Toki;
@@ -24,6 +25,35 @@ public partial class App : Application
 
     /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
     public static IReadOnlyList<TranscriptSegment>? LastTranscript { get; private set; }
+
+    /// <summary>Local database of meetings and notes.</summary>
+    static readonly Lazy<MeetingStore> LazyStore = new(() => new MeetingStore());
+    public static MeetingStore Store => LazyStore.Value;
+
+    /// <summary>The meeting the Notes screen should display (saved after transcription).</summary>
+    public static MeetingRecord? CurrentMeeting { get; set; }
+
+    /// <summary>The manual note currently being edited.</summary>
+    public static MeetingRecord? CurrentManualNote { get; private set; }
+
+    /// <summary>Create a fresh manual note and open the editor.</summary>
+    public static void NewManualNote()
+    {
+        try
+        {
+            var id = Store.CreateManualNote("Untitled note", "");
+            CurrentManualNote = Store.Get(id);
+            State.TryGo(PillState.ManualNote);
+        }
+        catch (Exception ex) { Log($"new manual note failed: {ex.Message}"); }
+    }
+
+    /// <summary>Open an existing manual note for editing.</summary>
+    public static void OpenManualNote(MeetingRecord note)
+    {
+        CurrentManualNote = note;
+        State.TryGo(PillState.ManualNote);
+    }
 
     /// <summary>Dev only: <c>--noghost</c> disables screen-capture exclusion so tools can grab the window.</summary>
     public static bool GhostDisabled { get; private set; }
@@ -49,7 +79,7 @@ public partial class App : Application
         GhostDisabled = e.Args.Contains("--noghost");
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--seed");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -106,6 +136,21 @@ public partial class App : Application
             && Enum.TryParse<PillState>(e.Args[i + 1], ignoreCase: true, out var s)
             && s != PillState.Hidden)
         {
+            // Dev convenience: give data-driven screens something to show.
+            try
+            {
+                if (s == PillState.Notes && CurrentMeeting is null)
+                {
+                    var latest = Store.List().FirstOrDefault(x => x.Kind == MeetingKind.Meeting);
+                    if (latest is not null) CurrentMeeting = Store.Get(latest.Id);
+                }
+                else if (s == PillState.ManualNote && CurrentManualNote is null)
+                {
+                    var note = Store.List().FirstOrDefault(x => x.Kind == MeetingKind.Manual);
+                    CurrentManualNote = note is not null ? Store.Get(note.Id) : null;
+                }
+            }
+            catch { /* no store yet */ }
             State.ForceForDemo(s);
         }
         else
@@ -175,9 +220,15 @@ public partial class App : Application
         _detector?.EndRecording();
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
         LastTranscript = null;
+        CurrentMeeting = null;
 
-        // Show the loader immediately; finalize capture + transcribe entirely off
-        // the UI thread (never freeze the pill), then advance when done.
+        // Wall-clock duration = stop − start (lesson 10), captured at stop time.
+        var startedAt = State.RecordingStartedAt ?? DateTimeOffset.UtcNow;
+        var durationMs = (int)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+        var app = CurrentApp?.DisplayName;
+
+        // Show the loader immediately; finalize capture + transcribe + save entirely
+        // off the UI thread (never freeze the pill), then advance when done.
         State.TryGo(PillState.Summarizing);
         System.Threading.Tasks.Task.Run(() =>
         {
@@ -189,17 +240,38 @@ public partial class App : Application
             var minShow = System.Threading.Tasks.Task.Delay(2200); // let the loader be seen
             try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
+
+            MeetingRecord? meeting = null;
+            if (transcript is { Count: > 0 })
+            {
+                try
+                {
+                    var notes = NoteExtractor.Extract(transcript);
+                    meeting = new MeetingRecord
+                    {
+                        Kind = MeetingKind.Meeting,
+                        App = app,
+                        StartedAt = startedAt.ToLocalTime(),
+                        DurationMs = durationMs,
+                        Folder = folder,
+                        Transcript = transcript.ToList(),
+                        Notes = notes,
+                        Title = NoteExtractor.Title(notes, app, startedAt.ToLocalTime()),
+                    };
+                    Store.Save(meeting);
+                    MarkdownMirror.Write(meeting);
+                    Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
+                }
+                catch (Exception ex) { Log($"save meeting failed (non-fatal): {ex.Message}"); }
+            }
             minShow.Wait();
 
             Current.Dispatcher.BeginInvoke(() =>
             {
                 LastTranscript = transcript;
-                // Real speech → Notes; genuinely silent → friendly empty state;
-                // model not ready (null) → Notes with the placeholder for now.
-                if (transcript is { Count: 0 })
-                    State.TryGo(PillState.NoSpeech);
-                else
-                    State.TryGo(PillState.Notes);
+                CurrentMeeting = meeting;
+                if (transcript is { Count: 0 }) State.TryGo(PillState.NoSpeech);
+                else State.TryGo(PillState.Notes);
             });
         });
     }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using Toki.Audio;
 using Toki.Detection;
+using Toki.Storage;
 using Toki.Transcription;
 
 namespace Toki.Dev;
@@ -33,6 +34,9 @@ static class SelfTests
                 "--recordtest" => RecordTest(args, Seconds(args, 6)),
                 "--asrtest" => AsrTest(args),
                 "--transcribetest" => TranscribeTest(args),
+                "--dbtest" => DbTest(),
+                "--notestest" => NotesTest(),
+                "--seed" => Seed(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -87,6 +91,157 @@ static class SelfTests
             Console.WriteLine("  note: peak is near silence — the app may not have played audio during the test.");
         return 0;
     }
+
+    static int Seed()
+    {
+        var store = new MeetingStore();
+        var m1 = new MeetingRecord
+        {
+            Title = "Ship on Thursday; email capture optional", App = "chrome.exe",
+            StartedAt = DateTimeOffset.Now.AddDays(-2), DurationMs = 24 * 60 * 1000,
+            Transcript =
+            [
+                new(Speaker.Them, 0, 3000, "So what is left before we ship?"),
+                new(Speaker.You, 3200, 6000, "Just the brand font and the Make webhook."),
+                new(Speaker.Them, 6200, 9000, "Which analytics platform do we point events at?"),
+            ],
+            Notes = new NoteSet
+            {
+                Tldr = "Reviewed launch readiness. Tool is code-complete; remaining blockers are brand tokens and the Make webhook. Ship moved to Thursday.",
+                Decisions = ["We agreed to ship on Thursday and keep email capture optional."],
+                Questions = ["Which analytics platform do we point events at?"],
+                Actions =
+                [
+                    new ActionItem { Text = "Confirm brand font + hex.", Owner = "Priya", Due = "Tomorrow" },
+                    new ActionItem { Text = "Wire the Make webhook and route the /health slug.", Owner = "You", Due = "This week" },
+                ],
+            },
+        };
+        store.Save(m1); MarkdownMirror.Write(m1);
+
+        var m2 = new MeetingRecord
+        {
+            Title = "Weekly 1:1 — Rounak", App = "zoom.exe",
+            StartedAt = DateTimeOffset.Now.AddDays(-3), DurationMs = 18 * 60 * 1000,
+            Transcript = [new(Speaker.You, 0, 3000, "Landing page hero is roughed in, pricing next.")],
+            Notes = new NoteSet
+            {
+                Tldr = "Landing page — hero roughed in, pricing next. Keep it one page for launch.",
+                Decisions = ["Keep the landing page to one page for launch."],
+                Actions = [new ActionItem { Text = "Draft pricing section.", Owner = "You" }],
+            },
+        };
+        store.Save(m2); MarkdownMirror.Write(m2);
+
+        store.CreateManualNote("Prep — Design review", "- ask about the analytics platform\n- confirm the ship date\n- bring the webhook URL");
+        Console.WriteLine($"[--seed] inserted 2 meetings + 1 manual note into {MeetingStore.DbPathDefault}");
+        return 0;
+    }
+
+    static int DbTest()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"toki-dbtest-{Environment.ProcessId}.db");
+        try
+        {
+            var store = new MeetingStore(dbPath);
+            Console.WriteLine($"[--dbtest] round-trip against {dbPath}");
+
+            var rec = new MeetingRecord
+            {
+                Title = "Design review — PixelFlow", App = "chrome.exe", DurationMs = 24 * 60 * 1000,
+                Transcript =
+                [
+                    new(Speaker.Them, 0, 2000, "So what is left before we ship?"),
+                    new(Speaker.You, 2100, 4000, "Just the brand font and the webhook."),
+                ],
+                Notes = new NoteSet
+                {
+                    Tldr = "Reviewed launch readiness; blockers are brand tokens and the webhook.",
+                    Decisions = ["Ship on Thursday."],
+                    Questions = ["Which analytics platform?"],
+                    Actions = [new ActionItem { Text = "Wire the webhook.", Owner = "You", Due = "This week" }],
+                },
+            };
+            var id = store.Save(rec);
+            Console.WriteLine($"  inserted meeting id={id}");
+
+            var got = store.Get(id) ?? throw new Exception("Get returned null");
+            if (got.Transcript.Count != 2) return Fail("transcript not round-tripped");
+            if (got.Notes.Decisions.Count != 1 || got.Notes.Actions.Count != 1) return Fail("notes not round-tripped");
+            Console.WriteLine($"  read back: {got.Transcript.Count} lines, {got.Notes.Actions.Count} action(s)");
+
+            var all = store.List();
+            if (all.Count != 1 || all[0].PeopleCount != 2) return Fail($"list wrong (count={all.Count})");
+            if (store.List("them: ship").Count != 1) return Fail("them: search failed");
+            if (store.List("you: webhook").Count != 1) return Fail("you: search failed");
+            if (store.List("them: webhook").Count != 0) return Fail("them: search matched the wrong speaker");
+            Console.WriteLine("  search: title/you:/them: all correct");
+
+            var actionId = got.Notes.Actions[0].Id;
+            store.SetActionDone(actionId, true);
+            if (!store.Get(id)!.Notes.Actions[0].Done) return Fail("action done not persisted");
+
+            var noteId = store.CreateManualNote("My prep note", "- ask about pricing\n- confirm scope");
+            if (store.List().Count != 2) return Fail("manual note not saved");
+            Console.WriteLine($"  manual note id={noteId} saved");
+
+            store.Delete(id);
+            store.Delete(noteId);
+            if (store.List().Count != 0) return Fail("delete failed");
+            Console.WriteLine("  deleted both (cascade ok)");
+
+            Console.WriteLine("[--dbtest] PASS — insert / search / update / delete round-trip works.");
+            return 0;
+        }
+        catch (Exception ex) { return Fail($"--dbtest threw: {ex}"); }
+        finally { try { File.Delete(dbPath); } catch { } }
+    }
+
+    static int NotesTest()
+    {
+        Console.WriteLine("[--notestest] canned transcript with a planted echo pair + decisions/actions/questions");
+        // Planted echo: the remote line also appears on YOU within the window.
+        var you = new List<TranscriptSegment>
+        {
+            new(Speaker.You, 2100, 4000, "We agreed to ship on Thursday and keep email capture optional."),
+            new(Speaker.You, 6000, 8000, "So what is left before we ship?"),   // echo of them@6000
+            new(Speaker.You, 9000, 11000, "I'll wire up the webhook this week."),
+        };
+        var them = new List<TranscriptSegment>
+        {
+            new(Speaker.Them, 0, 2000, "Which analytics platform do we point events at?"),
+            new(Speaker.Them, 6000, 8000, "So what is left before we ship?"),  // clean copy
+            new(Speaker.Them, 12000, 14000, "Priya will confirm the brand font tomorrow."),
+        };
+
+        var merged = TranscriptMerger.Merge(you, them);
+        var echoRemoved = merged.Count(s => s.Speaker == Speaker.You && s.Text.Contains("what is left")) == 0
+                          && merged.Count(s => s.Text.Contains("what is left")) == 1;
+        Console.WriteLine($"  echo de-dup: {(echoRemoved ? "OK — duplicate removed, one copy kept" : "FAIL")}");
+
+        var notes = NoteExtractor.Extract(merged);
+        var title = NoteExtractor.Title(notes, "chrome.exe", DateTimeOffset.Now);
+        Console.WriteLine($"  title: \"{title}\"");
+        Console.WriteLine($"  tl;dr: {notes.Tldr}");
+        Console.WriteLine($"  decisions ({notes.Decisions.Count}): {string.Join(" | ", notes.Decisions)}");
+        Console.WriteLine($"  actions   ({notes.Actions.Count}): {string.Join(" | ", notes.Actions.Select(a => $"{a.Text} [{a.Owner}/{a.Due}]"))}");
+        Console.WriteLine($"  questions ({notes.Questions.Count}): {string.Join(" | ", notes.Questions)}");
+
+        var hasGarbage = HasCjkOrRepetition(title);
+        var ok = echoRemoved
+                 && notes.Decisions.Any(d => d.Contains("Thursday"))
+                 && notes.Actions.Any(a => a.Text.Contains("webhook"))
+                 && notes.Actions.Any(a => a.Owner == "Priya")
+                 && notes.Questions.Any(q => q.Contains("analytics"))
+                 && !hasGarbage;
+        if (!ok) return Fail("planted items not all extracted (or title garbage).");
+        Console.WriteLine("[--notestest] PASS — echo removed; decisions/actions/questions extracted; title clean.");
+        return 0;
+    }
+
+    static bool HasCjkOrRepetition(string s) =>
+        s.Any(c => c is >= (char)0x3040 and <= (char)0x9FFF) ||
+        System.Text.RegularExpressions.Regex.IsMatch(s, @"(.)\1{5,}");
 
     static int TranscribeTest(string[] args)
     {
