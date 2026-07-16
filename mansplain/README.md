@@ -11,3 +11,4 @@ Read them in order:
 5. [Never freezes, and properly alive](05-smooth-and-alive.md) — killing the freeze bug, re-launch handling, and the redone alive loading animation.
 6. [The black window, and why the PC got slow](06-black-window-fixed.md) — the see-through-window vs ghost-mode conflict, and rebuilding the window to be solid, fast, and stable.
 7. [Toki turns talking into text](07-toki-understands-speech.md) — on-device speech-to-text, both sides transcribed and labelled, echo removed.
+8. [Toki remembers, and pulls out the useful bits](08-remembering-meetings.md) — local database, first-pass notes, the searchable Library, and manual notes.

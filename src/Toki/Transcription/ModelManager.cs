@@ -45,6 +45,16 @@ public sealed class ModelManager
             throw new FileNotFoundException($"Model '{spec.Id}' still missing required files after extract.");
     }
 
+    /// <summary>Download a single file (e.g. a GGUF) to <paramref name="destPath"/> if missing.</summary>
+    public static async Task EnsureFileAsync(string url, string destPath, IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        if (File.Exists(destPath)) { progress?.Report(1); return; }
+        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+        var tmp = destPath + ".part";
+        await DownloadAsync(url, tmp, progress, ct).ConfigureAwait(false);
+        File.Move(tmp, destPath, overwrite: true);
+    }
+
     static async Task DownloadAsync(string url, string dest, IProgress<double>? progress, CancellationToken ct)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };

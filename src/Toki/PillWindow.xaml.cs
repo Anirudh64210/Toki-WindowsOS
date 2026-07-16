@@ -32,6 +32,7 @@ public partial class PillWindow : Window
         [PillState.Home]          = (344, 232),
         [PillState.Library]       = (404, 440),
         [PillState.Settings]      = (404, 440),
+        [PillState.ManualNote]    = (424, 438),
     };
 
     const double BottomGap = 14;  // above the taskbar
@@ -138,6 +139,7 @@ public partial class PillWindow : Window
             PillState.Home          => new HomeView(),
             PillState.Library       => new LibraryView(),
             PillState.Settings      => new SettingsView(),
+            PillState.ManualNote    => new ManualNoteView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
