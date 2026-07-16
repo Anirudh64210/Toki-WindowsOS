@@ -15,11 +15,42 @@ public partial class TokiBlob : UserControl
     static readonly Random Rng = new();
     readonly DispatcherTimer _blinkTimer = new();
 
+    bool _running;
+
     public TokiBlob()
     {
         InitializeComponent();
-        Loaded += (_, _) => { StartBreathing(); ScheduleBlink(); };
-        Unloaded += (_, _) => _blinkTimer.Stop();
+        _blinkTimer.Tick += OnBlinkTick;
+        // Only animate while actually on screen — cached-but-hidden views must
+        // not burn CPU (this was part of the slowness).
+        IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Pause(); };
+        Unloaded += (_, _) => Pause();
+    }
+
+    void Run()
+    {
+        if (_running) return;
+        _running = true;
+        StartBreathing();
+        ScheduleBlink();
+    }
+
+    void OnBlinkTick(object? sender, EventArgs e)
+    {
+        _blinkTimer.Stop();
+        if (!_running) return;
+        Blink(doubleBlink: Rng.Next(4) == 0);
+        ScheduleBlink();
+    }
+
+    void Pause()
+    {
+        _running = false;
+        _blinkTimer.Stop();
+        Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        Breathe.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        LeftBlink.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        RightBlink.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
 
     void StartBreathing()
@@ -44,12 +75,6 @@ public partial class TokiBlob : UserControl
     void ScheduleBlink()
     {
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(2200 + Rng.Next(2600));
-        _blinkTimer.Tick += (_, _) =>
-        {
-            _blinkTimer.Stop();
-            Blink(doubleBlink: Rng.Next(4) == 0);
-            ScheduleBlink();
-        };
         _blinkTimer.Start();
     }
 

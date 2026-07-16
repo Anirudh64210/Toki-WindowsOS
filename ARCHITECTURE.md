@@ -94,9 +94,42 @@ The mic is the signal: a call is essentially the only everyday reason another ap
 
 Click-away/Esc dismissal uses **global low-level mouse + keyboard hooks** (`InputMonitor`), not WPF window activation. Activation-based closing fired on unrelated focus changes and flickered the pill shut on launch. The hooks let Toki stay a true no-focus overlay (fits ghost mode) and only dismiss on a real click *outside* the shell rect (with a 500ms grace period after opening). Escape is handled the same way so it works without the window holding keyboard focus.
 
+## Window architecture (revised M3.2) — non-layered, hardware-accelerated
+
+**Decision:** the pill is a **non-layered, opaque, hardware-accelerated window** whose corners are rounded by DWM (`DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`, plus a subtle `DWMWA_BORDER_COLOR`). The window *is* the pill — it resizes to each state's content and anchors bottom-center.
+
+**Why not the original `AllowsTransparency=True` layered window:** that path (a) forced slow software rendering, and (b) is **fundamentally incompatible with `SetWindowDisplayAffinity`** (ghost mode) — the layered + capture-exclusion combination renders the window as a black rectangle (confirmed by Microsoft's own docs/issue tracker; the call returns `ERROR_NOT_ENOUGH_MEMORY` on layered windows). The owner hit exactly this black-rectangle glitch during screen recording. A non-layered window is GPU-composited (fast) and lets ghost mode work reliably.
+
+**Rounded corners (M3.3):** DWM corner rounding (`DWMWA_WINDOW_CORNER_PREFERENCE`) does **not** apply to borderless `WindowStyle=None` windows — corners stayed square. The pill is instead clipped to a rounded region via `SetWindowRgn(CreateRoundRectRgn(...))` at radius 22 (DPI-scaled), re-applied on every resize and work-area change. This restores the larger pill radius the design wants. Region edges are 1-bit (mildly aliased) but fine at this radius/DPI; a `Border` inside draws the matching AA fill + subtle edge.
+
+**Content sizing (M3.3):** the size-to-content window hosts the current view in a `Grid` (not a `ContentControl`) so the view is stretched to the exact window bounds — otherwise views render at their natural size and clip (this caused the owner's "cut off" report). Window height is clamped to the work area; taller panels scroll internally.
+
+**Trade-off vs the old layered window:** no soft outer drop-shadow and no per-window opacity fade. Acceptable for the stability/ghost/perf win.
+
+**Positioning (M3.4): physical pixels, not WPF logical.** The window is placed with Win32 `SetWindowPos` using the physical work area (`SystemParametersInfo(SPI_GETWORKAREA)`) and physical window size (`GetWindowRect`), because WPF's logical `Left`/`Top` mis-scale on a per-monitor-DPI-aware app (at 125% the pill floated mid-screen / tall panels ran off the bottom). This is fully resolution/DPI-adaptive. Window height is clamped to the physical work area so panels never exceed the screen (they scroll). No window-`Top` slide animation — it conflicted with `SetWindowPos`; the entrance is the content pop+fade.
+
+**DPI caution for verification:** the dev machine runs at 125% scaling. Screen/window captures MUST be DPI-aware (`SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`) or they grab only the top-left fraction of a scaled window and fake "cut off" content. The in-app layout log (`view == host` size) and the physical position log are the reliable checks.
+
 ## Ghost mode
 
-`SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` makes the overlay visible to the user but omitted from DWM captures — screen recording and screen-share never show it. Plus `WS_EX_TOOLWINDOW` to stay out of alt-tab. Verified: a `PrintWindow(PW_RENDERFULLCONTENT)` grab returns fully black while the app is on screen.
+`SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` — reliable now that the window is non-layered — makes the overlay visible to the user but omitted from DWM captures (screen recording and screen-share never show it). Plus `WS_EX_TOOLWINDOW` to stay out of alt-tab. Verified: a `PrintWindow` grab returns blank while the app is on screen. Dev-only `--noghost` disables it so capture tooling can verify the UI.
+
+## Performance discipline (M3.2)
+
+- **The mouse hook runs on its own thread** (`InputMonitor`), never the UI thread — a low-level hook is serviced on its installing thread, so putting it on the UI thread meant any render/GC stall there lagged all mouse input system-wide. Its callback does pure arithmetic against a cached window rect (via `GetWindowRect`, physical pixels) and marshals dismissal to the UI thread.
+- **Animations pause when off-screen.** `TokiBlob`, `Waveform`, and the loader stop their loops on `IsVisibleChanged`/`Unloaded`; cached-but-hidden views were previously animating forever. The loader also stops non-active stage motifs. Hidden-state CPU ≈ 0.
+
+## Never-hang discipline
+
+A meeting assistant that freezes is worse than useless. Rules now enforced:
+
+- **The UI thread never blocks.** Audio capture start and stop both run on background threads (`Task.Run`); the pill transitions immediately. The original hang was `StopRecording` joining the loopback worker (up to 3s) on the UI thread — which also stalled the low-level mouse hook, freezing all input.
+- **The mouse hook does zero UI work.** A low-level hook runs on the UI thread's message pump, so any slow work there lags the whole system. The hook only compares the click point to a *cached* rect updated on layout — pure arithmetic. The global keyboard hook was removed entirely (invasive + another stall vector).
+- **Single instance, but relaunch surfaces it.** A named `EventWaitHandle`: a second launch signals the running instance to show Home, then exits. Plus a tray "Restart Toki". So the app is always one process, always reachable, never a zombie that blocks new launches.
+
+## Loading animation (M3.1)
+
+The summarizing/loading view is a staged character scene, not a static spinner: Toki (breathing, blinking, bobbing, soft glow) beside a motif that crossfades through the stages of understanding a meeting — rings (listening) → document with sweeping highlight (reading) → checkboxes ticking (organizing) → pen drawing an underline (writing) — over a filling progress bar. Stages are placeholder-paced now; M6 will drive them off the real transcription/notes passes. Verified live via `--noghost` multi-frame capture.
 
 ## Distribution (test build)
 
