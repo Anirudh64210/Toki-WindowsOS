@@ -233,6 +233,20 @@ On-device speech-to-text with **Parakeet TDT 0.6b v2** via **sherpa-onnx**.
 - `--notestest`: planted transcript → echo removed, decisions/actions(+owner/due)/questions extracted, clean title.
 - Live DPI-aware captures of Library (3 seeded items), Notes (full structured notes), and the manual-note editor — all render correctly. 36/36 tests.
 
-## M6 — LLM notes (next)
+## M6 — LLM notes (2026-07-15)
 
-LLamaSharp + Qwen3-4B, three-pass notes (TL;DR last), sampler params + degeneration validators (lesson 8), model selection, BYO API key. `--llmtest`. Then live transcription preview.
+On-device AI-written notes with **Qwen3-4B-Instruct-2507** (Q4_K_M GGUF) via **LLamaSharp**.
+
+**Built**
+- `LlamaLlm` (ILlm) — loads the ~2.5GB GGUF once, Qwen3 chat template, `DefaultSamplingPipeline` with Qwen's official params (temp 0.7 / topP 0.8 / topK 20 / presence 0.5; never greedy — lesson 8).
+- `LlmNoteWriter` — three focused passes (decisions → to-dos → **TL;DR last**, from the reduced sections); every output validated (`TextValidator`: rejects CJK-drift / repetition), retried once, else falls back to the heuristic per section. 12 unit tests.
+- `LlmService` + `AppSettings` — model selection (On-device / Heuristic-only / BYO API key, DPAPI-encrypted), **GPU off by default** (CPU is crash-proof; GPU is opt-in for 6GB+ cards). `OpenAiLlm` for the BYO path.
+- Wired: after a recording, heuristic notes show instantly, then the LLM notes **upgrade in place** in the background. `--llmtest`. Functional Settings screen.
+
+**Verified**
+- `--llmtest`: Qwen wrote a correct, coherent, English summary + decisions + action items (with owners & due dates) from a test transcript — **62s on CPU**, no degeneration.
+- Caught + fixed two real bugs: a GPU **VRAM OOM crash** on a 4GB card (→ default CPU, context 4096, GPU opt-in) and an **async deadlock** when blocking on inference from the UI thread (→ run off-thread). 48/48 tests. App launches clean with the native LLM backend configured.
+
+## Live transcription preview (next)
+
+Streaming zipformer fed live mic chunks → partial text in the expanded recording view.

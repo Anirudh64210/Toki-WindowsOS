@@ -7,6 +7,7 @@ using H.NotifyIcon;
 using Toki.Audio;
 using Toki.Detection;
 using Toki.Interop;
+using Toki.Llm;
 using Toki.State;
 using Toki.Storage;
 using Toki.Transcription;
@@ -32,6 +33,10 @@ public partial class App : Application
 
     /// <summary>The meeting the Notes screen should display (saved after transcription).</summary>
     public static MeetingRecord? CurrentMeeting { get; set; }
+
+    /// <summary>Raised when CurrentMeeting's notes were updated (e.g. LLM upgrade) — the Notes view re-reads.</summary>
+    public static event Action? NotesUpdated;
+    public static void RaiseNotesUpdated() => Current?.Dispatcher.BeginInvoke(() => NotesUpdated?.Invoke());
 
     /// <summary>The manual note currently being edited.</summary>
     public static MeetingRecord? CurrentManualNote { get; private set; }
@@ -78,8 +83,13 @@ public partial class App : Application
         Log($"startup args=[{string.Join(" ", e.Args)}]");
         GhostDisabled = e.Args.Contains("--noghost");
 
+        // Configure the LLM native backend BEFORE any LLamaSharp call: prefer
+        // Vulkan (any GPU), fall back to CPU if the GPU lib/device can't load.
+        try { LLama.Native.NativeLibraryConfig.All.WithVulkan(true).WithAutoFallback(true); }
+        catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
+
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--seed");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--seed" or "--llmtest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -273,7 +283,32 @@ public partial class App : Application
                 if (transcript is { Count: 0 }) State.TryGo(PillState.NoSpeech);
                 else State.TryGo(PillState.Notes);
             });
+
+            // Upgrade heuristic → LLM notes quietly in the background (slow on CPU).
+            // The Notes screen shows the heuristic notes immediately and refreshes
+            // in place when the better notes are ready.
+            if (meeting is not null)
+                UpgradeNotesWithLlm(meeting, transcript!);
         });
+    }
+
+    static async void UpgradeNotesWithLlm(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> transcript)
+    {
+        try
+        {
+            var llmNotes = await System.Threading.Tasks.Task.Run(() =>
+                LlmService.Instance.WriteNotesAsync(transcript));
+            if (llmNotes is null) return; // heuristic-only mode or no model → keep heuristic notes
+
+            Store.ReplaceNotes(meeting.Id, llmNotes);
+            meeting.Notes = llmNotes;
+            meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
+            Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
+            MarkdownMirror.Write(meeting);
+            Log($"upgraded notes to LLM for meeting {meeting.Id}");
+            RaiseNotesUpdated();
+        }
+        catch (Exception ex) { Log($"LLM notes upgrade failed (kept heuristic): {ex.Message}"); }
     }
 
     static void BeginRecording(DetectedApp? app)

@@ -166,6 +166,43 @@ public sealed class MeetingStore
         return m;
     }
 
+    /// <summary>Replace a meeting's notes (e.g. upgrade heuristic → LLM-written).</summary>
+    public void ReplaceNotes(long meetingId, NoteSet notes)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        foreach (var table in new[] { "decisions", "questions", "action_items" })
+        {
+            using var del = c.CreateCommand();
+            del.CommandText = $"DELETE FROM {table} WHERE meeting_id=$id";
+            del.Parameters.AddWithValue("$id", meetingId);
+            del.ExecuteNonQuery();
+        }
+        using (var upd = c.CreateCommand())
+        {
+            upd.CommandText = "UPDATE meetings SET tldr=$t WHERE id=$id";
+            upd.Parameters.AddWithValue("$t", notes.Tldr);
+            upd.Parameters.AddWithValue("$id", meetingId);
+            upd.ExecuteNonQuery();
+        }
+        InsertSimple(c, "decisions", meetingId, notes.Decisions);
+        InsertSimple(c, "questions", meetingId, notes.Questions);
+        for (var i = 0; i < notes.Actions.Count; i++)
+        {
+            var a = notes.Actions[i];
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "INSERT INTO action_items (meeting_id, text, owner, due, done, ord) VALUES ($m,$t,$o,$d,$done,$ord)";
+            cmd.Parameters.AddWithValue("$m", meetingId);
+            cmd.Parameters.AddWithValue("$t", a.Text);
+            cmd.Parameters.AddWithValue("$o", (object?)a.Owner ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$d", (object?)a.Due ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$done", a.Done ? 1 : 0);
+            cmd.Parameters.AddWithValue("$ord", i);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
     public void SetActionDone(long actionId, bool done)
     {
         using var c = Open();

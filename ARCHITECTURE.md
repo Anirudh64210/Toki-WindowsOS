@@ -184,3 +184,16 @@ Local SQLite (`MeetingStore`, `%APPDATA%\Toki\toki.db`): `meetings` (with `kind`
 `MarkdownMirror` writes each meeting to `%APPDATA%\Toki\Notes\*.md` — the DB is source of truth; the Markdown is a user-inspectable, sync-friendly mirror/export (the open-source-notetaker research's "every meeting is a file you own").
 
 Verification note: data-driven views populate on `Loaded`, which does NOT fire in the offscreen `--render` harness — verify them with live DPI-aware `PrintWindow` captures (`--state library/notes/manualnote --noghost`) instead.
+
+## LLM notes (M6)
+
+On-device notes with **Qwen3-4B-Instruct-2507 Q4_K_M** via **LLamaSharp** (llama.cpp), behind an `ILlm` interface so the source is swappable (local model / BYO OpenAI-compatible key).
+
+- **Three passes, TL;DR last** (`LlmNoteWriter`): decisions → action items (owner/due) → TL;DR written from the *reduced* sections, not the raw transcript. Questions stay heuristic (reliable). Every model output goes through `TextValidator` (rejects CJK/kana/Hangul drift and 6+ char repetition — lesson 8), retried once, then falls back to `NoteExtractor` per section. So the user never sees degenerate text and always gets notes.
+- **Sampler**: Qwen's official params via `DefaultSamplingPipeline` (temp 0.7 / topP 0.8 / topK 20 / presence 0.5). Never greedy.
+- **CPU by default** (`GpuLayers = 0`), context 4096. This is deliberate: on a 4GB GPU, offloading all layers loads fine but then OOMs allocating the compute buffers, and llama.cpp crashes **natively** (an `AccessViolation` .NET can't catch after the fact). CPU can't OOM VRAM, so it can't crash. GPU offload is an opt-in setting for 6GB+ cards. `LLamaWeights` is loaded once (`LlmService`, lazy — not warmed at launch, to respect RAM); a fresh `StatelessExecutor` context per generation.
+- **Async deadlock**: LLamaSharp's `InferAsync` continuations must not be forced back onto a blocked UI thread — inference runs on a background thread (the recording flow already does; the self-test wraps in `Task.Run`). Symptom was a hang with flat CPU and the model paged out.
+- **UX**: heuristic notes render immediately after a recording; the LLM upgrade replaces them in place (`ReplaceNotes` + `NotesUpdated` event) ~a minute later on CPU. The DB/Markdown are updated regardless of whether the Notes screen is still open.
+- **Settings**: `AppSettings` (%APPDATA%\Toki\settings.json) — notes mode (Local / HeuristicOnly / ApiKey), GPU layers, and the BYO API key **DPAPI-encrypted** (per-user, never plaintext — brief §4). `NativeLibraryConfig` is set once at startup (Vulkan preferred, CPU auto-fallback) before any LLamaSharp call.
+
+Deferred: chunked map-reduce for very long transcripts (current single-context handles typical meetings within 4096 tokens); the "Built with" attribution screen (M8).
