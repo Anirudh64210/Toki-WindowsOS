@@ -187,6 +187,8 @@ Verification note: data-driven views populate on `Loaded`, which does NOT fire i
 
 ## LLM notes (M6)
 
+> **Superseded in parts by "Refinements (M6.1)" below** — the notes are now a single structured pass (not three), GPU offload is VRAM-auto (not CPU-by-default), and the model is warmed at launch. The M6 record is kept for history.
+
 On-device notes with **Qwen3-4B-Instruct-2507 Q4_K_M** via **LLamaSharp** (llama.cpp), behind an `ILlm` interface so the source is swappable (local model / BYO OpenAI-compatible key).
 
 - **Three passes, TL;DR last** (`LlmNoteWriter`): decisions → action items (owner/due) → TL;DR written from the *reduced* sections, not the raw transcript. Questions stay heuristic (reliable). Every model output goes through `TextValidator` (rejects CJK/kana/Hangul drift and 6+ char repetition — lesson 8), retried once, then falls back to `NoteExtractor` per section. So the user never sees degenerate text and always gets notes.
@@ -197,3 +199,42 @@ On-device notes with **Qwen3-4B-Instruct-2507 Q4_K_M** via **LLamaSharp** (llama
 - **Settings**: `AppSettings` (%APPDATA%\Toki\settings.json) — notes mode (Local / HeuristicOnly / ApiKey), GPU layers, and the BYO API key **DPAPI-encrypted** (per-user, never plaintext — brief §4). `NativeLibraryConfig` is set once at startup (Vulkan preferred, CPU auto-fallback) before any LLamaSharp call.
 
 Deferred: chunked map-reduce for very long transcripts (current single-context handles typical meetings within 4096 tokens); the "Built with" attribution screen (M8).
+
+## Refinements (M6.1) — notes shape, speed, and polish
+
+Driven by owner testing on real meetings. Three fronts: what the notes look like, how fast they're produced, and how the whole thing feels.
+
+### Notes shape: Granola-style, one pass
+
+**Decision: Summary → Key points → Action items** (dropped "Decisions" and "Open Questions"). Decisions just restated the to-dos right below them (the owner's exact complaint); open questions weren't wanted. Key points now capture *topics/context/decisions*, distinct from the action list. The `NoteSet.Decisions` field + `decisions` DB table are **repurposed** to store key points — no schema migration, older meetings still load.
+
+**Decision: one structured generation, not three passes.** `LlmNoteWriter` asks for KEY POINTS + ACTION ITEMS + SUMMARY in a single call, with SUMMARY **last** so the model writes it from the details it just produced (preserves the "TL;DR last" property of lesson 8 within one generation). A tiny second pass writes the title from the summary. Each section still validates (`TextValidator`) and falls back to the heuristic on garbage. Halves the generations vs M6, and the output-token budget is trimmed (concise key points). Placeholder junk in owner/due (`->`, `-`, `tbd`) is stripped in the prompt, parser, **and** renderer (so pre-existing rows are clean).
+
+### GPU offload: VRAM-auto, made coherent (`LlmRuntime`)
+
+**Decision: decide GPU-vs-CPU once, up front, from real VRAM — and only load Vulkan if we'll actually offload.** The M6 "CPU by default" was safe but slow, and worse: the Vulkan backend was still loaded at `GpuLayers=0`, which is the **pathological path** — llama.cpp shuffles every layer CPU↔GPU (hundreds of graph splits). Measured on the owner's RTX 3050: that hybrid was **~65s**; clean CPU (no Vulkan) is **~46s**; a safe partial GPU offload is **~34s cold / ~13s warm**.
+
+`LlmRuntime.Resolve()` runs before any LLamaSharp call. It reads true dedicated VRAM from the driver registry (`HKLM\...\Control\Class\{4d36e968-...}\NNNN\HardwareInformation.qwMemorySize`, max across adapters — no COM interop) and picks: ≥7 GB → full offload / ctx 4096; ≥3.9 GB → **20 layers / ctx 3072**; else CPU. `App` then loads the Vulkan backend **only** when `GpuLayers > 0`. Offload is deliberately conservative (20 of 36 layers ≈ 2.3 GB of 4 GB) to keep headroom — a live video call also holds VRAM, and a GPU OOM at model load is an **uncatchable native crash**. Tuning knobs: `AppSettings.GpuLayers` (0 = auto, -1 = force CPU, >0 = force N; Settings toggle maps to auto/CPU), env `TOKI_GPU_LAYERS` / `TOKI_CTX`.
+
+**Both engines warmed at launch** (`LlmService.Instance.Warm()` alongside the ASR warm), so a meeting-stop pays no model-load time — the warm number (~13s) is what the user actually sees.
+
+### No "bad first draft" flash
+
+**Decision: stay on the summarizing animation until the good notes exist, then reveal once.** M6 showed the heuristic notes immediately (raw transcript lines — ugly) and swapped in the LLM version ~10s later; the owner found the flash jarring. Now `StopRecording` writes the AI notes on the background thread *before* switching to the Notes screen (a 150s timeout guards a stuck generation; heuristic is still saved first as the DB floor and shown if there's no model). The user waits once, on the animation, and sees the finished notes.
+
+### Transcription speed: measured, left sequential on purpose
+
+**Finding: transcription — not the AI notes — is the bottleneck, and it's a hard floor here.** Parakeet runs at **~4× real-time on CPU**, and the two tracks are transcribed **sequentially**, so a 1-min two-party meeting ≈ 30s of ASR. Investigated every lever:
+- **Parallelising the two streams is unsafe** — two `Transcriber` instances decoding at once gave **non-deterministic, corrupt** output (same audio → 13 segments one run, 270 the next; sequential is stable). sherpa-onnx's offline recognizer has shared global state. Reverted; correctness wins.
+- **Thread count barely matters** (flat past ~6 threads; oversubscription hurts).
+- **GPU ASR isn't available** — the shipped sherpa-onnx native is built CPU-only (`Provider="cuda"/"directml"` both fall back: "compile with -DSHERPA_ONNX_ENABLE_GPU=ON").
+
+So total summarize time is ~35s on a 1-min meeting, dominated by ASR. The genuine path to <30s is **live transcription during the meeting** (task #14, parked) — then only the ~13s of notes remain at stop. A GPU speech engine (e.g. whisper.cpp on the Vulkan backend we already use) is the alternative, but a heavier dependency.
+
+### UI polish
+
+- **Library window** (`LibraryWindow`) as a resizable master–detail view — the maximise target and the Home/tray Library button — with a **"‹ Back to Toki"** button that returns to the pill. Manual notes are editable here with an explicit **Save** (`UpdateTitleAndBody`).
+- **Shared `NoteRenderer`** draws the notes for both the pill Notes view and the window, so spacing/sections stay consistent (scales with a `spacious` flag).
+- **Custom slim rounded scrollbars** and **custom rounded checkboxes** (coral fill + tick) as app-wide styles in `Theme.xaml`; soft opacity cross-fade when switching notes. **Copy transcript** + **maximise** buttons on the pill; the dead "search this transcript" placeholder was removed.
+
+**WPF gotcha (cost time):** setting the `Template` property inside a `ControlTemplate.Trigger` throws *"'Template' cannot be set in the current element's Template"* at layout, which the global handler swallowed and the window rendered **black**. Hit it building the custom scrollbar; fix is to handle orientation in `Style.Triggers` (Width/Height) with a `Track Orientation="{TemplateBinding Orientation}"`, never swapping the template in a trigger.

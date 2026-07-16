@@ -247,6 +247,38 @@ On-device AI-written notes with **Qwen3-4B-Instruct-2507** (Q4_K_M GGUF) via **L
 - `--llmtest`: Qwen wrote a correct, coherent, English summary + decisions + action items (with owners & due dates) from a test transcript — **62s on CPU**, no degeneration.
 - Caught + fixed two real bugs: a GPU **VRAM OOM crash** on a 4GB card (→ default CPU, context 4096, GPU opt-in) and an **async deadlock** when blocking on inference from the UI thread (→ run off-thread). 48/48 tests. App launches clean with the native LLM backend configured.
 
-## Live transcription preview (next)
+## M6.1 — Refinements: notes shape, speed & polish (2026-07-16)
 
-Streaming zipformer fed live mic chunks → partial text in the expanded recording view.
+Owner testing on real meetings drove a batch of refinements to the notes, the engine speed, and the UI.
+
+**Notes — Granola-style, one pass**
+- Restructured the notes to **Summary → Key points → Action items** (labelled). Dropped the old "Decisions" section (it just echoed the to-dos) and "Open Questions". The `decisions` DB column is repurposed to store Key points (no migration).
+- `LlmNoteWriter` now does **one structured generation** (Key points + Action items + Summary, summary written last so it's drawn from the details) plus a tiny title pass — down from four passes. Output token budget trimmed.
+- **Concise, context-aware titles** via a dedicated title pass from the summary (e.g. "Finalize Branding and Webhook Integration"), with a validated heuristic fallback.
+- Owner/due placeholder junk (`->`, `-`, `TBD`) is now stripped in the prompt, the parser, **and** the renderer, so old rows are clean too.
+
+**Speed — 65s → ~13s for the AI notes**
+- **VRAM-auto GPU offload** (`LlmRuntime`): reads the true GPU memory from the driver registry and offloads a *safe* number of layers (20 on a 4 GB card, ctx 3072), or full offload on a big card, or clean CPU otherwise. The Vulkan backend is loaded **only** when we actually offload — enabling it at 0 layers was the pathological slow path (was ~65s of CPU/GPU thrash; clean CPU is ~46s).
+- Both engines are now **warmed at launch**, so a meeting-stop never waits on model load.
+- Settings GPU toggle is now **automatic** (on = auto/safe, off = force CPU) instead of forcing an unsafe full offload.
+
+**No more "bad first draft" flash**
+- Toki now stays on the summarizing animation until the good AI notes are ready, then reveals them once — instead of flashing the rough heuristic draft (raw transcript lines) and swapping it out ~10s later. A 150s timeout guards against a stuck generation.
+
+**UI polish (buttery pass)**
+- New resizable **Library window** as the maximise target and the Home/tray Library button: master–detail, every meeting + manual note, with a **"‹ Back to Toki"** button.
+- **Custom slim rounded scrollbars** and **custom rounded checkboxes** (coral fill + tick) app-wide; soft cross-fade when switching notes.
+- **Copy transcript** and **maximise** buttons on the pill Notes view; removed a dead "search this transcript" box.
+- **Manual notes** are fully editable in the window with an explicit **Save**.
+
+**Transcription — findings (kept sequential on purpose)**
+- Measured Parakeet at **~4× real-time on CPU**; the two tracks run **sequentially**. Parallelising them corrupted the transcript (sherpa-onnx isn't safe to decode two at once — non-deterministic output), so it was reverted: correctness over ~15% wall-clock. More CPU threads don't help (flat past 6). The shipped engine is **CPU-only** (no GPU execution provider in the package).
+- Net: total summarize time is ~35s on a 1-min two-party meeting, dominated by transcription. The clean path to <30s is **live transcription during the meeting** (parked, task #14).
+
+**Verified**
+- `--llmtest`: new structure + concise title, **~27s cold / ~13s warm**, no degeneration. 49/49 tests.
+- Live DPI-aware captures of the Library window, manual-note editor, and pill Notes view — all render correctly after fixing a WPF crash (a `Template` set inside a `ControlTemplate` trigger blanked the window black).
+
+## Live transcription preview (parked)
+
+Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain).
