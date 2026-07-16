@@ -119,7 +119,7 @@ static class SelfTests
             new(Speaker.Them, 17200, 20000, "Yep, I'll get you the font and colors by tomorrow. Which analytics platform are we pointing events at?"),
         };
 
-        Console.WriteLine("[--llmtest] loading Qwen + writing notes (three passes, TL;DR last)...");
+        Console.WriteLine("[--llmtest] loading Qwen + writing notes (one structured pass + title)...");
         var sw = Stopwatch.StartNew();
         // Run off the UI thread — LLamaSharp's async continuations would otherwise
         // deadlock against this thread being blocked on the result.
@@ -128,15 +128,16 @@ static class SelfTests
         if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
 
         Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms ({(LlmService.Instance.LocalLoaded ? "local Qwen" : "?")})");
-        Console.WriteLine($"  TL;DR: {notes.Tldr}");
-        Console.WriteLine($"  DECISIONS ({notes.Decisions.Count}):");
+        Console.WriteLine($"  TITLE: {notes.Title ?? "(none)"}");
+        Console.WriteLine($"  SUMMARY: {notes.Tldr}");
+        Console.WriteLine($"  KEY POINTS ({notes.Decisions.Count}):");
         foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
         Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
-        Console.WriteLine($"  OPEN QUESTIONS ({notes.Questions.Count}):");
-        foreach (var q in notes.Questions) Console.WriteLine($"    - {q}");
 
-        if (TextValidator.IsDegenerate(notes.Tldr)) return Fail("TL;DR is degenerate (CJK / repetition).");
+        if (sw.ElapsedMilliseconds > 40000)
+            Console.WriteLine($"  [warn] took {sw.ElapsedMilliseconds / 1000.0:0.0}s — target is under 30s.");
+        if (TextValidator.IsDegenerate(notes.Tldr)) return Fail("SUMMARY is degenerate (CJK / repetition).");
         Console.WriteLine("[--llmtest] PASS — notes generated, English, no degeneration. Read them: do they match the transcript?");
         return 0;
     }

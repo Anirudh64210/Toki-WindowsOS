@@ -18,8 +18,9 @@ public sealed class AppSettings
     public string ApiModel { get; set; } = "gpt-4o-mini";
     public string ApiBaseUrl { get; set; } = "https://api.openai.com/";
 
-    /// <summary>GPU layers to offload for the local model. 0 = CPU only (safe on any
-    /// machine; can't run out of VRAM). Raise (e.g. 999 = all) only with a 6GB+ GPU.</summary>
+    /// <summary>Local-model GPU offload policy. 0 = auto (detect VRAM and offload a
+    /// safe number of layers — the default); -1 = force CPU only; &gt;0 = force that
+    /// many layers. Resolved once at launch by <see cref="LlmRuntime"/>.</summary>
     public int GpuLayers { get; set; } = 0;
 
     /// <summary>DPAPI-encrypted API key (base64). Use <see cref="ApiKey"/> to read/write in the clear.</summary>

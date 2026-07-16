@@ -14,5 +14,9 @@ public partial class HomeView : UserControl
 
     void OnTakeNotes(object sender, RoutedEventArgs e) => App.StartQuickNote();
 
-    void OnLibrary(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Library);
+    void OnLibrary(object sender, RoutedEventArgs e)
+    {
+        Toki.LibraryWindow.ShowLibrary();
+        App.State.TryGo(PillState.Hidden);
+    }
 }

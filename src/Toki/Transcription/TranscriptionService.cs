@@ -22,8 +22,11 @@ public sealed class TranscriptionService
     TranscriptionService() { }
 
     /// <summary>
-    /// Transcribe both streams of a recording folder and merge them. Returns null
-    /// if the model isn't available. Safe to call on a background thread.
+    /// Transcribe both streams of a recording folder (sequentially — a sherpa-onnx
+    /// offline recognizer is NOT safe to run concurrently, even as two instances:
+    /// concurrent decode produced non-deterministic, corrupt transcripts in testing,
+    /// so correctness wins over the ~15% wall-clock a parallel run would save) and
+    /// merge them. Returns null if the model isn't available. Background-thread safe.
     /// </summary>
     public IReadOnlyList<TranscriptSegment>? Process(string sessionFolder)
     {
@@ -38,10 +41,11 @@ public sealed class TranscriptionService
             try { _transcriber ??= new Transcriber(); }
             catch (Exception ex) { App.Log($"transcriber init failed: {ex.Message}"); return null; }
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var you = TranscribeStream(Path.Combine(sessionFolder, "you.wav"), Speaker.You);
             var them = TranscribeStream(Path.Combine(sessionFolder, "them.wav"), Speaker.Them);
             var merged = TranscriptMerger.Merge(you, them);
-            App.Log($"transcribed: you={you.Count} them={them.Count} -> merged {merged.Count} segments");
+            App.Log($"transcribed in {sw.ElapsedMilliseconds} ms: you={you.Count} them={them.Count} -> merged {merged.Count} segments");
             return merged;
         }
     }

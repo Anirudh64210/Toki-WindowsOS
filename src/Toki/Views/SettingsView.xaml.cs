@@ -27,7 +27,7 @@ public partial class SettingsView : UserControl
         NotesModeSeg.Children.Add(SegButton("Heuristic", NotesMode.HeuristicOnly, s.NotesMode));
         NotesModeSeg.Children.Add(SegButton("My API key", NotesMode.ApiKey, s.NotesMode));
 
-        GpuToggle.IsChecked = s.GpuLayers > 0;
+        GpuToggle.IsChecked = s.GpuLayers >= 0; // on = auto (uses GPU when it fits safely)
         ApiKeyBox.Password = s.ApiKey ?? "";
 
         LocalOptions.Visibility = s.NotesMode == NotesMode.Local ? Visibility.Visible : Visibility.Collapsed;
@@ -79,7 +79,9 @@ public partial class SettingsView : UserControl
     {
         if (_loading) return;
         var s = AppSettings.Current;
-        s.GpuLayers = GpuToggle.IsChecked == true ? 999 : 0;
+        // On = auto (0): detect VRAM and offload a safe number of layers. Off = force
+        // CPU (-1). Takes effect next launch (the model is loaded once at startup).
+        s.GpuLayers = GpuToggle.IsChecked == true ? 0 : -1;
         s.Save();
     }
 

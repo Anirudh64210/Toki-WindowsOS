@@ -25,12 +25,11 @@ public sealed class LlamaLlm : ILlm, IDisposable
 
     public LlamaLlm(string modelPath)
     {
-        // Default CPU (GpuLayers=0): can never run out of VRAM, so it can't crash
-        // llama.cpp natively (which .NET can't catch). Users with a big GPU can
-        // opt into offload via settings. Context 4096 is plenty for note chunks
-        // and keeps the KV cache / compute buffers small.
-        var gpuLayers = Math.Max(0, AppSettings.Current.GpuLayers);
-        var p = new ModelParams(modelPath) { ContextSize = 4096, GpuLayerCount = gpuLayers };
+        // How to run on THIS machine was decided up front (LlmRuntime): a safe GPU
+        // offload sized to the detected VRAM, or a clean CPU path. Offload is capped
+        // to fit with headroom so it can't hit the uncatchable native OOM crash.
+        var gpuLayers = Math.Max(0, LlmRuntime.GpuLayers);
+        var p = new ModelParams(modelPath) { ContextSize = LlmRuntime.ContextSize, GpuLayerCount = gpuLayers };
         _model = LLamaWeights.LoadFromFile(p);
         OnGpu = gpuLayers > 0;
         _executor = new StatelessExecutor(_model, p);
