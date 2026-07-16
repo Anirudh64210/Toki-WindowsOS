@@ -1,0 +1,6 @@
+<UserControl x:Class="Toki.Controls.Waveform"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Height="20">
+    <StackPanel x:Name="Bars" Orientation="Horizontal" VerticalAlignment="Center"/>
+</UserControl>

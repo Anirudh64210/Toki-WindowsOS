@@ -1,0 +1,132 @@
+<UserControl x:Class="Toki.Views.LibraryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceHi}"/>
+            <Setter Property="CornerRadius" Value="13"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+        </Style>
+        <Style x:Key="CardTag" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Chip}"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="Margin" Value="0,6,6,0"/>
+        </Style>
+    </UserControl.Resources>
+    <DockPanel Margin="14,12,14,8">
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Style="{StaticResource IconButton}" Content="‹" FontSize="16" Click="OnBack"/>
+            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Meetings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
+                <TextBlock Text="3 meetings · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>
+            </StackPanel>
+            <Border Grid.Column="2" Background="{StaticResource GreenDark}" CornerRadius="6"
+                    Padding="7,3" VerticalAlignment="Center">
+                <TextBlock Text="● ON-DEVICE" Foreground="{StaticResource Green}" FontSize="8.5"
+                           FontWeight="Bold" FontFamily="{StaticResource UiFont}"/>
+            </Border>
+        </Grid>
+
+        <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceHi}" CornerRadius="10"
+                Padding="11,7" Margin="0,11,0,0">
+            <TextBlock Text="Search all meetings — try you: or them:" Style="{StaticResource Dim}"/>
+        </Border>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Dim}" FontSize="9" Margin="2,6,0,0"
+                   Text="Tip:  you: pricing  finds only what you said  ·  them: webhook  finds only them"/>
+
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" Margin="0,2,0,0">
+            <StackPanel>
+                <Border Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="8" Style="{StaticResource Body}" FontSize="15" FontWeight="Bold"/>
+                            <TextBlock Text="JUL" Style="{StaticResource Dim}" FontSize="8.5"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Design review — PixelFlow" Style="{StaticResource Body}" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="Design review · 24 min · 2 days ago" Style="{StaticResource Dim}" FontSize="9.5"/>
+                            <TextBlock Style="{StaticResource Dim}" FontSize="10.5" Margin="0,4,0,0"
+                                       Text="Tool is code-complete; blockers are brand tokens and the Make webhook. Ship moved to Thursday."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Style="{StaticResource CardTag}" Background="{StaticResource AmberDark}">
+                                    <TextBlock Text="2 open" Foreground="{StaticResource Amber}" FontSize="9" FontWeight="SemiBold"/>
+                                </Border>
+                                <Border Style="{StaticResource CardTag}">
+                                    <TextBlock Text="3 people" Style="{StaticResource Dim}" FontSize="9"/>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="7" Style="{StaticResource Body}" FontSize="15" FontWeight="Bold"/>
+                            <TextBlock Text="JUL" Style="{StaticResource Dim}" FontSize="8.5"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Weekly 1:1 — Rounak" Style="{StaticResource Body}" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="1:1 · 18 min · 3 days ago" Style="{StaticResource Dim}" FontSize="9.5"/>
+                            <TextBlock Style="{StaticResource Dim}" FontSize="10.5" Margin="0,4,0,0"
+                                       Text="Landing page — hero roughed in, pricing next. Keep it one page for launch."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Style="{StaticResource CardTag}" Background="{StaticResource AmberDark}">
+                                    <TextBlock Text="2 open" Foreground="{StaticResource Amber}" FontSize="9" FontWeight="SemiBold"/>
+                                </Border>
+                                <Border Style="{StaticResource CardTag}">
+                                    <TextBlock Text="2 people" Style="{StaticResource Dim}" FontSize="9"/>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="4" Style="{StaticResource Body}" FontSize="15" FontWeight="Bold"/>
+                            <TextBlock Text="JUL" Style="{StaticResource Dim}" FontSize="8.5"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Pricing sync — Maydit" Style="{StaticResource Body}" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="Internal · 32 min · 6 days ago" Style="{StaticResource Dim}" FontSize="9.5"/>
+                            <TextBlock Style="{StaticResource Dim}" FontSize="10.5" Margin="0,4,0,0"
+                                       Text="Reworked the rate card into three tiers + a scoping calculator so quotes stop being guesses."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Style="{StaticResource CardTag}" Background="{StaticResource AmberDark}">
+                                    <TextBlock Text="1 open" Foreground="{StaticResource Amber}" FontSize="9" FontWeight="SemiBold"/>
+                                </Border>
+                                <Border Style="{StaticResource CardTag}">
+                                    <TextBlock Text="2 people" Style="{StaticResource Dim}" FontSize="9"/>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <TextBlock Style="{StaticResource Dim}" FontSize="9" Margin="2,10,0,6" TextAlignment="Center"
+                           Text="Placeholder cards — the real Library (search, edit, export, manual notes) lands in Milestone 5."/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

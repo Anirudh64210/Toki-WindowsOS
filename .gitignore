@@ -12,6 +12,10 @@ obj/
 TestResults/
 *.trx
 
-# Packaging output (Velopack, installers)
+# Packaging output (Velopack, installers, self-contained publish)
 Releases/
 publish/
+dist/
+
+# Windows shortcuts (machine-specific absolute paths)
+*.lnk

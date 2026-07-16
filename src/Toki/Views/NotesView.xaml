@@ -1,0 +1,89 @@
+<UserControl x:Class="Toki.Views.NotesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="Tag" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Chip}"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="Margin" Value="0,4,6,0"/>
+        </Style>
+        <Style x:Key="TagText" TargetType="TextBlock" BasedOn="{StaticResource Dim}">
+            <Setter Property="FontSize" Value="9.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="CheckBoxSquare" TargetType="Border">
+            <Setter Property="Width" Value="13"/>
+            <Setter Property="Height" Value="13"/>
+            <Setter Property="CornerRadius" Value="3.5"/>
+            <Setter Property="BorderBrush" Value="{StaticResource TextDim}"/>
+            <Setter Property="BorderThickness" Value="1.4"/>
+            <Setter Property="Margin" Value="0,2,8,0"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+        </Style>
+    </UserControl.Resources>
+    <DockPanel Margin="16,12,16,6">
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Border Background="{StaticResource AmberDark}" CornerRadius="8" Width="28" Height="28">
+                <TextBlock Text="▪▪" Foreground="{StaticResource Amber}" FontSize="9"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Meeting Notes" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
+                <TextBlock Text="Design review · placeholder until Milestone 6" Style="{StaticResource Dim}" FontSize="9.5"/>
+            </StackPanel>
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="✕" Click="OnClose"/>
+        </Grid>
+
+        <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceHi}" CornerRadius="10"
+                Padding="11,7" Margin="0,11,0,0">
+            <TextBlock Text="Search these notes — you: / them:" Style="{StaticResource Dim}"/>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" Margin="0,4,0,0">
+            <StackPanel>
+                <TextBlock Style="{StaticResource Body}" FontSize="11.5" Foreground="#C9C9C7" Margin="0,10,0,0"
+                           Text="The team reviewed onboarding-diagnostic launch readiness. Tool is code-complete; remaining blockers are brand tokens and the Make webhook. Ship moved to Thursday pending Priya's font confirmation."/>
+
+                <TextBlock Style="{StaticResource SectionHeader}" Foreground="{StaticResource Green}" Text="✓  DECISIONS"/>
+                <TextBlock Style="{StaticResource Body}" FontSize="11.5" Margin="0,0,0,4"
+                           Text="•  Launch the onboarding diagnostic as ungated with instant results."/>
+                <TextBlock Style="{StaticResource Body}" FontSize="11.5"
+                           Text="•  Ship date moves to Thursday; email capture stays optional."/>
+
+                <TextBlock Style="{StaticResource SectionHeader}" Foreground="{StaticResource Blue}" Text="→  ACTION ITEMS"/>
+                <StackPanel Orientation="Horizontal">
+                    <Border Style="{StaticResource CheckBoxSquare}"/>
+                    <StackPanel>
+                        <TextBlock Text="Confirm brand font + hex." Style="{StaticResource Body}" FontSize="11.5"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Style="{StaticResource Tag}"><TextBlock Text="Priya" Style="{StaticResource TagText}"/></Border>
+                            <Border Style="{StaticResource Tag}" Background="{StaticResource AmberDark}">
+                                <TextBlock Text="Tomorrow" Style="{StaticResource TagText}" Foreground="{StaticResource Amber}"/>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                    <Border Style="{StaticResource CheckBoxSquare}"/>
+                    <StackPanel>
+                        <TextBlock Text="Wire the Make webhook and route the /health slug." Style="{StaticResource Body}" FontSize="11.5"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Style="{StaticResource Tag}"><TextBlock Text="Sid" Style="{StaticResource TagText}"/></Border>
+                            <Border Style="{StaticResource Tag}"><TextBlock Text="This week" Style="{StaticResource TagText}"/></Border>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock Style="{StaticResource SectionHeader}" Foreground="{StaticResource Purple}" Text="?  OPEN QUESTIONS"/>
+                <TextBlock Style="{StaticResource Body}" FontSize="11.5" Margin="0,0,0,12"
+                           Text="•  Which analytics platform do we point events at?"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

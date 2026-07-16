@@ -1,0 +1,57 @@
+<UserControl x:Class="Toki.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Toki.Controls">
+    <DockPanel Margin="14,13,14,10">
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Viewbox Width="30">
+                <controls:TokiBlob/>
+            </Viewbox>
+            <TextBlock Grid.Column="1" Text="Welcome back, Sid!" Style="{StaticResource Body}"
+                       FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0" VerticalAlignment="Center"/>
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="⚙" FontSize="14"
+                    ToolTip="Settings" Click="OnSettings"/>
+        </Grid>
+
+        <Grid DockPanel.Dock="Top" Margin="0,11,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <Button Style="{StaticResource PillButton}" Margin="0,0,4,0" Padding="0,9"
+                    HorizontalContentAlignment="Center" Click="OnMeeting"
+                    ToolTip="Demo the meeting prompt (real detection lands in Milestone 3)">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="▦" Foreground="{StaticResource Green}" Margin="0,0,7,0"/>
+                    <TextBlock Text="Meeting"/>
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="1" Style="{StaticResource PillButton}" Margin="4,0,0,0" Padding="0,9"
+                    HorizontalContentAlignment="Center" Click="OnTakeNotes"
+                    ToolTip="Mic-only quick note (real capture lands in Milestone 2)">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="⁞⁞⁞" Foreground="{StaticResource Amber}" Margin="0,0,7,0"/>
+                    <TextBlock Text="Take Notes"/>
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <Button DockPanel.Dock="Top" Style="{StaticResource WhiteButton}" Margin="0,10,0,0" Padding="0,11"
+                HorizontalContentAlignment="Center"
+                ToolTip="Google Calendar connect lands in Milestone 7">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="G" FontWeight="Bold" Foreground="#4285F4" Margin="0,0,8,0"/>
+                <TextBlock Text="Connect Google"/>
+            </StackPanel>
+        </Button>
+
+        <Button VerticalAlignment="Bottom" Style="{StaticResource PillButton}" Background="Transparent"
+                Padding="4,3" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"
+                FontSize="10.5" Content="Library  ›" Click="OnLibrary"/>
+    </DockPanel>
+</UserControl>

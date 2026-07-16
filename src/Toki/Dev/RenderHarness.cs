@@ -1,0 +1,136 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using Toki.State;
+using Toki.Views;
+
+namespace Toki.Dev;
+
+/// <summary>
+/// Renders each view to a PNG via RenderTargetBitmap — captures the visual tree
+/// directly, so it works even though the live overlay is a transparent (layered)
+/// window that plain screen-capture can't see. Run: <c>Toki.exe --render &lt;dir&gt;</c>.
+/// </summary>
+static class RenderHarness
+{
+    static readonly (PillState State, double W, double H)[] Shots =
+    [
+        (PillState.MeetingPrompt, 300, 74),
+        (PillState.RecordingBar,  236, 52),
+        (PillState.RecordingOpen, 372, 234),
+        (PillState.Summarizing,   340, 164),
+        (PillState.Notes,         424, 438),
+        (PillState.NoSpeech,      320, 100),
+        (PillState.Home,          344, 232),
+        (PillState.Library,       404, 440),
+        (PillState.Settings,      404, 440),
+    ];
+
+    public static void RenderAll(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        foreach (var (state, w, h) in Shots)
+        {
+            var view = Build(state);
+            var pill = new Border
+            {
+                Background = (Brush)Application.Current.Resources["Surface"],
+                CornerRadius = new CornerRadius(26),
+                Width = w,
+                Height = h,
+                Child = view,
+            };
+            // Neutral backdrop so the pill's rounded edges are visible in the PNG.
+            var canvas = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+                Padding = new Thickness(20),
+                Child = pill,
+            };
+
+            var totalW = w + 40;
+            var totalH = h + 40;
+            canvas.Measure(new Size(totalW, totalH));
+            canvas.Arrange(new Rect(0, 0, totalW, totalH));
+            canvas.UpdateLayout();
+
+            const double scale = 2.0;
+            var rtb = new RenderTargetBitmap(
+                (int)(totalW * scale), (int)(totalH * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            rtb.Render(canvas);
+
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(rtb));
+            var path = Path.Combine(dir, $"{state}.png");
+            using var fs = File.Create(path);
+            enc.Save(fs);
+        }
+    }
+
+    /// <summary>
+    /// Renders the Summarizing view twice, ~550ms apart, so the two PNGs can be
+    /// compared to confirm the loading animation actually moves (constructor-based
+    /// animations advance with the real clock even offscreen).
+    /// </summary>
+    public static void RenderAnim(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        const double w = 340, h = 164;
+        var view = new SummarizingView();
+        var pill = new Border
+        {
+            Background = (Brush)Application.Current.Resources["Surface"],
+            CornerRadius = new CornerRadius(26),
+            Width = w, Height = h, Child = view,
+        };
+        var canvas = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+            Padding = new Thickness(20), Child = pill,
+        };
+        canvas.Measure(new Size(w + 40, h + 40));
+        canvas.Arrange(new Rect(0, 0, w + 40, h + 40));
+        canvas.UpdateLayout();
+
+        Save(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_t0.png"));
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(550) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            canvas.UpdateLayout();
+            Save(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_t550.png"));
+            Application.Current.Shutdown();
+        };
+        timer.Start();
+    }
+
+    static void Save(Visual visual, double w, double h, string path)
+    {
+        const double scale = 2.0;
+        var rtb = new RenderTargetBitmap(
+            (int)(w * scale), (int)(h * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        rtb.Render(visual);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(rtb));
+        using var fs = File.Create(path);
+        enc.Save(fs);
+    }
+
+    static UserControl Build(PillState s) => s switch
+    {
+        PillState.MeetingPrompt => new MeetingPromptView(),
+        PillState.RecordingBar  => new RecordingBarView(),
+        PillState.RecordingOpen => new RecordingOpenView(),
+        PillState.Summarizing   => new SummarizingView(),
+        PillState.Notes         => new NotesView(),
+        PillState.NoSpeech      => new NoSpeechView(),
+        PillState.Home          => new HomeView(),
+        PillState.Library       => new LibraryView(),
+        PillState.Settings      => new SettingsView(),
+        _ => throw new ArgumentOutOfRangeException(nameof(s)),
+    };
+}

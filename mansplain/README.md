@@ -5,3 +5,6 @@ This folder explains the build in plain language — no jargon, no code. One sho
 Read them in order:
 
 1. [Getting started](01-getting-started.md) — setting up the workshop and the empty app.
+2. [The pill is alive](02-the-pill.md) — Toki's body: the shape-shifting pill, the tray icon, and the shortcut.
+3. [Toki can hear](03-toki-can-hear.md) — the two ears (your mic + the meeting app only), and proof it records only the right app.
+4. [Toki notices, and a real app you can open](04-noticing-and-recording.md) — double-click app, never-crash, ghost mode, and detecting a call to ask about recording.
