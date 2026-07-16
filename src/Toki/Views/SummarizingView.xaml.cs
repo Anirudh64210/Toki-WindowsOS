@@ -37,17 +37,12 @@ public partial class SummarizingView : UserControl
         ];
 
         _dotTimer.Tick += (_, _) => { _dots = (_dots + 1) % 4; Dots.Text = new string('.', _dots); };
+        // Loop the stages while real transcription runs in the background; App
+        // drives the transition to Notes / NoSpeech when it finishes.
         _stageTimer.Tick += (_, _) =>
         {
-            _stage++;
-            if (_stage < _stages.Length) EnterStage(_stage);
-            else
-            {
-                _stageTimer.Stop();
-                _dotTimer.Stop();
-                // A silent meeting saves nothing (lesson 7).
-                App.State.TryGo(App.LastRecordingSilent ? PillState.NoSpeech : PillState.Notes);
-            }
+            _stage = (_stage + 1) % _stages.Length;
+            EnterStage(_stage);
         };
 
         Loaded += (_, _) =>

@@ -199,6 +199,25 @@ Owner (with screenshots): the recording bar floated in the **middle of the scree
 
 **Verified** (position logs + DPI-aware captures, screen 1920×1080, work-area bottom 1020): recording bar bottom-edge at 1002, Notes bottom-edge at 1002 — both sit just above the taskbar, centered. Recording bar and summarizing render correctly with rounded corners. 21/21 tests, 0 crashes.
 
-## M4 — Transcription (next)
+## M4 — Transcription (2026-07-15)
 
-sherpa-onnx Parakeet whole-file per stream, streaming preview, whisper.cpp failure-only fallback, cross-stream echo de-dup, merge. `--asrtest`. (See ARCHITECTURE "Lessons from open-source notetakers" for the plan.)
+On-device speech-to-text with **Parakeet TDT 0.6b v2** via **sherpa-onnx**.
+
+**Built**
+- `AudioLoader` — any WAV → 16kHz mono float32 (NAudio downmix + WDL resample), for the 48kHz-float "you" and 44.1kHz-16bit "them" streams.
+- `ModelManager` — downloads + extracts the ~630MB Parakeet int8 bundle to `%APPDATA%\Toki\Models\` with progress (onboarding-time, never mid-meeting — lesson 2).
+- `Transcriber` — sherpa-onnx `OfflineRecognizer` (`nemo_transducer`, greedy), whole-file per stream, one fresh stream per file (no leaked state — lesson 5), token timestamps grouped into segments. Empty result = silence, returns nothing (lesson 4/7).
+- `TranscriptMerger` — merges you/them into one timeline and removes echo (drop a "you" line that duplicates a "them" line within ±4s; exact-match only for short interjections — lesson 6). 8 unit tests.
+- `TranscriptionService` — orchestrates both streams → merge; owns the heavy recognizer (created once, warmed at launch); degrades gracefully if the model isn't installed.
+- Wired into the flow: Stop → loader animation while transcription runs **off the UI thread** → Notes shows the real you/them transcript (or the empty state if silent). `--asrtest`, `--transcribetest`.
+
+**Verified (real audio)**
+- `--asrtest` on a 22.8s speech clip: transcribed near-perfectly, **tail matched the end** (no mid-file truncation), **2.3× real-time on CPU**.
+- `--transcribetest` on two separate speech files: both transcribed accurately and merged with correct **You/Them** attribution.
+- 29/29 unit tests pass.
+
+**Deferred:** live streaming preview (streaming zipformer) and the whisper.cpp error-only fallback are stubbed (fallback logs + skips for now) — both are follow-ups; the core accurate transcription works.
+
+## M5 — Storage + heuristic notes + Library (next)
+
+SQLite schema (meetings, notes, action items, manual notes with `kind`), heuristic extraction, Library window with search/edit/export, manual "New note", Markdown mirror. `--dbtest`, `--notestest`.

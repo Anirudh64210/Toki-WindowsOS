@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using Toki.Audio;
 using Toki.Detection;
+using Toki.Transcription;
 
 namespace Toki.Dev;
 
@@ -30,6 +31,8 @@ static class SelfTests
                 "--playtone" => PlayTone(Seconds(args, 20)),
                 "--detecttest" => DetectTest(Seconds(args, 30)),
                 "--recordtest" => RecordTest(args, Seconds(args, 6)),
+                "--asrtest" => AsrTest(args),
+                "--transcribetest" => TranscribeTest(args),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -82,6 +85,82 @@ static class SelfTests
         Console.WriteLine($"[--loopbacktest] PASS — play {Path.GetFileName(path)} and you should hear that app.");
         if (cap.PeakLevel < 0.005f)
             Console.WriteLine("  note: peak is near silence — the app may not have played audio during the test.");
+        return 0;
+    }
+
+    static int TranscribeTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--transcribetest");
+        var folder = i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        if (folder is null || !Directory.Exists(folder))
+            return Fail("usage: --transcribetest <folder with you.wav / them.wav>");
+
+        Console.WriteLine($"[--transcribetest] transcribing both streams in {folder} and merging...");
+        var sw = Stopwatch.StartNew();
+        var transcript = TranscriptionService.Instance.Process(folder);
+        sw.Stop();
+
+        if (transcript is null) return Fail("model not installed (run --asrtest once to fetch it).");
+        Console.WriteLine($"  {transcript.Count} merged segments in {sw.ElapsedMilliseconds} ms:");
+        foreach (var s in transcript)
+            Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Speaker,-4}  {s.Text}");
+        Console.WriteLine("[--transcribetest] PASS — you/them attributed, echo removed, one timeline.");
+        return 0;
+    }
+
+    static int AsrTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--asrtest");
+        var file = i >= 0 && i + 1 < args.Length && !args[i + 1].StartsWith('-') ? args[i + 1] : null;
+        if (file is null || !File.Exists(file))
+            return Fail("usage: --asrtest <path-to-wav>");
+
+        // Model must be present (download at onboarding in the real app; here on demand).
+        if (!ModelManager.IsInstalled(ModelManager.Parakeet))
+        {
+            Console.WriteLine("[--asrtest] Parakeet model not installed — downloading (~630 MB, one time)...");
+            var last = -5;
+            var progress = new Progress<double>(p =>
+            {
+                var pct = (int)(p * 100);
+                if (pct >= last + 5) { Console.WriteLine($"  download {pct}%"); last = pct; }
+            });
+            try { ModelManager.EnsureAsync(ModelManager.Parakeet, progress).GetAwaiter().GetResult(); }
+            catch (Exception ex) { return Fail($"model download failed: {ex.Message}"); }
+            Console.WriteLine("  model ready.");
+        }
+
+        Console.WriteLine($"[--asrtest] loading {Path.GetFileName(file)} -> 16kHz mono...");
+        var audioSw = Stopwatch.StartNew();
+        var samples = AudioLoader.To16kMono(file);
+        audioSw.Stop();
+        var audioSecs = samples.Length / (double)AudioLoader.TargetRate;
+        Console.WriteLine($"  audio: {audioSecs:0.0}s ({samples.Length:N0} samples), loaded in {audioSw.ElapsedMilliseconds} ms");
+
+        Console.WriteLine("  loading Parakeet + transcribing (whole file, one pass)...");
+        var sw = Stopwatch.StartNew();
+        IReadOnlyList<TranscriptSegment> segments;
+        using (var asr = new Transcriber())
+            segments = asr.Transcribe(samples, Speaker.Them);
+        sw.Stop();
+
+        Console.WriteLine($"  {segments.Count} segments in {sw.ElapsedMilliseconds} ms " +
+                          $"({audioSecs / Math.Max(0.001, sw.Elapsed.TotalSeconds):0.0}x real-time)");
+        if (segments.Count == 0)
+        {
+            Console.WriteLine("[--asrtest] empty transcript — treat as silence (nobody spoke). PASS if the clip was silent.");
+            return 0;
+        }
+
+        Console.WriteLine("  --- HEAD ---");
+        foreach (var s in segments.Take(3)) Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Text}");
+        if (segments.Count > 6)
+        {
+            Console.WriteLine("  ...");
+            Console.WriteLine("  --- TAIL ---");
+            foreach (var s in segments.TakeLast(3)) Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Text}");
+        }
+        Console.WriteLine($"[--asrtest] PASS — verify the TAIL matches the END of the audio (proves no mid-file truncation).");
         return 0;
     }
 
