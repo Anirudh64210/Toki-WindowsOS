@@ -19,3 +19,17 @@ dist/
 
 # Windows shortcuts (machine-specific absolute paths)
 *.lnk
+
+# Debug screenshots dropped in the repo root (design refs live in Toki-ProductDesign/)
+/Screenshot*.png
+
+# On-device models, recordings, and databases (live in %APPDATA%, never committed;
+# these patterns are defensive in case any land in the repo tree during dev)
+*.onnx
+*.gguf
+*.bin
+*.tar.bz2
+*.wav
+*.db
+*.db-shm
+*.db-wal

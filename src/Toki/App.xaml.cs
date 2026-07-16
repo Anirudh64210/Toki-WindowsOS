@@ -8,6 +8,7 @@ using Toki.Audio;
 using Toki.Detection;
 using Toki.Interop;
 using Toki.State;
+using Toki.Transcription;
 
 namespace Toki;
 
@@ -20,6 +21,9 @@ public partial class App : Application
 
     /// <summary>Set on Stop: true when nothing audible was captured (→ friendly empty state).</summary>
     public static bool LastRecordingSilent { get; private set; }
+
+    /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
+    public static IReadOnlyList<TranscriptSegment>? LastTranscript { get; private set; }
 
     /// <summary>Dev only: <c>--noghost</c> disables screen-capture exclusion so tools can grab the window.</summary>
     public static bool GhostDisabled { get; private set; }
@@ -45,7 +49,7 @@ public partial class App : Application
         GhostDisabled = e.Args.Contains("--noghost");
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -112,6 +116,10 @@ public partial class App : Application
         }
 
         StartMeetingDetection();
+
+        // Warm the ASR engine ahead of the first meeting so a stop never waits on
+        // model load (lesson 2). Off the UI thread; no-op if the model isn't installed.
+        System.Threading.Tasks.Task.Run(() => TranscriptionService.Instance.Warm());
     }
 
     void StartMeetingDetection()
@@ -166,15 +174,34 @@ public partial class App : Application
         _session = null;
         _detector?.EndRecording();
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
+        LastTranscript = null;
 
-        // UI advances instantly; capture is finalized off the UI thread so
-        // joining the capture worker can NEVER freeze the pill (this was the hang).
+        // Show the loader immediately; finalize capture + transcribe entirely off
+        // the UI thread (never freeze the pill), then advance when done.
         State.TryGo(PillState.Summarizing);
-        if (session is not null)
-            System.Threading.Tasks.Task.Run(() =>
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            var folder = "";
+            try { folder = session?.Stop() ?? ""; }
+            catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
+
+            IReadOnlyList<TranscriptSegment>? transcript = null;
+            var minShow = System.Threading.Tasks.Task.Delay(2200); // let the loader be seen
+            try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
+            catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
+            minShow.Wait();
+
+            Current.Dispatcher.BeginInvoke(() =>
             {
-                try { session.Stop(); } catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
+                LastTranscript = transcript;
+                // Real speech → Notes; genuinely silent → friendly empty state;
+                // model not ready (null) → Notes with the placeholder for now.
+                if (transcript is { Count: 0 })
+                    State.TryGo(PillState.NoSpeech);
+                else
+                    State.TryGo(PillState.Notes);
             });
+        });
     }
 
     static void BeginRecording(DetectedApp? app)

@@ -148,6 +148,19 @@ Surveyed Meetily, Hyprnote, Vibe, Buzz, Whishper, Amurex, and others (MIT ones a
 - **Show liveness while recording** (meter/duration/partial text) — silence-until-done reads as broken.
 - **Perf:** Windows on-device is the harder target (Hyprnote went Mac-first for this reason); ship a GPU path (Vulkan/DirectML) and validate CPU fallback timing on mid hardware.
 
+## Transcription (M4)
+
+On-device ASR pipeline: `you.wav`/`them.wav` → **16kHz mono float32** (`AudioLoader`, NAudio downmix + WDL resample) → **Parakeet TDT 0.6b v2** via sherpa-onnx (`Transcriber`, `OfflineRecognizer` with `ModelType="nemo_transducer"`, greedy) → timestamped `TranscriptSegment`s → `TranscriptMerger` (one timeline + echo de-dup) → `TranscriptionService` orchestrates and hands the UI a merged transcript.
+
+- **Model**: `ModelManager` downloads the ~630MB int8 bundle to `%APPDATA%\Toki\Models\` (SharpCompress extracts the tar.bz2). Model files live outside the exe; only the sherpa native DLLs (~20MB: `sherpa-onnx-c-api.dll`, `onnxruntime.dll`) ship in the single-file exe (`IncludeNativeLibrariesForSelfExtract`). Verified transcription works from the *packaged* exe.
+- **Recognizer lifecycle**: heavy (~630MB) — created once (`TranscriptionService`, lazy + `Warm()` at launch off the UI thread), reused; a fresh one-shot `OfflineStream` per file, so no state leaks between meetings (lesson 5).
+- **Silence vs error**: an empty Parakeet result = nobody spoke → return no segments (silence is not failure, lesson 4/7). A thrown error is where the whisper.cpp fallback belongs (currently logged + skipped — a follow-up).
+- **Echo de-dup** (`TranscriptMerger`): the mic hears the far end through the speakers, so a remote line can land on both streams. We keep the clean loopback ("them") copy and drop the "you" duplicate within ±4s; short interjections (<3 significant words) require an exact normalized match so real "yeah"/"okay" survive (lesson 6). Transcript-level (not signal-level AEC), matching the open-source-notetaker research.
+- **Threading**: on Stop, capture-finalize + transcription run entirely off the UI thread; the loader animation shows meanwhile; the pill never blocks. The async model download uses `ConfigureAwait(false)` (a `.GetResult()` on the UI thread otherwise deadlocks).
+- **Async deadlock gotcha**: blocking on an async download from the UI thread (`.GetAwaiter().GetResult()`) deadlocks unless every await is `ConfigureAwait(false)` — hit and fixed during M4.
+
+Deferred: live streaming preview (streaming zipformer `OnlineRecognizer`) and the whisper.cpp error-only fallback (`Whisper.net` + `ggml-small.en`).
+
 ## Verification model
 
 Two layers, both required:
