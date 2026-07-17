@@ -102,6 +102,14 @@ public partial class PillWindow : Window
             (_rectL, _rectT, _rectR, _rectB) = (r.Left, r.Top, r.Right, r.Bottom);
     }
 
+    /// <summary>The pill's current on-screen rectangle in WPF DIPs (for the Library morph).</summary>
+    public Rect ScreenDipRect()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        return new Rect(_rectL / dpi.DpiScaleX, _rectT / dpi.DpiScaleY,
+                        (_rectR - _rectL) / dpi.DpiScaleX, (_rectB - _rectT) / dpi.DpiScaleY);
+    }
+
     /// <summary>
     /// Place the window bottom-centered using PHYSICAL pixels (Win32), which is
     /// robust to any resolution/DPI — WPF's logical Left/Top mis-scale at 125%+.

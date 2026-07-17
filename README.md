@@ -306,8 +306,16 @@ Owner pointed out (correctly) that Cluely / "cheating daddy" have transparent wi
 - **Genuinely translucent pill** — `PillWindow` is now `AllowsTransparency=True` with a translucent Border fill + top sheen. Verified: `--noghost` shows a see-through pill; **ghost-on shows it absent from capture** (ghost still works, via `WDA_EXCLUDEFROMCAPTURE` re-applied on every show). No DWM accent acrylic (it caused sharp black corners); corners are clean because outside the Border the window is truly transparent.
 - **Crisp icons** — all buttons use **Segoe Fluent Icons**; copy / open-window / close are now distinct (were ambiguous unicode glyphs). `IconButton` restyled to a clean floating glyph with a subtle hover highlight.
 - **Library cards** — date badge + meta + snippet + "N open / N people" chips, matching `Toki-ProductDesign/⑥`.
+- **Buttery Library open** — the window scales up from its bottom-centre (toward the pill) with a fade, so it reads as the pill extending into a window instead of a hard pop.
+- **Drag-to-reorder notes** — pick up a card and the others slide to make space (iPhone-home-screen style); the order persists via a new `sort_order` column (safe migration, seeded to the current newest-first order). New notes land at the top.
 
-Still open from the owner's batch: smooth pill→Library **morph** transition, and **drag-to-reorder** notes.
+## M6.5 — Monotone notes + morph/drag polish (2026-07-17)
+
+Owner feedback on the first pass: coloured section headers + green tick were "ugly, not clean," the Library "force opened," and a dropped card could sit awkwardly between two rows.
+
+- **Notes go monotone** — SUMMARY / KEY POINTS / ACTION ITEMS / TRANSCRIPT are quiet dim-grey labels (no coral/green/blue on text, no tick icon); chips are neutral grey (YOU a shade brighter than THEM). Apple-clean, generous consistent spacing. Removed the "ON-DEVICE" badge.
+- **Morph grows from the pill** — the Library window's content now scales up out of the pill's *exact* on-screen rectangle (not the screen centre), so it reads as the pill extending into a window.
+- **Drag settles cleanly** — on release the card animates into its target slot before committing (it can no longer sit between rows), and an off-by-one in the drop target was fixed.
 
 ## Live transcription preview (parked)
 

@@ -59,6 +59,44 @@ public sealed class MeetingStore
               text TEXT NOT NULL, owner TEXT, due TEXT, done INTEGER DEFAULT 0, ord INTEGER);
             """;
         cmd.ExecuteNonQuery();
+
+        // Migration: a manual sort order for the Library list. Seed it to the current
+        // newest-first order so nothing jumps around on first run.
+        if (!ColumnExists(c, "meetings", "sort_order"))
+        {
+            using var alter = c.CreateCommand();
+            alter.CommandText = "ALTER TABLE meetings ADD COLUMN sort_order INTEGER;";
+            alter.ExecuteNonQuery();
+        }
+        using var seed = c.CreateCommand();
+        seed.CommandText = "UPDATE meetings SET sort_order = (SELECT COUNT(*) FROM meetings m2 WHERE m2.started_at > meetings.started_at) WHERE sort_order IS NULL;";
+        seed.ExecuteNonQuery();
+    }
+
+    static bool ColumnExists(SqliteConnection c, string table, string column)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table});";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    /// <summary>Persist a new top-to-bottom order for the Library list (manual drag reorder).</summary>
+    public void Reorder(IReadOnlyList<long> idsTopToBottom)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        for (var i = 0; i < idsTopToBottom.Count; i++)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE meetings SET sort_order=$o WHERE id=$id";
+            cmd.Parameters.AddWithValue("$o", i);
+            cmd.Parameters.AddWithValue("$id", idsTopToBottom[i]);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
     public long Save(MeetingRecord m)
@@ -83,6 +121,14 @@ public sealed class MeetingStore
             cmd.Parameters.AddWithValue("$body", (object?)m.Body ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$tldr", m.Notes.Tldr);
             id = (long)cmd.ExecuteScalar()!;
+        }
+
+        // New items go to the top of the Library list.
+        using (var so = c.CreateCommand())
+        {
+            so.CommandText = "UPDATE meetings SET sort_order = COALESCE((SELECT MIN(sort_order) FROM meetings WHERE id<>$id), 0) - 1 WHERE id=$id";
+            so.Parameters.AddWithValue("$id", id);
+            so.ExecuteNonQuery();
         }
 
         InsertLines(c, "transcript", id, m.Transcript.Select((s, i) =>
@@ -125,7 +171,7 @@ public sealed class MeetingStore
             SELECT m.id, m.kind, m.title, m.app, m.started_at, m.duration_ms, m.tldr,
                    (SELECT COUNT(*) FROM action_items a WHERE a.meeting_id=m.id AND a.done=0),
                    (SELECT COUNT(DISTINCT t.speaker) FROM transcript t WHERE t.meeting_id=m.id)
-            FROM meetings m {where} ORDER BY m.started_at DESC;
+            FROM meetings m {where} ORDER BY COALESCE(m.sort_order, 1000000) ASC, m.started_at DESC;
             """;
         if (term is not null) cmd.Parameters.AddWithValue("$term", $"%{term}%");
         if (speaker is not null) cmd.Parameters.AddWithValue("$speaker", speaker);

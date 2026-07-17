@@ -13,11 +13,6 @@
                 <TextBlock Text="Meetings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
                 <TextBlock x:Name="CountLabel" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
-            <Border Grid.Column="2" Background="{StaticResource GreenDark}" CornerRadius="6"
-                    Padding="7,3" VerticalAlignment="Center">
-                <TextBlock Text="● ON-DEVICE" Foreground="{StaticResource Green}" FontSize="8.5"
-                           FontWeight="Bold" FontFamily="{StaticResource UiFont}"/>
-            </Border>
         </Grid>
 
         <Grid DockPanel.Dock="Top" Margin="0,11,0,0">

@@ -254,6 +254,16 @@ Two real gotchas: (1) **re-apply the affinity on every `Show()`** — Windows dr
 
 **Decision: all icon buttons use the `Segoe Fluent Icons` font** (falls back to `Segoe MDL2 Assets` on Win10). The old unicode glyphs (`⧉` copy vs `⤢` open) rendered nearly identically and read as ugly. `IconButton` is now a clean floating glyph (`TextDim`) that lifts onto a subtle rounded highlight on hover. Glyphs: copy `E8C8`, open-in-window `E740`, close `E711`, back `E76B`, settings `E713`.
 
+### Library open animation + drag-to-reorder
+
+**Open animation — grows out of the pill.** The first attempt scaled the content in place from the window's own bottom-centre, which read as a "force open" because the pill sits at screen-bottom while the window is screen-centre (disconnected). Now `HomeView` passes the pill's on-screen rect (`PillWindow.ScreenDipRect()`, physical→DIP) and `LibraryWindow.PlayOpen(fromRect)` builds a `TransformGroup` (scale + translate) that starts with the content occupying that exact pill rectangle and animates to identity (`RenderTransformOrigin=0,0`; `scaleX0=pillW/winW`, `translate0=pillTopLeft−winTopLeft`), ~300ms `CubicEase`, plus a fade. GPU transform on laid-out content — no reflow. Falls back to a gentle centred grow if the rect is unavailable.
+
+**Drag-to-reorder — settles cleanly on release.** Cards are pickable; past a 4px threshold the card lifts (ZIndex + opacity) and follows the pointer via a `TranslateTransform`, while the others animate a shift computed from a correct *insertion index among the non-dragged cards* (`shift = (i>from? −dh:0) + (oi>=ins? dh:0)`) — this fixed an off-by-one that mis-placed the drop. **On release the card animates into its target slot (settle, ~160ms) before the order commits + list rebuilds** — the earlier version returned early on a same-slot drop and left the card stuck between rows; now every path resets. Persistence: a new `meetings.sort_order` column via idempotent migration (`ColumnExists` guard), seeded to the existing newest-first order; `List` orders by `COALESCE(sort_order, …) ASC, started_at DESC`; new rows get `MIN(sort_order)-1` (top). A short click (no drag) still selects.
+
+### Notes render monotone (owner preference over the coloured design)
+
+**Decision: `NoteRenderer` section labels are monotone dim-grey uppercase — no coloured headers, no icons/ticks.** The design (`⑤`) uses green/blue/orange section headers, but the owner wanted an Apple-clean monotone look ("red and green never go on text"). So SUMMARY / KEY POINTS / ACTION ITEMS / TRANSCRIPT are quiet `TextDim` labels; bullets use a small dim dot; owner/due and YOU/THEM chips are neutral grey (YOU a shade brighter than THEM for distinction). Colour is reserved for content, never chrome. Spacing is deliberately generous and consistent so it always reads clean. The "● ON-DEVICE" badge was removed from both the pill Library view and the window.
+
 ### Library window cards match the design
 
 Cards in `LibraryWindow` now render a calendar-style **date badge** (day over 3-letter month), title, a meta line (type · duration · relative time), the TL;DR snippet, and count chips ("N open" / "N people") — all already on `MeetingSummary`. Selected card gets a coral hairline. Matches `Toki-ProductDesign/⑥`.

@@ -21,8 +21,9 @@ public partial class LibraryWindow : Window
     static LibraryWindow? _open;   // single instance
     long? _selected;
 
-    public static void ShowLibrary(long? focusMeetingId = null)
+    public static void ShowLibrary(long? focusMeetingId = null, Rect? fromRect = null)
     {
+        var justOpened = _open is null;
         if (_open is null)
         {
             _open = new LibraryWindow();
@@ -31,6 +32,42 @@ public partial class LibraryWindow : Window
         }
         _open.Activate();
         _open.Reload(focusMeetingId);
+        if (justOpened) _open.PlayOpen(fromRect);
+    }
+
+    /// <summary>
+    /// Buttery open: the window's content literally grows out of the pill's on-screen
+    /// rectangle to fill the window (a GPU scale+translate on the laid-out content — no
+    /// reflow), with a soft fade. Reads as the pill extending into a window rather than a
+    /// hard pop. Falls back to a gentle bottom-anchored grow if we don't have the rect.
+    /// </summary>
+    public void PlayOpen(Rect? fromRect)
+    {
+        UpdateLayout();
+        double ww = ActualWidth, wh = ActualHeight;
+        if (ww <= 0 || wh <= 0) return;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var dur = new Duration(TimeSpan.FromMilliseconds(300));
+
+        double sx0, sy0, tx0, ty0;
+        if (fromRect is Rect p && p.Width > 0 && p.Height > 0)
+        {
+            sx0 = p.Width / ww; sy0 = p.Height / wh;
+            tx0 = p.Left - Left; ty0 = p.Top - Top;   // pill's top-left relative to the window
+        }
+        else { sx0 = 0.86; sy0 = 0.7; tx0 = ww * 0.07; ty0 = wh * 0.15; } // gentle centred-ish grow
+
+        var scale = new ScaleTransform(sx0, sy0);
+        var trans = new TranslateTransform(tx0, ty0);
+        var grp = new TransformGroup();
+        grp.Children.Add(scale); grp.Children.Add(trans);
+        RootGrid.RenderTransform = grp;
+
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(sx0, 1, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(sy0, 1, dur) { EasingFunction = ease });
+        trans.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(tx0, 0, dur) { EasingFunction = ease });
+        trans.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(ty0, 0, dur) { EasingFunction = ease });
+        RootGrid.BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 1, new Duration(TimeSpan.FromMilliseconds(200))) { EasingFunction = ease });
     }
 
     /// <summary>Open the Library and start a fresh manual note in the editor.</summary>
@@ -125,9 +162,129 @@ public partial class LibraryWindow : Window
             CornerRadius = new CornerRadius(12), Padding = new Thickness(11, 11, 11, 12),
             Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
         };
-        card.MouseLeftButtonUp += (_, _) => Select(m.Id);
+        card.PreviewMouseLeftButtonDown += (_, e) => OnCardDown(card, e);
+        card.PreviewMouseMove += (_, e) => OnCardMove(e);
+        card.PreviewMouseLeftButtonUp += (_, e) => OnCardUp(card, m.Id);
         return card;
     }
+
+    // ---- drag-to-reorder (iPhone-home-screen style: pick up, others slide to make space,
+    //      release snaps cleanly into the nearest slot — a card never sits between two) ----
+    Border? _drag;
+    int _dragFrom;
+    double _dragStartY;
+    bool _dragMoved;
+    readonly List<Border> _cards = new();
+    readonly List<double> _cardTops = new();
+    readonly List<double> _cardHeights = new();
+
+    void OnCardDown(Border card, MouseButtonEventArgs e)
+    {
+        _drag = card;
+        _dragMoved = false;
+        _dragStartY = e.GetPosition(Cards).Y;
+
+        // Snapshot cards + their tops/heights so we can compute slots + shifts during the drag.
+        Cards.UpdateLayout();
+        _cards.Clear(); _cardTops.Clear(); _cardHeights.Clear();
+        double top = 0;
+        foreach (var child in Cards.Children)
+        {
+            if (child is not Border b) continue;
+            var t = Translate(b);
+            t.BeginAnimation(TranslateTransform.YProperty, null);
+            t.Y = 0;
+            var h = b.ActualHeight + 8; // + bottom margin
+            _cards.Add(b); _cardTops.Add(top); _cardHeights.Add(h); top += h;
+        }
+        _dragFrom = _cards.IndexOf(card);
+        card.CaptureMouse();
+    }
+
+    void OnCardMove(MouseEventArgs e)
+    {
+        if (_drag is null || e.LeftButton != MouseButtonState.Pressed || _dragFrom < 0) return;
+        var dy = e.GetPosition(Cards).Y - _dragStartY;
+        if (!_dragMoved && Math.Abs(dy) < 4) return;
+        if (!_dragMoved) { _dragMoved = true; _drag.Opacity = 0.9; Panel.SetZIndex(_drag, 30); }
+
+        Translate(_drag).Y = dy;
+
+        var ins = InsertionIndex(_cardTops[_dragFrom] + _cardHeights[_dragFrom] / 2 + dy);
+        var dh = _cardHeights[_dragFrom];
+        for (var i = 0; i < _cards.Count; i++)
+        {
+            if (i == _dragFrom) continue;
+            var oi = i < _dragFrom ? i : i - 1;                       // its index among the "others"
+            var shift = (i > _dragFrom ? -dh : 0) + (oi >= ins ? dh : 0);
+            SlideTo(_cards[i], shift);
+        }
+    }
+
+    void OnCardUp(Border card, long id)
+    {
+        if (_drag is null) return;
+        card.ReleaseMouseCapture();
+        if (!_dragMoved) { _drag = null; Select(id); return; } // a click, not a drag
+
+        var center = _cardTops[_dragFrom] + _cardHeights[_dragFrom] / 2 + Translate(card).Y;
+        var ins = InsertionIndex(center);
+
+        // Settle: glide the dragged card into its final slot, THEN commit + rebuild. This is
+        // what stops it sitting awkwardly between two rows on release.
+        double slotTop = 0; var counted = 0;
+        for (var i = 0; i < _cards.Count && counted < ins; i++) { if (i == _dragFrom) continue; slotTop += _cardHeights[i]; counted++; }
+        var target = slotTop - _cardTops[_dragFrom];
+
+        var from = _dragFrom;
+        _drag = null;
+        var settle = new DoubleAnimation(target, TimeSpan.FromMilliseconds(160)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        settle.Completed += (_, _) =>
+        {
+            card.Opacity = 1; Panel.SetZIndex(card, 0);
+            CommitReorder(from, ins);
+        };
+        Translate(card).BeginAnimation(TranslateTransform.YProperty, settle);
+    }
+
+    // Where the dragged card would insert among the OTHER cards (0..n-1), by comparing its
+    // centre to the others' closed-up mid-points (dragged card excluded).
+    int InsertionIndex(double centerY)
+    {
+        var idx = 0; double top = 0;
+        for (var i = 0; i < _cards.Count; i++)
+        {
+            if (i == _dragFrom) continue;
+            var h = _cardHeights[i];
+            if (centerY > top + h / 2) idx++;
+            top += h;
+        }
+        return idx;
+    }
+
+    void CommitReorder(int from, int ins)
+    {
+        var ids = new List<long>();
+        foreach (var b in _cards) if (b.Tag is long id) ids.Add(id);
+        if (from < 0 || from >= ids.Count) { LoadList(); return; }
+        var moved = ids[from];
+        ids.RemoveAt(from);
+        ids.Insert(Math.Clamp(ins, 0, ids.Count), moved);
+        try { App.Store.Reorder(ids); } catch (Exception ex) { App.Log($"reorder persist failed: {ex.Message}"); }
+        LoadList(); // rebuild in the new order (always resets every drag transform)
+    }
+
+    static TranslateTransform Translate(UIElement el)
+    {
+        if (el.RenderTransform is TranslateTransform t) return t;
+        var nt = new TranslateTransform();
+        el.RenderTransform = nt;
+        return nt;
+    }
+
+    static void SlideTo(UIElement el, double y) =>
+        Translate(el).BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(y, TimeSpan.FromMilliseconds(150)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
 
     Border Chip(string text, string fgKey, string bgKey) => new()
     {

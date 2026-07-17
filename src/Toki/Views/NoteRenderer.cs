@@ -1,75 +1,91 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using Toki.Storage;
 using Toki.Transcription;
 
 namespace Toki.Views;
 
 /// <summary>
-/// Builds the visual for a meeting's notes (TL;DR / decisions / to-dos / questions
-/// / transcript) into a panel. Shared by the pill Notes view and the resizable
-/// Library window so the layout is clean and consistent in both — spacing scales
-/// with <paramref name="spacious"/> (window) vs compact (pill).
+/// Builds a meeting's notes (Summary / Key points / Action items / Transcript) into a
+/// panel, shared by the pill Notes view and the Library window. Deliberately clean and
+/// MONOTONE — section labels are a quiet uppercase grey (no coloured headers, no icons),
+/// generous consistent spacing, so it reads calm and Apple-clean. Colour is reserved for
+/// content, never chrome.
 /// </summary>
 public static class NoteRenderer
 {
     static object Res(string key) => Application.Current.FindResource(key);
     static Brush B(string key) => (Brush)Res(key);
+    static FontFamily Ui => (FontFamily)Res("UiFont");
 
     public static void Meeting(Panel body, MeetingRecord m, bool spacious)
     {
         body.Children.Clear();
-        var fs = spacious ? 13.0 : 11.5;
-        var gap = spacious ? 6.0 : 5.0;
+        var fs = spacious ? 13.5 : 12.0;
 
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
-            SectionHeader(body, "SUMMARY", "Coral", spacious);
+            SectionHeader(body, "SUMMARY", spacious, first: true);
             body.Children.Add(new TextBlock
             {
-                Text = m.Notes.Tldr, TextWrapping = TextWrapping.Wrap,
-                FontFamily = (FontFamily)Res("UiFont"), FontSize = fs + 0.5, LineHeight = fs + 9,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xD6, 0xD6, 0xD4)),
-                Margin = new Thickness(0, 0, 0, spacious ? 4 : 2),
+                Text = m.Notes.Tldr, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
+                FontSize = fs, LineHeight = fs + 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDB)),
+                Margin = new Thickness(0, 0, 0, 2),
             });
         }
 
         // "Decisions" storage is repurposed as key points (see NoteSet).
-        Section(body, "KEY POINTS", "Green", m.Notes.Decisions.Select(d => Bullet(d, fs, gap)), spacious);
-        Section(body, "ACTION ITEMS", "Blue", m.Notes.Actions.Select(a => ActionRow(a, fs, gap, spacious)), spacious);
+        Section(body, "KEY POINTS", m.Notes.Decisions.Select(d => Bullet(d, fs, spacious)), spacious);
+        Section(body, "ACTION ITEMS", m.Notes.Actions.Select(a => ActionRow(a, fs, spacious)), spacious);
 
         if (m.Transcript.Count > 0)
         {
-            SectionHeader(body, "TRANSCRIPT", "TextDim", spacious);
+            SectionHeader(body, "TRANSCRIPT", spacious);
             foreach (var s in m.Transcript) body.Children.Add(TranscriptRow(s, fs, spacious));
         }
     }
 
-    static void Section(Panel body, string title, string color, IEnumerable<FrameworkElement> rows, bool spacious)
+    static void Section(Panel body, string title, IEnumerable<FrameworkElement> rows, bool spacious)
     {
         var list = rows.ToList();
         if (list.Count == 0) return;
-        SectionHeader(body, title, color, spacious);
+        SectionHeader(body, title, spacious);
         foreach (var r in list) body.Children.Add(r);
     }
 
-    static void SectionHeader(Panel body, string title, string color, bool spacious) =>
+    // Quiet, monotone section label — small uppercase grey, well spaced. No colour, no icon.
+    static void SectionHeader(Panel body, string title, bool spacious, bool first = false) =>
         body.Children.Add(new TextBlock
         {
-            Text = title, FontFamily = (FontFamily)Res("UiFont"),
-            FontSize = spacious ? 11 : 10, FontWeight = FontWeights.Bold,
-            Foreground = B(color), Margin = new Thickness(0, spacious ? 20 : 15, 0, spacious ? 9 : 6),
+            Text = title, FontFamily = Ui, FontSize = spacious ? 10.5 : 9.5, FontWeight = FontWeights.SemiBold,
+            Foreground = B("TextDim"), Margin = new Thickness(0, first ? 0 : (spacious ? 22 : 17), 0, spacious ? 10 : 8),
         });
 
-    static TextBlock Bullet(string text, double fs, double gap) => new()
+    static FrameworkElement Bullet(string text, double fs, bool spacious)
     {
-        Text = "•   " + text, TextWrapping = TextWrapping.Wrap,
-        FontFamily = (FontFamily)Application.Current.FindResource("UiFont"), FontSize = fs,
-        Foreground = B("Text"), LineHeight = fs + 7, Margin = new Thickness(2, 0, 0, gap + 2),
-    };
+        var row = new Grid { Margin = new Thickness(0, 0, 0, spacious ? 10 : 8) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var dot = new Ellipse
+        {
+            Width = 3.5, Height = 3.5, Fill = B("TextDim"),
+            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(2, fs / 2, 12, 0),
+        };
+        var tb = new TextBlock
+        {
+            Text = text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
+            Foreground = B("Text"), LineHeight = fs + 8,
+        };
+        Grid.SetColumn(tb, 1);
+        row.Children.Add(dot);
+        row.Children.Add(tb);
+        return row;
+    }
 
-    static FrameworkElement ActionRow(ActionItem a, double fs, double gap, bool spacious)
+    static FrameworkElement ActionRow(ActionItem a, double fs, bool spacious)
     {
         var check = new CheckBox
         {
@@ -79,17 +95,21 @@ public static class NoteRenderer
         check.Checked += (_, _) => Toggle(a, true);
         check.Unchecked += (_, _) => Toggle(a, false);
 
-        var text = new TextBlock { Text = a.Text, TextWrapping = TextWrapping.Wrap, FontFamily = (FontFamily)Res("UiFont"), FontSize = fs, Foreground = B("Text"), LineHeight = fs + 6 };
-        if (a.Done) { text.TextDecorations = TextDecorations.Strikethrough; text.Opacity = 0.55; }
+        var text = new TextBlock
+        {
+            Text = a.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
+            Foreground = B("Text"), LineHeight = fs + 7,
+        };
+        if (a.Done) { text.TextDecorations = TextDecorations.Strikethrough; text.Opacity = 0.5; }
 
         var right = new StackPanel();
         right.Children.Add(text);
-        var tags = new StackPanel { Orientation = Orientation.Horizontal };
-        if (Meaningful(a.Owner)) tags.Children.Add(Tag(a.Owner!, "Chip", "TextDim"));
-        if (Meaningful(a.Due)) tags.Children.Add(Tag(a.Due!, "AmberDark", "Amber"));
+        var tags = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 0) };
+        if (Meaningful(a.Owner)) tags.Children.Add(Tag(a.Owner!));
+        if (Meaningful(a.Due)) tags.Children.Add(Tag(a.Due!));
         if (tags.Children.Count > 0) right.Children.Add(tags);
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, gap + 5) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, spacious ? 12 : 10) };
         row.Children.Add(check);
         row.Children.Add(right);
         return row;
@@ -97,28 +117,33 @@ public static class NoteRenderer
 
     static FrameworkElement TranscriptRow(TranscriptSegment seg, double fs, bool spacious)
     {
+        // Clean, consistent, generously-spaced turns. Monotone speaker chip on the left
+        // (YOU a touch brighter than THEM), the line flowing beside it, left-aligned so it
+        // reads like a clear script rather than a cramped two-sided chat.
         var you = seg.Speaker == Speaker.You;
         var chip = new Border
         {
-            Background = B(you ? "BlueDark" : "Chip"), CornerRadius = new CornerRadius(4),
+            Background = B(you ? "SurfaceHi" : "Chip"), CornerRadius = new CornerRadius(5),
             Padding = new Thickness(6, 2, 6, 2), VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 1, 8, 0),
-            Child = new TextBlock { Text = you ? "YOU" : "THEM", FontSize = 8.5, FontWeight = FontWeights.Bold, Foreground = B(you ? "Blue" : "TextDim"), FontFamily = (FontFamily)Res("UiFont") },
+            Margin = new Thickness(0, fs / 2 - 7, 10, 0), MinWidth = 40, HorizontalAlignment = HorizontalAlignment.Left,
+            Child = new TextBlock
+            {
+                Text = you ? "YOU" : "THEM", FontSize = 8.5, FontWeight = FontWeights.Bold,
+                Foreground = B(you ? "Text" : "TextDim"), FontFamily = Ui, TextAlignment = TextAlignment.Center,
+            },
         };
         var text = new TextBlock
         {
-            Text = seg.Text, TextWrapping = TextWrapping.Wrap, FontFamily = (FontFamily)Res("UiFont"),
-            FontSize = fs - 0.5, Foreground = B("Text"), LineHeight = fs + 6,
-            MaxWidth = spacious ? 620 : 300, TextAlignment = you ? TextAlignment.Right : TextAlignment.Left,
+            Text = seg.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
+            FontSize = fs, Foreground = B(you ? "Text" : "TextDim"), LineHeight = fs + 8,
         };
-        var row = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = you ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-            Margin = new Thickness(0, 0, 0, 9),
-        };
-        if (you) { row.Children.Add(text); row.Children.Add(chip); }
-        else { row.Children.Add(chip); row.Children.Add(text); }
+
+        var row = new Grid { Margin = new Thickness(0, 0, 0, spacious ? 14 : 12) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(text, 1);
+        row.Children.Add(chip);
+        row.Children.Add(text);
         return row;
     }
 
@@ -131,11 +156,12 @@ public static class NoteRenderer
             or "tbd" or "tba" or "unknown" or "unassigned" or "name" or "when");
     }
 
-    static Border Tag(string text, string bgKey, string fgKey) => new()
+    // Monotone chip (owner / due) — neutral grey, no colour.
+    static Border Tag(string text) => new()
     {
-        Background = B(bgKey), CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 2, 7, 2),
-        Margin = new Thickness(0, 5, 6, 0),
-        Child = new TextBlock { Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold, Foreground = B(fgKey), FontFamily = (FontFamily)Res("UiFont") },
+        Background = B("Chip"), CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 2, 7, 2),
+        Margin = new Thickness(0, 0, 6, 0),
+        Child = new TextBlock { Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontFamily = Ui },
     };
 
     static void Toggle(ActionItem a, bool done)
