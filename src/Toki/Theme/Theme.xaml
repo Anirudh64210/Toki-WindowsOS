@@ -20,6 +20,8 @@
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
 
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
+    <!-- Windows' crisp monochrome icon font (Win11 Fluent, falls back to Win10 MDL2). -->
+    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <Style x:Key="PillButton" TargetType="Button">
         <Setter Property="Foreground" Value="{StaticResource Text}"/>
@@ -90,13 +92,34 @@
         </Setter>
     </Style>
 
-    <!-- Small round icon button (gear, back, close) -->
-    <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
-        <Setter Property="Padding" Value="0"/>
-        <Setter Property="Width" Value="28"/>
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="FontSize" Value="13"/>
+    <!-- Small icon button (gear, back, copy, open, close) — crisp Fluent glyph that
+         floats until hovered, then lifts on a subtle rounded highlight (design style). -->
+    <Style x:Key="IconButton" TargetType="Button">
         <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="Height" Value="30"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#1FFFFFFF"/>
+                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{StaticResource Text}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#33FFFFFF"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Section header ("DECISIONS", "ACTION ITEMS", …) -->

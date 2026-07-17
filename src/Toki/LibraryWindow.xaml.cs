@@ -86,23 +86,72 @@ public partial class LibraryWindow : Window
     Border Card(MeetingSummary m)
     {
         var selected = _selected == m.Id;
-        var stack = new StackPanel();
-        var top = new StackPanel { Orientation = Orientation.Horizontal };
-        top.Children.Add(new TextBlock { Text = m.Kind == MeetingKind.Manual ? "✎ Note" : (m.App ?? "Meeting"), Style = St("Dim"), FontSize = 9.5 });
-        top.Children.Add(new TextBlock { Text = "  ·  " + m.StartedAt.ToString("MMM d"), Style = St("Dim"), FontSize = 9.5 });
-        stack.Children.Add(top);
-        stack.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 12.5, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 2, 0, 0) });
+
+        // Left: a calendar-style date badge (day over month), like the design.
+        var badge = new Border
+        {
+            Background = (Brush)FindResource("Chip"), CornerRadius = new CornerRadius(9),
+            Width = 42, Height = 46, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 11, 0),
+        };
+        var badgeStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        badgeStack.Children.Add(new TextBlock { Text = m.StartedAt.Day.ToString(), Style = St("Body"), FontSize = 17, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
+        badgeStack.Children.Add(new TextBlock { Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 8, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, -1, 0, 0) });
+        badge.Child = badgeStack;
+
+        // Right: title, meta line, snippet, and count chips.
+        var content = new StackPanel();
+        content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
+        content.Children.Add(new TextBlock { Text = CardMeta(m), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            stack.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap, MaxHeight = 30, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) });
+            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap, MaxHeight = 30, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0) });
+
+        var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0) };
+        if (m.OpenActions > 0) chips.Children.Add(Chip($"{m.OpenActions} open", "Amber", "AmberDark"));
+        if (m.PeopleCount > 0) chips.Children.Add(Chip($"{m.PeopleCount} {(m.PeopleCount == 1 ? "person" : "people")}", "TextDim", "Chip"));
+        if (chips.Children.Count > 0) content.Children.Add(chips);
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.Children.Add(badge);
+        Grid.SetColumn(content, 1);
+        row.Children.Add(content);
 
         var card = new Border
         {
             Background = (Brush)FindResource(selected ? "Chip" : "SurfaceHi"),
-            CornerRadius = new CornerRadius(11), Padding = new Thickness(12, 10, 12, 10),
-            Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = stack, Tag = m.Id,
+            BorderBrush = selected ? (Brush)FindResource("Coral") : Brushes.Transparent,
+            BorderThickness = new Thickness(selected ? 1 : 0),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(11, 11, 11, 12),
+            Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
         };
         card.MouseLeftButtonUp += (_, _) => Select(m.Id);
         return card;
+    }
+
+    Border Chip(string text, string fgKey, string bgKey) => new()
+    {
+        Background = (Brush)FindResource(bgKey), CornerRadius = new CornerRadius(5),
+        Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 0, 6, 0),
+        Child = new TextBlock { Text = text, Foreground = (Brush)FindResource(fgKey), FontSize = 9, FontWeight = FontWeights.SemiBold },
+    };
+
+    static string CardMeta(MeetingSummary m)
+    {
+        var parts = new List<string> { m.Kind == MeetingKind.Manual ? "Note" : (m.App ?? "Meeting") };
+        if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
+        parts.Add(TimeAgo(m.StartedAt));
+        return string.Join(" · ", parts);
+    }
+
+    static string TimeAgo(DateTimeOffset t)
+    {
+        var d = DateTimeOffset.Now - t;
+        if (d.TotalMinutes < 60) return "just now";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        if (d.TotalDays < 2) return "yesterday";
+        if (d.TotalDays < 7) return $"{(int)d.TotalDays} days ago";
+        return t.ToString("MMM d");
     }
 
     void Select(long id)

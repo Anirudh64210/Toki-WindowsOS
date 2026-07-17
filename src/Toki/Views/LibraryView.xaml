@@ -8,7 +8,7 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <Button Style="{StaticResource IconButton}" Content="‹" FontSize="16" Click="OnBack"/>
+            <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Meetings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
                 <TextBlock x:Name="CountLabel" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>

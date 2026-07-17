@@ -100,7 +100,9 @@ Click-away/Esc dismissal uses **global low-level mouse + keyboard hooks** (`Inpu
 
 **Decision:** the pill is a **non-layered, opaque, hardware-accelerated window** whose corners are rounded by DWM (`DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`, plus a subtle `DWMWA_BORDER_COLOR`). The window *is* the pill — it resizes to each state's content and anchors bottom-center.
 
-**Why not the original `AllowsTransparency=True` layered window:** that path (a) forced slow software rendering, and (b) is **fundamentally incompatible with `SetWindowDisplayAffinity`** (ghost mode) — the layered + capture-exclusion combination renders the window as a black rectangle (confirmed by Microsoft's own docs/issue tracker; the call returns `ERROR_NOT_ENOUGH_MEMORY` on layered windows). The owner hit exactly this black-rectangle glitch during screen recording. A non-layered window is GPU-composited (fast) and lets ghost mode work reliably.
+> **Superseded (2026-07-17):** the "non-layered/opaque is required for ghost mode" claim below was a **misdiagnosis**. The pill is now `AllowsTransparency=True` (a genuinely translucent glass window) AND ghost mode works — the old black rectangle was the pre-2004 `WDA_MONITOR` fallback / a hide→show affinity revert, not a transparency conflict. See "The pill IS a translucent glass window" further down.
+
+**Original reasoning (kept for history):** that path (a) forced slow software rendering, and (b) was thought **incompatible with `SetWindowDisplayAffinity`** (ghost mode) — the layered + capture-exclusion combination appeared to render a black rectangle. This turned out to be fixable (use `WDA_EXCLUDEFROMCAPTURE` 0x11, not `WDA_MONITOR`, and re-apply on show).
 
 **Rounded corners (M3.3):** DWM corner rounding (`DWMWA_WINDOW_CORNER_PREFERENCE`) does **not** apply to borderless `WindowStyle=None` windows — corners stayed square. The pill is instead clipped to a rounded region via `SetWindowRgn(CreateRoundRectRgn(...))` at radius 22 (DPI-scaled), re-applied on every resize and work-area change. This restores the larger pill radius the design wants. Region edges are 1-bit (mildly aliased) but fine at this radius/DPI; a `Border` inside draws the matching AA fill + subtle edge.
 
@@ -240,9 +242,21 @@ Peak footprint drops from ~3.1 GB (both) to ~max(2.5, 0.63) GB. The cost on a sm
 
 **Decision: a stray click into your real work must never dismiss content you're using.** Click-outside used to close Home, Library, Settings, **Notes**, and NoSpeech — so clicking into the meeting app while reading notes made them vanish. Now `DismissOnClickOutside` is just `{Home, NoSpeech}` (the launcher menu and the transient "nothing was said" toast). Notes, Library, Settings, ManualNote — and recording/summarizing/prompt — stay until closed with their own button or Esc.
 
-### The pill's "glass" look — opaque frosted, not see-through (owner decision)
+### The pill IS a translucent glass window — and ghost still works (corrected)
 
-**Finding: true translucency and ghost mode are mutually exclusive in WPF.** Ghost mode (`WDA_EXCLUDEFROMCAPTURE`) is reliable only on an **opaque, non-layered** window; real acrylic/translucency needs a **layered alpha** surface (`AllowsTransparency=True`), which both re-introduces the black-rectangle capture glitch and forces software rendering. DWM's system-backdrop can't help either — WPF's opaque swap-chain has no alpha for the backdrop to show through. **Owner chose to keep ghost mode.** So the "glass" is an opaque *look*: a top-lit vertical gradient + a faint top "sheen" + a gradient hairline border (all in `PillWindow.xaml`), plus the Win11 dark immersive-frame attribute. `TryEnableGlass` now only sets that dark-mode attribute.
+**Correction to an earlier claim:** translucency and ghost mode are NOT mutually exclusive. Cluely and "cheating daddy" (both Electron) ship a transparent window with `setContentProtection(true)` = `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, and it works — the affinity is enforced at the DWM level (BitBlt / DXGI / Graphics-Capture all exclude it) regardless of transparency, on Win10 2004+.
+
+**So `PillWindow` is now `AllowsTransparency=True`, `Background=Transparent`.** The Border is the pill: a translucent gradient fill (~0x9E alpha) + a faint top sheen, rounded by its own `CornerRadius` (no `SetWindowRgn` — outside the Border the window is genuinely transparent, so corners are clean). Verified on the owner's PC: `--noghost` capture shows a see-through pill; ghost-on capture shows the pill **absent** (still hidden from recording).
+
+Two real gotchas: (1) **re-apply the affinity on every `Show()`** — Windows drops it across hide→show (`ApplyGhost()` runs after each show); (2) **do NOT use the DWM accent acrylic** (`SetWindowCompositionAttribute` / `ACCENT_ENABLE_ACRYLICBLURBEHIND`) — it fills the *square* window and shows sharp black corners around the rounded pill. Translucency comes from the Border brush, not the compositor.
+
+### Icons: Segoe Fluent, not ambiguous unicode
+
+**Decision: all icon buttons use the `Segoe Fluent Icons` font** (falls back to `Segoe MDL2 Assets` on Win10). The old unicode glyphs (`⧉` copy vs `⤢` open) rendered nearly identically and read as ugly. `IconButton` is now a clean floating glyph (`TextDim`) that lifts onto a subtle rounded highlight on hover. Glyphs: copy `E8C8`, open-in-window `E740`, close `E711`, back `E76B`, settings `E713`.
+
+### Library window cards match the design
+
+Cards in `LibraryWindow` now render a calendar-style **date badge** (day over 3-letter month), title, a meta line (type · duration · relative time), the TL;DR snippet, and count chips ("N open" / "N people") — all already on `MeetingSummary`. Selected card gets a coral hairline. Matches `Toki-ProductDesign/⑥`.
 
 ### Long recordings never crash or OOM (windowed ASR)
 

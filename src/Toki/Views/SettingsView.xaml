@@ -14,7 +14,7 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Button Style="{StaticResource IconButton}" Content="‹" FontSize="16" Click="OnBack"/>
+            <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Settings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
                 <TextBlock Text="Toki 1.0 · one-time · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>

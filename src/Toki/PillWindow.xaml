@@ -2,29 +2,30 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Toki"
-        WindowStyle="None" AllowsTransparency="False" ResizeMode="NoResize"
-        Background="{StaticResource Surface}"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="NoResize"
+        Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="{StaticResource UiFont}"
         Width="120" Height="40" KeyDown="OnKeyDown">
-    <!-- Opaque window clipped to a rounded region (see code-behind). The Border is the
-         pill surface: a subtle top-lit gradient + a soft top "sheen" gives a premium
-         frosted-glass look without true transparency (which can't coexist with ghost
-         mode's opaque non-layered window). Host stretches the current view to fill. -->
+    <!-- Transparent window (like Cluely / Cheating Daddy): the Border IS the pill, with
+         a translucent frosted surface so the desktop shows through. Ghost mode
+         (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
+         capture even though it's transparent — the two are NOT mutually exclusive.
+         A real acrylic blur-behind is applied in code (SetWindowCompositionAttribute). -->
     <Border x:Name="Root" CornerRadius="22" BorderThickness="1">
         <Border.BorderBrush>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#33FFFFFF" Offset="0"/>
-                <GradientStop Color="#14FFFFFF" Offset="0.5"/>
-                <GradientStop Color="#10000000" Offset="1"/>
+                <GradientStop Color="#40FFFFFF" Offset="0"/>
+                <GradientStop Color="#18FFFFFF" Offset="0.5"/>
+                <GradientStop Color="#14000000" Offset="1"/>
             </LinearGradientBrush>
         </Border.BorderBrush>
         <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#1B1E22" Offset="0"/>
-                <GradientStop Color="#101215" Offset="0.45"/>
-                <GradientStop Color="#0B0B0C" Offset="1"/>
+                <GradientStop Color="#9E24282E" Offset="0"/>
+                <GradientStop Color="#94141619" Offset="0.5"/>
+                <GradientStop Color="#9E0B0C0E" Offset="1"/>
             </LinearGradientBrush>
         </Border.Background>
         <Grid>
@@ -32,8 +33,8 @@
             <Border CornerRadius="22" IsHitTestVisible="False">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#1FFFFFFF" Offset="0"/>
-                        <GradientStop Color="#08FFFFFF" Offset="0.12"/>
+                        <GradientStop Color="#26FFFFFF" Offset="0"/>
+                        <GradientStop Color="#0AFFFFFF" Offset="0.12"/>
                         <GradientStop Color="#00FFFFFF" Offset="0.32"/>
                     </LinearGradientBrush>
                 </Border.Background>

@@ -64,7 +64,7 @@ public partial class PillWindow : Window
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SystemParameters.WorkArea) && IsVisible)
-                Dispatcher.Invoke(() => { PositionBottomCenter(); ApplyRoundedRegion(); CacheWindowRect(); });
+                Dispatcher.Invoke(() => { PositionBottomCenter(); CacheWindowRect(); });
         };
         LocationChanged += (_, _) => CacheWindowRect();
         SizeChanged += (_, _) => CacheWindowRect();
@@ -76,11 +76,9 @@ public partial class PillWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         try
         {
-            if (!App.GhostDisabled)
-                SetWindowDisplayAffinity(_hwnd, WdaExcludeFromCapture); // reliable on non-layered windows
+            ApplyGhost(); // WDA_EXCLUDEFROMCAPTURE — works on this transparent window too
             SetWindowLong(_hwnd, GwlExStyle, GetWindowLong(_hwnd, GwlExStyle) | WsExToolWindow);
-            ApplyRoundedRegion(); // DWM won't round a borderless window — clip it ourselves
-            TryEnableGlass();     // Win11: frosted-translucent pill (falls back to opaque)
+            EnableAcrylic(); // real blur-behind so the translucency reads as frosted glass
         }
         catch (Exception ex) { App.Log($"window setup failed (non-fatal): {ex.Message}"); }
 
@@ -169,39 +167,35 @@ public partial class PillWindow : Window
         Width = w;
         Height = Math.Min(h, availH);
 
-        if (fromHidden) Show();
+        if (fromHidden) { Show(); ApplyGhost(); } // re-apply WDA — hide/show can drop it
         PositionBottomCenter();   // physical-pixel placement, DPI-proof
-        ApplyRoundedRegion();
         MorphContent();
         CacheWindowRect();
     }
 
-    /// <summary>Clip the rectangular window to a rounded-rect region (physical px).</summary>
-    void ApplyRoundedRegion()
+    /// <summary>
+    /// Hide the pill from screen capture / sharing (WDA_EXCLUDEFROMCAPTURE) — the same
+    /// mechanism Electron's setContentProtection uses. It works fine on this transparent
+    /// window, but Windows can drop the affinity across hide→show, so we re-apply it
+    /// every time the pill is shown.
+    /// </summary>
+    void ApplyGhost()
     {
-        if (_hwnd == IntPtr.Zero) return;
-        try
-        {
-            var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-            if (!GetWindowRect(_hwnd, out var r)) return;
-            int w = r.Right - r.Left, h = r.Bottom - r.Top;
-            var d = (int)Math.Round(CornerRadius * 2 * dpi); // ellipse diameter
-            var rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d);
-            SetWindowRgn(_hwnd, rgn, true); // OS takes ownership of the region
-        }
-        catch (Exception ex) { App.Log($"region failed (non-fatal): {ex.Message}"); }
+        if (_hwnd == IntPtr.Zero || App.GhostDisabled) return;
+        try { SetWindowDisplayAffinity(_hwnd, WdaExcludeFromCapture); }
+        catch (Exception ex) { App.Log($"ghost affinity failed (non-fatal): {ex.Message}"); }
     }
 
     /// <summary>
-    /// Use the dark immersive DWM title/frame styling. (True see-through acrylic is NOT
-    /// possible here: ghost mode needs an opaque, non-layered window, while real
-    /// translucency needs a layered alpha surface — the two are mutually exclusive in
-    /// WPF, so the pill's premium "frosted" look is done with an opaque gradient + sheen
-    /// in XAML instead.)
+    /// Translucent glass surface. We do NOT use the DWM accent "acrylic" here: it fills
+    /// the whole rectangular window (ignoring our rounded corners), which showed as ugly
+    /// sharp black corners around the pill. Instead the translucency is the Border's own
+    /// semi-transparent fill on a transparent window — genuinely see-through, with clean
+    /// rounded corners and no black box. Ghost mode still hides it from capture.
     /// </summary>
-    void TryEnableGlass()
+    void EnableAcrylic()
     {
-        if (Environment.OSVersion.Version.Build < 22000) return; // Win11+
+        if (Environment.OSVersion.Version.Build < 22000) return;
         try
         {
             var dark = 1;
@@ -243,8 +237,6 @@ public partial class PillWindow : Window
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int newLong);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr hRgn, bool redraw);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int w, int h);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, ref RECT pv, uint winIni);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
@@ -253,8 +245,6 @@ public partial class PillWindow : Window
 
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
 
-    // Dark immersive frame styling (Win11). Real acrylic see-through isn't compatible
-    // with ghost mode's opaque non-layered window, so the glass look is done in XAML.
     const int DwmwaUseImmersiveDarkMode = 20;
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 }

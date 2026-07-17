@@ -295,9 +295,19 @@ Docs: `mansplain/11-fits-your-pc.md`.
 
 - **Recording chip** — removed the fake looping waveform; the recording pill is now a small calm chip (breathing dot + time + stop, 138×46) instead of a wide animated bar.
 - **Click-outside dismissal** — `DismissOnClickOutside` reduced to `{Home, NoSpeech}`; Notes/Library/Settings (and recording/summarizing) no longer vanish when you click into your real work.
-- **"Glass" pill** — true see-through is incompatible with ghost mode (opaque non-layered window). **Owner chose to keep ghost mode**, so the pill uses an opaque *frosted* look (top-lit gradient + sheen + hairline border) rather than real translucency.
+- **"Glass" pill** — first attempt kept it opaque (mistakenly thought translucency broke ghost mode). Corrected in M6.4.
 
 Still open: further speed (live transcription remains the real answer).
+
+## M6.4 — Real translucent glass, crisp icons, design-matched Library (2026-07-17)
+
+Owner pointed out (correctly) that Cluely / "cheating daddy" have transparent windows *and* stay hidden from screen capture — so the M6.3 "opaque only" conclusion was wrong.
+
+- **Genuinely translucent pill** — `PillWindow` is now `AllowsTransparency=True` with a translucent Border fill + top sheen. Verified: `--noghost` shows a see-through pill; **ghost-on shows it absent from capture** (ghost still works, via `WDA_EXCLUDEFROMCAPTURE` re-applied on every show). No DWM accent acrylic (it caused sharp black corners); corners are clean because outside the Border the window is truly transparent.
+- **Crisp icons** — all buttons use **Segoe Fluent Icons**; copy / open-window / close are now distinct (were ambiguous unicode glyphs). `IconButton` restyled to a clean floating glyph with a subtle hover highlight.
+- **Library cards** — date badge + meta + snippet + "N open / N people" chips, matching `Toki-ProductDesign/⑥`.
+
+Still open from the owner's batch: smooth pill→Library **morph** transition, and **drag-to-reorder** notes.
 
 ## Live transcription preview (parked)
 

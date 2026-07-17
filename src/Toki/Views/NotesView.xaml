@@ -17,11 +17,12 @@
                 <TextBlock x:Name="Subtitle" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button x:Name="CopyBtn" Style="{StaticResource IconButton}" Content="⧉" FontSize="13"
+                <Button x:Name="CopyBtn" Style="{StaticResource IconButton}" Content="&#xE8C8;"
                         ToolTip="Copy transcript" Click="OnCopy"/>
-                <Button Style="{StaticResource IconButton}" Content="⤢" FontSize="13" Margin="4,0,0,0"
+                <Button Style="{StaticResource IconButton}" Content="&#xE740;"
                         ToolTip="Open in Library window" Click="OnMaximise"/>
-                <Button Style="{StaticResource IconButton}" Content="✕" Margin="4,0,0,0" Click="OnClose"/>
+                <Button Style="{StaticResource IconButton}" Content="&#xE711;"
+                        ToolTip="Close" Click="OnClose"/>
             </StackPanel>
         </Grid>
 

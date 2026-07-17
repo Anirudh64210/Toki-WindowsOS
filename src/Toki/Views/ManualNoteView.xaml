@@ -8,10 +8,10 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <Button Style="{StaticResource IconButton}" Content="‹" FontSize="16" Click="OnBack"/>
+            <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <TextBlock Grid.Column="1" Text="Note" Style="{StaticResource Dim}" FontSize="10"
                        Margin="10,0,0,0" VerticalAlignment="Center"/>
-            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="✕" Click="OnClose"/>
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="&#xE711;" Click="OnClose"/>
         </Grid>
 
         <TextBox x:Name="TitleBox" DockPanel.Dock="Top" Background="Transparent" BorderThickness="0"

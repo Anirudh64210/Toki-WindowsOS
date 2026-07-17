@@ -14,7 +14,7 @@
             </Viewbox>
             <TextBlock Grid.Column="1" Text="Welcome back, Sid!" Style="{StaticResource Body}"
                        FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0" VerticalAlignment="Center"/>
-            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="⚙" FontSize="14"
+            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="&#xE713;"
                     ToolTip="Settings" Click="OnSettings"/>
         </Grid>
 
