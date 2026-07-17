@@ -36,6 +36,11 @@ public sealed class TranscriptionService
             return null;
         }
 
+        // On a small-RAM PC the 2.5GB notes LLM cannot be resident while the recognizer
+        // decodes a long meeting — that's the native OOM crash. Free it first so the
+        // recognizer has room; the LLM reloads on demand after transcription.
+        if (App.LowMemoryMode) Toki.Llm.LlmService.Instance.Release();
+
         lock (_gate)
         {
             try { _transcriber ??= new Transcriber(); }
@@ -76,5 +81,22 @@ public sealed class TranscriptionService
             try { _transcriber ??= new Transcriber(); }
             catch (Exception ex) { App.Log($"transcriber warm failed: {ex.Message}"); }
         }
+    }
+
+    /// <summary>
+    /// Free the recognizer (~630MB). Used in low-memory mode so the notes LLM can load
+    /// without the two models fighting over RAM. The next transcription reloads it.
+    /// </summary>
+    public void Release()
+    {
+        lock (_gate)
+        {
+            if (_transcriber is null) return;
+            try { _transcriber.Dispose(); } catch { }
+            _transcriber = null;
+            App.Log("ASR recognizer released (low-memory)");
+        }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
     }
 }

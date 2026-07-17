@@ -8,17 +8,43 @@
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="{StaticResource UiFont}"
         Width="120" Height="40" KeyDown="OnKeyDown">
-    <!-- Opaque window clipped to a rounded region (see code-behind). The Border
-         draws the matching rounded fill + subtle edge; Host stretches the current
-         view to fill the window so content never overflows/clips. -->
-    <Border x:Name="Root" Background="{StaticResource Surface}"
-            BorderBrush="#20FFFFFF" BorderThickness="1" CornerRadius="22">
-        <!-- Grid stretches its child view to fill the window exactly, so content
-             wraps/scrolls within bounds instead of overflowing and clipping. -->
-        <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
-            <Grid.RenderTransform>
-                <ScaleTransform x:Name="HostScale"/>
-            </Grid.RenderTransform>
+    <!-- Opaque window clipped to a rounded region (see code-behind). The Border is the
+         pill surface: a subtle top-lit gradient + a soft top "sheen" gives a premium
+         frosted-glass look without true transparency (which can't coexist with ghost
+         mode's opaque non-layered window). Host stretches the current view to fill. -->
+    <Border x:Name="Root" CornerRadius="22" BorderThickness="1">
+        <Border.BorderBrush>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#33FFFFFF" Offset="0"/>
+                <GradientStop Color="#14FFFFFF" Offset="0.5"/>
+                <GradientStop Color="#10000000" Offset="1"/>
+            </LinearGradientBrush>
+        </Border.BorderBrush>
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#1B1E22" Offset="0"/>
+                <GradientStop Color="#101215" Offset="0.45"/>
+                <GradientStop Color="#0B0B0C" Offset="1"/>
+            </LinearGradientBrush>
+        </Border.Background>
+        <Grid>
+            <!-- Glass sheen: a faint highlight along the top edge, fading out quickly. -->
+            <Border CornerRadius="22" IsHitTestVisible="False">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#1FFFFFFF" Offset="0"/>
+                        <GradientStop Color="#08FFFFFF" Offset="0.12"/>
+                        <GradientStop Color="#00FFFFFF" Offset="0.32"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+            <!-- Grid stretches its child view to fill the window exactly, so content
+                 wraps/scrolls within bounds instead of overflowing and clipping. -->
+            <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
+                <Grid.RenderTransform>
+                    <ScaleTransform x:Name="HostScale"/>
+                </Grid.RenderTransform>
+            </Grid>
         </Grid>
     </Border>
 </Window>

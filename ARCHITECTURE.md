@@ -90,6 +90,8 @@ The mic is the signal: a call is essentially the only everyday reason another ap
 
 **Decision (M3): detection prompts, never auto-records.** Confirmed by the research below — every mature local tool ships manual/confirmed start; silent auto-join is the risky, opt-in feature. For a privacy product, "we noticed a call — record it?" is the trustworthy default.
 
+**Decision: a *manual* start still captures the other side.** Starting a recording from Home/hotkey used to be mic-only (`BeginRecording(null)`), so a user who muted themselves and hit record saved nothing but silence — a real lost meeting. Now `BeginRecording` resolves a target when none is given (`ResolveMeetingTarget` → the non-denylisted app currently holding the mic, via `MicUsageReader`) and taps its process tree too. Auto-stop (target releases the mic) stays armed **only** for prompt-accepted meetings — a manual start is stopped by the user, because some apps drop the mic on mute and that must not end a manual recording. A sub-3s recording with <5 words is treated as an accidental tap and discarded (no hollow Library entry).
+
 ## Overlay dismissal & focus (M3 fix)
 
 Click-away/Esc dismissal uses **global low-level mouse + keyboard hooks** (`InputMonitor`), not WPF window activation. Activation-based closing fired on unrelated focus changes and flickered the pill shut on launch. The hooks let Toki stay a true no-focus overlay (fits ghost mode) and only dismiss on a real click *outside* the shell rect (with a 500ms grace period after opening). Escape is handled the same way so it works without the window holding keyboard focus.
@@ -216,7 +218,37 @@ Driven by owner testing on real meetings. Three fronts: what the notes look like
 
 `LlmRuntime.Resolve()` runs before any LLamaSharp call. It reads true dedicated VRAM from the driver registry (`HKLM\...\Control\Class\{4d36e968-...}\NNNN\HardwareInformation.qwMemorySize`, max across adapters — no COM interop) and picks: ≥7 GB → full offload / ctx 4096; ≥3.9 GB → **20 layers / ctx 3072**; else CPU. `App` then loads the Vulkan backend **only** when `GpuLayers > 0`. Offload is deliberately conservative (20 of 36 layers ≈ 2.3 GB of 4 GB) to keep headroom — a live video call also holds VRAM, and a GPU OOM at model load is an **uncatchable native crash**. Tuning knobs: `AppSettings.GpuLayers` (0 = auto, -1 = force CPU, >0 = force N; Settings toggle maps to auto/CPU), env `TOKI_GPU_LAYERS` / `TOKI_CTX`.
 
-**Both engines warmed at launch** (`LlmService.Instance.Warm()` alongside the ASR warm), so a meeting-stop pays no model-load time — the warm number (~13s) is what the user actually sees.
+**Both engines warmed at launch — gently, and memory-permitting.** On a machine with enough RAM, `WarmEnginesGently` loads the ASR then the LLM on a single **below-normal-priority** background thread, after a short delay and staggered, so a meeting-stop pays no model-load time without the launch making the PC stutter. On a small-RAM PC the LLM is **not** prewarmed (see below).
+
+### Memory: one heavy model at a time on a small PC (`App.LowMemoryMode`)
+
+**Finding (paid for on the owner's 6 GB laptop): holding both models resident is what actually crashed transcription, made first-launch clunky, and slowed everything.** Qwen3-4B (~2.5 GB) + Parakeet (~630 MB), on top of a browser and the meeting app, does not fit in 6 GB. The symptoms all traced to this: a real 35-min meeting saved *"nothing was said"* (onnxruntime threw the uncatchable-looking native `External component has thrown an exception` — it's an allocation failure), the mouse stuttered on first launch (heavy Windows memory-compression + paging while the 2.5 GB model preloaded), and processing dragged (swapping).
+
+`Interop.SystemMemory.Physical()` (P/Invoke `GlobalMemoryStatusEx`) reads total RAM at startup; `< 8 GB` sets `App.LowMemoryMode`. In that mode Toki keeps **only one heavy model resident at a time**:
+- **Before transcribing**, `TranscriptionService.Process` calls `LlmService.Release()` (dispose weights + GC).
+- **Before writing notes**, `LlmService.EnsureLocal` calls `TranscriptionService.Release()`.
+- **The LLM is never prewarmed** (the big preload was the main launch-clunk cause); it loads on demand at meeting-end.
+- **After notes**, the LLM is released and the small recognizer is re-warmed, so idle Toki is light and the next meeting is ready.
+
+Peak footprint drops from ~3.1 GB (both) to ~max(2.5, 0.63) GB. The cost on a small PC is a few seconds of model-load at meeting-end instead of it being pre-ready — a deliberate trade of a little latency for reliability and a responsive desktop. On an 8 GB+ PC nothing changes (both stay warm).
+
+### Recording presence: calm, not a stuck animation
+
+**Decision: the recording pill is a small, quiet chip — no looping waveform.** The old recording bar sat at bottom-center the whole meeting showing a **fake** animated "waveform" (a fixed decorative pattern, not real audio levels), which read as a distraction sitting on screen for 30+ minutes. It's now a compact chip (138×46): a slowly-breathing coral dot, the elapsed time, and a stop button. Click to expand for the transcript view. The expanded view's waveform became a calm "● Recording" indicator too.
+
+### Click-outside dismissal: only ephemeral popups
+
+**Decision: a stray click into your real work must never dismiss content you're using.** Click-outside used to close Home, Library, Settings, **Notes**, and NoSpeech — so clicking into the meeting app while reading notes made them vanish. Now `DismissOnClickOutside` is just `{Home, NoSpeech}` (the launcher menu and the transient "nothing was said" toast). Notes, Library, Settings, ManualNote — and recording/summarizing/prompt — stay until closed with their own button or Esc.
+
+### The pill's "glass" look — opaque frosted, not see-through (owner decision)
+
+**Finding: true translucency and ghost mode are mutually exclusive in WPF.** Ghost mode (`WDA_EXCLUDEFROMCAPTURE`) is reliable only on an **opaque, non-layered** window; real acrylic/translucency needs a **layered alpha** surface (`AllowsTransparency=True`), which both re-introduces the black-rectangle capture glitch and forces software rendering. DWM's system-backdrop can't help either — WPF's opaque swap-chain has no alpha for the backdrop to show through. **Owner chose to keep ghost mode.** So the "glass" is an opaque *look*: a top-lit vertical gradient + a faint top "sheen" + a gradient hairline border (all in `PillWindow.xaml`), plus the Win11 dark immersive-frame attribute. `TryEnableGlass` now only sets that dark-mode attribute.
+
+### Long recordings never crash or OOM (windowed ASR)
+
+**Finding: whole-file decode of a very long clip throws in the native recognizer, and the old loader OOM'd before it even got there.** Two fixes in the ASR path:
+- `AudioLoader.To16kMono` now fills one exact-size array instead of a doubling `List<float>` + `ToArray` (which transiently held 3–4× the samples — it OOM'd on a 35-min file).
+- `Transcriber.Transcribe` keeps the single whole-file path for normal-length meetings (best accuracy, lesson 3) but, past a safe length (~6 min; env `TOKI_ASR_MAXSEC`), walks the audio in ~3-min windows **cut at the quietest nearby 25 ms frame** so no word is split, decoding each with a fresh stream and offsetting timestamps to meeting time. A per-window `try/catch` means one bad window can't lose the whole meeting. Verified on the owner's actual 784 MB / 35-min recording that previously crashed.
 
 ### No "bad first draft" flash
 

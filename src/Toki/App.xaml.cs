@@ -24,6 +24,14 @@ public partial class App : Application
     /// <summary>Set on Stop: true when nothing audible was captured (→ friendly empty state).</summary>
     public static bool LastRecordingSilent { get; private set; }
 
+    /// <summary>
+    /// True on a memory-constrained PC (&lt;8GB RAM). In this mode Toki keeps only ONE
+    /// heavy model resident at a time (release the LLM before transcribing, release
+    /// the recognizer before writing notes) and never preloads the LLM — otherwise
+    /// the 2.5GB LLM + 630MB recognizer starve transcription and page the whole PC.
+    /// </summary>
+    public static bool LowMemoryMode { get; private set; }
+
     /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
     public static IReadOnlyList<TranscriptSegment>? LastTranscript { get; private set; }
 
@@ -82,6 +90,13 @@ public partial class App : Application
 
         Log($"startup args=[{string.Join(" ", e.Args)}]");
         GhostDisabled = e.Args.Contains("--noghost");
+
+        // How much RAM does this PC have? Toki's two heavy models (2.5GB LLM + 630MB
+        // recognizer) don't both fit alongside a browser + meeting app on a small
+        // machine — keeping both resident crashes transcription and pages the PC.
+        var (totalGB, availGB) = Interop.SystemMemory.Physical();
+        LowMemoryMode = totalGB > 0 && totalGB < 8.0;
+        Log($"system RAM {totalGB:F1}GB (avail {availGB:F1}GB) → {(LowMemoryMode ? "LOW-MEMORY mode: one model at a time, no LLM prewarm" : "normal mode")}");
 
         // Decide how to run the model on THIS machine (GPU layers + context) BEFORE
         // any LLamaSharp call. Load the Vulkan backend ONLY when we actually intend to
@@ -187,9 +202,41 @@ public partial class App : Application
         StartMeetingDetection();
 
         // Warm both engines ahead of the first meeting so a stop never waits on model
-        // load (lesson 2). Off the UI thread; no-ops if a model isn't installed.
-        System.Threading.Tasks.Task.Run(() => TranscriptionService.Instance.Warm());
-        LlmService.Instance.Warm();
+        // load (lesson 2) — but GENTLY. Toki must never make the rest of the PC feel
+        // clunky. See WarmEnginesGently.
+        WarmEnginesGently();
+    }
+
+    /// <summary>
+    /// Load the ASR + LLM models ahead of the first meeting without disrupting the PC.
+    /// The old path fired both heavy loads at once on normal-priority threads —
+    /// reading ~3GB from disk, building graphs and uploading to the GPU all together —
+    /// which made the mouse and desktop stutter on first launch of the day. Instead a
+    /// single below-normal-priority background thread waits for the UI to settle, then
+    /// loads the models one at a time. A finished meeting still never waits on a load,
+    /// but starting Toki no longer competes with whatever you're doing.
+    /// </summary>
+    static void WarmEnginesGently()
+    {
+        var t = new System.Threading.Thread(() =>
+        {
+            try { System.Threading.Thread.Sleep(3000); } catch { } // let the app finish appearing
+            try { TranscriptionService.Instance.Warm(); }
+            catch (Exception ex) { Log($"ASR warm (non-fatal): {ex.Message}"); }
+            // On a small-RAM PC we do NOT preload the 2.5GB LLM — that's what made the
+            // machine clunky on first launch and starved transcription. It loads on
+            // demand (one model at a time) when a meeting actually ends.
+            if (LowMemoryMode) { Log("low-memory: skipping LLM prewarm (loads on demand)"); return; }
+            try { System.Threading.Thread.Sleep(750); } catch { }  // don't stack the two loads
+            try { LlmService.Instance.WarmBlocking(); }
+            catch (Exception ex) { Log($"LLM warm (non-fatal): {ex.Message}"); }
+        })
+        {
+            IsBackground = true,
+            Priority = System.Threading.ThreadPriority.BelowNormal,
+            Name = "toki-warm",
+        };
+        t.Start();
     }
 
     void StartMeetingDetection()
@@ -218,6 +265,9 @@ public partial class App : Application
     public static void AcceptPrompt()
     {
         BeginRecording(CurrentApp);
+        // Auto-stop when the meeting app releases the mic — but only for a prompt we
+        // detected. A manual start is stopped by the user, so it isn't armed here
+        // (some apps drop the mic when you mute, which must NOT end a manual recording).
         if (CurrentApp is not null) _detector?.BeginRecording(CurrentApp);
         State.TryGo(PillState.RecordingBar);
     }
@@ -250,7 +300,7 @@ public partial class App : Application
         // Wall-clock duration = stop − start (lesson 10), captured at stop time.
         var startedAt = State.RecordingStartedAt ?? DateTimeOffset.UtcNow;
         var durationMs = (int)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        var app = CurrentApp?.DisplayName;
+        var app = session?.Target?.DisplayName ?? CurrentApp?.DisplayName;
 
         // Show the loader immediately; finalize capture + transcribe + save entirely
         // off the UI thread (never freeze the pill), then advance when done.
@@ -266,8 +316,15 @@ public partial class App : Application
             try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
 
+            // An accidental tap (start → immediate stop) shouldn't become a hollow
+            // Library entry. A sub-3s recording with barely any words is a mis-click,
+            // not a meeting — drop it and show the friendly empty state instead.
+            var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
+            var tooTrivial = transcript is { Count: > 0 } && durationMs < 3000 && words < 5;
+            if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) — accidental tap");
+
             MeetingRecord? meeting = null;
-            if (transcript is { Count: > 0 })
+            if (transcript is { Count: > 0 } && !tooTrivial)
             {
                 try
                 {
@@ -314,13 +371,23 @@ public partial class App : Application
                     }
                 }
                 catch (Exception ex) { Log($"LLM notes failed (kept heuristic): {ex.Message}"); }
+
+                // Low-memory: don't leave the 2.5GB model sitting resident while the user
+                // reads their notes and goes back to work. Drop it and re-warm the small
+                // recognizer so idle Toki is light and the next meeting is ready to record.
+                if (LowMemoryMode)
+                {
+                    LlmService.Instance.Release();
+                    TranscriptionService.Instance.Warm();
+                }
             }
 
             Current.Dispatcher.BeginInvoke(() =>
             {
                 LastTranscript = transcript;
                 CurrentMeeting = meeting;
-                if (transcript is { Count: 0 }) State.TryGo(PillState.NoSpeech);
+                // No saved meeting (silence, trivial tap, or no ASR model) → empty state.
+                if (meeting is null) State.TryGo(PillState.NoSpeech);
                 else State.TryGo(PillState.Notes);
             });
         });
@@ -330,6 +397,12 @@ public partial class App : Application
     {
         try
         {
+            // No explicit target (manual/hotkey/Home start) → find the meeting app
+            // currently on the mic so we still capture "them". This is what makes
+            // "mute yourself and hit record" actually save the other person; without
+            // it, a manual start is mic-only and a muted meeting saves nothing.
+            app ??= ResolveMeetingTarget();
+            CurrentApp = app; // so the saved meeting is labelled with the right app
             var session = new RecordingSession(app);
             _session = session;
             // Start capture off the UI thread too — device init can take ~100ms.
@@ -339,6 +412,25 @@ public partial class App : Application
             });
         }
         catch (Exception ex) { Log($"begin recording failed (non-fatal): {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Best-effort meeting app when recording starts without an explicit target.
+    /// Picks the (non-denylisted) app currently holding the mic open — how Toki
+    /// still captures "them" when you mute yourself and hit record, or start a
+    /// recording mid-call. Null = nobody else on the mic (a genuine solo note).
+    /// </summary>
+    static DetectedApp? ResolveMeetingTarget()
+    {
+        try
+        {
+            var app = MicUsageReader.GetActiveMicApps()
+                .FirstOrDefault(a => !MeetingDetector.IsDenylisted(a));
+            if (app is not null) Log($"manual start: resolved meeting target '{app.DisplayName}'");
+            else Log("manual start: no meeting app on mic — recording mic only");
+            return app;
+        }
+        catch (Exception ex) { Log($"resolve meeting target failed (mic-only): {ex.Message}"); return null; }
     }
 
     void InstallGlobalExceptionHandlers()

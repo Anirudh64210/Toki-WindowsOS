@@ -24,7 +24,7 @@ public partial class PillWindow : Window
     {
         [PillState.Collapsed]     = (132, 40),
         [PillState.MeetingPrompt] = (300, 74),
-        [PillState.RecordingBar]  = (236, 52),
+        [PillState.RecordingBar]  = (138, 46),
         [PillState.RecordingOpen] = (372, 234),
         [PillState.Summarizing]   = (340, 164),
         [PillState.Notes]         = (424, 438),
@@ -39,8 +39,13 @@ public partial class PillWindow : Window
     const double TopMargin = 12;  // never touch the top edge
     const double CornerRadius = 22;
 
-    static readonly HashSet<PillState> PanelStates =
-        [PillState.Home, PillState.Library, PillState.Settings, PillState.Notes, PillState.NoSpeech];
+    // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
+    // transient "nothing was said" toast). Everything with content you actually work
+    // with — Notes, Library, Settings, ManualNote — stays put until you close it with
+    // its own button or Esc; a stray click into your real work must never make it
+    // vanish. Recording/Summarizing/MeetingPrompt were never dismissable this way.
+    static readonly HashSet<PillState> DismissOnClickOutside =
+        [PillState.Home, PillState.NoSpeech];
 
     readonly AppState _state;
     readonly Dictionary<PillState, UserControl> _views = new();
@@ -75,11 +80,12 @@ public partial class PillWindow : Window
                 SetWindowDisplayAffinity(_hwnd, WdaExcludeFromCapture); // reliable on non-layered windows
             SetWindowLong(_hwnd, GwlExStyle, GetWindowLong(_hwnd, GwlExStyle) | WsExToolWindow);
             ApplyRoundedRegion(); // DWM won't round a borderless window — clip it ourselves
+            TryEnableGlass();     // Win11: frosted-translucent pill (falls back to opaque)
         }
         catch (Exception ex) { App.Log($"window setup failed (non-fatal): {ex.Message}"); }
 
         _input = new Interop.InputMonitor(
-            isArmed: () => PanelStates.Contains(_state.Current)
+            isArmed: () => DismissOnClickOutside.Contains(_state.Current)
                            && Environment.TickCount64 - _panelShownTick > 500,
             isInsidePanel: PointInWindow,
             dismiss: () => Dispatcher.BeginInvoke(() =>
@@ -153,7 +159,7 @@ public partial class PillWindow : Window
         var fromHidden = old == PillState.Hidden || !IsVisible;
         Host.Children.Clear();
         Host.Children.Add(ViewFor(next));
-        if (PanelStates.Contains(next)) _panelShownTick = Environment.TickCount64;
+        if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
 
         var (w, h) = Sizes[next];
         var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
@@ -184,6 +190,24 @@ public partial class PillWindow : Window
             SetWindowRgn(_hwnd, rgn, true); // OS takes ownership of the region
         }
         catch (Exception ex) { App.Log($"region failed (non-fatal): {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Use the dark immersive DWM title/frame styling. (True see-through acrylic is NOT
+    /// possible here: ghost mode needs an opaque, non-layered window, while real
+    /// translucency needs a layered alpha surface — the two are mutually exclusive in
+    /// WPF, so the pill's premium "frosted" look is done with an opaque gradient + sheen
+    /// in XAML instead.)
+    /// </summary>
+    void TryEnableGlass()
+    {
+        if (Environment.OSVersion.Version.Build < 22000) return; // Win11+
+        try
+        {
+            var dark = 1;
+            DwmSetWindowAttribute(_hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
+        }
+        catch (Exception ex) { App.Log($"dark mode attr failed (non-fatal): {ex.Message}"); }
     }
 
     void MorphContent()
@@ -228,4 +252,9 @@ public partial class PillWindow : Window
     const uint SwpNoSize = 0x0001, SwpNoZOrder = 0x0004, SwpNoActivate = 0x0010;
 
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+
+    // Dark immersive frame styling (Win11). Real acrylic see-through isn't compatible
+    // with ghost mode's opaque non-layered window, so the glass look is done in XAML.
+    const int DwmwaUseImmersiveDarkMode = 20;
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 }

@@ -14,6 +14,21 @@ public sealed class Transcriber : IDisposable
     // Split into a new segment when tokens are separated by more than this silence.
     const double SegmentGapSeconds = 0.8;
 
+    // Whole-file decode is best (lesson 3) but the native recognizer THREW on a
+    // real 35-minute clip ("External component has thrown an exception") and the
+    // whole meeting was lost. So: normal-length meetings still take the single
+    // whole-file path; anything longer is split into windows cut at quiet points
+    // (avoids slicing mid-word) and decoded piece by piece. Never crash, never
+    // lose a long meeting.
+    // Env override (seconds) lets tests trigger the windowed path on a short clip.
+    static readonly int SafeMaxSamples = SecondsEnv("TOKI_ASR_MAXSEC", 6 * 60) * AudioLoader.TargetRate;
+    static readonly int WindowSamples  = SecondsEnv("TOKI_ASR_WINSEC", 3 * 60) * AudioLoader.TargetRate;
+    const int SearchSamples  = 5 * AudioLoader.TargetRate;       // ±5s quiet-point search
+    const int FrameSamples   = 400;                              // 25ms energy frame
+
+    static int SecondsEnv(string name, int fallback) =>
+        int.TryParse(Environment.GetEnvironmentVariable(name), out var s) && s > 0 ? s : fallback;
+
     readonly OfflineRecognizer _recognizer;
 
     public Transcriber()
@@ -38,16 +53,62 @@ public sealed class Transcriber : IDisposable
     /// </summary>
     public IReadOnlyList<TranscriptSegment> Transcribe(float[] samples16kMono, Speaker speaker)
     {
+        if (samples16kMono.Length <= SafeMaxSamples)
+            return TranscribeWindow(samples16kMono, 0, samples16kMono.Length, 0, speaker);
+
+        // Long recording: walk it in windows, each cut at a quiet point so we never
+        // slice a word in half. Timestamps stay meeting-relative via the offset.
+        App.Log($"ASR long path: {samples16kMono.Length} samples ({samples16kMono.Length / (double)AudioLoader.TargetRate:F0}s), windowing");
+        var all = new List<TranscriptSegment>();
+        var pos = 0;
+        while (pos < samples16kMono.Length)
+        {
+            var target = Math.Min(pos + WindowSamples, samples16kMono.Length);
+            var cut = target >= samples16kMono.Length ? samples16kMono.Length : QuietCut(samples16kMono, target, SearchSamples);
+            if (cut <= pos) cut = target; // guarantee forward progress
+            var offsetSec = pos / (double)AudioLoader.TargetRate;
+            App.Log($"ASR window @ {offsetSec:F0}s [{pos}..{cut}] ({(cut - pos) / (double)AudioLoader.TargetRate:F0}s)");
+            try { all.AddRange(TranscribeWindow(samples16kMono, pos, cut, offsetSec, speaker)); }
+            catch (Exception ex) { App.Log($"ASR window {offsetSec:F0}s failed, skipping: {ex.GetType().Name}: {ex.Message}"); }
+            pos = cut;
+        }
+        App.Log($"ASR long path done: {all.Count} segments");
+        return all;
+    }
+
+    /// <summary>Decode one slice [start,end) with a fresh stream; timestamps offset to meeting time.</summary>
+    List<TranscriptSegment> TranscribeWindow(float[] samples, int start, int end, double offsetSec, Speaker speaker)
+    {
+        var len = end - start;
+        if (len <= 0) return [];
+        var slice = start == 0 && end == samples.Length ? samples : samples[start..end];
         using var stream = _recognizer.CreateStream();
-        stream.AcceptWaveform(AudioLoader.TargetRate, samples16kMono);
+        stream.AcceptWaveform(AudioLoader.TargetRate, slice);
         _recognizer.Decode(stream);
         var r = stream.Result;
         if (string.IsNullOrWhiteSpace(r.Text) || r.Tokens is null || r.Tokens.Length == 0)
             return [];
-        return GroupIntoSegments(r.Tokens, r.Timestamps, r.Durations, speaker);
+        return GroupIntoSegments(r.Tokens, r.Timestamps, r.Durations, offsetSec, speaker);
     }
 
-    static List<TranscriptSegment> GroupIntoSegments(string[] tokens, float[] times, float[] durations, Speaker speaker)
+    /// <summary>Index of the quietest 25ms frame within ±radius of center — a safe place to cut.</summary>
+    static int QuietCut(float[] samples, int center, int radius)
+    {
+        var lo = Math.Max(FrameSamples, center - radius);
+        var hi = Math.Min(samples.Length - FrameSamples, center + radius);
+        if (hi <= lo) return center;
+        var bestIdx = center;
+        var bestEnergy = double.MaxValue;
+        for (var i = lo; i < hi; i += FrameSamples)
+        {
+            double sum = 0;
+            for (var j = i; j < i + FrameSamples; j++) sum += samples[j] * samples[j];
+            if (sum < bestEnergy) { bestEnergy = sum; bestIdx = i; }
+        }
+        return bestIdx;
+    }
+
+    static List<TranscriptSegment> GroupIntoSegments(string[] tokens, float[] times, float[] durations, double offsetSec, Speaker speaker)
     {
         var segments = new List<TranscriptSegment>();
         var sb = new StringBuilder();
@@ -58,7 +119,7 @@ public sealed class Transcriber : IDisposable
         {
             var text = Detokenize(sb.ToString());
             if (text.Length > 0)
-                segments.Add(new TranscriptSegment(speaker, (int)(segStart * 1000), (int)(end * 1000), text));
+                segments.Add(new TranscriptSegment(speaker, (int)((segStart + offsetSec) * 1000), (int)((end + offsetSec) * 1000), text));
             sb.Clear();
         }
 
@@ -82,8 +143,9 @@ public sealed class Transcriber : IDisposable
     static string Detokenize(string joined) =>
         joined.Replace("▁", " ").Replace("  ", " ").Trim();
 
-    // ASR is CPU-bound; use most cores. The two streams run in parallel, so each
-    // recognizer gets ~half so they don't oversubscribe. Env override for tuning.
+    // ASR is CPU-bound; use about half the cores. Streams are decoded sequentially
+    // (concurrent decode corrupts output), so this leaves headroom for the rest of
+    // the PC to stay responsive. Env override for tuning.
     static int ThreadCount()
     {
         if (Environment.GetEnvironmentVariable("TOKI_ASR_THREADS") is { } s && int.TryParse(s, out var n) && n > 0)

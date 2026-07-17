@@ -23,12 +23,24 @@ public static class AudioLoader
             ? mono
             : new WdlResamplingSampleProvider(mono, TargetRate); // managed resampler, no MediaFoundation
 
-        var samples = new List<float>((int)(reader.TotalTime.TotalSeconds * TargetRate) + TargetRate);
+        // Preallocate the exact array and fill it in place. The old List<float> +
+        // ToArray path transiently held 3-4x the final size (doubling growth + a full
+        // copy), which OOM'd on a 35-min recording once the LLM was warmed. This holds
+        // just the one array.
+        var estimate = (int)(reader.TotalTime.TotalSeconds * TargetRate) + TargetRate;
+        var samples = new float[estimate];
+        var count = 0;
         var buffer = new float[TargetRate]; // ~1s chunks
         int read;
         while ((read = src.Read(buffer, 0, buffer.Length)) > 0)
-            samples.AddRange(new ArraySegment<float>(buffer, 0, read));
-        return samples.ToArray();
+        {
+            if (count + read > samples.Length)
+                Array.Resize(ref samples, Math.Max(samples.Length + TargetRate, count + read));
+            Array.Copy(buffer, 0, samples, count, read);
+            count += read;
+        }
+        if (count != samples.Length) Array.Resize(ref samples, count);
+        return samples;
     }
 
     /// <summary>Duration of a WAV in milliseconds, without decoding all samples.</summary>

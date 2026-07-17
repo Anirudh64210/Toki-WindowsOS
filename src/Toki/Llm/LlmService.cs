@@ -37,6 +37,10 @@ public sealed class LlmService
     {
         if (_local is not null) return _local;
         if (_localFailed || !ModelManager.QwenInstalled) return null;
+        // On a small-RAM PC, free the ~630MB recognizer before loading the 2.5GB LLM —
+        // both resident is what crashes/pages the machine. The recognizer reloads for
+        // the next meeting.
+        if (App.LowMemoryMode) TranscriptionService.Instance.Release();
         lock (_gate)
         {
             if (_local is not null) return _local;
@@ -56,6 +60,35 @@ public sealed class LlmService
     {
         if (AppSettings.Current.NotesMode == NotesMode.Local && ModelManager.QwenInstalled)
             System.Threading.Tasks.Task.Run(() => EnsureLocal());
+    }
+
+    /// <summary>
+    /// Warm synchronously on the caller's thread — used by the gentle low-priority
+    /// startup warmer so the model load inherits that below-normal priority instead
+    /// of running on a normal-priority thread-pool thread.
+    /// </summary>
+    public void WarmBlocking()
+    {
+        if (AppSettings.Current.NotesMode == NotesMode.Local && ModelManager.QwenInstalled)
+            EnsureLocal();
+    }
+
+    /// <summary>
+    /// Free the local model (~2.5GB). Used in low-memory mode so the recognizer can run
+    /// without the two models fighting over RAM, and so idle Toki isn't holding the big
+    /// model. It reloads on demand for the next set of notes.
+    /// </summary>
+    public void Release()
+    {
+        lock (_gate)
+        {
+            if (_local is IDisposable d) { try { d.Dispose(); } catch { } }
+            if (_local is not null) App.Log("LLM released (low-memory)");
+            _local = null;
+            _localFailed = false;
+        }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
     }
 
     /// <summary>Write notes with the active model, or null to keep the heuristic notes.</summary>

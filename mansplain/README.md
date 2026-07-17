@@ -14,3 +14,4 @@ Read them in order:
 8. [Toki remembers, and pulls out the useful bits](08-remembering-meetings.md) — local database, first-pass notes, the searchable Library, and manual notes.
 9. [Toki writes the notes like a person would](09-ai-written-notes.md) — the on-device AI writer, three-pass notes, safety net, and the GPU control.
 10. [Making the notes better, cleaner, and faster](10-refined-and-faster.md) — Granola-style notes, concise titles, no ugly first draft, a big speed-up, the Library window, and the honest story on transcription speed.
+11. [Making Toki fit your PC](11-fits-your-pc.md) — the lost-meeting bug explained, capturing the other people on a manual start, long meetings that can't crash, and fitting two big models into a small memory.

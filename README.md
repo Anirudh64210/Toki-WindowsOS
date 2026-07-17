@@ -279,6 +279,26 @@ Owner testing on real meetings drove a batch of refinements to the notes, the en
 - `--llmtest`: new structure + concise title, **~27s cold / ~13s warm**, no degeneration. 49/49 tests.
 - Live DPI-aware captures of the Library window, manual-note editor, and pill Notes view — all render correctly after fixing a WPF crash (a `Template` set inside a `ControlTemplate` trigger blanked the window black).
 
+## M6.2 — Reliability on a small PC (2026-07-16)
+
+Triggered by a real 30-min meeting that saved **"nothing was said."** Root-caused from the logs + the actual 784 MB recording to a **6 GB RAM** machine trying to hold both heavy models (2.5 GB LLM + 630 MB ASR) at once.
+
+- **Manual start now captures the other side.** Recording from Home/hotkey was mic-only, so a muted user saved silence. `BeginRecording` now resolves the meeting app on the mic (`ResolveMeetingTarget`) and taps it. Auto-stop stays armed only for prompt-accepted meetings.
+- **Long meetings can't crash ASR.** `Transcriber` windows long audio into ~3-min slices cut at quiet points (whole-file kept for normal meetings). Verified end-to-end on the exact 35-min file that used to throw.
+- **Loader OOM fixed.** `AudioLoader` preallocates one exact array instead of a doubling `List` + `ToArray`.
+- **Low-memory mode (`App.LowMemoryMode`, <8 GB).** Only one heavy model resident at a time (release LLM before transcribe, release ASR before notes, no LLM prewarm, release LLM after notes). This is the fix for the crash *and* the first-launch clunkiness.
+- **Gentle warm** on a below-normal-priority thread; **junk-tap guard** (sub-3s, <5 words → discarded, no hollow Library entry).
+
+Docs: `mansplain/11-fits-your-pc.md`.
+
+## M6.3 — Calmer recording, sane dismissal, honest "glass" (2026-07-16)
+
+- **Recording chip** — removed the fake looping waveform; the recording pill is now a small calm chip (breathing dot + time + stop, 138×46) instead of a wide animated bar.
+- **Click-outside dismissal** — `DismissOnClickOutside` reduced to `{Home, NoSpeech}`; Notes/Library/Settings (and recording/summarizing) no longer vanish when you click into your real work.
+- **"Glass" pill** — true see-through is incompatible with ghost mode (opaque non-layered window). **Owner chose to keep ghost mode**, so the pill uses an opaque *frosted* look (top-lit gradient + sheen + hairline border) rather than real translucency.
+
+Still open: further speed (live transcription remains the real answer).
+
 ## Live transcription preview (parked)
 
 Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain).
