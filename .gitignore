@@ -22,8 +22,13 @@ dist/
 
 # Debug screenshots dropped in the repo root (design refs live in Toki-ProductDesign/)
 /Screenshot*.png
-/Trial 2 - workflow - engine efficiency needs improvement.mp4
-/Trial1 - workflow-mic and audio input confirmed.mp4
+
+# Trial / demo / screen-recording videos — large, machine-specific, never committed
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
 # On-device models, recordings, and databases (live in %APPDATA%, never committed;
 # these patterns are defensive in case any land in the repo tree during dev)
 *.onnx
