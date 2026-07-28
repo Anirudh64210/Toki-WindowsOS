@@ -317,6 +317,44 @@ Owner feedback on the first pass: coloured section headers + green tick were "ug
 - **Morph grows from the pill** — the Library window's content now scales up out of the pill's *exact* on-screen rectangle (not the screen centre), so it reads as the pill extending into a window.
 - **Drag settles cleanly** — on release the card animates into its target slot before committing (it can no longer sit between rows), and an off-by-one in the drop target was fixed.
 
+## M6.6 — Transcript integrity + calmer recording + UI fixes (2026-07-27)
+
+Owner tested real 20-min meetings and hit two real bugs plus a batch of UI issues.
+
+**Transcript was shattered per word (the big one).** Notes came out garbled ("a udi o", "min ute", "D eep ik a"); the transcript broke every 1–2 sub-word pieces. Root-caused meticulously from the actual recordings + logs: `GroupIntoSegments` splits on a time-gap (>0.8s), and the split was allowed to fall **mid-word**. Parakeet emits words as sub-word pieces, and on hesitant/pausey real-meeting speech the gap landed inside words. Verified the tokenizer directly (`--asrtest` debug dump): this Parakeet build marks a new word with a **leading space** on the token (`" R","as","h","m","i"` = "Rashmi"), *not* the `▁` marker the old `Detokenize` assumed (its `▁`→space replace was a silent no-op — the spaces were already literal). Fix: only break at a **word boundary** (token with a leading space / `▁`), on either a real pause **or** end-of-sentence punctuation. Verified on the exact meeting that shattered: **912 fragments → 82 clean per-sentence segments**, whole words throughout, tail matches audio end.
+
+**A muted-mic side is skipped now.** Logs showed meetings where the user's mic was muted the whole call (`you peak 0%`) yet we still spent ~half the total time transcribing pure silence. `TranscriptionService` now skips a near-silent stream (linear amplitude scan, early-exit) — roughly halves processing whenever one side is muted. (The remaining ~4×-real-time floor on a *fully-active* meeting is why live transcription is the next real speed win — parked below.)
+
+**UI**
+- **Recording is out of the way (WisprFlow-style).** While recording, the pill collapses to just the **alive Toki character** (breathing/blinking) with a small pulsing dot — no timer or button sitting on screen. Click it to reveal a compact **timer + Stop**. The expanded view's **fake placeholder transcript** (shown during real recordings — a lie) was removed.
+- **Softer record button.** The harsh fire red-orange (`#F94A26`) → a truer, calmer coral (`#FF6F61`) across record/stop/accents.
+- **Adaptive greeting.** "Welcome back, Sid!" (hardcoded) → the actual user (settings name, else Windows account name).
+- **No em dash** in the "X is in a call. Record it?" prompt.
+- **Library opens instantly.** It felt like a ~2s freeze. Profiled it: the cost was rebuilding content on every open — above all **rendering a 1140-segment transcript synchronously** into a non-virtualizing panel. Fixes: stream the transcript in on background priority (render ~30ms), stop rebuilding twice per open, and keep the window warm + skip the rebuild unless data changed (like WisprFlow keeping its window alive). Measured **~940ms → ~80ms**.
+
+Verified: `--asrtest` on the real 20-min recording (82 clean segments), `--render` of every view, 49/49 unit tests.
+
+## M6.7 — UI/UX overhaul: hover-reveal pill, smooth morphs, cleaner Library (2026-07-27)
+
+A focused pass on how Toki *feels*, driven by live owner testing. Everything below was verified by running the app (view renders, mouse-driven hover cycle in the log, maximise capture) — not just described.
+
+**Toki is now an always-present, hover-reveal pill (WisprFlow-style)**
+- **Launch = the tiny alive Toki pill** (56×44, breathing/blinking), not a static "Welcome back" panel. **Hover it → Home reveals** ("welcome back" + the page); **move away → it collapses back**. Ctrl+Alt+Space toggles the pill on/off.
+- **While recording**, same idea: the tiny Toki sits out of the way; **hover → it grows to the timer + a `Stop` button**; leave → shrinks back. No click needed.
+- **The morph is smooth, not a burst:** the pill *animates its size* (grows over ~300ms, shrinks faster ~190ms so closing feels snappy), staying anchored bottom-centre, content fading in.
+- **Hover detection is cursor-position polling, not WPF `MouseEnter`/`Leave`** — those fire phantom leave/enter while the window animates+repositions under the pointer, which caused an open/close flicker loop. Polling the real cursor vs the pill's real rect gives clean hysteresis (on it → open; off it → closed) with a dwell (~260ms, so a graze won't trigger it) and a quick close (~120ms).
+- **Toki blinks + pops** the moment you hover the pill, and when Home/recording controls appear — alive and glad to see you.
+- Fixed: the expanded recording pill sometimes clipped the `Stop` button (height was exactly tight) — gave it headroom so it always shows. Fixed: Home wouldn't collapse back (the state machine disallowed Home→Collapsed) — added the transition.
+
+**Library window**
+- **Opens instantly** (~80ms): created once and kept warm (pre-built off-screen at launch), hidden not destroyed between opens, and rebuilt only when data changed. The transcript is streamed in on background priority instead of built all at once. See ARCHITECTURE.
+- **Maximise is clean now:** pinned to the monitor work area (`WM_GETMINMAXINFO`) so it snaps correctly with no jump; the content is a **fixed-width readable column** so widening/maximising doesn't re-wrap every transcript line (that reflow was the lag that made the content "sit then snap"); dark window border, not white.
+- **Monotone selection** (soft white hairline, not the coral/red box). The maximise-from-transcript button now hides the pill first, then opens the warm window — consistent with Home→Library.
+
+**Notes & Home**
+- **Manual notes auto-save** in the Library window (debounced) — the static red **Save**/**Cancel** are gone; a quiet "Saved" flashes and fades; the editor left-aligns instead of floating centre.
+- **One `Take Notes` button** on Home (the duplicate "Meeting" is gone — both just recorded).
+
 ## Live transcription preview (parked)
 
-Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain).
+Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain). **Now the clear next step** — on a fully-active meeting, live transcription is the only thing that removes the multi-minute wait at stop.
