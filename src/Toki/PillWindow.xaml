@@ -13,7 +13,9 @@
          (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
          capture even though it's transparent — the two are NOT mutually exclusive.
          A real acrylic blur-behind is applied in code (SetWindowCompositionAttribute). -->
-    <Border x:Name="Root" CornerRadius="22" BorderThickness="1">
+    <!-- Rounded only on the BOTTOM — the top is flush with the screen edge, so it reads as
+         a notch carved into the top, not a floating pill. -->
+    <Border x:Name="Root" CornerRadius="0,0,22,22" BorderThickness="1,0,1,1">
         <Border.BorderBrush>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                 <GradientStop Color="#40FFFFFF" Offset="0"/>
@@ -30,7 +32,7 @@
         </Border.Background>
         <Grid>
             <!-- Glass sheen: a faint highlight along the top edge, fading out quickly. -->
-            <Border CornerRadius="22" IsHitTestVisible="False">
+            <Border x:Name="Sheen" CornerRadius="0,0,22,22" IsHitTestVisible="False">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                         <GradientStop Color="#26FFFFFF" Offset="0"/>

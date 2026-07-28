@@ -18,6 +18,9 @@ public partial class App : Application
 {
     public static AppState State { get; } = new();
 
+    /// <summary>Set by the pill: opens the Toki peek into the remembered page (click on the peek).</summary>
+    public static Action? OpenPeek;
+
     /// <summary>The app that triggered the current prompt / is being recorded (for UI + capture).</summary>
     public static DetectedApp? CurrentApp { get; private set; }
 
@@ -189,8 +192,8 @@ public partial class App : Application
         }
         else
         {
-            // Double-click launch: rest as the tiny alive Toki pill. Hovering it reveals
-            // Home ("welcome back" + the page); it's never a static panel sitting open.
+            // Double-click launch: Toki peeks from the top edge (the character first) — click
+            // it to open Home. It's never the welcome panel dropped on you.
             State.TryGo(PillState.Collapsed);
         }
 
@@ -324,11 +327,12 @@ public partial class App : Application
             try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
 
-            // An accidental tap (start → immediate stop) shouldn't become a hollow
-            // Library entry. A sub-3s recording with barely any words is a mis-click,
-            // not a meeting — drop it and show the friendly empty state instead.
+            // An accidental tap shouldn't become a hollow Library entry with a bogus summary.
+            // A meeting has real content; a mis-click yields a handful of garbled words (e.g.
+            // "Met the t I mean"). Drop anything with too few words OR a very short duration —
+            // it's not a meeting. (Was: <3s AND <5 words — too weak; a 5-word tap slipped through.)
             var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
-            var tooTrivial = transcript is { Count: > 0 } && durationMs < 3000 && words < 5;
+            var tooTrivial = transcript is { Count: > 0 } && (words < 12 || durationMs < 4000);
             if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) — accidental tap");
 
             MeetingRecord? meeting = null;
@@ -505,9 +509,9 @@ public partial class App : Application
 
     static void ToggleHome()
     {
-        // Ctrl+Alt+Space toggles the tiny Toki pill on/off. When shown, hover it to reveal
-        // Home. Force-applied so the user can never get stuck.
-        if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
+        // Ctrl+Alt+Space drops the notch (Home) from the top / tucks it back.
+        // Force-applied so the user can never get stuck.
+        if (State.Current is PillState.Hidden or PillState.Collapsed) State.ForceForDemo(PillState.Home);
         else State.ForceForDemo(PillState.Hidden);
     }
 
