@@ -294,3 +294,51 @@ So total summarize time is ~35s on a 1-min meeting, dominated by ASR. The genuin
 - **Custom slim rounded scrollbars** and **custom rounded checkboxes** (coral fill + tick) as app-wide styles in `Theme.xaml`; soft opacity cross-fade when switching notes. **Copy transcript** + **maximise** buttons on the pill; the dead "search this transcript" placeholder was removed.
 
 **WPF gotcha (cost time):** setting the `Template` property inside a `ControlTemplate.Trigger` throws *"'Template' cannot be set in the current element's Template"* at layout, which the global handler swallowed and the window rendered **black**. Hit it building the custom scrollbar; fix is to handle orientation in `Style.Triggers` (Width/Height) with a `Track Orientation="{TemplateBinding Orientation}"`, never swapping the template in a trigger.
+
+### Transcript segmentation: split only at word boundaries (M6.6)
+
+**Finding (paid for on a real 20-min meeting): the segment splitter was cutting words in half.** `Transcriber.GroupIntoSegments` starts a new transcript line when two decoded pieces are separated by a time-gap (>0.8s). On short, fast test meetings the gap never landed mid-word, so early results looked perfect. On a real meeting with hesitant speech ("sorry, my audio — just a minute") the gaps land *inside* words, because Parakeet emits words as sub-word pieces. The result: "Deepika" → four lines `D / eep / ik / a`, and notes built from those fragments read as "a udi o" / "min ute".
+
+**The tokenizer marks word starts with a LEADING SPACE, not `▁`.** Verified by dumping `OfflineRecognizerResult.Tokens` on a real clip: `" R","as","h","m","i"` = "Rashmi". The old `Detokenize` did `Replace("▁"," ")` — a silent **no-op** here (there are no `▁`); the spaces were already literal in the tokens, so text *looked* right while any `▁`-based logic was dead. So a word-boundary guard must test for a leading space (`StartsWord` accepts a leading space **or** `▁`, to also cover other SentencePiece builds).
+
+**Rule now: only break at a word boundary, on a pause OR end-of-sentence.** A split fires at a token that starts a new word (leading space) when either the pause exceeds 0.8s **or** the text so far ends a sentence (`. ? !`, which this build does emit). This keeps every word whole (sub-word pieces never trigger a split) and lands lines per-utterance — not per sub-word (the bug) and not one run-on paragraph per decode window (which would defeat the ±4s echo de-dup and You/Them interleaving). Measured on the meeting that shattered: **912 → 82 segments**, words whole, tail matches the audio end.
+
+### Skip a near-silent stream before decoding (M6.6)
+
+Real logs showed meetings where the user's mic was muted the whole call (`you peak 0%`), yet we still ran the full ~4×-real-time decode over a silent `you.wav` — about **half the total processing time, for nothing**. `TranscriptionService.TranscribeStream` now scans the loaded samples for any amplitude above a low floor (~-46 dBFS, early-exit) and skips the decode if the stream is silent — silence is not failure (lesson 4), a muted side just isn't transcribed. Halves processing whenever one side is muted; no effect on a two-active-party meeting (where live transcription remains the only real speed win).
+
+### Library window opens instantly — profiled, three real causes (M6.6)
+
+Opening the Library felt like a ~2s freeze (owner: "does not happen with WisprFlow"). Warming the window alone did **not** fix it — profiling with per-phase stopwatch logs found the cost was rebuilding content on every open, dominated by one thing:
+
+- **Rendering the whole transcript synchronously.** `NoteRenderer.Meeting` did `foreach (seg in Transcript) body.Children.Add(TranscriptRow(...))` into a **non-virtualizing** `StackPanel`. The auto-selected newest meeting had **1140 segments** (× ~5 visual elements each) → thousands of elements built on the UI thread on the click. Fix: render a small first batch (25 rows) then **stream the rest in on `DispatcherPriority.Background`**, chunked, with a per-panel generation token so switching meetings cancels stale work. Render dropped from ~seconds to ~30ms.
+- **`Reload` ran twice per open.** `Show()` raises `Loaded`, and a `Loaded += Reload` handler duplicated the explicit `Reload` in `ShowLibrary`/`Warm` — every open rebuilt the entire list+detail twice. Removed the handler.
+- **Rebuilding when nothing changed.** The window is now kept alive (Hidden, never destroyed) and only re-`Reload`ed when a `_dirty` flag is set — `LibraryWindow.MarkDirty()` is called when a recording saves a meeting, a note is created/edited, or a meeting is deleted. A plain re-open with no data change is just `Show()`.
+
+Measured (owner's PC, on the 1140-segment meeting): cold first-ever open ~940ms → **warm + dirty-skip open ~80ms**. Warming (`Warm()`, below) pre-pays the one-time create+layout+first-render off-screen at startup on a Background dispatcher tick, so even the first real open hits the fast path.
+
+#### Kept warm, never destroyed
+
+**The clunk was the window *building*, not the animation.** Opening the Library created a fresh 940×640 `Window` and laid out the whole master–detail view synchronously on the click — so the empty frame appeared, then visibly populated ("loads the window"), and only after all that did the pill finally hide. A slow, overlapping handoff. Earlier attempts animated the window's *opacity*, which made it worse: animating a whole `Window`'s Opacity forces Windows to make it a **layered window** and re-blit the entire surface on the CPU every frame → stutter.
+
+**Fix: create the window once, keep it warm, open instantly.**
+- `LibraryWindow` is created a single time and **pre-warmed off-screen at startup** (`Warm()`, on a Background-priority dispatcher tick): shown far off every monitor with `ShowActivated=false`/`ShowInTaskbar=false`, laid out (`UpdateLayout`), then hidden — so the expensive first measure/arrange/render is paid once, off the critical path.
+- Opening is now just `Reload` + `CenterOnWorkArea` + `Show` on the warm instance → instant, no visible build. `WindowStartupLocation=Manual` (we place it ourselves).
+- It's **hidden, never destroyed**, between opens: "‹ Back to Toki" and the OS **X** button both route to `HideToPill()` (hide + bring the pill back) via a `Closing` handler that cancels the close. Guarded by `App.Exiting` / `Dispatcher.HasShutdownStarted` so a real app-quit still closes it (otherwise the cancelled close would keep the last window alive and block shutdown).
+- Handoff order flipped: the pill is dismissed **first**, then the warm window shows — no more "window builds while the pill lingers". (No window-level opacity/scale animation at all now; instant is the smoothest.)
+
+### Hover-reveal pill: cursor polling, not WPF mouse events (M6.7)
+
+The pill is now an always-present tiny Toki that reveals a bigger view on hover — the launcher (Collapsed → Home) and recording (RecordingBar → RecordingOpen) share one mechanism. Two things had to be right:
+
+**Smooth grow, not a size-snap.** A hover expand/collapse **animates the window's Width/Height** (`AnimateSize`, ~300ms open / ~190ms close so closing feels snappy) with the pill re-centred bottom-anchored on every `SizeChanged` (via `PlaceBottomCenter`, which does NOT call `UpdateLayout` — that would throw inside a layout pass). Content fades in over the morph to mask the reflow. Only these hover pairs animate; every other transition stays instant.
+
+**Hover detection polls the real cursor, NOT WPF `MouseEnter`/`MouseLeave`.** While the window animates its size and slides under a stationary pointer, WPF's hit-testing fires phantom leave/enter events, which flip-flopped the pill open/closed in an endless loop. Instead a 60ms `DispatcherTimer` (active only in the four hover states) compares the real cursor position (`GetCursorPos`) against the pill's real cached rect. Because the expanded rect contains the collapsed one, this gives clean **hysteresis** — on it → open, off it → closed, no flicker — with a **dwell** (~260ms before opening, so a graze doesn't) and a **quick close** (~120ms). Toki blinks (`TokiBlob.BlinkNow`) on the rising edge of hover.
+
+**State machine:** the hover pairs must be allowed **both ways** (`Collapsed ⇄ Home`, `RecordingBar ⇄ RecordingOpen`) in `AppState.Allowed`, or `TryGo` silently rejects the collapse — that was a real "Home won't minimise back" bug (Home→Collapsed was missing).
+
+### Library maximise: clamp to work area + fixed-width content (M6.7)
+
+Two separate maximise problems, both fixed:
+- **The frame maximised but the content lagged then snapped to fill.** Cause: the detail was a full-width `StackPanel`, so widening the window forced WPF to **re-wrap and re-measure every transcript line** (hundreds–1000+) at the new width — that reflow trails the OS maximise. Fix: the detail is a **fixed-width readable column** (`MaxWidth`, ≤ the default column width so restored vs maximised are the *same* text width → nothing to re-wrap → WPF re-renders instantly). Also better typography. Meetings centre the column; the manual-note editor left-aligns it.
+- **Jump / white edges.** A per-monitor-DPI window with a manual position mis-sized on maximise. `WM_GETMINMAXINFO` now pins the maximised bounds to the current monitor's **work area**, and `DWMWA_BORDER_COLOR` is set dark so the Win11 border isn't white.
