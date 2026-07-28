@@ -2,106 +2,42 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
-    <Grid Margin="20,16">
+    <!-- The loader lives mostly as a 13px SLIVER: a dark tab hanging from the top with a soft
+         coral shimmer sweeping across it, so it reads as "quietly working" without being loud.
+         Hover it open and you get a tiny bobbing Toki + a gentle status line. Small, cute, sticky. -->
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
+            <!-- Row 0 is EXACTLY the sliver height (13px): when tucked, only this row shows, so the
+                 sliver is a clean dark tab carrying just the shimmer — never a clipped slice of Toki. -->
+            <RowDefinition Height="13"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Stage label -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center">
-            <TextBlock x:Name="StatusText" Text="Listening back" Style="{StaticResource Body}"
-                       FontSize="13.5" FontWeight="SemiBold"/>
-            <TextBlock x:Name="Dots" Text="" Style="{StaticResource Body}" FontSize="13.5"
-                       FontWeight="SemiBold" Width="18"/>
-        </StackPanel>
-
-        <!-- Scene: Toki + a changing activity motif -->
-        <Grid Grid.Row="1" Margin="0,6,0,8">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <!-- Toki, with a soft glow -->
-                <Grid Width="64" Height="64" Margin="0,0,22,0">
-                    <Ellipse x:Name="Glow" Width="64" Height="64" RenderTransformOrigin="0.5,0.5">
-                        <Ellipse.Fill>
-                            <RadialGradientBrush>
-                                <GradientStop Color="#55F48AAE" Offset="0"/>
-                                <GradientStop Color="#00F48AAE" Offset="1"/>
-                            </RadialGradientBrush>
-                        </Ellipse.Fill>
-                        <Ellipse.RenderTransform><ScaleTransform x:Name="GlowScale" CenterX="32" CenterY="32"/></Ellipse.RenderTransform>
-                    </Ellipse>
-                    <controls:TokiBlob x:Name="Toki" Width="50" Height="44"
-                                       HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
-                </Grid>
-
-                <!-- Motif host: exactly one child visible at a time -->
-                <Grid Width="96" Height="64">
-                    <!-- Listening: concentric rings -->
-                    <Grid x:Name="MotifListen">
-                        <Ellipse x:Name="Ring1" Width="20" Height="20" Stroke="{StaticResource Amber}" StrokeThickness="2.5"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform><ScaleTransform/></Ellipse.RenderTransform></Ellipse>
-                        <Ellipse x:Name="Ring2" Width="20" Height="20" Stroke="{StaticResource Amber}" StrokeThickness="2.5"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform><ScaleTransform/></Ellipse.RenderTransform></Ellipse>
-                        <Ellipse x:Name="Ring3" Width="20" Height="20" Stroke="{StaticResource Amber}" StrokeThickness="2.5"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform><ScaleTransform/></Ellipse.RenderTransform></Ellipse>
-                    </Grid>
-
-                    <!-- Reading: a document with a sweeping highlight -->
-                    <Grid x:Name="MotifRead" Opacity="0">
-                        <Border Width="58" Height="52" Background="#F4F5F8" CornerRadius="8"/>
-                        <StackPanel Width="58" Margin="10,0,10,0" VerticalAlignment="Center">
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#C6C9D2" Margin="0,0,0,5"/>
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#C6C9D2" Margin="0,0,0,5" Width="26" HorizontalAlignment="Left"/>
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#C6C9D2" Width="34" HorizontalAlignment="Left"/>
-                        </StackPanel>
-                        <Border x:Name="ReadHighlight" Width="58" Height="14" VerticalAlignment="Top"
-                                Background="#33E89B3C" CornerRadius="4" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform><TranslateTransform x:Name="ReadHighlightMove"/></Border.RenderTransform>
-                        </Border>
-                    </Grid>
-
-                    <!-- Organizing: checkboxes ticking -->
-                    <StackPanel x:Name="MotifOrganize" Opacity="0" VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <Grid Margin="0,0,0,7">
-                            <Border Width="15" Height="15" CornerRadius="4.5" Background="{StaticResource GreenDark}" HorizontalAlignment="Left"/>
-                            <Path x:Name="Check1" Data="M 3,7 L 6,10 L 12,3" Stroke="{StaticResource Green}" StrokeThickness="2"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0" HorizontalAlignment="Left"/>
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#4A4A4C" Width="40" HorizontalAlignment="Left" Margin="22,0,0,0"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,7">
-                            <Border Width="15" Height="15" CornerRadius="4.5" Background="{StaticResource GreenDark}" HorizontalAlignment="Left"/>
-                            <Path x:Name="Check2" Data="M 3,7 L 6,10 L 12,3" Stroke="{StaticResource Green}" StrokeThickness="2"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0" HorizontalAlignment="Left"/>
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#4A4A4C" Width="52" HorizontalAlignment="Left" Margin="22,0,0,0"/>
-                        </Grid>
-                        <Grid>
-                            <Border Width="15" Height="15" CornerRadius="4.5" Background="{StaticResource GreenDark}" HorizontalAlignment="Left"/>
-                            <Path x:Name="Check3" Data="M 3,7 L 6,10 L 12,3" Stroke="{StaticResource Green}" StrokeThickness="2"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0" HorizontalAlignment="Left"/>
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#4A4A4C" Width="34" HorizontalAlignment="Left" Margin="22,0,0,0"/>
-                        </Grid>
-                    </StackPanel>
-
-                    <!-- Writing: a pen drawing an underline -->
-                    <Grid x:Name="MotifWrite" Opacity="0">
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                            <Rectangle Height="3.5" RadiusX="2" RadiusY="2" Fill="#C6C9D2" Width="52" Margin="0,0,0,6"/>
-                            <Rectangle x:Name="WriteLine" Height="3.5" RadiusX="2" RadiusY="2" Fill="{StaticResource Amber}"
-                                       Width="0" HorizontalAlignment="Left"/>
-                        </StackPanel>
-                    </Grid>
-                </Grid>
-            </StackPanel>
-        </Grid>
-
-        <!-- Progress track -->
-        <Border x:Name="Track" Grid.Row="2" Height="4" CornerRadius="2" Background="{StaticResource SurfaceHi}" HorizontalAlignment="Stretch">
-            <Border x:Name="ProgressFill" Height="4" CornerRadius="2" Background="{StaticResource Amber}"
-                    HorizontalAlignment="Left" Width="10"/>
+        <!-- The sliver's heartbeat: a soft coral highlight glides through a thin dim track, on loop.
+             This is the ONLY thing visible when the loader is tucked away. -->
+        <Border Grid.Row="0" Height="3" VerticalAlignment="Center" Margin="16,0" CornerRadius="1.5"
+                Background="#14FFFFFF" ClipToBounds="True">
+            <Border x:Name="Shimmer" Width="70" HorizontalAlignment="Left" CornerRadius="1.5"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#00F48AAE" Offset="0"/>
+                        <GradientStop Color="#F2F48AAE" Offset="0.5"/>
+                        <GradientStop Color="#00F48AAE" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.RenderTransform><TranslateTransform x:Name="ShimmerMove"/></Border.RenderTransform>
+            </Border>
         </Border>
+
+        <!-- Expanded content (revealed only when you hover the working sliver fully open). -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <controls:TokiBlob x:Name="Toki" Width="26" Height="24" Margin="0,0,10,0"
+                               VerticalAlignment="Center" RenderTransformOrigin="0.5,1"/>
+            <TextBlock Text="Tidying up your notes" Style="{StaticResource Body}"
+                       FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock x:Name="Dots" Text="" Style="{StaticResource Body}" FontSize="12.5"
+                       FontWeight="SemiBold" Width="16" VerticalAlignment="Center"/>
+        </StackPanel>
     </Grid>
 </UserControl>

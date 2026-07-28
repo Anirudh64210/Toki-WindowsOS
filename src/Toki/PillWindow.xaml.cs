@@ -25,9 +25,9 @@ public partial class PillWindow : Window
         // Sizes trimmed smaller overall (owner: "make the notch smaller").
         [PillState.Collapsed]     = (52, 42),    // launcher peek (Toki alone)
         [PillState.MeetingPrompt] = (288, 72),
-        [PillState.RecordingBar]  = (52, 22),    // minimal upside-down eyes-peek — clear of browser tabs
+        [PillState.RecordingBar]  = (34, 14),    // TINY upside-down eyes-peek — never in the way of browser tabs / snip toolbar
         [PillState.RecordingOpen] = (284, 116),  // compact timer + stop
-        [PillState.Summarizing]   = (320, 156),
+        [PillState.Summarizing]   = (232, 66),   // small, cute working loader (mostly lives as a sliver)
         [PillState.Notes]         = (360, 320),  // smaller — no longer half the screen
         [PillState.NoSpeech]      = (300, 96),
         [PillState.Home]          = (320, 220),
@@ -200,7 +200,21 @@ public partial class PillWindow : Window
 
     void OnStateChanged(PillState old, PillState next)
     {
-        if (next == PillState.Hidden) { StartHoverPoll(); HideAnimated(); return; } // keep polling: watch the top edge to summon
+        if (next == PillState.Hidden)
+        {
+            // A result (notes / nothing-was-said) is a ONE-SHOT announcement. Once it's closed,
+            // re-summoning must bring back Toki — never the dead result. Forgetting it here is what
+            // breaks the "click Okay → hover → nothing-was-said again → forever" loop.
+            if (old is PillState.Notes or PillState.NoSpeech) _context = PillState.Home;
+            // A short cooldown so a page that just closed off can't instantly re-summon a fresh
+            // Toki under a cursor still resting at the top edge (the "both open at once" collision).
+            _edgeReadyTick = Environment.TickCount64 + EdgeReadyDelayMs;
+            // Disarm the edge-summon: after closing off, the cursor must drop back down into the page
+            // and make a fresh reach UP before Toki returns. Without this, a cursor primed earlier
+            // (while down in Chrome's content) would re-summon the moment it drifts back to the tabs.
+            _edgeArmed = false;
+            StartHoverPoll(); HideAnimated(); return; // keep polling: watch the top edge to summon
+        }
 
         var fromHidden = old == PillState.Hidden || !IsVisible;
         Host.Children.Clear();
@@ -217,10 +231,11 @@ public partial class PillWindow : Window
         Root.BorderThickness = peek ? default : new Thickness(1, 0, 1, 1);
         Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
 
-        // A reveal can enter directly as a SLIVER (peek) instead of full open — the edge-summon
-        // restores your last page as a hover-able sliver, and RESULTS (notes / nothing-was-said)
-        // arrive as a quiet sliver you hover to open, never a panel dropped in your face.
-        var enterTucked = (_revealTucked || next is PillState.Notes or PillState.NoSpeech) && IsStayable(next);
+        // A reveal can enter directly as a SLIVER (peek) instead of full open. The LOADER works
+        // quietly as a sliver from the very first frame — it never flashes a panel in your face.
+        // RESULTS (notes / nothing-was-said) instead announce themselves: they open briefly, then
+        // tuck to a sliver on their own (handled below). A re-summon restores a page as a sliver too.
+        var enterTucked = (_revealTucked || next == PillState.Summarizing) && IsStayable(next);
         _revealTucked = false;
         _tucked = enterTucked;
 
@@ -283,8 +298,11 @@ public partial class PillWindow : Window
         if (IsStayable(next))
         {
             _context = next;                     // remember the page — re-summoning restores it
-            if (enterTucked) ArmAutoHide();      // entered as a sliver → count down to fully hide
-            else ArmIdle();                      // fully open → tuck to a sliver after idle
+            // The loader is a PERSISTENT working sliver: it must not hide itself, it waits for the
+            // result (Notes / NoSpeech) to replace it. Everything else counts down.
+            if (next == PillState.Summarizing) { StopIdle(); StopAutoHide(); }
+            else if (enterTucked) ArmAutoHide(); // entered as a sliver → count down to fully hide
+            else ArmIdle();                      // fully open → tuck to a sliver after a beat
         }
         else { StopIdle(); StopAutoHide(); }
     }
@@ -386,14 +404,19 @@ public partial class PillWindow : Window
     // (ignore fast flings — only a deliberate settle summons it).
     const int EdgeBandHalf = 90;     // half-width of the reveal zone (centre only)
     const int EdgeTopPx = 2;         // within this many px of the very top edge
-    const int EdgeDwellMs = 220;     // hold at the edge this long to summon
+    const int EdgeDwellMs = 300;     // hold at the edge this long to summon (deliberate, not a passing tab click)
     const int EdgeMaxStep = 40;      // per-tick cursor move above which it's a "fling", not a summon
+    const int EdgeReArmBelowPx = 150; // the cursor must drop at least this far below the top edge before
+                                      // it can summon again — so a cursor living up on the browser tab
+                                      // strip can't keep re-summoning a just-closed-off Toki.
     static readonly bool EdgeSummon = Environment.GetEnvironmentVariable("TOKI_NO_EDGE") is null;
 
     readonly System.Windows.Threading.DispatcherTimer _hoverPoll =
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(HoverPollMs) };
     int _overMs, _offMs, _tuckMs, _edgeMs, _lastX, _lastY;
     bool _hoverWired, _wasOver, _hasLast;
+    bool _edgeArmed;   // true once the cursor has dropped clear of the top edge — a deliberate summon
+                       // is a reach UP from the page body, never a cursor already parked up top.
 
     // The two hover pairs: resting pill → revealed view. Same behaviour for the launcher
     // (tiny Toki → Home) and recording (tiny Toki → timer+Stop).
@@ -440,9 +463,12 @@ public partial class PillWindow : Window
     // intact behind it. Hover the sliver and the SAME page slides back down (no reload, state
     // preserved). It stays like that until you click outside (→ fully tucked away / Hidden).
     const double SliverH = 13;
-    const int IdleTuckMs = 2500;       // a page tucks to a sliver this long after you stop hovering
-    const int SummarizeShowMs = 2800;  // the loader shows this long, then tucks to a working sliver
+    const int IdleTuckMs = 2500;       // a deliberate page (Home/Settings) tucks this long after you stop hovering
+    const int ResultShowMs = 2000;     // a result (Notes / nothing-was-said) announces itself this long, then tucks
     const int AutoHideMs = 9000;       // a tucked sliver fully hides after this (context remembered)
+    const int EdgeReadyDelayMs = 700;  // after anything tucks to Hidden, wait this long before the edge can re-summon
+                                       // — stops a just-hidden sliver from instantly popping a fresh Toki (the "both open" collision)
+    long _edgeReadyTick;
     bool _tucked;
     bool _revealTucked;                // next reveal enters as a sliver (peek), not full open
     PillState _context = PillState.Home; // the page Toki remembers — re-summoning restores it
@@ -469,12 +495,14 @@ public partial class PillWindow : Window
                 _idle.Stop();
                 var cur = _state.Current;
                 if (!IsStayable(cur) || _tucked) return;
-                // The loader tucks after a brief flash regardless of hover; other pages only
-                // tuck once you've stopped hovering them.
-                if (cur == PillState.Summarizing || !CursorOverPill()) TuckCurrent();
+                // Only tuck once you've stopped hovering — never yank a page away while you're
+                // reading it (hovering re-arms this timer in HoverTick).
+                if (!CursorOverPill()) TuckCurrent();
             };
         }
-        _idle.Interval = TimeSpan.FromMilliseconds(_state.Current == PillState.Summarizing ? SummarizeShowMs : IdleTuckMs);
+        // Results announce briefly (2s) then tuck; deliberate pages linger a touch longer.
+        _idle.Interval = TimeSpan.FromMilliseconds(
+            _state.Current is PillState.Notes or PillState.NoSpeech ? ResultShowMs : IdleTuckMs);
         _idle.Stop();
         _idle.Start();
     }
@@ -496,9 +524,18 @@ public partial class PillWindow : Window
 
     void TuckCurrent()
     {
-        _tucked = true;
-        AnimateSize(ActualWidth, SliverH, 200);   // retract to a sliver (top-anchored: hangs a little)
-        ArmAutoHide();                            // a tucked sliver fully hides after a while (context kept)
+        // The LOADER keeps a clean heartbeat sliver — it never fully hides while it's working,
+        // so you always know Toki's on it (and can hover to peek progress).
+        if (_state.Current == PillState.Summarizing)
+        {
+            _tucked = true;
+            AnimateSize(ActualWidth, SliverH, 200);   // retract to a sliver (top-anchored: hangs a little)
+            return;
+        }
+        // EVERYTHING ELSE closes off completely (context kept) rather than leaving a sliver
+        // hanging in your way while you work in another app. You bring it back — as whatever
+        // Toki was showing — by hovering the top-centre edge. Workflow stays undisturbed.
+        _state.ForceForDemo(PillState.Hidden);
     }
 
     void ExpandCurrent()
@@ -575,16 +612,32 @@ public partial class PillWindow : Window
         if (!EdgeSummon || EdgeSuppressed() || !GetCursorPos(out var p)) { _edgeMs = 0; _hasLast = false; return; }
         var work = PhysicalWorkArea();
         int cx = work.Left + (work.Right - work.Left) / 2;
+
+        // Re-arm the summon only once the cursor has dropped clear of the top edge. A real summon is
+        // a reach UP to the notch from the page — NOT a cursor that just lives up on the browser's
+        // tab strip. This is what makes "close off" actually STICK: right after Toki closes off your
+        // cursor is still up top (on Chrome's tabs), and without this it would instantly re-summon.
+        if (p.Y > work.Top + EdgeReArmBelowPx) _edgeArmed = true;
+
+        // Brief cooldown right after a close-off. Still track motion so the dwell starts clean after.
+        if (Environment.TickCount64 < _edgeReadyTick) { _edgeMs = 0; _lastX = p.X; _lastY = p.Y; _hasLast = true; return; }
+
         bool atEdge = p.Y <= work.Top + EdgeTopPx && Math.Abs(p.X - cx) <= EdgeBandHalf;
         int dx = _hasLast ? p.X - _lastX : 0, dy = _hasLast ? p.Y - _lastY : 0;
         bool slow = dx * dx + dy * dy <= EdgeMaxStep * EdgeMaxStep;
         _lastX = p.X; _lastY = p.Y; _hasLast = true;
 
-        if (atEdge && slow)
+        if (_edgeArmed && atEdge && slow)
         {
             _edgeMs += HoverPollMs;
-            // Toki peeks FIRST (the cute character) — you then click/hover it to open your page.
-            if (_edgeMs >= EdgeDwellMs) { _edgeMs = 0; _state.ForceForDemo(PillState.Collapsed); }
+            if (_edgeMs >= EdgeDwellMs)
+            {
+                _edgeMs = 0;
+                _edgeArmed = false;   // consume it — the cursor must drop back down before summoning again
+                // If Toki is mid-task (writing your notes), reaching the edge brings that back so you
+                // can check on it — "access whatever Toki is doing". Otherwise Toki peeks first.
+                _state.ForceForDemo(_context == PillState.Summarizing ? PillState.Summarizing : PillState.Collapsed);
+            }
         }
         else _edgeMs = 0;
     }
