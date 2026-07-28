@@ -342,3 +342,29 @@ The pill is now an always-present tiny Toki that reveals a bigger view on hover 
 Two separate maximise problems, both fixed:
 - **The frame maximised but the content lagged then snapped to fill.** Cause: the detail was a full-width `StackPanel`, so widening the window forced WPF to **re-wrap and re-measure every transcript line** (hundreds–1000+) at the new width — that reflow trails the OS maximise. Fix: the detail is a **fixed-width readable column** (`MaxWidth`, ≤ the default column width so restored vs maximised are the *same* text width → nothing to re-wrap → WPF re-renders instantly). Also better typography. Meetings centre the column; the manual-note editor left-aligns it.
 - **Jump / white edges.** A per-monitor-DPI window with a manual position mis-sized on maximise. `WM_GETMINMAXINFO` now pins the maximised bounds to the current monitor's **work area**, and `DWMWA_BORDER_COLOR` is set dark so the Win11 border isn't white.
+
+### The virtual notch (top-edge overlay) — M7 UI
+
+Toki moved from a bottom-centre pill to a **top-centre virtual notch** (flush to the top edge, bottom-rounded, grows downward). Mechanically it's the same morphing overlay re-anchored: `PlaceTopCenter` fixes the TOP edge (so height animates downward), `HideAnimated` retracts the height (tucks up), the Border is `CornerRadius="0,0,22,22"` with no top border. The whole state machine / hover-morph / blink / ghost mode carried over.
+
+**Peek vs. open.** The resting/recording peeks (`Collapsed`, `RecordingBar`) drop the dark frosted surface entirely — `Root.Background`/`BorderBrush` go transparent and the sheen hides, so Toki is *just the character* floating from the edge. The dark panel only appears once it opens into a usable view. Opening Home from the launcher peek is **deliberate** (long `OpenDwellMs` dwell, or a click on `CollapsedView`) — a brief hover only shows the peek, because after an edge-summon the cursor is already there and a quick dwell would auto-open (felt wrong).
+
+**Edge-summon, tuned for the crowded top.** When tucked (`Hidden`) the hover poll runs `EdgeTick`: accumulate dwell only while the cursor is at the **absolute top row** (`EdgeTopPx`), inside a **narrow centre band** (`EdgeBandHalf`), and **moving slowly** (velocity gate — a fast fling toward a browser tab is ignored). `EdgeSuppressed()` blocks it while the **left mouse button is down** (a window drag / Snap Layouts in progress) or a **fullscreen** app is foreground (`SHQueryUserNotificationState` → busy / D3D-fullscreen / presentation). Env `TOKI_NO_EDGE` disables it.
+
+**Auto-tuck behaviours.** The launcher peek tucks back to `Hidden` once the cursor leaves both the peek and the edge. **Results** (`Notes`, `NoSpeech`) run a 2s `_resultTuck` timer that keeps them up while the cursor is over them and tucks them away ~2s after the cursor leaves — a glance, not a panel that squats on your work. `Home` does NOT auto-tuck (it's an explicit summon, dismissed by Esc/click-away) — auto-collapsing it made a hotkey/launch summon vanish instantly.
+
+**Multi-monitor.** `PhysicalWorkArea` now resolves the monitor under the **cursor** (`MonitorFromPoint`), so the notch summons on whichever screen you're using and events land on the active screen.
+
+### Context-aware snap-bar: peek → page → sliver (M7.1)
+
+The notch became a stateful snap-bar. Three visual levels on one morphing window: **Toki peek** (`Collapsed` — character only, no dark box), **full page** (Home/Notes/Settings/…), **sliver** (the page tucked to a ~13px strip, view kept behind it). Transitions:
+
+- **Summon** (launch / edge / hotkey) → **`Collapsed`** (Toki first, greets `CollapsedGraceMs` before it can tuck). **Click** (`App.OpenPeek`, set by the pill) or a long dwell (`OpenDwellMs`) → the **remembered page** (`_context`, default Home), blooming open.
+- **Tuck** — a page tucks to a sliver `IdleTuckMs` (~2.5s) after the cursor leaves, or immediately on **click-outside** (the `InputMonitor` dismiss now calls `TuckCurrent`, NOT `ForceForDemo(Hidden)` — that's what preserves context; clicking your work no longer resets Toki to Home). The loader (`Summarizing`) tucks after `SummarizeShowMs` regardless of hover; **results** (`Notes`/`NoSpeech`) *enter* tucked (a quiet peek, never a panel dropped in). A tucked sliver `_autoHide`s to `Hidden` after `AutoHideMs`, `_context` remembered — so re-summoning restores the page.
+- **Expand** — hovering a sliver runs `ExpandCurrent` (animates height back to the state's full size). No view rebuild — context is the same view instance.
+
+`TuckCurrent`/`ExpandCurrent` are height-only `AnimateSize` animations that never change `_state` or clear `Host`, so the page is preserved. `enterTucked`/`_revealTucked` let a reveal enter directly as a sliver.
+
+**Timer priority — the "works in demo, not in real use" bug.** `DispatcherTimer` defaults to `DispatcherPriority.Background`. The idle/auto-hide/hover timers were therefore **starved while the app warms the ~3 GB of ASR/LLM models at launch** — exactly when Home and the loader are on screen, so they never tucked (Notes, appearing after warm-up, did — which is what the owner observed). All three pill timers are now `DispatcherPriority.Input`.
+
+**Accidental-tap guard.** A ~5-word mis-click was saved as a meeting because the old guard needed `<3s AND <5 words`. Now `words < 12 || durationMs < 4000` — a mis-click yields a handful of garbled words and is dropped; a real meeting always clears the bar.
