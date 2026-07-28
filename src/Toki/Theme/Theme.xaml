@@ -7,7 +7,9 @@
     <SolidColorBrush x:Key="Chip" Color="#2C2C2E"/>
     <SolidColorBrush x:Key="Text" Color="#F5F5F4"/>
     <SolidColorBrush x:Key="TextDim" Color="#8E8E8E"/>
-    <SolidColorBrush x:Key="Coral" Color="#F94A26"/>
+    <!-- Softer, truer "coral" than the old fire red-orange (#F94A26), which read as harsh
+         on the record button. Used for record/stop + accents (dot, check, selection). -->
+    <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
     <SolidColorBrush x:Key="Amber" Color="#E89B3C"/>
     <SolidColorBrush x:Key="AmberDark" Color="#3B2F1B"/>
     <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>

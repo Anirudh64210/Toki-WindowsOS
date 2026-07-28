@@ -21,68 +21,128 @@ public partial class LibraryWindow : Window
     static LibraryWindow? _open;   // single instance
     long? _selected;
 
+    // Manual notes auto-save as you type (debounced) — no static Save/Cancel buttons.
+    readonly System.Windows.Threading.DispatcherTimer _manualDebounce = new() { Interval = TimeSpan.FromMilliseconds(600) };
+    Action? _manualFlush; // saves the currently-open manual note; null when a meeting is shown
+
+    // The list/detail is only rebuilt when the data actually changed. Between opens the
+    // window is kept alive (Hidden), fully rendered — so a plain re-open is just Show(),
+    // which is instant (like WisprFlow keeping its window warm). MarkDirty() is called when
+    // something external changes the data (a recording saves a meeting, a note is created).
+    static bool _dirty = true;
+    public static void MarkDirty() => _dirty = true;
+
+    /// <summary>
+    /// Open the Library — must feel INSTANT. The window is created once and kept warm
+    /// (Hidden between opens, never destroyed), and is pre-warmed off-screen at startup
+    /// (<see cref="Warm"/>), so a click never pays window-create + full-layout cost. That
+    /// slow, visible "the window builds while the pill is still up, then the pill closes"
+    /// handoff was the clunk — a warm window just appears.
+    /// </summary>
     public static void ShowLibrary(long? focusMeetingId = null, Rect? fromRect = null)
     {
-        var justOpened = _open is null;
-        if (_open is null)
+        EnsureCreated();
+        var w = _open!;
+        // Rebuild only when data changed (or a specific note was requested); otherwise the
+        // already-rendered content is reused and opening is just Show() → instant.
+        if (_dirty || focusMeetingId is not null) { w.Reload(focusMeetingId); _dirty = false; }
+        if (!w.IsVisible) { w.CenterOnWorkArea(); w.Show(); w.PlayOpen(); }
+        w.Activate();
+    }
+
+    static void EnsureCreated()
+    {
+        if (_open is not null) return;
+        _open = new LibraryWindow();
+        _open.Closed += (_, _) => _open = null;   // if it ever really closes, drop the singleton
+        // The OS close (X) button hides the window and hands back to the pill, instead of
+        // destroying it — so the NEXT open stays instant too. But on real app exit, let it
+        // close (else cancelling here would keep the last window alive and block shutdown).
+        _open.Closing += (_, e) =>
         {
-            _open = new LibraryWindow();
-            _open.Closed += (_, _) => _open = null;
-            _open.Show();
-        }
-        _open.Activate();
-        _open.Reload(focusMeetingId);
-        if (justOpened) _open.PlayOpen(fromRect);
+            if (App.Exiting || System.Windows.Application.Current.Dispatcher.HasShutdownStarted) return;
+            e.Cancel = true;
+            _open?.HideToPill();
+        };
     }
 
     /// <summary>
-    /// Buttery open: the window's content literally grows out of the pill's on-screen
-    /// rectangle to fill the window (a GPU scale+translate on the laid-out content — no
-    /// reflow), with a soft fade. Reads as the pill extending into a window rather than a
-    /// hard pop. Falls back to a gentle bottom-anchored grow if we don't have the rect.
+    /// Pre-create + fully lay out the window OFF-SCREEN at startup, so even the first real
+    /// open is instant (the expensive part is the first measure/arrange/render of the whole
+    /// visual tree — we pay it once, off the critical path). No flash: it's shown far off
+    /// every monitor and hidden again within the same tick, without activating or a taskbar
+    /// button.
     /// </summary>
-    public void PlayOpen(Rect? fromRect)
+    public static void Warm()
     {
-        UpdateLayout();
-        double ww = ActualWidth, wh = ActualHeight;
-        if (ww <= 0 || wh <= 0) return;
+        if (_open is not null) return;
+        EnsureCreated();
+        var w = _open!;
+        w.ShowActivated = false;
+        w.ShowInTaskbar = false;
+        w.Left = -32000; w.Top = -32000;
+        w.Show();
+        w.Reload();       // build the real content once, off-screen (pre-JIT + pre-render)
+        _dirty = false;   // content is now current; first real open can skip the rebuild
+        w.UpdateLayout();
+        w.Hide();
+        w.ShowInTaskbar = true;
+        w.ShowActivated = true;
+    }
+
+    /// <summary>
+    /// Smooth appear: the content scales up subtly from centre with a fade — GPU-composited
+    /// (a RenderTransform + element Opacity on RootGrid), so it's smooth and cheap. NOT the
+    /// window's Opacity (that forces a layered window + CPU re-blit → stutter). Mirrors the
+    /// "Back to Toki" feel where the pill morphs, and adds nothing to the ~80ms open cost
+    /// (it runs after Show, non-blocking).
+    /// </summary>
+    void PlayOpen()
+    {
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var dur = new Duration(TimeSpan.FromMilliseconds(300));
+        var dur = new Duration(TimeSpan.FromMilliseconds(180));
+        RootGrid.RenderTransformOrigin = new Point(0.5, 0.5);
+        var scale = new ScaleTransform(0.96, 0.96);
+        RootGrid.RenderTransform = scale;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
+        var fade = new DoubleAnimation(0.0, 1, dur) { EasingFunction = ease };
+        fade.Completed += (_, _) => { RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1; };
+        RootGrid.BeginAnimation(OpacityProperty, fade);
+    }
 
-        double sx0, sy0, tx0, ty0;
-        if (fromRect is Rect p && p.Width > 0 && p.Height > 0)
-        {
-            sx0 = p.Width / ww; sy0 = p.Height / wh;
-            tx0 = p.Left - Left; ty0 = p.Top - Top;   // pill's top-left relative to the window
-        }
-        else { sx0 = 0.86; sy0 = 0.7; tx0 = ww * 0.07; ty0 = wh * 0.15; } // gentle centred-ish grow
+    void CenterOnWorkArea()
+    {
+        var wa = SystemParameters.WorkArea;
+        var ww = ActualWidth > 0 ? ActualWidth : Width;
+        var wh = ActualHeight > 0 ? ActualHeight : Height;
+        Left = wa.Left + (wa.Width - ww) / 2;
+        Top = wa.Top + (wa.Height - wh) / 2;
+    }
 
-        var scale = new ScaleTransform(sx0, sy0);
-        var trans = new TranslateTransform(tx0, ty0);
-        var grp = new TransformGroup();
-        grp.Children.Add(scale); grp.Children.Add(trans);
-        RootGrid.RenderTransform = grp;
-
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(sx0, 1, dur) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(sy0, 1, dur) { EasingFunction = ease });
-        trans.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(tx0, 0, dur) { EasingFunction = ease });
-        trans.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(ty0, 0, dur) { EasingFunction = ease });
-        RootGrid.BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 1, new Duration(TimeSpan.FromMilliseconds(200))) { EasingFunction = ease });
+    /// <summary>Hide the window (keep it warm) and bring the pill back.</summary>
+    void HideToPill()
+    {
+        FlushManual();          // don't lose an in-progress manual-note edit on close
+        Hide();
+        App.State.ForceForDemo(PillState.Home);
     }
 
     /// <summary>Open the Library and start a fresh manual note in the editor.</summary>
     public static void ShowNewNote()
     {
-        ShowLibrary();
         var id = App.Store.CreateManualNote("Untitled note", "");
-        _open!.Reload(id);
+        ShowLibrary(id);
     }
 
     LibraryWindow()
     {
         InitializeComponent();
         SourceInitialized += (_, _) => StyleChrome();
-        Loaded += (_, _) => Reload();
+        _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
+        // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
+        // already call Reload() explicitly — a Loaded handler here made every open rebuild
+        // the whole list+detail TWICE.
     }
 
     void StyleChrome()
@@ -91,9 +151,17 @@ public partial class LibraryWindow : Window
         {
             var hwnd = new WindowInteropHelper(this).Handle;
             var dark = 1;
-            DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // dark title bar
+            DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE)
+            int borderColor = 0x00161616;
+            DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR — dark, not white
             if (!App.GhostDisabled)
                 SetWindowDisplayAffinity(hwnd, 0x11);               // ghost: not in screen capture
+
+            // Maximise cleanly. On a per-monitor-DPI-aware app with a manually-placed window,
+            // WPF's default maximise mis-sizes (jumps, or spills under the taskbar) — that was
+            // the glitch. Handling WM_GETMINMAXINFO pins the maximised bounds to the current
+            // monitor's WORK AREA, so maximise snaps to exactly the right rectangle.
+            HwndSource.FromHwnd(hwnd)?.AddHook(WndProc);
         }
         catch { }
     }
@@ -157,7 +225,9 @@ public partial class LibraryWindow : Window
         var card = new Border
         {
             Background = (Brush)FindResource(selected ? "Chip" : "SurfaceHi"),
-            BorderBrush = selected ? (Brush)FindResource("Coral") : Brushes.Transparent,
+            // Monotone selection: a soft white hairline (not the coral outline, which read
+            // as an alarming red box), on the slightly-brighter Chip background.
+            BorderBrush = selected ? new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)) : Brushes.Transparent,
             BorderThickness = new Thickness(selected ? 1 : 0),
             CornerRadius = new CornerRadius(12), Padding = new Thickness(11, 11, 11, 12),
             Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
@@ -313,6 +383,7 @@ public partial class LibraryWindow : Window
 
     void Select(long id)
     {
+        FlushManual();          // save the previous manual note before switching away
         _selected = id;
         LoadList(); // refresh selection highlight
         var m = App.Store.Get(id);
@@ -332,15 +403,12 @@ public partial class LibraryWindow : Window
         });
     }
 
-    void OnBack(object sender, RoutedEventArgs e)
-    {
-        Close();
-        App.State.ForceForDemo(PillState.Home); // bring the pill back
-    }
+    void OnBack(object sender, RoutedEventArgs e) => HideToPill(); // hide (stay warm) + bring the pill back
 
     void RenderMeeting(MeetingRecord m)
     {
         Detail.Children.Clear();
+        Detail.HorizontalAlignment = HorizontalAlignment.Center;   // reading: balanced column
 
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -365,6 +433,7 @@ public partial class LibraryWindow : Window
     void RenderManual(MeetingRecord m)
     {
         Detail.Children.Clear();
+        Detail.HorizontalAlignment = HorizontalAlignment.Left;   // editor sits at the left, not floating centre
 
         var titleBox = new TextBox { Text = m.Title, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"), FontSize = 20, FontWeight = FontWeights.Bold, FontFamily = (FontFamily)FindResource("UiFont") };
         Detail.Children.Add(titleBox);
@@ -380,20 +449,41 @@ public partial class LibraryWindow : Window
         };
         Detail.Children.Add(bodyBox);
 
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 0) };
-        var saveBtn = SmallButton("Save", () => { }, primary: true);
-        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
-        ((Button)saveBtn).Click += (_, _) =>
-        {
-            var title = string.IsNullOrWhiteSpace(titleBox.Text) ? "Untitled note" : titleBox.Text.Trim();
-            App.Store.UpdateTitleAndBody(m.Id, title, bodyBox.Text);
-            status.Text = "Saved ✓";
-            LoadList();
-        };
-        bar.Children.Add(saveBtn);
-        bar.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
+        // Dynamic footer — no static Save/Cancel. Toki saves as you type (debounced); a
+        // quiet monotone status flashes "Saved" and fades. Delete is a subtle monotone action.
+        var status = new TextBlock { Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), Opacity = 0, Text = "Saved" };
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
+        bar.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true)); // monotone (dim), not red
         bar.Children.Add(status);
         Detail.Children.Add(bar);
+
+        _manualFlush = () =>
+        {
+            var title = string.IsNullOrWhiteSpace(titleBox.Text) ? "Untitled note" : titleBox.Text.Trim();
+            try { App.Store.UpdateTitleAndBody(m.Id, title, bodyBox.Text); MarkDirty(); }
+            catch (Exception ex) { App.Log($"manual note save failed: {ex.Message}"); }
+            status.Text = "Saved"; FlashStatus(status);
+        };
+        void Schedule() { status.Text = "Saving…"; status.Opacity = 0.75; status.BeginAnimation(OpacityProperty, null); _manualDebounce.Stop(); _manualDebounce.Start(); }
+        titleBox.TextChanged += (_, _) => Schedule();
+        bodyBox.TextChanged += (_, _) => Schedule();
+    }
+
+    // Show a status word, then let it fade out — "saved" should reassure, not linger as chrome.
+    static void FlashStatus(UIElement e)
+    {
+        e.BeginAnimation(OpacityProperty, null);
+        e.Opacity = 1;
+        e.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(1200)) { BeginTime = TimeSpan.FromMilliseconds(700) });
+    }
+
+    // Save any pending manual-note edit immediately (on switching notes or closing the window).
+    void FlushManual()
+    {
+        if (_manualFlush is null) return;
+        _manualDebounce.Stop();
+        var f = _manualFlush; _manualFlush = null;
+        f();
     }
 
     void OnNewNote(object sender, RoutedEventArgs e)
@@ -449,6 +539,31 @@ public partial class LibraryWindow : Window
         return string.Join("  ·  ", parts);
     }
 
+    // Pin maximise to the current monitor's work area (fixes the DPI maximise glitch).
+    static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_GETMINMAXINFO = 0x0024, MONITOR_DEFAULTTONEAREST = 0x2;
+        if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
+        var mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (mon == IntPtr.Zero) return IntPtr.Zero;
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(mon, ref info)) return IntPtr.Zero;
+        var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+        mmi.ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left;
+        mmi.ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top;
+        mmi.ptMaxSize.x = info.rcWork.right - info.rcWork.left;
+        mmi.ptMaxSize.y = info.rcWork.bottom - info.rcWork.top;
+        Marshal.StructureToPtr(mmi, lParam, true);
+        return IntPtr.Zero;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct POINTL { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] struct RECTL { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MINMAXINFO { public POINTL ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECTL rcMonitor, rcWork; public int dwFlags; }
+
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 }

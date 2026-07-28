@@ -56,6 +56,7 @@ public partial class App : Application
         {
             var id = Store.CreateManualNote("Untitled note", "");
             CurrentManualNote = Store.Get(id);
+            LibraryWindow.MarkDirty();
             State.TryGo(PillState.ManualNote);
         }
         catch (Exception ex) { Log($"new manual note failed: {ex.Message}"); }
@@ -188,9 +189,9 @@ public partial class App : Application
         }
         else
         {
-            // Double-click launch: greet the user so it's obviously running,
-            // then normal rules apply (hotkey toggles, click-away/Esc dismiss).
-            State.TryGo(PillState.Home);
+            // Double-click launch: rest as the tiny alive Toki pill. Hovering it reveals
+            // Home ("welcome back" + the page); it's never a static panel sitting open.
+            State.TryGo(PillState.Collapsed);
         }
 
         // Dev: open the Library window directly for inspection.
@@ -198,6 +199,13 @@ public partial class App : Application
             Dispatcher.BeginInvoke(() => LibraryWindow.ShowLibrary());
         if (e.Args.Contains("--newnote"))
             Dispatcher.BeginInvoke(() => LibraryWindow.ShowNewNote());
+
+        // Pre-warm the Library window off-screen once the app has settled, so its first
+        // open is instant (no visible build) — a clean, fast handoff from the pill.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try { LibraryWindow.Warm(); } catch (Exception ex) { Log($"library warm (non-fatal): {ex.Message}"); }
+        }), System.Windows.Threading.DispatcherPriority.Background);
 
         StartMeetingDetection();
 
@@ -342,6 +350,7 @@ public partial class App : Application
                     };
                     Store.Save(meeting);
                     MarkdownMirror.Write(meeting);
+                    LibraryWindow.MarkDirty(); // a new meeting exists — refresh the Library on next open
                     Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
                 }
                 catch (Exception ex) { Log($"save meeting failed (non-fatal): {ex.Message}"); }
@@ -367,6 +376,7 @@ public partial class App : Application
                         meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
                         Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
                         MarkdownMirror.Write(meeting);
+                        LibraryWindow.MarkDirty(); // notes/title upgraded — refresh on next open
                         Log($"notes written by LLM for meeting {meeting.Id}");
                     }
                 }
@@ -462,11 +472,17 @@ public partial class App : Application
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
         }
         catch (Exception ex) { Log($"restart failed: {ex.Message}"); }
+        Exiting = true;
         Current.Shutdown();
     }
 
+    /// <summary>True once the app is intentionally quitting — lets warm-and-hidden windows
+    /// (e.g. the Library) actually close instead of cancelling-to-hide and blocking exit.</summary>
+    public static bool Exiting { get; private set; }
+
     protected override void OnExit(ExitEventArgs e)
     {
+        Exiting = true;
         _detector?.Stop();
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
         _hotkey?.Dispose();
@@ -489,9 +505,9 @@ public partial class App : Application
 
     static void ToggleHome()
     {
-        // Ctrl+Alt+Space: open Home when hidden, close to Hidden when open.
-        // Force-applied so the user can never get stuck.
-        if (State.Current is PillState.Hidden or PillState.Collapsed) State.ForceForDemo(PillState.Home);
+        // Ctrl+Alt+Space toggles the tiny Toki pill on/off. When shown, hover it to reveal
+        // Home. Force-applied so the user can never get stuck.
+        if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
         else State.ForceForDemo(PillState.Hidden);
     }
 
@@ -519,6 +535,7 @@ public partial class App : Application
         menu.Items.Add(Item("Restart Toki", RestartApp));
         menu.Items.Add(Item("Quit Toki", () =>
         {
+            Exiting = true;
             _tray?.Dispose();
             Shutdown();
         }));

@@ -18,6 +18,26 @@ public sealed class AppSettings
     public string ApiModel { get; set; } = "gpt-4o-mini";
     public string ApiBaseUrl { get; set; } = "https://api.openai.com/";
 
+    /// <summary>Display name for the greeting ("Welcome back, X"). Set during onboarding;
+    /// falls back to the Windows account name when empty.</summary>
+    public string? UserName { get; set; }
+
+    /// <summary>Best available first name for the greeting: the configured <see cref="UserName"/>,
+    /// else a cleaned Windows account name, else "" (caller shows a nameless greeting).</summary>
+    [JsonIgnore]
+    public string DisplayName => ResolveDisplayName(UserName);
+
+    static string ResolveDisplayName(string? configured)
+    {
+        var raw = !string.IsNullOrWhiteSpace(configured) ? configured! : Environment.UserName;
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        // Windows account names come as "First Last" or "first.last" — take the first
+        // token and title-case it so "sid.desai" → "Sid".
+        var first = raw.Replace('.', ' ').Replace('_', ' ').Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } parts ? parts[0] : "";
+        if (first.Length == 0) return "";
+        return char.ToUpperInvariant(first[0]) + (first.Length > 1 ? first[1..].ToLowerInvariant() : "");
+    }
+
     /// <summary>Local-model GPU offload policy. 0 = auto (detect VRAM and offload a
     /// safe number of layers — the default); -1 = force CPU only; &gt;0 = force that
     /// many layers. Resolved once at launch by <see cref="LlmRuntime"/>.</summary>

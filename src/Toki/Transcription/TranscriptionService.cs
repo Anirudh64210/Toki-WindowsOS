@@ -61,6 +61,15 @@ public sealed class TranscriptionService
         try
         {
             var samples = AudioLoader.To16kMono(wavPath);
+            // Skip a near-silent stream (e.g. the user's mic muted the whole call).
+            // Decoding it costs the full ~4x-real-time grind yet yields nothing — on
+            // a muted-mic meeting that was ~half the total processing time (real logs).
+            // Silence is not failure (lesson 4): a muted stream just isn't transcribed.
+            if (IsSilent(samples))
+            {
+                App.Log($"{speaker} stream near-silent, skipping ASR ({samples.Length / (double)AudioLoader.TargetRate:F0}s)");
+                return [];
+            }
             return _transcriber!.Transcribe(samples, speaker);
         }
         catch (Exception ex)
@@ -70,6 +79,18 @@ public sealed class TranscriptionService
             App.Log($"Parakeet error on {speaker} stream: {ex.Message} (whisper fallback: TODO)");
             return [];
         }
+    }
+
+    // A stream is "silent" if no sample ever crosses a low amplitude floor (~-46 dBFS).
+    // Real speech peaks near 0.1–1.0, so this only ever trips on genuine digital silence
+    // (muted mic / no loopback), never on quiet speech. Early-exits on the first loud
+    // sample, so it's a cheap linear scan.
+    const float SilenceFloor = 0.005f;
+    static bool IsSilent(float[] samples)
+    {
+        foreach (var s in samples)
+            if (s > SilenceFloor || s < -SilenceFloor) return false;
+        return true;
     }
 
     /// <summary>Load the recognizer ahead of the first meeting (lesson 2: warm at launch).</summary>

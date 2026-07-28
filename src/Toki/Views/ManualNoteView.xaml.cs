@@ -46,7 +46,7 @@ public partial class ManualNoteView : UserControl
         var title = string.IsNullOrWhiteSpace(TitleBox.Text) ? "Untitled note" : TitleBox.Text.Trim();
         note.Title = title;
         note.Body = BodyBox.Text;
-        try { App.Store.UpdateTitleAndBody(note.Id, title, BodyBox.Text); }
+        try { App.Store.UpdateTitleAndBody(note.Id, title, BodyBox.Text); Toki.LibraryWindow.MarkDirty(); }
         catch (Exception ex) { App.Log($"manual note save failed: {ex.Message}"); }
     }
 

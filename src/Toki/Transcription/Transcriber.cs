@@ -127,7 +127,16 @@ public sealed class Transcriber : IDisposable
         {
             var start = i < times.Length ? times[i] : prevEnd;
             var end = start + (i < durations.Length ? durations[i] : 0);
-            if (sb.Length > 0 && start - prevEnd > SegmentGapSeconds)
+            // Break ONLY at a WORD boundary. This Parakeet build marks a new word with a
+            // LEADING SPACE on the token (" Rashmi" = " R","as","h","m","i"); sub-word pieces
+            // carry no leading space. Splitting on a time-gap alone would cut mid-word on
+            // hesitant/pausey speech, shattering "Deepika" into "D / eep / ik / a" (and the
+            // notes into "a udi o"). At a word boundary we split on either a real pause
+            // (>0.8s) OR the end of a sentence (". ? !"), so lines land per-utterance — not
+            // per-word (untrue) and not one giant run-on paragraph per window (breaks echo
+            // de-dup). (▁ is handled too, for other SentencePiece model builds.)
+            var isWordStart = StartsWord(tokens[i]);
+            if (sb.Length > 0 && isWordStart && (start - prevEnd > SegmentGapSeconds || EndsSentence(sb)))
             {
                 Flush(prevEnd);
                 segStart = start;
@@ -137,6 +146,24 @@ public sealed class Transcriber : IDisposable
         }
         if (sb.Length > 0) Flush(prevEnd);
         return segments;
+    }
+
+    /// <summary>True if this token begins a new word — marked by a leading space in this
+    /// Parakeet build (" word"), or a ▁ marker in other SentencePiece builds.</summary>
+    static bool StartsWord(string tok) =>
+        tok.Length > 0 && (tok[0] == '▁' || char.IsWhiteSpace(tok[0]));
+
+    /// <summary>True if the text so far ends a sentence (last real char is . ? or !),
+    /// ignoring the ▁ word markers and whitespace. Used to break segments per-utterance.</summary>
+    static bool EndsSentence(StringBuilder sb)
+    {
+        for (var i = sb.Length - 1; i >= 0; i--)
+        {
+            var c = sb[i];
+            if (c == '▁' || char.IsWhiteSpace(c)) continue;
+            return c is '.' or '?' or '!';
+        }
+        return false;
     }
 
     /// <summary>SentencePiece detokenize: the ▁ marker denotes a word boundary (space).</summary>

@@ -56,8 +56,10 @@ public partial class NotesView : UserControl
 
     void OnMaximise(object sender, RoutedEventArgs e)
     {
-        LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id);
+        // Consistent with Home → Library: dismiss the pill first, then show the warm window
+        // so it opens instantly and smoothly (no old overlapping handoff).
         App.State.TryGo(PillState.Hidden);
+        LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id);
     }
 
     static string Meta(MeetingRecord m)
