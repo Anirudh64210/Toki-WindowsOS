@@ -22,10 +22,10 @@ public partial class PillWindow : Window
     // Logical-pixel content sizes per state, from Toki-ProductDesign/.
     static readonly Dictionary<PillState, (double W, double H)> Sizes = new()
     {
-        [PillState.Collapsed]     = (132, 40),
+        [PillState.Collapsed]     = (56, 44),    // tiny alive Toki at rest; hover reveals Home
         [PillState.MeetingPrompt] = (300, 74),
-        [PillState.RecordingBar]  = (138, 46),
-        [PillState.RecordingOpen] = (372, 234),
+        [PillState.RecordingBar]  = (56, 44),    // tiny alive Toki, out of the way
+        [PillState.RecordingOpen] = (300, 120),  // compact timer + stop (extra height so Stop never clips)
         [PillState.Summarizing]   = (340, 164),
         [PillState.Notes]         = (424, 438),
         [PillState.NoSpeech]      = (320, 100),
@@ -44,8 +44,11 @@ public partial class PillWindow : Window
     // with — Notes, Library, Settings, ManualNote — stays put until you close it with
     // its own button or Esc; a stray click into your real work must never make it
     // vanish. Recording/Summarizing/MeetingPrompt were never dismissable this way.
+    // Home is no longer dismissed by click-outside — it now collapses back to the tiny Toki
+    // pill on hover-leave (handled by the hover poll), so it stays pill-centric, never fully
+    // vanishing on a stray click. Only the transient "nothing was said" toast auto-dismisses.
     static readonly HashSet<PillState> DismissOnClickOutside =
-        [PillState.Home, PillState.NoSpeech];
+        [PillState.NoSpeech];
 
     readonly AppState _state;
     readonly Dictionary<PillState, UserControl> _views = new();
@@ -67,7 +70,9 @@ public partial class PillWindow : Window
                 Dispatcher.Invoke(() => { PositionBottomCenter(); CacheWindowRect(); });
         };
         LocationChanged += (_, _) => CacheWindowRect();
-        SizeChanged += (_, _) => CacheWindowRect();
+        // Keep the pill anchored bottom-centre as it grows/shrinks — so an animated resize
+        // (the smooth recording expand) stays put instead of drifting from its top-left.
+        SizeChanged += (_, _) => { if (IsVisible && _hwnd != IntPtr.Zero) PlaceBottomCenter(); CacheWindowRect(); };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -118,7 +123,14 @@ public partial class PillWindow : Window
     {
         if (_hwnd == IntPtr.Zero) return;
         UpdateLayout();
-        if (!GetWindowRect(_hwnd, out var wr)) return;
+        PlaceBottomCenter();
+    }
+
+    // Position from the CURRENT physical window size, without forcing layout — safe to call
+    // from SizeChanged (which fires inside a layout pass, where UpdateLayout would throw).
+    void PlaceBottomCenter()
+    {
+        if (_hwnd == IntPtr.Zero || !GetWindowRect(_hwnd, out var wr)) return;
         int winW = wr.Right - wr.Left, winH = wr.Bottom - wr.Top;
         var work = PhysicalWorkArea();
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
@@ -160,7 +172,7 @@ public partial class PillWindow : Window
 
     void OnStateChanged(PillState old, PillState next)
     {
-        if (next == PillState.Hidden) { HideAnimated(); return; }
+        if (next == PillState.Hidden) { StopHoverPoll(); HideAnimated(); return; }
 
         var fromHidden = old == PillState.Hidden || !IsVisible;
         Host.Children.Clear();
@@ -172,13 +184,46 @@ public partial class PillWindow : Window
         var work = PhysicalWorkArea();
         // Never exceed the screen — tall panels clamp and scroll internally.
         var availH = (work.Bottom - work.Top) / dpi - BottomGap - TopMargin;
-        Width = w;
-        Height = Math.Min(h, availH);
+        var targetH = Math.Min(h, availH);
 
-        if (fromHidden) { Show(); ApplyGhost(); } // re-apply WDA — hide/show can drop it
-        PositionBottomCenter();   // physical-pixel placement, DPI-proof
-        MorphContent();
+        // A hover pill expand/collapse (tiny Toki ⇄ Home, or ⇄ recording controls) is
+        // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Closing is quicker
+        // than opening so dismissing feels snappy. Other transitions stay instant.
+        var hoverMorph = !fromHidden && IsHoverPair(old, next);
+        var collapsing = next is PillState.Collapsed or PillState.RecordingBar;
+
+        if (hoverMorph)
+        {
+            AnimateSize(w, targetH, collapsing ? 190 : 300);   // SizeChanged re-centres each frame
+            Host.BeginAnimation(OpacityProperty, null);
+            Host.Opacity = 0;             // the new content fades in as the pill morphs (masks reflow)
+            Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 150 : 240))));
+        }
+        else
+        {
+            BeginAnimation(WidthProperty, null);   // clear any in-flight resize animation
+            BeginAnimation(HeightProperty, null);
+            Width = w;
+            Height = targetH;
+            if (fromHidden) { Show(); ApplyGhost(); } // re-apply WDA — hide/show can drop it
+            PositionBottomCenter();   // physical-pixel placement, DPI-proof
+            MorphContent();
+        }
         CacheWindowRect();
+
+        // Poll for hover while in a pill state that reveals-on-hover (launcher + recording).
+        if (next is PillState.Collapsed or PillState.Home or PillState.RecordingBar or PillState.RecordingOpen)
+            StartHoverPoll();
+        else StopHoverPoll();
+    }
+
+    /// <summary>Smoothly animate the window's size (the pill morph) with a gentle ease.</summary>
+    void AnimateSize(double w, double h, int ms)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var dur = new Duration(TimeSpan.FromMilliseconds(ms));
+        BeginAnimation(WidthProperty, new DoubleAnimation(w, dur) { EasingFunction = ease });
+        BeginAnimation(HeightProperty, new DoubleAnimation(h, dur) { EasingFunction = ease });
     }
 
     /// <summary>
@@ -236,6 +281,109 @@ public partial class PillWindow : Window
         if (e.Key == Key.Escape) _state.ForceForDemo(PillState.Hidden);
     }
 
+    // ── Hover-to-expand while recording (WisprFlow-style) ──
+    // The recording pill is a tiny alive Toki; resting the pointer on it expands it to the
+    // timer + Stop, moving away collapses it back — no click, never in the way.
+    //
+    // We do NOT use WPF MouseEnter/Leave here: while the pill animates its size and
+    // repositions under a stationary cursor, WPF's hit-testing fires phantom leave/enter
+    // events, which flip-flopped it open/closed endlessly. Instead we poll the REAL cursor
+    // position against the pill's REAL rectangle. Because the expanded rect contains the
+    // collapsed one, that gives clean hysteresis: on it → open; off it → closed; no flicker.
+    const int HoverPollMs = 60;
+    const int ExpandDwellMs = 260;   // rest this long before it opens (a graze won't)
+    const int CollapseDelayMs = 120; // close soon after leaving — closing should feel snappy
+    readonly System.Windows.Threading.DispatcherTimer _hoverPoll =
+        new() { Interval = TimeSpan.FromMilliseconds(HoverPollMs) };
+    int _overMs, _offMs;
+    bool _hoverWired, _wasOver;
+
+    // The two hover pairs: resting pill → revealed view. Same behaviour for the launcher
+    // (tiny Toki → Home) and recording (tiny Toki → timer+Stop).
+    static PillState? ExpandTarget(PillState s) => s switch
+    {
+        PillState.Collapsed => PillState.Home,
+        PillState.RecordingBar => PillState.RecordingOpen,
+        _ => null,
+    };
+    static PillState? CollapseTarget(PillState s) => s switch
+    {
+        PillState.Home => PillState.Collapsed,
+        PillState.RecordingOpen => PillState.RecordingBar,
+        _ => null,
+    };
+    static bool IsHoverPair(PillState a, PillState b) =>
+        ExpandTarget(a) == b || CollapseTarget(a) == b;
+
+    void EnsureHoverPoll()
+    {
+        if (_hoverWired) return;
+        _hoverWired = true;
+        _hoverPoll.Tick += (_, _) => HoverTick();
+    }
+
+    void StartHoverPoll()
+    {
+        EnsureHoverPoll();
+        _overMs = _offMs = 0;
+        _wasOver = false;
+        if (!_hoverPoll.IsEnabled) _hoverPoll.Start();
+    }
+
+    void StopHoverPoll()
+    {
+        if (_hoverPoll.IsEnabled) _hoverPoll.Stop();
+    }
+
+    void HoverTick()
+    {
+        var cur = _state.Current;
+        var over = CursorOverPill();
+
+        // Cute: Toki blinks the moment the pointer lands on the resting pill.
+        if (over && !_wasOver && (cur == PillState.Collapsed || cur == PillState.RecordingBar)) BlinkCurrentToki();
+        _wasOver = over;
+
+        if (ExpandTarget(cur) is PillState expand)
+        {
+            _offMs = 0;
+            _overMs = over ? _overMs + HoverPollMs : 0;
+            if (_overMs >= ExpandDwellMs) { _overMs = 0; _state.TryGo(expand); }
+        }
+        else if (CollapseTarget(cur) is PillState collapse)
+        {
+            _overMs = 0;
+            _offMs = over ? 0 : _offMs + HoverPollMs;
+            if (_offMs >= CollapseDelayMs) { _offMs = 0; _state.TryGo(collapse); }
+        }
+        else StopHoverPoll(); // not a hover state anymore
+    }
+
+    // Find the Toki character in the current view and make it blink.
+    void BlinkCurrentToki()
+    {
+        var toki = FindDescendant<Controls.TokiBlob>(Host);
+        toki?.BlinkNow();
+    }
+
+    static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) return hit;
+            if (FindDescendant<T>(child) is T deep) return deep;
+        }
+        return null;
+    }
+
+    // The physical cursor position, tested against the pill's cached physical rectangle.
+    bool CursorOverPill()
+    {
+        if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
+        return p.X >= _rectL && p.X <= _rectR && p.Y >= _rectT && p.Y <= _rectB;
+    }
+
     // ---- interop ----
     const int GwlExStyle = -20;
     const int WsExToolWindow = 0x00000080;
@@ -245,6 +393,7 @@ public partial class PillWindow : Window
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int newLong);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, ref RECT pv, uint winIni);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
@@ -252,6 +401,7 @@ public partial class PillWindow : Window
     const uint SwpNoSize = 0x0001, SwpNoZOrder = 0x0004, SwpNoActivate = 0x0010;
 
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
 
     const int DwmwaUseImmersiveDarkMode = 20;
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);

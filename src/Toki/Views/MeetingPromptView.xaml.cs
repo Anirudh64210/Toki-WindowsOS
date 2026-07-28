@@ -10,10 +10,10 @@ public partial class MeetingPromptView : UserControl
         InitializeComponent();
         Loaded += (_, _) =>
         {
-            // "Zoom is in a call — record it?" when we know the app; generic otherwise.
+            // "Zoom is in a call. Record it?" when we know the app; generic otherwise.
             var app = App.CurrentApp?.DisplayName;
             var name = string.IsNullOrWhiteSpace(app) ? null : PrettyName(app!);
-            Prompt.Text = name is null ? "Record this meeting?" : $"{name} is in a call — record it?";
+            Prompt.Text = name is null ? "Record this meeting?" : $"{name} is in a call. Record it?";
         };
     }
 

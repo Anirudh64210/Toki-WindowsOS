@@ -8,17 +8,17 @@ public sealed class AppState
 {
     static readonly Dictionary<PillState, PillState[]> Allowed = new()
     {
-        // Idle is Hidden (nothing on screen). Collapsed remains valid for a
-        // future "pin the pill" setting but is not used in the default flow.
+        // The tiny Toki pill (Collapsed) is the resting state; hovering it reveals Home,
+        // hovering out collapses Home back to it — so Collapsed ⇄ Home both ways.
         [PillState.Hidden]        = [PillState.Home, PillState.MeetingPrompt, PillState.Collapsed],
         [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden],
         [PillState.MeetingPrompt] = [PillState.RecordingBar, PillState.Hidden],
         [PillState.RecordingBar]  = [PillState.RecordingOpen, PillState.Summarizing],
         [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing],
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
-        [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Library],
-        [PillState.NoSpeech]      = [PillState.Hidden, PillState.Home],
-        [PillState.Home]          = [PillState.Hidden, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings, PillState.ManualNote],
+        [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Library],
+        [PillState.NoSpeech]      = [PillState.Hidden, PillState.Home, PillState.Collapsed],
+        [PillState.Home]          = [PillState.Hidden, PillState.Collapsed, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings, PillState.ManualNote],
         [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings, PillState.Notes, PillState.ManualNote],
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],

@@ -11,9 +11,9 @@ public partial class RecordingBarView : UserControl
     public RecordingBarView()
     {
         InitializeComponent();
-        RecordingClock.Attach(this, Timer);
-        // A slow, gentle breath on the dot — enough to read as "live", never a
-        // distraction. Runs only while the chip is visible.
+        // A slow, gentle pulse on the recording dot — reads as "live", never a
+        // distraction. Runs only while the tiny Toki is visible. (No timer here:
+        // the elapsed time lives in the expanded controls, one click away.)
         IsVisibleChanged += (_, e) =>
         {
             if ((bool)e.NewValue) PulseDot();

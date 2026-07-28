@@ -25,6 +25,11 @@ public static class NoteRenderer
         body.Children.Clear();
         var fs = spacious ? 13.5 : 12.0;
 
+        // Generation guard: if this panel is re-rendered for another meeting, any pending
+        // deferred transcript work for the old one stops (checks body.Tag still == token).
+        var token = new object();
+        body.Tag = token;
+
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
             SectionHeader(body, "SUMMARY", spacious, first: true);
@@ -44,8 +49,30 @@ public static class NoteRenderer
         if (m.Transcript.Count > 0)
         {
             SectionHeader(body, "TRANSCRIPT", spacious);
-            foreach (var s in m.Transcript) body.Children.Add(TranscriptRow(s, fs, spacious));
+            // Do NOT build the whole transcript synchronously — a long meeting is hundreds
+            // to 1000+ segments (~5 visual elements each), and dumping them all into a
+            // non-virtualizing panel on the click froze the window open for ~2s. Render a
+            // small first batch now (instant open) and stream the rest in on Background
+            // priority so the UI thread never blocks. The transcript is below the fold
+            // anyway; it fills in as you'd scroll to it.
+            RenderTranscriptChunked(body, m.Transcript, fs, spacious, token, 0);
         }
+    }
+
+    // First batch is small enough to feel instant; later batches are larger and yield to
+    // input between them so scrolling/clicking stays responsive while it fills.
+    static void RenderTranscriptChunked(Panel body, IReadOnlyList<TranscriptSegment> segs,
+        double fs, bool spacious, object token, int start)
+    {
+        var batch = start == 0 ? 25 : 80;
+        var end = Math.Min(start + batch, segs.Count);
+        for (var i = start; i < end; i++) body.Children.Add(TranscriptRow(segs[i], fs, spacious));
+        if (end >= segs.Count) return;
+        body.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!ReferenceEquals(body.Tag, token)) return; // panel reused for another meeting
+            RenderTranscriptChunked(body, segs, fs, spacious, token, end);
+        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     static void Section(Panel body, string title, IEnumerable<FrameworkElement> rows, bool spacious)

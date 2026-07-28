@@ -114,7 +114,7 @@ public partial class LibraryView : UserControl
         var confirm = MessageBox.Show($"Delete \"{m.Title}\"? This can't be undone.",
             "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.OK) return;
-        try { App.Store.Delete(m.Id); } catch (Exception ex) { App.Log($"delete failed: {ex.Message}"); }
+        try { App.Store.Delete(m.Id); Toki.LibraryWindow.MarkDirty(); } catch (Exception ex) { App.Log($"delete failed: {ex.Message}"); }
         Reload();
     }
 

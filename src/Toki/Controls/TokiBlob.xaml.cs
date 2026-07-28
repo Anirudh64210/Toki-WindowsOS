@@ -72,6 +72,23 @@ public partial class TokiBlob : UserControl
         Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, x);
     }
 
+    /// <summary>Blink right now (a cute reaction, e.g. when the pill is hovered). Also
+    /// gives a tiny squash-pop so it reads as "Toki noticed you".</summary>
+    public void BlinkNow()
+    {
+        if (!IsVisible) return;
+        Blink(doubleBlink: false);
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 };
+        Breathe.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(1.10, 1.0, TimeSpan.FromMilliseconds(300)) { EasingFunction = ease });
+        Breathe.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.90, 1.0, TimeSpan.FromMilliseconds(300)) { EasingFunction = ease });
+        // Resume the gentle breathing afterwards so it doesn't freeze on the popped scale.
+        var resume = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        resume.Tick += (_, _) => { resume.Stop(); if (_running) StartBreathing(); };
+        resume.Start();
+    }
+
     void ScheduleBlink()
     {
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(2200 + Rng.Next(2600));
