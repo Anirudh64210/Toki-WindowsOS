@@ -355,6 +355,45 @@ A focused pass on how Toki *feels*, driven by live owner testing. Everything bel
 - **Manual notes auto-save** in the Library window (debounced) — the static red **Save**/**Cancel** are gone; a quiet "Saved" flashes and fades; the editor left-aligns instead of floating centre.
 - **One `Take Notes` button** on Home (the duplicate "Meeting" is gone — both just recorded).
 
+## M7 (UI) — The virtual notch: Toki hangs from the top edge (2026-07-28)
+
+A design pivot (owner-driven): instead of a bottom pill (which shadowed WisprFlow), Toki is a **virtual notch** at the top-centre edge — closer to the original macOS Toki, which "hangs from the notch". Built in three phases; the whole state machine, hover-morph, blink and ghost mode transferred unchanged, just re-anchored to the top.
+
+**The notch**
+- Anchored **flush to the top-centre edge**, square top corners, **rounded only on the bottom** — reads as carved into the top, not a floating pill. Grows **downward** (blooms out of the edge) and **tucks back up** into it on hide.
+- **Idle is nothing.** It appears only when needed.
+
+**How it comes and goes**
+- **Reach the top-centre edge → it summons** (Phase 2). Tuned against accidental triggers (top-centre is crowded with browser tabs / window controls): a **narrow centre band**, the **absolute top pixel row**, a short **dwell**, and a **velocity gate** (a fast reach for a tab won't trip it). Suppressed while **dragging a window** (don't fight Snap Layouts) and in **fullscreen** (`SHQueryUserNotificationState`).
+- **Peek ≠ open.** Reaching the edge shows only **Toki peeking** (the character alone — no dark box). Opening the welcome window is deliberate: **click Toki**, or **dwell noticeably** ("waiting for it"). A brief hover just shows the peek and tucks away.
+- **Hotkey / launch** also summon it; **Home stays until Esc/click-away** (an explicit summon never vanishes).
+- **Recording** shows a **minimal eyes-peek** (tiny, clear of browser tabs) — hover reveals timer + Stop.
+- **Results** (notes / "nothing was said") **drop for a glance (~2s) then tuck themselves away** so they never sit on your work — unless you hover to keep reading.
+- **Multi-monitor:** appears on the screen your cursor is on.
+
+Env `TOKI_NO_EDGE` disables edge-summon (a Settings toggle will follow). Settings notch trimmed (no dead space); the Settings page content is still placeholder wiring — flagged for the ship pass.
+
+## M7.1 (UI) — Context-aware snap-bar: Toki first, tuck-not-dismiss (2026-07-28)
+
+Refined the notch into a proper snap-bar that remembers where you were and never squats on your work.
+
+**Toki first, then the page**
+- **Launch / reach-the-edge → Toki peeks** (the character alone, no panel) and greets for ~3s. **Click Toki** (or rest on it) → it **blooms open into your remembered page** — Home by default, or whatever you were last on.
+- **Context-aware.** Toki remembers the current page (`_context`). Clicking into your real work **tucks the page to a thin sliver (keeps context)** instead of resetting to Home; re-summoning restores that page. A tucked sliver fully hides after ~9s, still remembering the page.
+
+**Persistent tucked sliver (no rebuild)**
+- Any page (Home / Notes / loader / "nothing was said") **tucks to a sliver ~2.5s after you stop hovering** — not gone, a little hangs from the edge. **Hover the sliver → the SAME page slides back down** (context preserved, no reload).
+- **Loader** shows ~2.8s then tucks regardless of hover (it's a transient "working" flash). **Results arrive as a quiet sliver** (a peek), never a panel dropped in your face — hover to open.
+
+**Recording = upside-down Toki**
+- Toki **flips and falls** to hang **upside-down**, only its **eyes peeking** over the edge, blinking — minimal, alive, clear of browser tabs.
+
+**Two real bugs fixed**
+- **Timers were starved during model warm-up.** The tuck timers ran at `DispatcherTimer` default *Background* priority, so they got starved while the ASR/LLM models load at launch — exactly when Home / the loader show. That's why pages during warm-up never tucked but Notes (later) did. Bumped to **Input priority**. (This was the "works in the demo, not in real use" bug.)
+- **Accidental-tap guard strengthened.** A ~5-word mis-click ("Met the t I mean") was saved as a meeting because the guard required <3s **and** <5 words. Now drops anything with **<12 words or <4s** — a mis-click is never a meeting.
+
+Sizes trimmed smaller across the board (Notes no longer half-screen). Timer/animation knobs are all constants at the top of `PillWindow`.
+
 ## Live transcription preview (parked)
 
 Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain). **Now the clear next step** — on a fully-active meeting, live transcription is the only thing that removes the multi-minute wait at stop.
