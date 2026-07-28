@@ -20,14 +20,14 @@ public partial class RecordingBarView : UserControl
     void PlayFlipAndFall()
     {
         Flip.Angle = 0;
-        Fall.Y = -18;
+        Fall.Y = -12;
         // Tighter: flip over (0 → 180°) and drop in with a small bounce, settling upside-down
         // so only the eyes peek over the edge (the body is tucked above it).
         Flip.BeginAnimation(RotateTransform.AngleProperty,
             new DoubleAnimation(0, 180, TimeSpan.FromMilliseconds(420))
             { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 } });
         Fall.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(-18, 0, TimeSpan.FromMilliseconds(480))
+            new DoubleAnimation(-12, 0, TimeSpan.FromMilliseconds(480))
             { EasingFunction = new BounceEase { Bounces = 2, Bounciness = 2.6, EasingMode = EasingMode.EaseOut } });
     }
 

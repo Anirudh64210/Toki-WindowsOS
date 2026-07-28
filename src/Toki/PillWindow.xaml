@@ -15,32 +15,15 @@
          A real acrylic blur-behind is applied in code (SetWindowCompositionAttribute). -->
     <!-- Rounded only on the BOTTOM — the top is flush with the screen edge, so it reads as
          a notch carved into the top, not a floating pill. -->
-    <Border x:Name="Root" CornerRadius="0,0,22,22" BorderThickness="1,0,1,1">
-        <Border.BorderBrush>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#40FFFFFF" Offset="0"/>
-                <GradientStop Color="#18FFFFFF" Offset="0.5"/>
-                <GradientStop Color="#14000000" Offset="1"/>
-            </LinearGradientBrush>
-        </Border.BorderBrush>
-        <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#9E24282E" Offset="0"/>
-                <GradientStop Color="#94141619" Offset="0.5"/>
-                <GradientStop Color="#9E0B0C0E" Offset="1"/>
-            </LinearGradientBrush>
-        </Border.Background>
+    <!-- A VIRTUAL NOTCH, not a glass pill: PITCH BLACK and fully opaque, so it reads as a hole
+         carved out of the top edge (like the macOS notch / Dynamic Island). No white sheen, no
+         translucency — a clean black slab. Even a 13px tucked sliver is an unmistakable dark tab. -->
+    <Border x:Name="Root" CornerRadius="0,0,22,22" BorderThickness="1,0,1,1"
+            Background="#FF000000" BorderBrush="#33000000">
         <Grid>
-            <!-- Glass sheen: a faint highlight along the top edge, fading out quickly. -->
-            <Border x:Name="Sheen" CornerRadius="0,0,22,22" IsHitTestVisible="False">
-                <Border.Background>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#26FFFFFF" Offset="0"/>
-                        <GradientStop Color="#0AFFFFFF" Offset="0.12"/>
-                        <GradientStop Color="#00FFFFFF" Offset="0.32"/>
-                    </LinearGradientBrush>
-                </Border.Background>
-            </Border>
+            <!-- Kept only so code can reference it; no white glare on a pitch-black notch. -->
+            <Border x:Name="Sheen" CornerRadius="0,0,22,22" IsHitTestVisible="False"
+                    Background="Transparent"/>
             <!-- Grid stretches its child view to fill the window exactly, so content
                  wraps/scrolls within bounds instead of overflowing and clipping. -->
             <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
