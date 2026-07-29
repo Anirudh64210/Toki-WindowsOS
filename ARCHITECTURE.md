@@ -368,3 +368,35 @@ The notch became a stateful snap-bar. Three visual levels on one morphing window
 **Timer priority — the "works in demo, not in real use" bug.** `DispatcherTimer` defaults to `DispatcherPriority.Background`. The idle/auto-hide/hover timers were therefore **starved while the app warms the ~3 GB of ASR/LLM models at launch** — exactly when Home and the loader are on screen, so they never tucked (Notes, appearing after warm-up, did — which is what the owner observed). All three pill timers are now `DispatcherPriority.Input`.
 
 **Accidental-tap guard.** A ~5-word mis-click was saved as a meeting because the old guard needed `<3s AND <5 words`. Now `words < 12 || durationMs < 4000` — a mis-click yields a handful of garbled words and is dropped; a real meeting always clears the bar.
+
+### Close-off that sticks — the real "context-aware" model (M7.2)
+
+M7.1 tucked pages to a persistent sliver. In real use that was two problems: the sliver **squatted on the screen**, and it **re-summoned itself**. The log was unambiguous — `Home → Hidden → Collapsed → Home` cycling every ~2 s. Root cause: the top-centre edge-summon zone is **the same physical space as a maximised browser's tab strip**. While you work in Chrome your cursor lives up there, so the moment a page closed off, the cursor (still at the top edge) tripped the summon again. Close-off *worked*; it just couldn't *stay*.
+
+The fix is a **priming/arming** model, the industry-standard way to disambiguate a deliberate reach from an incidental hover:
+- **`TuckCurrent` closes a page off entirely** (`ForceForDemo(Hidden)`, `_context` kept) rather than leaving a sliver — the screen stays clean while you work. The **loader is the sole exception** (it keeps a clean shimmer sliver so you know it's working).
+- **`EdgeTick` only summons when `_edgeArmed`.** The arm is set true only once the cursor is **≥ `EdgeReArmBelowPx` (150 px) below the top edge** (down in the page body), consumed on each summon, and reset to false on every transition to `Hidden`. So a cursor parked on the tab strip can never summon; you must reach *up from the page*. Dwell also went 220 → 300 ms. An `_edgeReadyTick` cooldown (700 ms after any close-off) covers the immediate hand-off. This is what makes close-off feel like it sticks.
+- **Reach-the-edge restores what Toki is *doing*.** If `_context == Summarizing` (writing your notes) the edge brings the loader back so you can check progress; otherwise Toki peeks first. "Access whatever Toki is doing by hovering the top-centre."
+- **Results are one-shot.** Leaving `Notes`/`NoSpeech` → `Hidden` resets `_context` to `Home`, so re-summoning gives Toki, never the dead result (the "click Okay → hover → nothing-was-said again → forever" loop). `Notes`/`NoSpeech` now **enter open** (a ~2 s announce, `ResultShowMs`) then tuck; the **loader enters directly as a persistent sliver** (no flash) — the inverse of M7.1, matching "after recording, straight to a working sliver; when notes are ready, open briefly then tuck."
+
+**Surface = pitch black.** `Root.Background` is a fully-opaque `#000` slab, no white sheen (the sheen `Border` is kept, referenced by code, but painted transparent). The translucent-frosted look washed out and made 13 px slivers invisible; an opaque black notch reads as carved-out and makes the sliver a crisp dark tab.
+
+**Loader sliver = shimmer only.** `SummarizingView`'s top row is fixed at exactly `SliverH` and carries only a sweeping coral shimmer; the Toki + status line live in a second row that's below the fold when tucked — so the sliver is never a clipped slice of Toki's head.
+
+### Notes: map-reduce + adaptive/honest (M8)
+
+**Finding first (lesson 1: garbage in, garbage out — check what the LLM is fed).** The saved notes plus the logs showed the real failures, not "the model is dumb":
+- A 25-min transcript is far larger than the model's **~3072-token context** (`LlmRuntime`, partial-GPU). The single `CombinedPass` overran it, `CompleteAsync` threw, and `WriteAsync` silently fell back to the **heuristic** — whose TL;DR is literally the first sentences and whose "to-do" is every keyword-matched line. That is the "summary = first three lines" bug.
+- A short meeting *fit* in context, so the LLM ran — and the prompt **forced** KEY POINTS / ACTION ITEMS on every meeting, so it padded a screen-share logistics chat into corporate filler.
+
+**Design — do it in pieces, adapt the shape:**
+- **Map-reduce.** `Chunk()` splits the transcript at whole-segment boundaries into windows under `MaxChunkChars()` ( `(ContextSize − 800) × 3` chars, sized to the model). `MapChunk` compresses each window to a factual digest (or `NOTHING`); `FinalNote` reduces the digests (or, for a single window, reads it raw). Summarising summaries can't overflow. `StatelessExecutor` makes every call independent, so the several passes are safe and serialized.
+- **Adaptive by omission.** The reduce prompt emits only the sections that apply; `MarkdownMirror` and `NoteRenderer` already guard on `Count > 0`, so empty sections vanish with **no schema/DB change**. `NoteSet.Decisions` stays repurposed as KEY POINTS.
+- **Honest, not filler.** `LowSubstanceNote()` is a one-line honest note for genuinely empty exchanges. The `NOTHING` trigger is deliberately **narrow** — an early over-eager version dismissed a real (but informal, and shattered — see M8.1) working session as "nothing substantive," so the prompt was tightened to fire only on pure greetings/small-talk/connection-checks.
+- **Verified against real data** via `--renotes <id>` (re-runs the writer on a stored transcript). This is why the harness matters: it let the fix be proven on the exact meetings that failed, no re-recording.
+
+**How this meets the parked live-transcription work (owner's "run both optimally").** The same chunk boundaries are the unit of live work: with **incremental transcription** (Phase 2) the transcript finalizes per-utterance *during* the meeting, and on capable machines the **map** passes run as a rolling summary as the meeting proceeds — so Stop needs only a final reduce. On low-RAM PCs the recognizer and LLM never sit resident together: transcribe live (recognizer resident), then release it and load the LLM for the chunked map-reduce at stop. Map-reduce is the design that makes notes and live transcription compose.
+
+### Transcript grouping — pausey speech (M8.1)
+
+`GroupIntoSegments` breaks a segment at a **word boundary** on a sentence end *or* a >0.8 s pause. The pause rule alone shattered slow/deliberate speech into one word per line (every word had a >0.8 s gap). Added a `words` counter: the **pause break only fires once the line has ≥ `MinWordsForPauseBreak` (8) words**; sentence ends still break freely. Slow speech now forms full-sentence lines; genuine long un-punctuated runs still get chunked at ~8-word boundaries (needed because Parakeet punctuation isn't always reliable, and echo de-dup needs utterance-sized lines, not one giant run-on).

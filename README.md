@@ -394,6 +394,39 @@ Refined the notch into a proper snap-bar that remembers where you were and never
 
 Sizes trimmed smaller across the board (Notes no longer half-screen). Timer/animation knobs are all constants at the top of `PillWindow`.
 
-## Live transcription preview (parked)
+## M7.2 (UI) — Pitch-black notch, close-off that *sticks*, tiny recording peek (2026-07-28)
 
-Streaming zipformer fed live mic chunks → partial text in the expanded recording view. Deprioritized by the owner, but it's the real path to sub-30s total time (transcript ready at stop → only the AI notes remain). **Now the clear next step** — on a fully-active meeting, live transcription is the only thing that removes the multi-minute wait at stop.
+Owner testing in a real Chrome session exposed that M7.1's "tuck to a sliver" left Toki squatting on the screen, and — worse — it kept **re-summoning itself**. Rebuilt the resting behaviour around one principle: **one element at the top, and once it's gone it stays gone until you deliberately ask for it back.**
+
+- **Pitch-black notch.** The frosted-translucent surface read as a washed-out grey pill and slivers were nearly invisible. The notch is now a **fully-opaque pitch-black slab** (no white sheen, no translucency) — a real "hole carved out of the top edge," like the Mac notch / Dynamic Island.
+- **Close-off, not a lingering sliver.** A page now **closes off completely** (→ `Hidden`, context remembered) when you move on, instead of leaving a strip hanging in your way. The **loader is the one exception** — it keeps a clean sliver as its "I'm working" heartbeat.
+- **Summon that sticks (the "context-aware close-off doesn't work" bug).** The log showed `Home → Hidden → Collapsed → Home` looping every ~2s: the top-centre summon zone sits exactly on **Chrome's tab strip**, so the instant Toki closed off, the cursor (still up there) re-triggered it. Fix: the edge-summon **re-arms only after the cursor drops ≥150 px into the page body**, the arm is consumed on each summon and reset on every close-off, and the dwell went 220 → 300 ms. Now you can close Toki and keep working up top — it stays gone; you bring it back with a deliberate reach up (or `Ctrl+Alt+Space` / tray).
+- **"Nothing was said" no longer loops.** Clicking *Okay* hid it, but the remembered page was still `NoSpeech`, so hovering re-opened it forever. A **result is a one-shot announcement** — dismissing it now resets the remembered page to Home.
+- **Loader is a clean sliver.** It used to show a clipped slice of Toki's head + text when tucked (ugly). The loader view's top row is now exactly the sliver height, carrying only a **soft coral shimmer heartbeat** — Toki's body never peeks through. Redesigned smaller and cuter.
+- **Recording peek shrunk** to ~34 px (was 52) so the upside-down eyes never clash with browser tabs or the snipping-tool toolbar.
+- **`Ctrl+Alt+Space` summons the small Toki**, not the full welcome window (Toki-first, like the edge-summon).
+
+## M8 (Notes) — Map-reduce, adaptive, honest notes (2026-07-28)
+
+Two real meetings exposed that the notes were fundamentally broken, and the logs told the true story:
+
+| Meeting | Transcription | Notes |
+|---|---|---|
+| 25-min | **602 s (10 min!)** whole-file at stop | LLM overran its ~3 k-token context → threw → silent heuristic fallback (TL;DR = the first three sentences, "to-do" = 19 keyword-matched lines) |
+| 5-min "nothing" | 38 s | LLM ran and **manufactured corporate filler** out of a screen-share logistics exchange |
+
+**Findings:** the 6–7-minute wait is *transcription*, not notes (see M8.1 plan). The bad notes are two separate failures — **context overflow on long meetings** (→ garbage fallback) and a **rigid template that forces KEY POINTS / ACTION ITEMS on every meeting** (→ invented filler).
+
+**What changed — `LlmNoteWriter` is now map-reduce and adaptive:**
+- **Map-reduce.** The transcript is split at speaker/segment boundaries into context-safe windows (`MaxChunkChars` sized from `LlmRuntime.ContextSize`). Each window is **mapped** to a compact factual digest; the digests are **reduced** into the final note. Summarising summaries never overflows — a 2-hour meeting works as well as a 5-minute one. (One-window meetings skip the map and read raw for best fidelity.)
+- **Adaptive + honest.** The reduce step judges the meeting's substance and emits **only the sections that genuinely apply** (empty sections are already dropped by both renderers, so this is adaptive-by-omission — no schema change). A meeting with no real content gets a one-line honest note, never filler. The `NOTHING` escape is deliberately narrow (**greetings / small-talk / connection-checks only**) so a real-but-informal working session isn't wrongly dismissed.
+- **Title from the whole-meeting summary**, not the opening line.
+- **Verification:** new **`--renotes <meetingId>`** self-test re-runs the writer on a stored meeting's real transcript and prints the result. Confirmed against the two failing meetings — the 25-min one now yields *"Refine Weekend Attendance Tracking"* + a real whole-meeting summary/points/actions (80 s); the 5-min one yields an honest *"nothing substantive"* line (7 s). App notes timeout raised 150 → 300 s (map-reduce makes several short calls).
+
+## M8.1 (ASR) — Pausey speech no longer shatters the transcript (2026-07-28)
+
+A presenter reading slowly ("And… professors… Brown… University.") produced **one word per line** in the transcript. The M6.6 fix stopped mid-*word* shatter, but a >0.8 s pause *between* words still forced a new segment. Fix: a pause break now only fires once the line already has **≥ 8 words** (`MinWordsForPauseBreak`); sentence ends (`. ? !`) still break freely. Verified by re-transcribing the real clip → clean full-sentence lines. (This also fixed a knock-on notes false-negative: a shattered transcript looked like noise and got a wrongly-empty note.)
+
+## Live transcription — the next milestone (Phase 2, planned)
+
+The 25-min meeting spent **10 minutes transcribing after Stop** because Toki does one whole-file Parakeet pass at the end (and the sherpa-onnx build is CPU-only — no GPU ASR). Owner-approved plan: **incremental Parakeet during the meeting** — a voice-activity detector splits the live audio at natural pauses and each utterance is transcribed in the background, so **Stop → transcript is near-instant**. One recognizer feeds both a live preview and the saved transcript (memory-friendly for low-RAM PCs). The notes' "map" passes can then run *during* the meeting on capable machines for near-instant notes. This is the real fix for the multi-minute wait; it touches the audio pipeline so it needs a real meeting to verify by ear.
