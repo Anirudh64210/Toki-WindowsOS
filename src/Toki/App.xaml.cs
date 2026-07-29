@@ -116,7 +116,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--seed" or "--llmtest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--seed" or "--llmtest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -371,7 +371,9 @@ public partial class App : Application
             {
                 try
                 {
-                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(150));
+                    // Map-reduce makes several short LLM calls for a long meeting; give it room.
+                    // (Still bounded so a stuck generation can never hang the pill.)
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
                     var llmNotes = LlmService.Instance.WriteNotesAsync(transcript, cts.Token).GetAwaiter().GetResult();
                     if (llmNotes is not null)
                     {
@@ -509,9 +511,10 @@ public partial class App : Application
 
     static void ToggleHome()
     {
-        // Ctrl+Alt+Space drops the notch (Home) from the top / tucks it back.
+        // Ctrl+Alt+Space summons the small Toki peek (NOT the full welcome window) / tucks it back.
+        // Toki-first, like the edge-summon: you get the character, then open a page from it.
         // Force-applied so the user can never get stuck.
-        if (State.Current is PillState.Hidden or PillState.Collapsed) State.ForceForDemo(PillState.Home);
+        if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
         else State.ForceForDemo(PillState.Hidden);
     }
 

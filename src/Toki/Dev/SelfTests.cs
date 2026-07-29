@@ -37,6 +37,7 @@ static class SelfTests
                 "--transcribetest" => TranscribeTest(args),
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
+                "--renotes" => ReNotes(args),
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
@@ -139,6 +140,38 @@ static class SelfTests
             Console.WriteLine($"  [warn] took {sw.ElapsedMilliseconds / 1000.0:0.0}s — target is under 30s.");
         if (TextValidator.IsDegenerate(notes.Tldr)) return Fail("SUMMARY is degenerate (CJK / repetition).");
         Console.WriteLine("[--llmtest] PASS — notes generated, English, no degeneration. Read them: do they match the transcript?");
+        return 0;
+    }
+
+    /// <summary>Re-run the LLM note writer on a STORED meeting's real transcript and print the
+    /// result — so we can verify the notes engine against actual meetings (e.g. the 25-min one that
+    /// used to summarise only its first lines) without recording again.</summary>
+    static int ReNotes(string[] args)
+    {
+        var idArg = ArgValue(args, "--renotes");
+        if (idArg is null || !long.TryParse(idArg, out var id))
+            return Fail("usage: --renotes <meetingId>");
+
+        var store = new MeetingStore();
+        var m = store.Get(id);
+        if (m is null) return Fail($"no meeting with id {id}");
+        Console.WriteLine($"[--renotes] meeting {id}: \"{m.Title}\"  ({m.Transcript.Count} segments, {m.DurationMs / 60000} min)");
+        if (m.Transcript.Count == 0) return Fail("meeting has no transcript to summarise.");
+
+        var sw = Stopwatch.StartNew();
+        // Off the UI thread — LLamaSharp async continuations would deadlock a blocked caller.
+        var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(m.Transcript)).GetAwaiter().GetResult();
+        sw.Stop();
+        if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
+
+        Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"  TITLE  : {notes.Title ?? "(none → falls back to app + date)"}");
+        Console.WriteLine($"  SUMMARY: {notes.Tldr}");
+        Console.WriteLine($"  KEY POINTS ({notes.Decisions.Count}):");
+        foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
+        foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
+        Console.WriteLine("[--renotes] done — read the notes: do they reflect the WHOLE meeting, honestly (no filler)?");
         return 0;
     }
 

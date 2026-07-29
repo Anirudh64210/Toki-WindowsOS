@@ -1,23 +1,34 @@
+using System.Text;
 using Toki.Storage;
 using Toki.Transcription;
 
 namespace Toki.Llm;
 
 /// <summary>
-/// Writes meeting notes with a local LLM. To stay fast (target: well under the
-/// old multi-pass minute), it does ONE structured generation for Key points +
-/// Action items + Summary — with the Summary asked for LAST so the model writes
-/// it after the details it's summarising (brief §5 / lesson 8) — then a tiny
-/// title pass. Every output is validated; on garbage or error a section falls
-/// back to the heuristic extractor, so the user always gets clean notes.
-/// (Granola-style shape: a labelled summary, a few key points, and to-dos.
-/// No "decisions" section — it just echoed the to-dos — and no open questions.)
+/// Writes meeting notes with a local LLM — MAP-REDUCE and ADAPTIVE.
+///
+/// Why map-reduce: the local model's context is only a few thousand tokens. A single
+/// pass over a 25-minute transcript overruns it, the call throws, and we fall back to
+/// the raw-first-lines heuristic (the "summary is just the opening sentences" bug). So
+/// instead we split the transcript at speaker/segment boundaries into context-safe
+/// windows, "map" each window to a compact factual digest, then "reduce" the digests
+/// into the final note. Summarising summaries never overflows — a 2-hour meeting works
+/// as well as a 5-minute one.
+///
+/// Why adaptive + honest: not every meeting has decisions, tasks, or goals. The reduce
+/// step judges the meeting's substance and emits ONLY the sections that genuinely apply
+/// (empty sections are dropped by the renderer). A casual or inconclusive meeting gets a
+/// one-line honest note — never corporate filler manufactured to look important. This is
+/// the Granola/Fireflies principle: pick the shape that fits, don't force a template.
 /// </summary>
 public sealed class LlmNoteWriter
 {
     const string System =
-        "You are a meeting-notes assistant. Respond in English only. Be concise and factual. "
-        + "Output ONLY what is asked — no preamble, no explanations, no markdown headings.";
+        "You are a meeting-notes assistant. Respond in English only. Be concise, factual, and honest. "
+        + "Output ONLY what is asked — no preamble, no explanations, no markdown headings, no 'None'.";
+
+    // A window that a chunk digest / final pass will report nothing for.
+    const string NothingMarker = "NOTHING";
 
     readonly ILlm _llm;
     public LlmNoteWriter(ILlm llm) => _llm = llm;
@@ -27,57 +38,167 @@ public sealed class LlmNoteWriter
         var heuristic = NoteExtractor.Extract(transcript);
         if (!_llm.Ready || transcript.Count == 0) return heuristic;
 
-        var text = Flatten(transcript);
+        var chunks = Chunk(transcript, MaxChunkChars());
 
-        // One pass for everything the model is good at, in write-order KEY POINTS
-        // → ACTION ITEMS → SUMMARY (summary last, from what it just wrote).
-        var (keyPoints, actions, summary) = await CombinedPass(text, ct);
-
-        var notes = new NoteSet
+        // Decide what the final pass reads. One window → read it raw (best fidelity for a short
+        // meeting). Many windows → MAP each to a digest first, so the final pass fits in context.
+        string source;
+        bool sourceIsDigests;
+        if (chunks.Count == 1)
         {
-            Tldr = string.IsNullOrWhiteSpace(summary) ? heuristic.Tldr : summary,
-            Decisions = keyPoints ?? heuristic.Decisions,     // Decisions column repurposed as "Key points"
-            Actions = actions ?? heuristic.Actions,
-            Questions = [],                                    // open-questions section retired
-        };
+            source = chunks[0];
+            sourceIsDigests = false;
+        }
+        else
+        {
+            var digests = new List<string>();
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                var d = await MapChunk(chunks[i], i + 1, chunks.Count, ct);
+                if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d)) digests.Add(d);
+            }
+            // Every window was greetings/logistics/silence → an honest, minimal note. No filler.
+            if (digests.Count == 0) return LowSubstanceNote();
+            source = string.Join("\n", digests);
+            sourceIsDigests = true;
+        }
 
-        // A short, specific title from the summary (concise — not a sentence).
-        notes.Title = await TitlePass(notes.Tldr, ct);
-        return notes;
+        // REDUCE / FINAL: the adaptive, honest note.
+        var note = await FinalNote(source, sourceIsDigests, ct);
+        if (note is null) return heuristic;                       // total LLM failure → heuristic floor
+        if (IsNothing(note.Summary) && note.KeyPoints.Count == 0 && note.Actions.Count == 0)
+            return LowSubstanceNote();                            // model judged it low-substance
+
+        var result = new NoteSet
+        {
+            Tldr = string.IsNullOrWhiteSpace(note.Summary) ? heuristic.Tldr : note.Summary,
+            Decisions = note.KeyPoints,   // "Decisions" column is rendered as KEY POINTS; empty → section dropped
+            Actions = note.Actions,       // empty → section dropped
+            Questions = [],
+        };
+        result.Title = await TitlePass(result.Tldr, ct);
+        return result;
     }
 
-    /// <summary>
-    /// Single generation returning (keyPoints, actions, summary). Any section the
-    /// model mangles comes back null so the caller uses the heuristic for it.
-    /// </summary>
-    async Task<(List<string>? KeyPoints, List<ActionItem>? Actions, string? Summary)> CombinedPass(string text, CancellationToken ct)
+    // ── MAP: one window → a compact factual digest (or NOTHING) ──
+    async Task<string?> MapChunk(string chunk, int part, int total, CancellationToken ct)
     {
         var prompt =
-            "Summarise this meeting in exactly three sections, using these headers on their own lines:\n\n"
-            + "KEY POINTS\n- 3 to 4 SHORT bullets (max ~14 words each) on the TOPICS, context, and decisions "
-            + "discussed — the substance, not a to-do list. Do NOT restate the action items here, and do not "
-            + "start bullets with \"I will\".\n\n"
-            + "ACTION ITEMS\n- each concrete task/follow-up on its own line as: task | owner: name | due: when. "
-            + "Leave out 'owner:' or 'due:' entirely when unknown — never write a placeholder dash.\n\n"
-            + "SUMMARY\nOne short paragraph (2-3 sentences) of plain-English takeaways.\n\n"
-            + "If a section genuinely has nothing, put NONE under its header.\n\n"
-            + $"Transcript:\n{text}";
-
-        var raw = await TextPass(prompt, 480, ct);
-        if (raw is null) return (null, null, null);
-
-        var (kpLines, aiLines, summary) = SplitSections(raw);
-        var keyPoints = kpLines.Count > 0 ? kpLines : null;
-        var actions = aiLines.Count > 0 ? ParseActions(aiLines) : null;
-        return (keyPoints, actions, string.IsNullOrWhiteSpace(summary) ? null : summary);
+            $"This is part {part} of {total} of a meeting transcript. In 2 to 5 short dash bullets, list ONLY the "
+            + "concrete things in THIS part: topics discussed, any decisions, any tasks/follow-ups (with who and "
+            + "when if stated), and important facts. Capture real content even if the talk is informal, rambling, "
+            + "or in fragments. Do not editorialise.\n"
+            + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk, or "
+            + "connection/audio checks with no real topic at all.\n\n"
+            + $"Transcript part:\n{chunk}";
+        return await TextPass(prompt, 220, ct);
     }
 
-    /// <summary>Split the model's output into the three labelled sections.</summary>
+    // ── REDUCE / FINAL: adaptive, honest note ──
+    async Task<FinalSections?> FinalNote(string content, bool contentIsDigests, CancellationToken ct)
+    {
+        var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
+        var prompt =
+            $"Write the notes for {what}. First judge how much real substance the meeting had.\n\n"
+            + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
+            + "SUMMARY\n"
+            + "2 to 4 plain-English sentences on what the meeting was about and what came of it. Capture what was "
+            + "genuinely discussed even if the talk was informal, wandering, or a working session — never inflate it, "
+            + "but never dismiss real content either.\n\n"
+            + "KEY POINTS\n"
+            + "- up to 5 short bullets on the main topics, facts, or decisions. Include this section ONLY if there "
+            + "are real points worth listing.\n\n"
+            + "ACTION ITEMS\n"
+            + "- concrete follow-up tasks only, one per line as: task | owner: name | due: when (drop owner or due "
+            + "when not stated). Include this section ONLY if real tasks were actually agreed.\n\n"
+            + "Hard rules: never invent decisions, tasks, or points that aren't clearly present. Omit any section "
+            + $"that does not apply — a short, honest note is correct. Reply with exactly {NothingMarker} ONLY if the "
+            + "ENTIRE thing is greetings, small talk, or connection checks with no real topic discussed at all.\n\n"
+            + $"{(contentIsDigests ? "Notes" : "Transcript")}:\n{content}";
+
+        var raw = await TextPass(prompt, 420, ct);
+        if (raw is null) return null;
+        if (IsNothing(raw)) return new FinalSections { Summary = NothingMarker };
+
+        var (kp, ai, summary) = SplitSections(raw);
+        return new FinalSections
+        {
+            Summary = summary,
+            KeyPoints = kp,
+            Actions = ai.Count > 0 ? ParseActions(ai) : [],
+        };
+    }
+
+    sealed class FinalSections
+    {
+        public string Summary { get; set; } = "";
+        public List<string> KeyPoints { get; set; } = [];
+        public List<ActionItem> Actions { get; set; } = [];
+    }
+
+    // An honest, minimal note for a meeting where nothing substantive happened — the opposite of
+    // padding nothing into a serious-looking paragraph.
+    static NoteSet LowSubstanceNote() => new()
+    {
+        Tldr = "A brief exchange, mostly greetings and logistics. Nothing substantive was discussed, so there's little to note.",
+        Decisions = [],
+        Actions = [],
+        Questions = [],
+        // No Title → NoteExtractor.Title falls back to "<app> — <date>" (honest, not a fake headline).
+    };
+
+    // ── title ──
+    async Task<string?> TitlePass(string summary, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return null;
+        var raw = await TextPass(
+            "Write a title for this meeting: 3 to 6 words, specific and concise, like a calendar event. "
+            + "No quotes, no ending punctuation, no \"Meeting\" prefix.\n\nSummary: " + summary, 24, ct);
+        if (raw is null) return null;
+        var t = raw.Split('\n')[0].Trim().Trim('"', '\'', '.', ':', '-', ' ');
+        if (t.Length < 3) return null;
+        var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length > 8) t = string.Join(' ', words.Take(8));
+        return t;
+    }
+
+    // ── chunking (split at segment boundaries, never mid-utterance) ──
+
+    /// <summary>Context budget for a chunk, in characters, sized from the model's context window.</summary>
+    static int MaxChunkChars()
+    {
+        var ctx = (int)LlmRuntime.ContextSize;
+        // Reserve ~800 tokens for the prompt scaffolding + generated digest; ~3 chars/token (conservative).
+        return Math.Max(1800, (ctx - 800) * 3);
+    }
+
+    /// <summary>Group whole segments into windows under <paramref name="maxChars"/> each.</summary>
+    static List<string> Chunk(IReadOnlyList<TranscriptSegment> transcript, int maxChars)
+    {
+        var chunks = new List<string>();
+        var sb = new StringBuilder();
+        foreach (var seg in transcript)
+        {
+            var line = $"{(seg.Speaker == Speaker.You ? "You" : "Them")}: {seg.Text}";
+            if (sb.Length > 0 && sb.Length + line.Length + 1 > maxChars)
+            {
+                chunks.Add(sb.ToString());
+                sb.Clear();
+            }
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(line);
+        }
+        if (sb.Length > 0) chunks.Add(sb.ToString());
+        return chunks;
+    }
+
+    // ── section parsing (shared) ──
+
     static (List<string> KeyPoints, List<string> Actions, string Summary) SplitSections(string raw)
     {
         var keyPoints = new List<string>();
         var actions = new List<string>();
-        var summary = new System.Text.StringBuilder();
+        var summary = new StringBuilder();
         var section = 0; // 0 none, 1 key points, 2 actions, 3 summary
 
         foreach (var lineRaw in raw.Split('\n'))
@@ -99,7 +220,6 @@ public sealed class LlmNoteWriter
         return (keyPoints, actions, summary.ToString().Trim());
     }
 
-    // Recognise a section header even if the model bolds it or adds a colon.
     static int HeaderOf(string line)
     {
         var h = line.Trim('*', '#', ':', ' ', '\t').ToLowerInvariant();
@@ -131,22 +251,7 @@ public sealed class LlmNoteWriter
         return actions;
     }
 
-    async Task<string?> TitlePass(string summary, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(summary)) return null;
-        var raw = await TextPass(
-            $"Write a title for this meeting: 3 to 6 words, specific and concise, like a calendar event. "
-            + $"No quotes, no ending punctuation, no \"Meeting\" prefix.\n\nSummary: {summary}", 24, ct);
-        if (raw is null) return null;
-        // Take the first line, strip quotes/trailing punctuation, cap length.
-        var t = raw.Split('\n')[0].Trim().Trim('"', '\'', '.', ':', '-', ' ');
-        if (t.Length < 3) return null;
-        var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length > 8) t = string.Join(' ', words.Take(8));
-        return t;
-    }
-
-    // ---- passes (each validated, retried once, else null → caller falls back) ----
+    // ── passes (validated, retried once, else null → caller falls back) ──
 
     async Task<string?> TextPass(string user, int maxTokens, CancellationToken ct)
     {
@@ -154,21 +259,28 @@ public sealed class LlmNoteWriter
         {
             string outp;
             try { outp = (await _llm.CompleteAsync(System, user, maxTokens, ct)).Trim(); }
+            catch (OperationCanceledException) { return null; }
             catch { return null; }
             if (!TextValidator.IsDegenerate(outp)) return outp;
         }
         return null;
     }
 
-    // The model likes to fill blanks with dashes/placeholders instead of omitting them.
+    // A window/note the model reported nothing for ("NOTHING", "none", "(nothing substantive)"...).
+    static bool IsNothing(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return true;
+        var t = s.Trim().TrimStart('-', '*', '•', '(', ' ').TrimEnd(')', '.', ' ').ToLowerInvariant();
+        return t is "nothing" or "none" or "n/a" or "na"
+            || t.StartsWith("nothing substantive") || t.StartsWith("nothing of substance");
+    }
+
     static bool IsEmptyMarker(string v)
     {
         var s = v.Trim().Trim('<', '>', '(', ')', '[', ']').Trim().ToLowerInvariant();
         return s is "" or "-" or "--" or "->" or "—" or "n/a" or "na" or "none"
             or "tbd" or "tba" or "unknown" or "unassigned" or "name" or "when"
-            or "no owner" or "no due" or "no due date";
+            or "no owner" or "no due" or "no due date"
+            or "not specified" or "not stated" or "not mentioned";
     }
-
-    static string Flatten(IReadOnlyList<TranscriptSegment> t) =>
-        string.Join("\n", t.Select(s => $"{(s.Speaker == Speaker.You ? "You" : "Them")}: {s.Text}"));
 }
