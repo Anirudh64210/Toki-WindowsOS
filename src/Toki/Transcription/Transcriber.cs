@@ -11,8 +11,11 @@ namespace Toki.Transcription;
 /// </summary>
 public sealed class Transcriber : IDisposable
 {
-    // Split into a new segment when tokens are separated by more than this silence.
+    // Split into a new segment when tokens are separated by more than this silence...
     const double SegmentGapSeconds = 0.8;
+    // ...but ONLY once the line already has this many words, so slow/pausey speech (a presenter
+    // pausing between words) can't shatter into one word per line. Sentence ends still break freely.
+    const int MinWordsForPauseBreak = 8;
 
     // Whole-file decode is best (lesson 3) but the native recognizer THREW on a
     // real 35-minute clip ("External component has thrown an exception") and the
@@ -114,6 +117,7 @@ public sealed class Transcriber : IDisposable
         var sb = new StringBuilder();
         double segStart = times.Length > 0 ? times[0] : 0;
         double prevEnd = segStart;
+        var words = 0;   // word-start tokens accumulated in the current line
 
         void Flush(double end)
         {
@@ -121,6 +125,7 @@ public sealed class Transcriber : IDisposable
             if (text.Length > 0)
                 segments.Add(new TranscriptSegment(speaker, (int)((segStart + offsetSec) * 1000), (int)((end + offsetSec) * 1000), text));
             sb.Clear();
+            words = 0;
         }
 
         for (var i = 0; i < tokens.Length; i++)
@@ -130,17 +135,24 @@ public sealed class Transcriber : IDisposable
             // Break ONLY at a WORD boundary. This Parakeet build marks a new word with a
             // LEADING SPACE on the token (" Rashmi" = " R","as","h","m","i"); sub-word pieces
             // carry no leading space. Splitting on a time-gap alone would cut mid-word on
-            // hesitant/pausey speech, shattering "Deepika" into "D / eep / ik / a" (and the
-            // notes into "a udi o"). At a word boundary we split on either a real pause
-            // (>0.8s) OR the end of a sentence (". ? !"), so lines land per-utterance — not
-            // per-word (untrue) and not one giant run-on paragraph per window (breaks echo
-            // de-dup). (▁ is handled too, for other SentencePiece model builds.)
+            // hesitant/pausey speech, shattering "Deepika" into "D / eep / ik / a".
+            // At a word boundary we break on the end of a sentence (". ? !") — always — OR on a
+            // real pause (>0.8s), but the pause break only fires once the line already has enough
+            // words (MinWordsForPauseBreak). Otherwise a presenter pausing between words produces
+            // one word per line (the real regression). So lines land per-utterance: not per-word,
+            // and not one giant run-on per window (which would break echo de-dup).
+            // (▁ is handled too, for other SentencePiece model builds.)
             var isWordStart = StartsWord(tokens[i]);
-            if (sb.Length > 0 && isWordStart && (start - prevEnd > SegmentGapSeconds || EndsSentence(sb)))
+            if (sb.Length > 0 && isWordStart)
             {
-                Flush(prevEnd);
-                segStart = start;
+                var longPause = start - prevEnd > SegmentGapSeconds && words >= MinWordsForPauseBreak;
+                if (EndsSentence(sb) || longPause)
+                {
+                    Flush(prevEnd);
+                    segStart = start;
+                }
             }
+            if (isWordStart) words++;
             sb.Append(tokens[i]);
             prevEnd = end;
         }
