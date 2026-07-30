@@ -15,8 +15,14 @@ public enum NotesMode { Local, HeuristicOnly, ApiKey }
 public sealed class AppSettings
 {
     public NotesMode NotesMode { get; set; } = NotesMode.Local;
-    public string ApiModel { get; set; } = "gpt-4o-mini";
-    public string ApiBaseUrl { get; set; } = "https://api.openai.com/";
+
+    // Model + base URL are trimmed on set — pasted values arrive with stray whitespace,
+    // and a trailing space in a URL or model name fails in confusing ways downstream.
+    string _apiModel = "gpt-4o-mini";
+    public string ApiModel { get => _apiModel; set => _apiModel = (value ?? "").Trim(); }
+
+    string _apiBaseUrl = "https://api.openai.com/";
+    public string ApiBaseUrl { get => _apiBaseUrl; set => _apiBaseUrl = (value ?? "").Trim(); }
 
     /// <summary>Display name for the greeting ("Welcome back, X"). Set during onboarding;
     /// falls back to the Windows account name when empty.</summary>
@@ -46,11 +52,17 @@ public sealed class AppSettings
     /// <summary>DPAPI-encrypted API key (base64). Use <see cref="ApiKey"/> to read/write in the clear.</summary>
     public string? ApiKeyProtected { get; set; }
 
+    /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
+    /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
+    /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the
+    /// positive/working state in Settings, so we never claim a key is working on faith.</summary>
+    public bool ApiVerified { get; set; }
+
     [JsonIgnore]
     public string? ApiKey
     {
         get => Unprotect(ApiKeyProtected);
-        set => ApiKeyProtected = Protect(value);
+        set => ApiKeyProtected = Protect(value?.Trim());   // trimmed: pasted keys carry stray whitespace
     }
 
     // ---- persistence ----

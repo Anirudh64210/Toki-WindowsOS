@@ -38,6 +38,7 @@ static class SelfTests
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
                 "--renotes" => ReNotes(args),
+                "--livetest" => LiveTest(args),
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
@@ -172,6 +173,91 @@ static class SelfTests
         Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
         Console.WriteLine("[--renotes] done — read the notes: do they reflect the WHOLE meeting, honestly (no filler)?");
+        return 0;
+    }
+
+    /// <summary>
+    /// Feed a WAV through the LIVE transcriber the way capture would during a meeting, and prove that
+    /// most segments finalize DURING the stream — so Stop only decodes the short remainder (the whole
+    /// point of Phase 2). Paced ~2× real-time so the worker keeps up; use a short-ish clip.
+    /// </summary>
+    static int LiveTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--livetest");
+        var path = i >= 0 && i + 1 < args.Length && !args[i + 1].StartsWith('-') ? args[i + 1] : null;
+        if (path is null) return Fail("usage: --livetest <path-to-wav | recording-folder>");
+
+        if (!ModelManager.IsInstalled(ModelManager.Parakeet))
+        {
+            Console.WriteLine("[--livetest] Parakeet not installed — run --asrtest once to fetch it.");
+            return Fail("model missing");
+        }
+
+        // A folder feeds BOTH you.wav + them.wav concurrently — the real two-stream meeting load.
+        var streams = new List<(Speaker Speaker, string Wav)>();
+        if (Directory.Exists(path))
+        {
+            var you = Path.Combine(path, "you.wav");
+            var them = Path.Combine(path, "them.wav");
+            if (File.Exists(you)) streams.Add((Speaker.You, you));
+            if (File.Exists(them)) streams.Add((Speaker.Them, them));
+            if (streams.Count == 0) return Fail("folder has no you.wav / them.wav");
+        }
+        else if (File.Exists(path)) streams.Add((Speaker.Them, path));
+        else return Fail($"not found: {path}");
+
+        var live = new LiveTranscriber(TranscriptionService.Instance);
+        foreach (var (sp, wav) in streams)
+        {
+            using var r = new NAudio.Wave.WaveFileReader(wav);
+            live.AddStream(sp, r.WaveFormat);
+            Console.WriteLine($"[--livetest] {sp}: {Path.GetFileName(wav)}  [{r.WaveFormat}]  {r.TotalTime.TotalSeconds:0.0}s");
+        }
+        var duringStream = 0;
+        live.SegmentFinalized += _ => Interlocked.Increment(ref duringStream);
+        live.Start();
+        Console.WriteLine($"  feeding {streams.Count} stream(s) as they'd arrive in a meeting (~2x real-time)...");
+
+        // Feed every stream on its own thread, so you+them arrive together like a real call.
+        var feeders = streams.Select(s => new Thread(() =>
+        {
+            using var reader = new NAudio.Wave.WaveFileReader(s.Wav);
+            var chunkBytes = Math.Max(1, reader.WaveFormat.AverageBytesPerSecond / 5);   // ~200ms
+            var buf = new byte[chunkBytes];
+            int read;
+            while ((read = reader.Read(buf, 0, buf.Length)) > 0)
+            {
+                live.Feed(s.Speaker, buf, read);
+                Thread.Sleep(100);   // 200ms audio per 100ms wall → ~2x real-time
+            }
+        }) { IsBackground = true }).ToList();
+
+        var feedSw = Stopwatch.StartNew();
+        feeders.ForEach(t => t.Start());
+        feeders.ForEach(t => t.Join());
+        feedSw.Stop();
+        Console.WriteLine($"  fed all audio in {feedSw.Elapsed.TotalSeconds:0.0}s; {duringStream} segments finalized DURING the stream");
+
+        var stopSw = Stopwatch.StartNew();
+        var result = live.Stop();
+        stopSw.Stop();
+        if (result is null) return Fail("live transcriber returned null (no stream registered?).");
+
+        Console.WriteLine($"  >>> STOP finalized in {stopSw.ElapsedMilliseconds} ms → {result.Count} total merged segments <<<");
+        if (result.Count == 0)
+        {
+            Console.WriteLine("[--livetest] empty — treat as silence. PASS if the clip was silent.");
+            return 0;
+        }
+        Console.WriteLine("  --- HEAD ---");
+        foreach (var s in result.Take(3)) Console.WriteLine($"   [{s.Start:mm\\:ss}] {s.Speaker,-4} {s.Text}");
+        if (result.Count > 6)
+        {
+            Console.WriteLine("   ...");
+            Console.WriteLine("  --- TAIL ---");
+            foreach (var s in result.TakeLast(3)) Console.WriteLine($"   [{s.Start:mm\\:ss}] {s.Speaker,-4} {s.Text}");
+        }
+        Console.WriteLine($"[--livetest] PASS — {duringStream} segments finalized mid-stream; Stop only had {stopSw.ElapsedMilliseconds} ms left. In a real meeting that's your wait after clicking Stop.");
         return 0;
     }
 

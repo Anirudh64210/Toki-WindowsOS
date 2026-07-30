@@ -19,6 +19,10 @@ public sealed class MicCapture : IDisposable
     public WaveFormat? Format { get; private set; }
     public float PeakLevel => _peak;
 
+    /// <summary>Optional passive tap: raw capture bytes (native format) as they arrive, for live transcription.
+    /// Purely an observer of the buffer already being written to WAV — must never affect capture.</summary>
+    public Action<byte[], int>? OnBuffer;
+
     public void Start(string wavPath)
     {
         using var enumerator = new MMDeviceEnumerator();
@@ -37,6 +41,7 @@ public sealed class MicCapture : IDisposable
         _writer!.Write(e.Buffer, 0, e.BytesRecorded);
         var p = PeakOf(e.Buffer, e.BytesRecorded, Format!);
         if (p > _peak) _peak = p;
+        try { OnBuffer?.Invoke(e.Buffer, e.BytesRecorded); } catch { /* a tap must never break capture */ }
     }
 
     /// <summary>Peak absolute sample amplitude in 0..1, for IEEE-float or 16-bit PCM buffers.</summary>

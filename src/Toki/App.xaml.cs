@@ -21,6 +21,10 @@ public partial class App : Application
     /// <summary>Set by the pill: opens the Toki peek into the remembered page (click on the peek).</summary>
     public static Action? OpenPeek;
 
+    /// <summary>Raised (on the UI thread) when a transcript segment finalizes DURING recording — for the
+    /// live-transcript preview in the recording view. Real text now, not the old fake placeholder lines.</summary>
+    public static event Action<TranscriptSegment>? LivePreview;
+
     /// <summary>The app that triggered the current prompt / is being recorded (for UI + capture).</summary>
     public static DetectedApp? CurrentApp { get; private set; }
 
@@ -34,6 +38,10 @@ public partial class App : Application
     /// the 2.5GB LLM + 630MB recognizer starve transcription and page the whole PC.
     /// </summary>
     public static bool LowMemoryMode { get; private set; }
+
+    /// <summary>True in the offscreen PNG render harness (--render). Views must not hit the
+    /// network or persist settings in this mode — it runs against the user's real settings file.</summary>
+    public static bool Headless { get; private set; }
 
     /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
     public static IReadOnlyList<TranscriptSegment>? LastTranscript { get; private set; }
@@ -70,6 +78,29 @@ public partial class App : Application
     {
         CurrentManualNote = note;
         State.TryGo(PillState.ManualNote);
+    }
+
+    /// <summary>Discard a meeting entirely — remove it from the Library (DB), its Markdown mirror, and
+    /// its recording folder. Used by the "Delete" choice on the Notes screen.</summary>
+    public static void DiscardMeeting(MeetingRecord? m)
+    {
+        if (m is null) return;
+        try
+        {
+            Store.Delete(m.Id);
+            try
+            {
+                if (Directory.Exists(MarkdownMirror.NotesDir))
+                    foreach (var f in Directory.GetFiles(MarkdownMirror.NotesDir, $"*-{m.Id}.md")) File.Delete(f);
+            }
+            catch (Exception ex) { Log($"discard: markdown cleanup: {ex.Message}"); }
+            try { if (!string.IsNullOrWhiteSpace(m.Folder) && Directory.Exists(m.Folder)) Directory.Delete(m.Folder, true); }
+            catch (Exception ex) { Log($"discard: folder cleanup: {ex.Message}"); }
+            LibraryWindow.MarkDirty();
+            if (CurrentMeeting?.Id == m.Id) CurrentMeeting = null;
+            Log($"discarded meeting {m.Id}");
+        }
+        catch (Exception ex) { Log($"discard meeting failed: {ex.Message}"); }
     }
 
     /// <summary>Dev only: <c>--noghost</c> disables screen-capture exclusion so tools can grab the window.</summary>
@@ -116,7 +147,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--seed" or "--llmtest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -132,6 +163,7 @@ public partial class App : Application
         var r = Array.IndexOf(e.Args, "--render");
         if (r >= 0 && r + 1 < e.Args.Length)
         {
+            Headless = true;                              // views must not touch the network or save settings
             Dev.RenderHarness.RenderAll(e.Args[r + 1]);
             Shutdown();
             return;
@@ -139,6 +171,7 @@ public partial class App : Application
         var ra = Array.IndexOf(e.Args, "--render-anim");
         if (ra >= 0 && ra + 1 < e.Args.Length)
         {
+            Headless = true;
             Dev.RenderHarness.RenderAnim(e.Args[ra + 1]); // shuts down itself after 2nd frame
             return;
         }
@@ -319,12 +352,27 @@ public partial class App : Application
         System.Threading.Tasks.Task.Run(() =>
         {
             var folder = "";
-            try { folder = session?.Stop() ?? ""; }
+            IReadOnlyList<TranscriptSegment>? live = null;
+            try { folder = session?.Stop() ?? ""; live = session?.LiveTranscript; }
             catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
 
             IReadOnlyList<TranscriptSegment>? transcript = null;
             var minShow = System.Threading.Tasks.Task.Delay(1200); // let the loader be seen
-            try { if (folder.Length > 0) transcript = TranscriptionService.Instance.Process(folder); }
+            try
+            {
+                // Live transcription already did the work DURING the meeting → use it (the fast path,
+                // no multi-minute wait). Fall back to the whole-file pass only when live produced
+                // nothing — that pass is fast on true silence and correct if the live path glitched.
+                if (live is { Count: > 0 })
+                {
+                    transcript = live;
+                    Log($"using live transcript ({live.Count} segments) — no stop-time ASR");
+                }
+                else if (folder.Length > 0)
+                {
+                    transcript = TranscriptionService.Instance.Process(folder);
+                }
+            }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
 
             // An accidental tap shouldn't become a hollow Library entry with a bogus summary.
@@ -424,7 +472,14 @@ public partial class App : Application
             // Start capture off the UI thread too — device init can take ~100ms.
             System.Threading.Tasks.Task.Run(() =>
             {
-                try { session.Start(); } catch (Exception ex) { Log($"begin recording (bg): {ex.Message}"); }
+                try
+                {
+                    session.Start();
+                    // Stream live-finalized segments to the recording preview (marshalled to the UI thread).
+                    if (session.Live is { } live)
+                        live.SegmentFinalized += s => Current?.Dispatcher.BeginInvoke(() => LivePreview?.Invoke(s));
+                }
+                catch (Exception ex) { Log($"begin recording (bg): {ex.Message}"); }
             });
         }
         catch (Exception ex) { Log($"begin recording failed (non-fatal): {ex.Message}"); }

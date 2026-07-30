@@ -2,13 +2,14 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
-    <!-- Expanded recording controls: the elapsed time + a live "Recording" cue + Stop.
-         No live transcript here (that's parked) — this used to show fake placeholder
-         lines during a real recording, which read as a lie. Click the header (or the
-         tiny Toki) to collapse back to the out-of-the-way character. -->
-    <DockPanel Margin="16,12,16,13" LastChildFill="False">
-        <Grid DockPanel.Dock="Top" Background="Transparent" MouseLeftButtonUp="OnCollapse" Cursor="Hand"
-              ToolTip="Collapse">
+    <!-- Expanded recording controls: elapsed time + a live "Recording" cue + a REAL live
+         transcript line (Phase 2 — transcribed during the meeting) + Stop. Click the header
+         (or the tiny Toki) to collapse back to the out-of-the-way character. -->
+    <!-- A vertical stack with ONE uniform gap between timer, live line, and Stop — even and sticky.
+         The live line is a single line (latest utterance), so the notch height never jumps as
+         text arrives. Auto-height sizes the notch to this exactly. -->
+    <StackPanel Margin="16,12,16,13">
+        <Grid Background="Transparent" MouseLeftButtonUp="OnCollapse" Cursor="Hand" ToolTip="Collapse">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <Viewbox x:Name="TokiBox" Width="22" Margin="0,0,10,0" RenderTransformOrigin="0.5,0.9">
                     <Viewbox.RenderTransform>
@@ -26,7 +27,13 @@
                            Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
             </StackPanel>
         </Grid>
-        <Button DockPanel.Dock="Bottom" Style="{StaticResource CoralButton}" Margin="0,13,0,0"
+
+        <!-- Live transcript: the most recent finalized line, fading in as Toki hears it. -->
+        <TextBlock x:Name="LiveLine" Margin="0,11,0,0" Text="Listening…" Style="{StaticResource Body}"
+                   FontSize="11.5" Foreground="{StaticResource TextDim}" TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+
+        <Button Margin="0,11,0,0" Style="{StaticResource CoralButton}"
                 Padding="0,9" HorizontalContentAlignment="Center" Click="OnStop">
             <StackPanel Orientation="Horizontal">
                 <Rectangle Width="8" Height="8" RadiusX="2" RadiusY="2" Fill="White"
@@ -34,5 +41,5 @@
                 <TextBlock Text="Stop"/>
             </StackPanel>
         </Button>
-    </DockPanel>
+    </StackPanel>
 </UserControl>

@@ -27,6 +27,23 @@ public partial class RecordingOpenView : UserControl
             }
             else Dot.BeginAnimation(OpacityProperty, null);
         };
+        // Live transcript preview — real segments as Toki hears them (Phase 2).
+        Loaded += (_, _) =>
+        {
+            LiveLine.Text = "Listening…";
+            LiveLine.Opacity = 1;
+            App.LivePreview += OnLiveSegment;
+        };
+        Unloaded += (_, _) => { App.LivePreview -= OnLiveSegment; };
+    }
+
+    // Show the most recent finalized line, fading it in so it reads as "just heard".
+    void OnLiveSegment(Toki.Transcription.TranscriptSegment s)
+    {
+        var text = s.Text?.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        LiveLine.Text = text;
+        LiveLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0.35, 1.0, TimeSpan.FromMilliseconds(260)));
     }
 
     // A lively spring-pop on Toki each time the pill expands on hover — Toki is alive and

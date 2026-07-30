@@ -28,6 +28,13 @@ public sealed class ProcessLoopbackCapture
     public float PeakLevel { get; private set; }
     public long BytesWritten { get; private set; }
 
+    /// <summary>The fixed capture format (44.1 kHz 16-bit stereo) — for wiring the live-transcription tap.</summary>
+    public static WaveFormat CaptureFormat => new(SampleRate, BitsPerSample, Channels);
+
+    /// <summary>Optional passive tap: raw capture bytes as they arrive, for live transcription.
+    /// Observes the buffer already being written to WAV — must never affect capture.</summary>
+    public Action<byte[], int>? OnBuffer;
+
     readonly ManualResetEventSlim _stopRequested = new(false);
     Thread? _thread;
     Exception? _threadError;
@@ -148,6 +155,7 @@ public sealed class ProcessLoopbackCapture
                         }
                         writer.Write(buffer, 0, byteCount);
                         BytesWritten += byteCount;
+                        try { OnBuffer?.Invoke(buffer, byteCount); } catch { /* a tap must never break capture */ }
                         Marshal.ThrowExceptionForHR(captureClient.ReleaseBuffer(framesAvailable));
                     }
                 }

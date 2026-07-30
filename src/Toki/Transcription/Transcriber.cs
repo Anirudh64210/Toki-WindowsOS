@@ -79,6 +79,18 @@ public sealed class Transcriber : IDisposable
         return all;
     }
 
+    /// <summary>
+    /// Public slice decode for LIVE incremental transcription: decode [start,end) of a buffer at a
+    /// given meeting-time offset. Same one-shot-stream path the whole-file decode uses, so quality
+    /// is identical — the live path just hands it ~15s windows during the meeting instead of the
+    /// whole file at the end.
+    /// </summary>
+    public IReadOnlyList<TranscriptSegment> TranscribeSlice(float[] samples, int start, int end, double offsetSec, Speaker speaker) =>
+        TranscribeWindow(samples, start, end, offsetSec, speaker);
+
+    /// <summary>Public quiet-point finder for the live windower — cut here to avoid slicing a word.</summary>
+    public static int FindQuietCut(float[] samples, int center, int radius) => QuietCut(samples, center, radius);
+
     /// <summary>Decode one slice [start,end) with a fresh stream; timestamps offset to meeting time.</summary>
     List<TranscriptSegment> TranscribeWindow(float[] samples, int start, int end, double offsetSec, Speaker speaker)
     {
