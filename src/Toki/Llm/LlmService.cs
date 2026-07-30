@@ -27,8 +27,18 @@ public sealed class LlmService
     public ILlm? Active()
     {
         var s = AppSettings.Current;
-        if (s.NotesMode == NotesMode.ApiKey && !string.IsNullOrWhiteSpace(s.ApiKey))
-            return new OpenAiLlm(s.ApiKey!, s.ApiModel, s.ApiBaseUrl);
+        if (s.NotesMode == NotesMode.ApiKey)
+        {
+            // Only hand back the API client when it can actually work; otherwise say
+            // why (never the key itself) and return null so notes stay heuristic.
+            var api = new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl);
+            if (api.Ready) return api;
+            App.Log("API notes unavailable: " + (
+                string.IsNullOrWhiteSpace(s.ApiKey) ? "no API key set"
+                : ApiLlm.TryBuildEndpoint(s.ApiBaseUrl) is null ? "base URL is not a valid https:// (or http:// loopback) address"
+                : "no model name set") + " — keeping heuristic notes");
+            return null;
+        }
         if (s.NotesMode == NotesMode.HeuristicOnly) return null;
         return EnsureLocal();
     }

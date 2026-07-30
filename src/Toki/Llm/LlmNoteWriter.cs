@@ -76,7 +76,9 @@ public sealed class LlmNoteWriter
             Actions = note.Actions,       // empty → section dropped
             Questions = [],
         };
-        result.Title = await TitlePass(result.Tldr, ct);
+        // The combined pass already produced the title in the SAME call — only fall back to a
+        // separate title generation (an extra ~round-trip) if it somehow didn't.
+        result.Title = !string.IsNullOrWhiteSpace(note.Title) ? note.Title : await TitlePass(result.Tldr, ct);
         return result;
     }
 
@@ -101,6 +103,8 @@ public sealed class LlmNoteWriter
         var prompt =
             $"Write the notes for {what}. First judge how much real substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
+            + "TITLE\n"
+            + "3 to 6 words, specific and concise, like a calendar event — no quotes, no \"Meeting\" prefix.\n\n"
             + "SUMMARY\n"
             + "2 to 4 plain-English sentences on what the meeting was about and what came of it. Capture what was "
             + "genuinely discussed even if the talk was informal, wandering, or a working session — never inflate it, "
@@ -116,13 +120,14 @@ public sealed class LlmNoteWriter
             + "ENTIRE thing is greetings, small talk, or connection checks with no real topic discussed at all.\n\n"
             + $"{(contentIsDigests ? "Notes" : "Transcript")}:\n{content}";
 
-        var raw = await TextPass(prompt, 420, ct);
+        var raw = await TextPass(prompt, 430, ct);
         if (raw is null) return null;
         if (IsNothing(raw)) return new FinalSections { Summary = NothingMarker };
 
-        var (kp, ai, summary) = SplitSections(raw);
+        var (title, kp, ai, summary) = SplitSections(raw);
         return new FinalSections
         {
+            Title = CleanTitle(title),
             Summary = summary,
             KeyPoints = kp,
             Actions = ai.Count > 0 ? ParseActions(ai) : [],
@@ -131,9 +136,18 @@ public sealed class LlmNoteWriter
 
     sealed class FinalSections
     {
+        public string? Title { get; set; }
         public string Summary { get; set; } = "";
         public List<string> KeyPoints { get; set; } = [];
         public List<ActionItem> Actions { get; set; } = [];
+    }
+
+    static string? CleanTitle(string raw)
+    {
+        var t = raw.Split('\n')[0].Trim().Trim('"', '\'', '.', ':', '-', ' ');
+        if (t.Length < 3) return null;
+        var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length > 8 ? string.Join(' ', words.Take(8)) : t;
     }
 
     // An honest, minimal note for a meeting where nothing substantive happened — the opposite of
@@ -194,12 +208,13 @@ public sealed class LlmNoteWriter
 
     // ── section parsing (shared) ──
 
-    static (List<string> KeyPoints, List<string> Actions, string Summary) SplitSections(string raw)
+    static (string Title, List<string> KeyPoints, List<string> Actions, string Summary) SplitSections(string raw)
     {
         var keyPoints = new List<string>();
         var actions = new List<string>();
         var summary = new StringBuilder();
-        var section = 0; // 0 none, 1 key points, 2 actions, 3 summary
+        var title = new StringBuilder();
+        var section = 0; // 0 none, 1 key points, 2 actions, 3 summary, 4 title
 
         foreach (var lineRaw in raw.Split('\n'))
         {
@@ -215,9 +230,10 @@ public sealed class LlmNoteWriter
                 case 1 when clean.Length > 1: keyPoints.Add(clean); break;
                 case 2 when clean.Length > 1: actions.Add(clean); break;
                 case 3: if (summary.Length > 0) summary.Append(' '); summary.Append(clean); break;
+                case 4: if (title.Length == 0) title.Append(clean); break;   // first line only
             }
         }
-        return (keyPoints, actions, summary.ToString().Trim());
+        return (title.ToString().Trim(), keyPoints, actions, summary.ToString().Trim());
     }
 
     static int HeaderOf(string line)
@@ -226,6 +242,7 @@ public sealed class LlmNoteWriter
         if (h is "key points" or "keypoints" or "highlights" or "key point") return 1;
         if (h is "action items" or "action item" or "actions" or "to-dos" or "todos" or "to dos" or "next steps") return 2;
         if (h is "summary" or "tl;dr" or "tldr" or "overview") return 3;
+        if (h is "title") return 4;
         return 0;
     }
 

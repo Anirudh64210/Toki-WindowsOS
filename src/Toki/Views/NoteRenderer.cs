@@ -36,7 +36,7 @@ public static class NoteRenderer
             body.Children.Add(new TextBlock
             {
                 Text = m.Notes.Tldr, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
-                FontSize = fs, LineHeight = fs + 11,
+                FontSize = fs, LineHeight = fs + 11, TextAlignment = TextAlignment.Justify,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDB)),
                 Margin = new Thickness(0, 0, 0, 2),
             });
@@ -104,7 +104,7 @@ public static class NoteRenderer
         var tb = new TextBlock
         {
             Text = text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
-            Foreground = B("Text"), LineHeight = fs + 8,
+            Foreground = B("Text"), LineHeight = fs + 8, TextAlignment = TextAlignment.Justify,
         };
         Grid.SetColumn(tb, 1);
         row.Children.Add(dot);
@@ -125,7 +125,7 @@ public static class NoteRenderer
         var text = new TextBlock
         {
             Text = a.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
-            Foreground = B("Text"), LineHeight = fs + 7,
+            Foreground = B("Text"), LineHeight = fs + 7, TextAlignment = TextAlignment.Justify,
         };
         if (a.Done) { text.TextDecorations = TextDecorations.Strikethrough; text.Opacity = 0.5; }
 
@@ -136,7 +136,13 @@ public static class NoteRenderer
         if (Meaningful(a.Due)) tags.Children.Add(Tag(a.Due!));
         if (tags.Children.Count > 0) right.Children.Add(tags);
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, spacious ? 12 : 10) };
+        // A Grid, NOT a horizontal StackPanel: a StackPanel gives the text child INFINITE width, so a
+        // long task never wraps and runs off the right edge (you couldn't scroll to see the end). The
+        // star column constrains it so it wraps within the notch.
+        var row = new Grid { Margin = new Thickness(0, 0, 0, spacious ? 12 : 10) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(right, 1);
         row.Children.Add(check);
         row.Children.Add(right);
         return row;

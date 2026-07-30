@@ -22,6 +22,9 @@ public partial class NotesView : UserControl
         Body.Children.Clear();
         var meeting = App.CurrentMeeting;
 
+        // Keep-or-discard only makes sense for a real saved meeting.
+        ActionBar.Visibility = meeting is not null ? Visibility.Visible : Visibility.Collapsed;
+
         if (meeting is not null)
         {
             Title.Text = meeting.Title;
@@ -118,4 +121,14 @@ public partial class NotesView : UserControl
     }
 
     void OnClose(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Hidden);
+
+    // The meeting is auto-saved when it's transcribed, so "Save to Library" just keeps it and closes.
+    void OnSaveToLibrary(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Hidden);
+
+    // "Delete" discards it entirely (DB + notes file + audio) — the user decided not to keep it.
+    void OnDelete(object sender, RoutedEventArgs e)
+    {
+        App.DiscardMeeting(App.CurrentMeeting);
+        App.State.TryGo(PillState.Hidden);
+    }
 }

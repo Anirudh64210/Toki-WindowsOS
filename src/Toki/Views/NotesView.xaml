@@ -26,6 +26,20 @@
             </StackPanel>
         </Grid>
 
+        <!-- Keep-or-discard: you decide whether this meeting stays in your Library. -->
+        <Grid x:Name="ActionBar" DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Style="{StaticResource PillButton}" Background="Transparent"
+                    Foreground="{StaticResource Coral}" Padding="14,7" Content="Delete"
+                    ToolTip="Discard this meeting — remove it and its audio" Click="OnDelete"/>
+            <Button Grid.Column="1" Style="{StaticResource WhiteButton}" Padding="0,8" Margin="10,0,0,0"
+                    HorizontalContentAlignment="Center" Content="Save to Library"
+                    ToolTip="Keep this meeting in your Library" Click="OnSaveToLibrary"/>
+        </Grid>
+
         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
             <StackPanel x:Name="Body"/>
         </ScrollViewer>

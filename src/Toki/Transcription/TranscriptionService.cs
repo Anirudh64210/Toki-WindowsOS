@@ -55,6 +55,26 @@ public sealed class TranscriptionService
         }
     }
 
+    /// <summary>
+    /// Decode one LIVE window [start,end) of a stream's 16k-mono buffer at a meeting-time offset,
+    /// using the SHARED recognizer under the SAME gate as the stop-time decode — so live windows
+    /// and any stop-time pass never run concurrently (concurrent decode corrupts sherpa-onnx output).
+    /// Returns [] if the model isn't ready or the decode throws (never crashes the recording).
+    /// </summary>
+    public IReadOnlyList<TranscriptSegment> DecodeLive(float[] samples, int start, int end, double offsetSec, Speaker speaker)
+    {
+        if (!ModelReady || end <= start) return [];
+        lock (_gate)
+        {
+            try
+            {
+                _transcriber ??= new Transcriber();
+                return _transcriber.TranscribeSlice(samples, start, end, offsetSec, speaker);
+            }
+            catch (Exception ex) { App.Log($"live decode {speaker} @ {offsetSec:F0}s failed: {ex.Message}"); return []; }
+        }
+    }
+
     IReadOnlyList<TranscriptSegment> TranscribeStream(string wavPath, Speaker speaker)
     {
         if (!File.Exists(wavPath)) return [];

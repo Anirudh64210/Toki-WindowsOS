@@ -23,22 +23,38 @@ public partial class PillWindow : Window
     static readonly Dictionary<PillState, (double W, double H)> Sizes = new()
     {
         // Sizes trimmed smaller overall (owner: "make the notch smaller").
+        // NOTE: for the AutoHeight pages (Home/Settings/MeetingPrompt/NoSpeech/RecordingOpen) the
+        // HEIGHT below is only a fallback — the real height is measured from the content so every
+        // page is concise. Width is always used.
         [PillState.Collapsed]     = (52, 42),    // launcher peek (Toki alone)
         [PillState.MeetingPrompt] = (288, 72),
         [PillState.RecordingBar]  = (34, 14),    // TINY upside-down eyes-peek — never in the way of browser tabs / snip toolbar
-        [PillState.RecordingOpen] = (284, 116),  // compact timer + stop
+        [PillState.RecordingOpen] = (288, 118),  // compact: timer + a live-transcript line + stop
         [PillState.Summarizing]   = (232, 66),   // small, cute working loader (mostly lives as a sliver)
-        [PillState.Notes]         = (360, 320),  // smaller — no longer half the screen
-        [PillState.NoSpeech]      = (300, 96),
-        [PillState.Home]          = (320, 220),
+        [PillState.Notes]         = (360, 320),  // scrollable window into the notes
+        [PillState.NoSpeech]      = (300, 92),
+        [PillState.Home]          = (320, 190),
         [PillState.Library]       = (404, 440),
-        [PillState.Settings]      = (384, 312),
+        [PillState.Settings]      = (380, 360),   // FIXED height + internal scroll (not auto) — see AutoHeight note
         [PillState.ManualNote]    = (392, 410),
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
     const double BottomMargin = 12;  // never grow past the bottom of the work area
     const double CornerRadius = 22;
+
+    // Panels whose HEIGHT is sized to their actual content (measured), not a hardcoded number — so
+    // every page is concise with no dead space below it. The Sizes width is still used; the Sizes
+    // height is only a fallback. Scrollable/fixed pages (Notes, Library, ManualNote, Settings) and
+    // the peeks keep their fixed height on purpose.
+    //
+    // Settings is DELIBERATELY not auto-height: its content varies a lot between modes (the API-key
+    // view is far taller than the On-device view), and — the real bug — measuring its wrapping text
+    // out-of-tree BEFORE the view's first real layout under-reports the height, so the first open
+    // came up short (scrollbar) and every later re-open (after one arrange) came up full-size (big
+    // notch). A fixed height + the ScrollViewer already in SettingsView makes every open identical.
+    static readonly HashSet<PillState> AutoHeight =
+        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen];
 
     // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
     // transient "nothing was said" toast). Everything with content you actually work
@@ -217,19 +233,25 @@ public partial class PillWindow : Window
         }
 
         var fromHidden = old == PillState.Hidden || !IsVisible;
+        var view = ViewFor(next);
+        // The recording peek does its dramatic flip only when recording STARTS — on a hover-collapse
+        // from the open screen it just settles (see RecordingBarView.FlipOnShow), so minimising is clean.
+        if (view is Views.RecordingBarView rbv) rbv.FlipOnShow = old != PillState.RecordingOpen;
         Host.Children.Clear();
-        Host.Children.Add(ViewFor(next));
+        Host.Children.Add(view);
         if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
 
-        // While PEEKING (the resting/recording notch), drop the dark frosted box — Toki is
-        // just the character floating from the top edge. The dark surface only appears once
-        // the notch pops open into a usable panel.
+        var hoverMorph = !fromHidden && IsHoverPair(old, next);
+        var collapsing = next is PillState.Collapsed or PillState.RecordingBar;
+
+        // While PEEKING (the resting/recording notch), drop the dark frosted box — Toki is just the
+        // character floating from the top edge. But on a hover-COLLAPSE into a peek we KEEP the dark
+        // surface and only drop it once the shrink finishes (deferPeekBg), so the box shrinks away
+        // smoothly WITH the panel instead of vanishing the instant you hover out (that read as abrupt).
         if (next == PillState.Collapsed) _collapsedTick = Environment.TickCount64; // start the greeting grace
         var peek = next is PillState.Collapsed or PillState.RecordingBar;
-        Root.Background = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBg;
-        Root.BorderBrush = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBorder;
-        Root.BorderThickness = peek ? default : new Thickness(1, 0, 1, 1);
-        Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        var deferPeekBg = peek && hoverMorph;
+        if (!deferPeekBg) SetSurface(peek);
 
         // A reveal can enter directly as a SLIVER (peek) instead of full open. The LOADER works
         // quietly as a sliver from the very first frame — it never flashes a panel in your face.
@@ -244,20 +266,22 @@ public partial class PillWindow : Window
         var work = PhysicalWorkArea();
         // Never exceed the screen — tall panels clamp and scroll internally.
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
-        var targetH = enterTucked ? SliverH : Math.Min(h, availH);
+        var fullH = enterTucked ? SliverH : Math.Min(ContentHeight(next, w, h), availH);
+        var targetH = fullH;
 
         // A hover pill expand/collapse (tiny Toki ⇄ Home, or ⇄ recording controls) is
-        // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Closing is quicker
-        // than opening so dismissing feels snappy. Other transitions stay instant.
-        var hoverMorph = !fromHidden && IsHoverPair(old, next);
-        var collapsing = next is PillState.Collapsed or PillState.RecordingBar;
-
+        // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Other transitions stay instant.
         if (hoverMorph)
         {
-            AnimateSize(w, targetH, collapsing ? 190 : 300);   // SizeChanged re-centres each frame
+            // Collapsing (e.g. recording open → tiny peek) reads best as a smooth zoom-OUT: a slightly
+            // longer, eased size retract with the content cross-fading, not a hard snap.
+            const int collapseMs = 240;
+            AnimateSize(w, targetH, collapsing ? collapseMs : 300);   // SizeChanged re-centres each frame
             Host.BeginAnimation(OpacityProperty, null);
             Host.Opacity = 0;             // the new content fades in as the pill morphs (masks reflow)
-            Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 150 : 240))));
+            Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 210 : 240))));
+            // Drop the dark surface only once the box has finished shrinking → it fades away with the panel.
+            if (deferPeekBg) ScheduleSurface(next, peek, collapseMs);
         }
         else if (fromHidden)
         {
@@ -318,6 +342,26 @@ public partial class PillWindow : Window
         var fromH = ActualHeight > 0 ? ActualHeight : h;
         BeginAnimation(WidthProperty, new DoubleAnimation(fromW, w, dur) { EasingFunction = ease });
         BeginAnimation(HeightProperty, new DoubleAnimation(fromH, h, dur) { EasingFunction = ease });
+    }
+
+    /// <summary>Apply the notch surface: a peek is transparent (just Toki floating); an open panel is
+    /// the dark frosted box.</summary>
+    void SetSurface(bool peek)
+    {
+        Root.Background = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBg;
+        Root.BorderBrush = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBorder;
+        Root.BorderThickness = peek ? default : new Thickness(1, 0, 1, 1);
+        Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Apply the peek surface after the collapse finishes, so the dark box shrinks away WITH
+    /// the panel instead of vanishing the instant you hover out. No-op if the state changed meanwhile.</summary>
+    void ScheduleSurface(PillState forState, bool peek, int ms)
+    {
+        var t = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render)
+            { Interval = TimeSpan.FromMilliseconds(ms) };
+        t.Tick += (_, _) => { t.Stop(); if (_state.Current == forState) SetSurface(peek); };
+        t.Start();
     }
 
     /// <summary>
@@ -466,6 +510,8 @@ public partial class PillWindow : Window
     const int IdleTuckMs = 2500;       // a deliberate page (Home/Settings) tucks this long after you stop hovering
     const int ResultShowMs = 2000;     // a result (Notes / nothing-was-said) announces itself this long, then tucks
     const int AutoHideMs = 9000;       // a tucked sliver fully hides after this (context remembered)
+    const int NotesSliverHideMs = 120000; // a ready-notes sliver lingers this long (2 min) so you can come
+                                          // back and read it, then self-clears so it can't block a new meeting
     const int EdgeReadyDelayMs = 700;  // after anything tucks to Hidden, wait this long before the edge can re-summon
                                        // — stops a just-hidden sliver from instantly popping a fresh Toki (the "both open" collision)
     long _edgeReadyTick;
@@ -509,13 +555,14 @@ public partial class PillWindow : Window
 
     void StopIdle() { if (_idle.IsEnabled) _idle.Stop(); }
 
-    void ArmAutoHide()
+    void ArmAutoHide(int ms = AutoHideMs)
     {
         if (!_autoHideWired)
         {
             _autoHideWired = true;
             _autoHide.Tick += (_, _) => { _autoHide.Stop(); if (_tucked && !CursorOverPill()) _state.ForceForDemo(PillState.Hidden); };
         }
+        _autoHide.Interval = TimeSpan.FromMilliseconds(ms);
         _autoHide.Stop();
         _autoHide.Start();
     }
@@ -524,12 +571,16 @@ public partial class PillWindow : Window
 
     void TuckCurrent()
     {
-        // The LOADER keeps a clean heartbeat sliver — it never fully hides while it's working,
-        // so you always know Toki's on it (and can hover to peek progress).
-        if (_state.Current == PillState.Summarizing)
+        // The LOADER and a READY NOTE keep a hover-able sliver rather than closing off:
+        //  • the loader's sliver is its "I'm working" heartbeat (persistent until the result);
+        //  • a ready note tucks to a sliver you can leave, go do something, then come back and hover
+        //    to read again — but it self-clears after a generous while so it can't block the next
+        //    meeting forever.
+        if (_state.Current is PillState.Summarizing or PillState.Notes)
         {
             _tucked = true;
             AnimateSize(ActualWidth, SliverH, 200);   // retract to a sliver (top-anchored: hangs a little)
+            if (_state.Current == PillState.Notes) ArmAutoHide(NotesSliverHideMs);
             return;
         }
         // EVERYTHING ELSE closes off completely (context kept) rather than leaving a sliver
@@ -546,8 +597,26 @@ public partial class PillWindow : Window
         var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
         var work = PhysicalWorkArea();
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
-        AnimateSize(w, Math.Min(h, availH), 220);
+        AnimateSize(w, Math.Min(ContentHeight(_state.Current, w, h), availH), 220);
         ArmIdle();
+    }
+
+    /// <summary>
+    /// The height a panel should grow to. For an auto-height page it's the view's MEASURED content
+    /// height (so the page is concise — no dead space below the content), measured at the panel's
+    /// fixed width. Other pages use their fixed Sizes height.
+    /// </summary>
+    double ContentHeight(PillState state, double width, double fallback)
+    {
+        if (!AutoHeight.Contains(state)) return fallback;
+        try
+        {
+            var v = ViewFor(state);
+            v.Measure(new Size(Math.Max(1, width - 2), double.PositiveInfinity));   // −2 for the L/R border
+            var m = v.DesiredSize.Height;
+            return m > 8 ? Math.Ceiling(m) + 1 : fallback;   // +1 for the bottom border hairline
+        }
+        catch { return fallback; }
     }
 
     void HoverTick()

@@ -2,8 +2,10 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
-    <DockPanel Margin="14,13,14,10">
-        <Grid DockPanel.Dock="Top">
+    <!-- A simple vertical stack: ONE uniform gap between every element (header, buttons, Library),
+         so the spacing reads even and sticky. Auto-height sizes the notch to this exactly. -->
+    <StackPanel Margin="14,13,14,12">
+        <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -21,7 +23,7 @@
                     ToolTip="Settings" Click="OnSettings"/>
         </Grid>
 
-        <Button DockPanel.Dock="Top" Margin="0,11,0,0" Style="{StaticResource PillButton}" Padding="0,10"
+        <Button Margin="0,11,0,0" Style="{StaticResource PillButton}" Padding="0,10"
                 HorizontalContentAlignment="Center" Click="OnTakeNotes"
                 ToolTip="Start recording this meeting and take notes">
             <StackPanel Orientation="Horizontal">
@@ -30,7 +32,7 @@
             </StackPanel>
         </Button>
 
-        <Button DockPanel.Dock="Top" Style="{StaticResource WhiteButton}" Margin="0,10,0,0" Padding="0,11"
+        <Button Margin="0,11,0,0" Style="{StaticResource WhiteButton}" Padding="0,10"
                 HorizontalContentAlignment="Center"
                 ToolTip="Google Calendar connect lands in Milestone 7">
             <StackPanel Orientation="Horizontal">
@@ -39,8 +41,8 @@
             </StackPanel>
         </Button>
 
-        <Button VerticalAlignment="Bottom" Style="{StaticResource PillButton}" Background="Transparent"
-                Padding="4,3" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"
+        <Button Margin="0,11,0,0" Style="{StaticResource PillButton}" Background="Transparent"
+                Padding="4,5" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"
                 FontSize="10.5" Content="Library  ›" Click="OnLibrary"/>
-    </DockPanel>
+    </StackPanel>
 </UserControl>

@@ -16,17 +16,18 @@ namespace Toki.Dev;
 /// </summary>
 static class RenderHarness
 {
-    static readonly (PillState State, double W, double H)[] Shots =
+    // (state, width, capHeight). Height is MEASURED from the view's content (matching the runtime's
+    // content-tight auto-height) and capped — so these PNGs reflect what you actually see.
+    static readonly (PillState State, double W, double Cap)[] Shots =
     [
-        (PillState.MeetingPrompt, 300, 74),
-        (PillState.RecordingBar,  236, 52),
-        (PillState.RecordingOpen, 372, 234),
-        (PillState.Summarizing,   340, 164),
-        (PillState.Notes,         424, 438),
-        (PillState.NoSpeech,      320, 100),
-        (PillState.Home,          344, 232),
+        (PillState.MeetingPrompt, 288, 300),
+        (PillState.RecordingOpen, 288, 300),
+        (PillState.Summarizing,   232, 300),
+        (PillState.Notes,         360, 320),
+        (PillState.NoSpeech,      300, 300),
+        (PillState.Home,          320, 400),
         (PillState.Library,       404, 440),
-        (PillState.Settings,      404, 440),
+        (PillState.Settings,      380, 440),
     ];
 
     public static void RenderAll(string dir)
@@ -39,9 +40,12 @@ static class RenderHarness
             if (latest is not null) App.CurrentMeeting = new Storage.MeetingStore().Get(latest.Id);
         }
         catch { /* no store yet — Notes renders its fallback */ }
-        foreach (var (state, w, h) in Shots)
+        foreach (var (state, w, cap) in Shots)
         {
             var view = Build(state);
+            // Measure the view's real content height at this width, cap it — mirrors the runtime.
+            view.Measure(new Size(w - 2, double.PositiveInfinity));
+            var h = Math.Min(cap, Math.Ceiling(view.DesiredSize.Height) + 1);
             var pill = new Border
             {
                 Background = (Brush)Application.Current.Resources["Surface"],
