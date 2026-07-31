@@ -110,6 +110,22 @@
                 <TextBlock x:Name="ModelStatusTitle" Style="{StaticResource SettingTitle}" Text="Model status"/>
                 <TextBlock x:Name="ModelStatus" Style="{StaticResource Dim}" FontSize="10.5"/>
 
+                <!-- Recording & sharing: the notch is normally hidden from ALL screen capture
+                     (WDA_EXCLUDEFROMCAPTURE). This is the only opt-out — on = visible, so a demo
+                     can be recorded; off (default) = private. Same row shape as the GPU toggle. -->
+                <TextBlock Style="{StaticResource SettingTitle}" Text="Recording &amp; sharing"/>
+                <Grid Margin="2,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ShowInRecordingsToggle" VerticalAlignment="Center" Click="OnShowInRecordingsToggle"/>
+                    <TextBlock Grid.Column="1" Text="Show Toki in screen recordings &amp; sharing"
+                               Style="{StaticResource Body}" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                </Grid>
+                <TextBlock Style="{StaticResource Dim}" FontSize="9.5" Margin="2,3,0,0"
+                           Text="Normally hidden from anything you record or screen-share, so it never shows up in what others see. Turn on to capture a Toki demo — then turn it back off."/>
+
                 <TextBlock Style="{StaticResource Dim}" FontSize="9" Margin="2,16,0,6" TextAlignment="Center"
                            Text="Auto-record, keep-audio, and the Built-with credits arrive in a later update."/>
             </StackPanel>

@@ -52,6 +52,11 @@ public sealed class AppSettings
     /// <summary>DPAPI-encrypted API key (base64). Use <see cref="ApiKey"/> to read/write in the clear.</summary>
     public string? ApiKeyProtected { get; set; }
 
+    /// <summary>When true, the notch is visible to screen recorders and screen-share (ghost mode
+    /// OFF). Default false = hidden from capture (WDA_EXCLUDEFROMCAPTURE), so Toki never leaks into
+    /// a shared screen during a meeting. The user turns this on in Settings only to record a demo.</summary>
+    public bool ShowInRecordings { get; set; }
+
     /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
     /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
     /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the

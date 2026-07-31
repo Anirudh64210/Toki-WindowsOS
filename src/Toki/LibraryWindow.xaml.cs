@@ -154,8 +154,8 @@ public partial class LibraryWindow : Window
             DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE)
             int borderColor = 0x00161616;
             DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR — dark, not white
-            if (!App.GhostDisabled)
-                SetWindowDisplayAffinity(hwnd, 0x11);               // ghost: not in screen capture
+            // The Library is an ordinary window: it is NOT hidden from screen capture. (The pill has
+            // an opt-in ghost toggle; the Library deliberately does not — owner decision.)
 
             // Maximise cleanly. On a per-monitor-DPI-aware app with a manually-placed window,
             // WPF's default maximise mis-sizes (jumps, or spills under the taskbar) — that was
@@ -563,7 +563,6 @@ public partial class LibraryWindow : Window
     [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECTL rcMonitor, rcWork; public int dwFlags; }
 
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
     [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 }

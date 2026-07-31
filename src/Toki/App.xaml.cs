@@ -103,8 +103,19 @@ public partial class App : Application
         catch (Exception ex) { Log($"discard meeting failed: {ex.Message}"); }
     }
 
-    /// <summary>Dev only: <c>--noghost</c> disables screen-capture exclusion so tools can grab the window.</summary>
+    /// <summary>When true the notch is NOT hidden from screen capture (ghost mode off). Set by the
+    /// <c>--noghost</c> dev flag OR the persisted "Show Toki in screen recordings" setting, and
+    /// flipped live by the Settings toggle via <see cref="SetShowInRecordings"/>.</summary>
     public static bool GhostDisabled { get; private set; }
+
+    /// <summary>Flip screen-capture visibility live from the Settings toggle. On = show Toki in
+    /// recordings/screen-share (ghost off); off = hidden. Re-applies the affinity on the live window
+    /// so it takes effect immediately, no restart.</summary>
+    public static void SetShowInRecordings(bool show)
+    {
+        GhostDisabled = show;   // showing in recordings == capture-exclusion OFF
+        (Current as App)?._pill?.RefreshGhost();
+    }
 
     static System.Threading.Mutex? _singleInstance;
     static System.Threading.EventWaitHandle? _showSignal;
@@ -124,7 +135,7 @@ public partial class App : Application
         InstallGlobalExceptionHandlers();
 
         Log($"startup args=[{string.Join(" ", e.Args)}]");
-        GhostDisabled = e.Args.Contains("--noghost");
+        GhostDisabled = e.Args.Contains("--noghost") || AppSettings.Current.ShowInRecordings;
 
         // How much RAM does this PC have? Toki's two heavy models (2.5GB LLM + 630MB
         // recognizer) don't both fit alongside a browser + meeting app on a small

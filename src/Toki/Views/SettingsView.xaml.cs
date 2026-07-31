@@ -67,6 +67,7 @@ public partial class SettingsView : UserControl
         NotesModeSeg.Children.Add(SegButton("My API key", NotesMode.ApiKey, s.NotesMode));
 
         GpuToggle.IsChecked = s.GpuLayers >= 0; // on = auto (uses GPU when it fits safely)
+        ShowInRecordingsToggle.IsChecked = s.ShowInRecordings; // on = visible to recorders/screen-share (ghost off)
 
         LocalOptions.Visibility = s.NotesMode == NotesMode.Local ? Visibility.Visible : Visibility.Collapsed;
         ApiOptions.Visibility = s.NotesMode == NotesMode.ApiKey ? Visibility.Visible : Visibility.Collapsed;
@@ -255,6 +256,17 @@ public partial class SettingsView : UserControl
         // CPU (-1). Takes effect next launch (the model is loaded once at startup).
         s.GpuLayers = GpuToggle.IsChecked == true ? 0 : -1;
         s.Save();
+    }
+
+    void OnShowInRecordingsToggle(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        var s = AppSettings.Current;
+        // On = show Toki in captures (ghost/capture-exclusion off); off (default) = hidden from
+        // recorders and screen-share. Applies live so the user can flip it and record immediately.
+        s.ShowInRecordings = ShowInRecordingsToggle.IsChecked == true;
+        s.Save();
+        App.SetShowInRecordings(s.ShowInRecordings);
     }
 
     // ── BYO API key ──

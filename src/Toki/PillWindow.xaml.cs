@@ -372,10 +372,17 @@ public partial class PillWindow : Window
     /// </summary>
     void ApplyGhost()
     {
-        if (_hwnd == IntPtr.Zero || App.GhostDisabled) return;
-        try { SetWindowDisplayAffinity(_hwnd, WdaExcludeFromCapture); }
+        if (_hwnd == IntPtr.Zero) return;
+        // Set the affinity in BOTH directions: EXCLUDEFROMCAPTURE hides the notch, NONE reveals it.
+        // Applying NONE (not just skipping) matters for the live Settings toggle — turning ghost OFF
+        // must actively clear an exclusion that's already on the window.
+        try { SetWindowDisplayAffinity(_hwnd, App.GhostDisabled ? WdaNone : WdaExcludeFromCapture); }
         catch (Exception ex) { App.Log($"ghost affinity failed (non-fatal): {ex.Message}"); }
     }
+
+    /// <summary>Re-apply the current ghost setting to the live window (called when the Settings
+    /// "Show Toki in screen recordings" toggle changes) — takes effect immediately, no restart.</summary>
+    public void RefreshGhost() => ApplyGhost();
 
     /// <summary>
     /// Translucent glass surface. We do NOT use the DWM accent "acrylic" here: it fills
@@ -750,6 +757,7 @@ public partial class PillWindow : Window
     const int GwlExStyle = -20;
     const int WsExToolWindow = 0x00000080;
     const uint WdaExcludeFromCapture = 0x11;
+    const uint WdaNone = 0x00;   // visible to capture — ghost mode off
 
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
