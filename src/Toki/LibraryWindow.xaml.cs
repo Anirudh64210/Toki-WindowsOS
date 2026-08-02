@@ -253,6 +253,7 @@ public partial class LibraryWindow : Window
     {
         InitializeComponent();
         BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
+        try { _chats = _chatStore.Load(); } catch { _chats = new(); }   // past Ask conversations
         SourceInitialized += (_, _) => StyleChrome();
         // Soften the maximise/restore snap (the "min-to-max sizer" clunk): ease the content into
         // the new size on every WindowState change instead of a hard pop.
@@ -312,6 +313,11 @@ public partial class LibraryWindow : Window
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
     int _pokeKind;
+
+    // ── Ask conversations (persisted history) ──
+    readonly Storage.ChatStore _chatStore = new();
+    List<Storage.ChatStore.Conversation> _chats = new();
+    Storage.ChatStore.Conversation? _conv;   // the active conversation (null = fresh, on the landing)
 
     /// <summary>Build the hub's code-driven bits (called at construction and on a theme swap, since
     /// these are built with captured FindResource brushes).</summary>
@@ -470,28 +476,160 @@ public partial class LibraryWindow : Window
     bool _asking;
 
     // Ask a question about the meetings → retrieve relevant notes + answer with the active model (off
-    // the UI thread), shown as a conversation with source-meeting chips.
+    // the UI thread), STREAMING the answer into the bubble as it's written, with source-meeting chips.
     async void OnAsk(object sender, RoutedEventArgs e)
     {
         var q = AskBox.Text?.Trim();
         if (string.IsNullOrEmpty(q) || _asking) return;
         AskBox.Text = "";
+        EnsureConversation();
         Landing.Visibility = Visibility.Collapsed;
         Messages.Visibility = Visibility.Visible;
         Messages.Children.Add(UserBubble(q));
-        var thinking = LoaderBubble();
-        Messages.Children.Add(thinking);
+        _conv!.Turns.Add(new Storage.ChatStore.Turn { Role = "user", Text = q });
+        SetTitleFromFirstQuestion(q);
+
+        var stream = NewStreamBubble();
+        Messages.Children.Add(stream.Root);
         ScrollChatToEnd();
 
         _asking = true; AskBtn.IsEnabled = false; MicBtn.IsEnabled = false;
         Llm.NotesQa.Answer ans;
-        try { ans = await System.Threading.Tasks.Task.Run(() => Llm.NotesQa.AskAsync(q)); }
+        try
+        {
+            ans = await System.Threading.Tasks.Task.Run(() => Llm.NotesQa.AskStreamAsync(q,
+                srcs => Dispatcher.Invoke(() => stream.SetSources(srcs)),
+                tok => Dispatcher.Invoke(() => stream.Append(tok))));
+        }
         catch (Exception ex) { App.Log($"ask failed: {ex.Message}"); ans = new Llm.NotesQa.Answer("Something went wrong — try again.", [], false); }
         finally { _asking = false; AskBtn.IsEnabled = true; MicBtn.IsEnabled = true; }
 
-        Messages.Children.Remove(thinking);
-        Messages.Children.Add(AnswerBubble(ans));
+        // The final answer is authoritative (streamed text may have been a rejected/degenerate draft).
+        stream.SetFinalText(ans.Text);
+        stream.SetSources(ans.Sources);
+        _conv.Turns.Add(new Storage.ChatStore.Turn
+        {
+            Role = "assistant", Text = ans.Text,
+            Sources = ans.Sources.Select(s => new Storage.ChatStore.SourceRef { Id = s.Id, Title = s.Title }).ToList(),
+        });
+        PersistConversation();
         ScrollChatToEnd();
+    }
+
+    // ── conversations: new chat, history, persistence ──
+
+    void EnsureConversation()
+    {
+        if (_conv is not null) return;
+        _conv = new Storage.ChatStore.Conversation { Title = "New chat" };
+        _chats.Insert(0, _conv);
+    }
+
+    void SetTitleFromFirstQuestion(string q)
+    {
+        if (_conv is null || _conv.Turns.Count(t => t.Role == "user") != 1) return;   // only the first question titles it
+        _conv.Title = q.Length > 46 ? q[..46].TrimEnd() + "…" : q;
+        ChatTitle.Text = _conv.Title;
+    }
+
+    void PersistConversation()
+    {
+        if (_conv is null) return;
+        _conv.UpdatedAt = DateTimeOffset.Now.ToString("o");
+        // Save only non-empty conversations, newest first.
+        try { _chatStore.Save(_chats.Where(c => c.Turns.Count > 0)); } catch { }
+    }
+
+    void OnNewChat(object sender, RoutedEventArgs e)
+    {
+        if (_asking) return;
+        _conv = null;                       // next question starts a fresh conversation
+        Messages.Children.Clear();
+        Messages.Visibility = Visibility.Collapsed;
+        Landing.Visibility = Visibility.Visible;
+        ChatTitle.Text = "Ask Toki";
+        RefreshGreeting();                  // types a fresh greeting (guard passes now that Messages is empty)
+    }
+
+    void OnHistory(object sender, RoutedEventArgs e)
+    {
+        var convos = _chats.Where(c => c.Turns.Count > 0).OrderByDescending(c => c.Updated).ToList();
+        if (convos.Count == 0) { ChatTitle.Text = "No past chats yet"; return; }
+        ShowChatHistory((Button)sender, convos);
+    }
+
+    void LoadConversation(Storage.ChatStore.Conversation c)
+    {
+        _conv = c;
+        Messages.Children.Clear();
+        foreach (var t in c.Turns)
+        {
+            if (t.Role == "user") Messages.Children.Add(UserBubble(t.Text));
+            else Messages.Children.Add(AnswerBubble(new Llm.NotesQa.Answer(
+                t.Text, t.Sources.Select(s => new Llm.NotesQa.Source(s.Id, s.Title)).ToList(), true)));
+        }
+        Landing.Visibility = Visibility.Collapsed;
+        Messages.Visibility = Visibility.Visible;
+        ChatTitle.Text = c.Title;
+        ScrollChatToEnd();
+    }
+
+    // Themed history popup: each past chat (title + when), click to reopen, × to delete. Never the Win32 menu.
+    void ShowChatHistory(Button anchor, List<Storage.ChatStore.Conversation> convos)
+    {
+        var stack = new StackPanel();
+        var popup = new System.Windows.Controls.Primitives.Popup
+        {
+            PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade, VerticalOffset = 6,
+        };
+        foreach (var c in convos.Take(20))
+        {
+            var title = new TextBlock { Text = c.Title, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 230 };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+            var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 1, 0, 0) };
+            var textCol = new StackPanel { Children = { title, when } };
+            var del = new Button { Content = "✕", Style = St("PillButton"), Background = Brushes.Transparent, FontSize = 10, Padding = new Thickness(7, 4, 7, 4), VerticalAlignment = VerticalAlignment.Center };
+            del.SetResourceReference(ForegroundProperty, "TextDim");
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.Children.Add(textCol);
+            Grid.SetColumn(del, 1); grid.Children.Add(del);
+
+            var rowBorder = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(11, 8, 8, 8), Background = Brushes.Transparent, Child = grid };
+            var row = new Button { Content = rowBorder, Cursor = Cursors.Hand, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Focusable = false, Template = TransparentButtonTemplate() };
+            row.MouseEnter += (_, _) => rowBorder.SetResourceReference(Border.BackgroundProperty, "Chip");
+            row.MouseLeave += (_, _) => rowBorder.Background = Brushes.Transparent;
+            var captured = c;
+            row.Click += (_, _) => { popup.IsOpen = false; LoadConversation(captured); };
+            del.Click += (_, ev) =>
+            {
+                ev.Handled = true;                       // don't also trigger the row's open-click
+                _chats.Remove(captured);
+                if (ReferenceEquals(_conv, captured)) OnNewChat(this, ev);
+                try { _chatStore.Save(_chats.Where(x => x.Turns.Count > 0)); } catch { }
+                stack.Children.Remove(row);
+            };
+            stack.Children.Add(row);
+        }
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 360, Content = stack };
+        var box = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(6), BorderThickness = new Thickness(1), MinWidth = 280, Child = scroll };
+        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        popup.Child = box;
+        popup.IsOpen = true;
+    }
+
+    static string Ago(DateTimeOffset t)
+    {
+        var d = DateTimeOffset.Now - t;
+        if (d.TotalMinutes < 1) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        if (d.TotalDays < 7) return $"{(int)d.TotalDays}d ago";
+        return t.ToString("MMM d");
     }
 
     void OnMic(object sender, RoutedEventArgs e)
@@ -549,6 +687,44 @@ public partial class LibraryWindow : Window
         var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(15, 12, 15, 13), Margin = new Thickness(0, 0, 70, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = stack };
         b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
         return b;
+    }
+
+    // A live answer bubble: shows the cooking loader until the first token, then reveals the answer
+    // text and streams tokens into it; source chips appear as soon as retrieval names them.
+    sealed class StreamCtl
+    {
+        public required Border Root;
+        public required Action<string> Append;
+        public required Action<IReadOnlyList<Llm.NotesQa.Source>> SetSources;
+        public required Action<string> SetFinalText;
+    }
+
+    StreamCtl NewStreamBubble()
+    {
+        var loader = BuildLoader();
+        var answer = SelText("", 13.5, "Text");
+        answer.Visibility = Visibility.Collapsed;
+        var chips = new WrapPanel { Margin = new Thickness(0, 11, 0, 0), Visibility = Visibility.Collapsed };
+        var stack = new StackPanel { Children = { loader, answer, chips } };
+        var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(15, 12, 15, 13), Margin = new Thickness(0, 0, 70, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = stack };
+        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+
+        var started = false;
+        void Reveal() { if (started) return; started = true; stack.Children.Remove(loader); answer.Visibility = Visibility.Visible; }
+        return new StreamCtl
+        {
+            Root = b,
+            Append = tok => { Reveal(); answer.AppendText(tok); ScrollChatToEnd(); },
+            SetFinalText = txt => { Reveal(); answer.Text = txt ?? ""; ScrollChatToEnd(); },
+            SetSources = srcs =>
+            {
+                if (srcs is null || srcs.Count == 0) return;
+                chips.Children.Clear();
+                chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+                foreach (var s in srcs) chips.Children.Add(SourceChip(s));
+                chips.Visibility = Visibility.Visible;
+            },
+        };
     }
 
     // A fun "cooking up an answer" loader — a Toki-pink bar sliding across + rotating status words.

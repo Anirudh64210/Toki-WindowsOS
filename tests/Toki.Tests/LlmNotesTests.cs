@@ -24,6 +24,9 @@ public class LlmNotesTests
         public bool Ready => true;
         public Task<string> CompleteAsync(string system, string user, int maxTokens, CancellationToken ct = default)
             => Task.FromResult(reply(user));
+        public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        { await Task.Yield(); yield return reply(user); }
     }
 
     static readonly TranscriptSegment[] Transcript =
@@ -102,6 +105,8 @@ public class LlmNotesTests
     {
         public bool Ready => false;
         public Task<string> CompleteAsync(string s, string u, int m, CancellationToken ct = default)
+            => throw new InvalidOperationException("should not be called");
+        public IAsyncEnumerable<string> StreamAsync(string s, string u, int m, CancellationToken ct = default)
             => throw new InvalidOperationException("should not be called");
     }
 }

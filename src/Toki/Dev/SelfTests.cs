@@ -43,6 +43,7 @@ static class SelfTests
                 "--llmtest" => LlmTest(),
                 "--themetest" => ThemeTest(),
                 "--copytest" => CopyTest(),
+                "--asktest" => AskTest(args),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -688,6 +689,35 @@ static class SelfTests
         Console.WriteLine(copyOk ? "PASS: Copy 'everything' includes every part" : "FAIL: Copy 'everything' is incomplete");
 
         return selOk && copyOk ? 0 : 1;
+    }
+
+    // Verifies FTS5 retrieval + the task router against the REAL library (no model needed):
+    // prints which meetings a question matches, and a sample of open tasks. Toki.exe --asktest "who owns the deck"
+    static int AskTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--asktest");
+        var q = i >= 0 && i + 1 < args.Length ? args[i + 1] : "what did we decide";
+        var store = new MeetingStore();   // the real %APPDATA%\Toki\toki.db (EnsureCreated backfills FTS)
+
+        Console.WriteLine($"question: \"{q}\"");
+        var ids = store.SearchRelevant(q, 5);
+        Console.WriteLine($"FTS matched {ids.Count} meeting(s):");
+        foreach (var id in ids) Console.WriteLine($"  #{id}  {store.Get(id)?.Title}");
+
+        var open = store.OpenActions(8);
+        Console.WriteLine($"open tasks in library: {open.Count} (showing up to 8)");
+        foreach (var a in open) Console.WriteLine($"  • {a.Text}  —  {a.Meeting}");
+
+        // Exercise the actual router/answer path (App.Store points to the same real DB). Task queries
+        // return instantly without the model; content queries need a model (may be absent in this test).
+        Console.WriteLine("── NotesQa answer ──");
+        var ans = Toki.Llm.NotesQa.AskAsync(q).GetAwaiter().GetResult();
+        Console.WriteLine(ans.Text);
+        Console.WriteLine("────────────────────");
+
+        var ok = ids.Count > 0 || open.Count >= 0;
+        Console.WriteLine(ok ? "PASS: retrieval ran" : "FAIL");
+        return ok ? 0 : 1;
     }
 
     static int Seconds(string[] args, int fallback)

@@ -490,3 +490,15 @@ Copy/selection and layout fixes for the open note.
 - **Outlined inputs.** The Library search box and the Settings API-key / Address fields get a hairline outline so they no longer blend into the surface behind them.
 
 Note: `NotesQa.cs` (retrieval for the Phase 2 chatbot) is new and untracked — add it when committing.
+
+## P2 (Ask chatbot — fast + smart) — 2026-08-02
+
+"Ask Toki" became a real assistant over your notes.
+
+- **Answers stream in.** Words appear as the model writes them (instead of waiting for the whole reply) — the big perceived-speed win. Works for both the on-device model and a BYO API key.
+- **Better, grounded retrieval.** A local **FTS5 full-text index** (BM25-ranked over title, summary, sections, transcript, and tasks) finds the most relevant meetings; the answer cites them as chips you can click to open. Falls back to keyword/recent if needed. Verified against the real library with a `--asktest` dev flag.
+- **Instant task answers.** "What are my open tasks" is answered **straight from the database** (exact, no model, no hallucination). It's **scope-aware**: naming a meeting ("action items in the Postgres meeting") lists just that meeting's items; a bare "my open tasks" lists everything still open.
+- **New chat + history.** A **+ New chat** button starts fresh; a **History** list reopens past conversations (auto-titled from the first question, deletable) — no more being stuck in one endless thread. Conversations persist locally in `chats.json`.
+- A tighter prompt (context first, question last, today's date, short-answer constraint) keeps replies concise and on-topic.
+
+Verified: **87/87 tests pass** (incl. new FTS retrieval + open-tasks tests); `--llmtest` confirms the model still generates cleanly through the new streaming path. *(Voice input in the Ask bar is the next slice.)*

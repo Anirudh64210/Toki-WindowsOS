@@ -46,6 +46,18 @@
                 <!-- ── Ask (conversation + landing) ── -->
                 <Grid x:Name="AskPage">
                     <DockPanel>
+                        <!-- Top bar: current chat title, History (past conversations), and New chat. -->
+                        <Grid DockPanel.Dock="Top" Margin="40,16,40,0">
+                            <TextBlock x:Name="ChatTitle" Style="{StaticResource Dim}" FontSize="12" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="Ask Toki"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="HistoryBtn" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                                        Padding="11,7" FontSize="11.5" Click="OnHistory" Content="History"/>
+                                <Button x:Name="NewChatBtn" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                                        Padding="11,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New chat"/>
+                            </StackPanel>
+                        </Grid>
+
                         <!-- Input bar — always docked at the bottom. -->
                         <Border DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
                                 Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
