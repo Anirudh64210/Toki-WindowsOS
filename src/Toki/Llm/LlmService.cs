@@ -101,12 +101,28 @@ public sealed class LlmService
         GC.WaitForPendingFinalizers();
     }
 
-    /// <summary>Write notes with the active model, or null to keep the heuristic notes.</summary>
-    public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript, CancellationToken ct = default)
+    /// <summary>Write notes with the active model, or null to keep the heuristic notes. Pass
+    /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).</summary>
+    public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
+        CancellationToken ct = default, NoteTemplate? force = null)
     {
         var llm = Active();
         if (llm is null || !llm.Ready) return null;
-        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct); }
+        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }
+    }
+
+    /// <summary>True when a model is available to (re)write notes — WITHOUT loading it. (Calling
+    /// <see cref="Active"/> would synchronously load the 2.5 GB local model, freezing the caller;
+    /// this only checks that a model COULD be used, and the load happens later, off-thread.)</summary>
+    public bool CanWrite()
+    {
+        var s = AppSettings.Current;
+        return s.NotesMode switch
+        {
+            NotesMode.HeuristicOnly => false,
+            NotesMode.ApiKey => new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl).Ready,
+            _ => ModelManager.QwenInstalled,   // local: installed = can write (loads on demand during the rewrite)
+        };
     }
 }
