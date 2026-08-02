@@ -20,8 +20,14 @@ dist/
 # Windows shortcuts (machine-specific absolute paths)
 *.lnk
 
-# Debug screenshots dropped in the repo root (design refs live in Toki-ProductDesign/)
-/Screenshot*.png
+# Images dropped in the repo ROOT (screenshots, references, exports) — the intentional design
+# assets live in Toki-ProductDesign/ and stay tracked; only stray root-level images are ignored.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.bmp
+/*.webp
 
 # Trial / demo / screen-recording videos — large, machine-specific, never committed
 *.mp4
@@ -35,7 +41,15 @@ dist/
 *.gguf
 *.bin
 *.tar.bz2
+# Audio recordings — never committed
 *.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+Recordings/
+# Databases
 *.db
 *.db-shm
 *.db-wal
