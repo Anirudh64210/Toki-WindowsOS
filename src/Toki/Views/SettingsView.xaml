@@ -78,7 +78,8 @@
                     <!-- Only when Provider = Custom: the address is otherwise set for you. -->
                     <StackPanel x:Name="CustomEndpointRow" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource SettingTitle}" Text="Address"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0">
+                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                             <TextBox x:Name="ApiBaseUrlBox" Background="Transparent" BorderThickness="0"
                                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                      Height="34" FontSize="11.5" FontFamily="{StaticResource UiFont}"
@@ -90,7 +91,8 @@
                     </StackPanel>
 
                     <TextBlock Style="{StaticResource SettingTitle}" Text="Your API key"/>
-                    <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0">
+                    <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0"
+                            BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                         <PasswordBox x:Name="ApiKeyBox" Background="Transparent" BorderThickness="0"
                                      Foreground="{DynamicResource Text}" Height="34" FontSize="11.5"
                                      FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"

@@ -108,8 +108,16 @@ public sealed class LlmService
     {
         var llm = Active();
         if (llm is null || !llm.Ready) return null;
+        force ??= DefaultForced();   // honour the user's "always use X" default when no explicit override
         try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }
+    }
+
+    static NoteTemplate? DefaultForced()
+    {
+        var name = AppSettings.Current.DefaultTemplate;
+        return string.IsNullOrWhiteSpace(name) ? null
+            : NoteTemplates.All.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>True when a model is available to (re)write notes — WITHOUT loading it. (Calling

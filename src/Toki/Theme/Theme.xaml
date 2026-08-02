@@ -41,6 +41,10 @@
     <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
     <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
+    <!-- Destructive action (Delete). A clear, readable red on both black and white surfaces —
+         not the pale grey that made Delete look disabled. Constant across themes. -->
+    <SolidColorBrush x:Key="Danger" Color="#F0524B"/>
+    <SolidColorBrush x:Key="DangerTint" Color="#26F0524B"/>
 
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
     <!-- Windows' crisp monochrome icon font (Win11 Fluent, falls back to Win10 MDL2). -->
@@ -60,7 +64,16 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}"
                             CornerRadius="13" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- BlockLineHeight clamps the line box to the glyphs; the -1px nudge corrects the
+                             residual ~1px that Segoe UI Variable still sits low (measured against a true-
+                             centre reference line). Together the label lands optically centred. -->
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          TextBlock.LineStackingStrategy="BlockLineHeight"
+                                          TextBlock.LineHeight="{TemplateBinding FontSize}">
+                            <ContentPresenter.RenderTransform>
+                                <TranslateTransform Y="-1"/>
+                            </ContentPresenter.RenderTransform>
+                        </ContentPresenter>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -88,6 +101,40 @@
     <Style x:Key="StarButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
         <Setter Property="Background" Value="{DynamicResource AmberDark}"/>
         <Setter Property="Foreground" Value="{DynamicResource Amber}"/>
+    </Style>
+
+    <!-- VS Code-style pane splitter: a wide invisible grab strip with a 1px seam line that lights
+         up (pink, 2px) on hover/drag. Smooth because only the thin line animates, not a grey bar. -->
+    <Style x:Key="PaneSplitter" TargetType="GridSplitter">
+        <Setter Property="Width" Value="9"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="VerticalAlignment" Value="Stretch"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="ResizeBehavior" Value="PreviousAndCurrent"/>
+        <Setter Property="ResizeDirection" Value="Columns"/>
+        <Setter Property="Panel.ZIndex" Value="10"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GridSplitter">
+                    <Border Background="Transparent">
+                        <Border x:Name="Seam" Width="1" HorizontalAlignment="Center"
+                                Background="{DynamicResource Hairline}">
+                            <Border.RenderTransform><ScaleTransform x:Name="SeamScale" ScaleX="1"/></Border.RenderTransform>
+                        </Border>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource Pink}"/>
+                            <Setter TargetName="Seam" Property="Width" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource Pink}"/>
+                            <Setter TargetName="Seam" Property="Width" Value="2"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Rounded-square action button (stop) -->

@@ -478,3 +478,15 @@ The Library window became Toki's **home** — a Claude-desktop-style hub. (Phase
 - Smooth page fades; theme-reactive throughout.
 
 Verified: **83/83 tests pass**; hub pages render clean via a new `--libshot` dev flag. Fixed at the pre-commit review: the template-rewrite ran the model on the UI thread (would freeze the window) — now offloaded to `Task.Run`; `LlmService.CanWrite` no longer force-loads the model.
+
+## P1.1 (Library note polish) — 2026-08-02
+
+Copy/selection and layout fixes for the open note.
+
+- **Whole note is selectable + copyable.** The note is now one rich-text document, so a single drag from top to bottom selects everything (summary → bullets → to-dos → transcript) and Ctrl+C copies it all — not one bullet at a time. **Copy** is a split button: the button copies the *entire* note; the **▾** offers everything / summary+to-dos / transcript / reveal the note's file. Proven by a headless `--copytest` (a mouse drag can't be screenshot-verified, so the test selects the whole doc and checks every part is captured).
+- **Clean note layout.** Content is left-aligned and fills the pane at any window size (no centered column with a big left gap); the scrollbar sits at the window's right edge. Top toolbar: **Template** on the left, **Copy · Delete** on the right, above the title. **Delete** is a clear red, not a greyed-out look. Action-item name tags are bright (blue/amber) and readable on both themes.
+- **Buttons truly centered.** Segoe UI Variable sat labels ~1px low; corrected in the button template (measured against a true-center line via the `--libshot` `buttons.png` probe). The "‹ Back to Toki" chevron uses a properly-centered icon glyph.
+- **Resizable panels.** VS Code-style seams — invisible until hover, then a thin pink line — between the sidebar/list/note; drag to resize. Clicking **Library** while already on Library **collapses the note list** (animated); click again to bring it back.
+- **Outlined inputs.** The Library search box and the Settings API-key / Address fields get a hairline outline so they no longer blend into the surface behind them.
+
+Note: `NotesQa.cs` (retrieval for the Phase 2 chatbot) is new and untracked — add it when committing.
