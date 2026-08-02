@@ -47,7 +47,31 @@ public partial class LibraryWindow : Window
         // already-rendered content is reused and opening is just Show() → instant.
         if (_dirty || focusMeetingId is not null) { w.Reload(focusMeetingId); _dirty = false; }
         if (!w.IsVisible) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
+        // A specific note → open on the Library page showing it; otherwise the Ask landing (fresh greeting).
+        w.ShowPage(focusMeetingId is not null ? "library" : "ask", animate: false);
         w.Activate();
+    }
+
+    /// <summary>Dev: render the hub's three pages to PNGs (Library window isn't in the pill harness).</summary>
+    internal static void RenderShots(string dir)
+    {
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            var latest = App.Store.List().FirstOrDefault(x => x.Kind == MeetingKind.Meeting);
+            if (latest is not null) App.CurrentMeeting = App.Store.Get(latest.Id);
+        }
+        catch { }
+        var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
+        w.Show();
+        w.Reload(App.CurrentMeeting?.Id);
+        foreach (var page in new[] { "ask", "library", "templates" })
+        {
+            w.ShowPage(page, animate: false);
+            w.UpdateLayout();
+            Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, $"hub-{page}.png"));
+        }
+        w.Close();
     }
 
     static void EnsureCreated()
@@ -209,11 +233,18 @@ public partial class LibraryWindow : Window
         StateChanged += (_, _) => PlayStateSettle();
         // The list cards + note detail are built in code (FindResource brushes), so they don't
         // recolour on their own — rebuild them (and re-apply the title-bar theme) on a theme swap.
-        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { StyleChrome(); Reload(); });
+        // Code-built UI (list cards, note detail, nav, templates) captures brushes → rebuild on a theme swap.
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { StyleChrome(); BuildHub(); Reload(); });
         _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
         // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
         // already call Reload() explicitly — a Loaded handler here made every open rebuild
         // the whole list+detail TWICE.
+
+        BuildHub();
+        // Land on the Ask page by default (visibility only — the greeting types when actually opened).
+        AskPage.Visibility = Visibility.Visible;
+        LibraryPage.Visibility = Visibility.Collapsed;
+        TemplatesPage.Visibility = Visibility.Collapsed;
     }
 
     void StyleChrome()
@@ -245,6 +276,239 @@ public partial class LibraryWindow : Window
         if (toSelect is long id && App.Store.Get(id) is not null) Select(id);
         else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid);
         else { Detail.Children.Clear(); Detail.Children.Add(Placeholder("Select a meeting or note, or make a new one.")); }
+    }
+
+    // ══════════════════════ Hub: sidebar nav · Ask landing · Templates · mascot ══════════════════════
+
+    string _page = "ask";
+    bool _dragEnabled;                       // drag-reorder is OFF by default (no accidental moves)
+    readonly Dictionary<string, Border> _navButtons = new();
+    static readonly Random _rng = new();
+    System.Windows.Threading.DispatcherTimer? _typer;
+    int _pokeKind;
+
+    /// <summary>Build the hub's code-driven bits (called at construction and on a theme swap, since
+    /// these are built with captured FindResource brushes).</summary>
+    void BuildHub()
+    {
+        BuildNav();
+        BuildSuggestions();
+        BuildTemplatesPage();
+        UpdateDragToggle();
+        HighlightNav();
+    }
+
+    void BuildNav()
+    {
+        Nav.Children.Clear();
+        _navButtons.Clear();
+        Nav.Children.Add(NavItem("ask", (char)0xE8BD, "Ask"));       // chat bubble
+        Nav.Children.Add(NavItem("library", (char)0xE8F1, "Library"));// stacked books
+        Nav.Children.Add(NavItem("templates", (char)0xE8A5, "Templates")); // document
+    }
+
+    Border NavItem(string key, char glyph, string label)
+    {
+        var icon = new TextBlock { Text = glyph.ToString(), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 15, VerticalAlignment = VerticalAlignment.Center, Width = 22, TextAlignment = TextAlignment.Center };
+        var text = new TextBlock { Text = label, FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12.5, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(icon); row.Children.Add(text);
+        var b = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(11, 9, 11, 9), Margin = new Thickness(0, 0, 0, 4), Cursor = Cursors.Hand, Background = Brushes.Transparent, Child = row };
+        b.MouseLeftButtonUp += (_, _) => ShowPage(key);
+        _navButtons[key] = b;
+        return b;
+    }
+
+    void HighlightNav()
+    {
+        foreach (var (key, b) in _navButtons)
+        {
+            var active = key == _page;
+            if (active) b.Background = (Brush)FindResource("Chip"); else b.Background = Brushes.Transparent;
+            if (b.Child is StackPanel sp)
+                foreach (var c in sp.Children.OfType<TextBlock>())
+                    c.SetResourceReference(TextBlock.ForegroundProperty, active ? "Text" : "TextDim");
+        }
+    }
+
+    void ShowPage(string key, bool animate = true)
+    {
+        _page = key;
+        AskPage.Visibility = key == "ask" ? Visibility.Visible : Visibility.Collapsed;
+        LibraryPage.Visibility = key == "library" ? Visibility.Visible : Visibility.Collapsed;
+        TemplatesPage.Visibility = key == "templates" ? Visibility.Visible : Visibility.Collapsed;
+        HighlightNav();
+        UIElement page = key == "ask" ? AskPage : key == "library" ? LibraryPage : TemplatesPage;
+        if (animate && !App.Headless) FadePage(page);
+        if (key == "ask") RefreshGreeting();
+        if (key == "library" && Cards.Children.Count == 0) LoadList();
+    }
+
+    static void FadePage(UIElement e)
+    {
+        e.BeginAnimation(OpacityProperty, new DoubleAnimation(0.0, 1, TimeSpan.FromMilliseconds(200)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    }
+
+    // ── Ask landing: a rotating greeting that types in, a search bar, quick suggestions ──
+
+    static readonly string[] Greetings =
+    {
+        "Hi {0}, how are you doing?", "Hey {0} — what's on your mind?", "Welcome back, {0}.",
+        "Good to see you, {0}.", "Ready when you are, {0}.", "What can I find for you, {0}?",
+        "Hi {0} — ask me about your meetings.",
+    };
+
+    void RefreshGreeting()
+    {
+        var name = Llm.AppSettings.Current.DisplayName;
+        var full = string.Format(Greetings[_rng.Next(Greetings.Length)], string.IsNullOrEmpty(name) ? "there" : name);
+        AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
+        TypeText(Greeting, full);
+    }
+
+    // Reveal the greeting one character at a time — slow and smooth, like it's being written.
+    void TypeText(TextBlock tb, string full)
+    {
+        _typer?.Stop();
+        if (App.Headless) { tb.Text = full; return; }
+        tb.Text = "";
+        var i = 0;
+        _typer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(28) };
+        _typer.Tick += (_, _) => { if (i >= full.Length) { _typer!.Stop(); return; } tb.Text += full[i++]; };
+        _typer.Start();
+    }
+
+    void BuildSuggestions()
+    {
+        Suggestions.Children.Clear();
+        foreach (var s in new[] { "What did I commit to this week?", "Summarize my last meeting", "Any open tasks?" })
+            Suggestions.Children.Add(SuggestionChip(s));
+    }
+
+    Border SuggestionChip(string text)
+    {
+        var t = new TextBlock { Text = text, FontSize = 11, FontFamily = (FontFamily)FindResource("UiFont") };
+        t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+        var b = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(11, 7, 11, 7), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = t };
+        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        b.MouseLeftButtonUp += (_, _) => { AskBox.Text = text; OnAsk(this, new RoutedEventArgs()); };
+        return b;
+    }
+
+    void OnAskKeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { e.Handled = true; OnAsk(sender, e); } }
+
+    void OnAsk(object sender, RoutedEventArgs e)
+    {
+        var q = AskBox.Text?.Trim();
+        if (string.IsNullOrEmpty(q)) return;
+        // Phase 1: take the question into the Library and search it. Full conversational answering
+        // (retrieval over your notes) arrives with the chatbot — Phase 2.
+        SearchBox.Text = q;
+        AskBox.Text = "";
+        ShowPage("library");
+    }
+
+    void OnMic(object sender, RoutedEventArgs e)
+    {
+        AskHint.Text = "Voice questions arrive with the chatbot — coming next.";
+    }
+
+    // ── clickable mascot: a cute reaction that varies each poke ──
+    void OnMascotClick(object sender, MouseButtonEventArgs e)
+    {
+        SideToki.BlinkNow();
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.55 };
+        var (sx, sy) = (_pokeKind++ % 3) switch { 0 => (0.72, 0.72), 1 => (0.6, 0.9), _ => (0.92, 0.58) };
+        var dur = TimeSpan.FromMilliseconds(380);
+        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(sx, 1, dur) { EasingFunction = ease });
+        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(sy, 1, dur) { EasingFunction = ease });
+    }
+
+    // ── drag-reorder on/off toggle ──
+    void OnToggleDrag(object sender, RoutedEventArgs e) { _dragEnabled = !_dragEnabled; UpdateDragToggle(); }
+
+    void UpdateDragToggle()
+    {
+        DragToggle.Content = ((char)0xE8CB).ToString();   // Fluent: Sort / reorder lines
+        if (_dragEnabled) DragToggle.Foreground = (Brush)FindResource("Coral");
+        else DragToggle.ClearValue(ForegroundProperty);
+        DragToggle.ToolTip = _dragEnabled
+            ? "Reordering ON — drag cards to rearrange them"
+            : "Reordering off — tap to drag-reorder your notes";
+    }
+
+    // ── Templates page ──
+    void BuildTemplatesPage()
+    {
+        TemplatesList.Children.Clear();
+        TemplatesList.Children.Add(new TextBlock { Text = "Templates", Style = St("Body"), FontSize = 22, FontWeight = FontWeights.Bold });
+        TemplatesList.Children.Add(new TextBlock
+        {
+            Text = "Toki picks the shape that fits each meeting automatically. Open any note to switch its template by hand.",
+            Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 18),
+        });
+        foreach (var t in Llm.NoteTemplates.All) TemplatesList.Children.Add(TemplateCard(t));
+    }
+
+    Border TemplateCard(Llm.NoteTemplate t)
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(new TextBlock { Text = t.Name, Style = St("Body"), FontSize = 14.5, FontWeight = FontWeights.SemiBold });
+        stack.Children.Add(new TextBlock { Text = char.ToUpper(t.When[0]) + t.When[1..] + ".", Style = St("Dim"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+        var secs = new WrapPanel { Margin = new Thickness(0, 9, 0, 0) };
+        foreach (var s in new[] { "Summary" }.Concat(t.Sections).Concat(new[] { "Action items" }))
+            secs.Children.Add(SectionPill(s));
+        stack.Children.Add(secs);
+        var card = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(16, 14, 16, 15), Margin = new Thickness(0, 0, 0, 10), Child = stack };
+        card.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        return card;
+    }
+
+    Border SectionPill(string text)
+    {
+        var t = new TextBlock { Text = text, FontSize = 10, FontFamily = (FontFamily)FindResource("UiFont") };
+        t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+        var b = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 3, 8, 4), Margin = new Thickness(0, 0, 6, 6), Child = t };
+        b.SetResourceReference(Border.BackgroundProperty, "Chip");
+        return b;
+    }
+
+    // ── per-note template picker (manual override → Toki re-writes the note in the chosen shape) ──
+    FrameworkElement TemplatePicker(MeetingRecord m)
+    {
+        var wrap = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+        wrap.Children.Add(new TextBlock { Text = "TEMPLATE", Style = St("Dim"), FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(2, 0, 0, 4) });
+
+        var drop = new Views.SearchableDropdown { Width = 190, HorizontalAlignment = HorizontalAlignment.Left };
+        drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
+        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(2, 6, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+
+        drop.Changed += async (_, _) =>
+        {
+            var name = drop.Selected;
+            if (string.IsNullOrWhiteSpace(name) || string.Equals(name, m.Notes.Template ?? "General", StringComparison.OrdinalIgnoreCase)) return;
+            if (!Llm.LlmService.Instance.CanWrite())
+            {
+                status.Text = "Add the on-device model or an API key (Settings) to change templates.";
+                status.Visibility = Visibility.Visible;
+                return;
+            }
+            status.Text = $"Rewriting as {name}…"; status.Visibility = Visibility.Visible;
+            drop.IsEnabled = false;
+            var ok = await App.RewriteNotesAsync(m.Id, name);
+            drop.IsEnabled = true;
+            if (ok) { var fresh = App.Store.Get(m.Id); if (fresh is not null) RenderMeeting(fresh); }
+            else
+            {
+                // Nothing changed — put the dropdown back to the note's real template so it isn't
+                // showing a shape that wasn't actually applied.
+                drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
+                status.Text = "Couldn't rewrite — no transcript or model available.";
+            }
+        };
+        wrap.Children.Add(drop);
+        wrap.Children.Add(status);
+        return wrap;
     }
 
     void LoadList()
@@ -345,6 +609,10 @@ public partial class LibraryWindow : Window
 
     void OnCardMove(MouseEventArgs e)
     {
+        if (!_dragEnabled) return;   // reordering is opt-in — a plain click still selects (no move)
+        // Reordering only makes sense on the FULL list — a filtered view would renumber just the
+        // visible subset and scramble the global order. Under a search, a drag is treated as a click.
+        if (!string.IsNullOrWhiteSpace(SearchBox.Text)) return;
         if (_drag is null || e.LeftButton != MouseButtonState.Pressed || _dragFrom < 0) return;
         var dy = e.GetPosition(Cards).Y - _dragStartY;
         if (!_dragMoved && Math.Abs(dy) < 4) return;
@@ -496,6 +764,10 @@ public partial class LibraryWindow : Window
         Grid.SetColumn(actions, 1);
         header.Children.Add(actions);
         Detail.Children.Add(header);
+
+        // Manual template override — pick a shape and Toki re-writes the note in it.
+        if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
+            Detail.Children.Add(TemplatePicker(m));
 
         var body = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
         NoteRenderer.Meeting(body, m, spacious: true);

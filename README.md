@@ -466,3 +466,15 @@ A broad refinement pass across appearance, motion, and note quality.
 - **Housekeeping.** Removed the dead `Waveform` control and a never-firing notes-update event chain. The dev PC was found to be 11.4 GB RAM + RTX 3050 (not the old 6 GB) — noted for on-device headroom.
 
 Verified: **83/83 tests pass** (incl. new template-detection and live-theme-swap self-tests), clean 130 MB build.
+
+## P1 (Library → hub) — 2026-08-02
+
+The Library window became Toki's **home** — a Claude-desktop-style hub. (Phase 1 of a larger plan; the chatbot is Phase 2.)
+
+- **Sidebar** — the Toki cloud mascot up top (click it → a cute reaction that varies each poke), nav for **Ask · Library · Templates**, and **‹ Back to Toki** at the bottom.
+- **Ask** (the landing) — a greeting that types itself in and rotates each open, a centered search bar with a **mic**, and quick suggestion chips. *(Phase 1: a query routes into the Library search; conversational answering over your notes + voice input arrive with the Phase 2 chatbot.)*
+- **Library** — the meetings list + note detail, with a **drag-reorder toggle** (off by default, so cards never move by accident) and a **per-note template picker** (change the shape → Toki re-writes the note in it, off the UI thread).
+- **Templates** — all 8 shapes with the sections each produces.
+- Smooth page fades; theme-reactive throughout.
+
+Verified: **83/83 tests pass**; hub pages render clean via a new `--libshot` dev flag. Fixed at the pre-commit review: the template-rewrite ran the model on the UI thread (would freeze the window) — now offloaded to `Task.Run`; `LlmService.CanWrite` no longer force-loads the model.

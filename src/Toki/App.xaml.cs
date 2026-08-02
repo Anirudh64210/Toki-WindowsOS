@@ -117,6 +117,23 @@ public partial class App : Application
     /// notch), or null if the pill isn't up. Read it BEFORE hiding the pill.</summary>
     public static System.Windows.Rect? PillRect() => (Current as App)?._pill?.ScreenDipRect();
 
+    /// <summary>Re-write a saved meeting's notes in a SPECIFIC template (the manual override). Returns
+    /// false when there's no transcript or no model available. Heavy — runs the LLM on the transcript.</summary>
+    public static async Task<bool> RewriteNotesAsync(long meetingId, string templateName, System.Threading.CancellationToken ct = default)
+    {
+        var m = Store.Get(meetingId);
+        if (m is null || m.Transcript.Count == 0) return false;
+        var tpl = Llm.NoteTemplates.ByName(templateName);
+        // Off the UI thread: WriteNotesAsync starts by loading the local model synchronously, which
+        // would otherwise freeze the window the picker lives in.
+        var notes = await System.Threading.Tasks.Task.Run(() => Llm.LlmService.Instance.WriteNotesAsync(m.Transcript, ct, tpl));
+        if (notes is null) return false;
+        notes.Template = tpl.Name;
+        Store.ReplaceNotes(meetingId, notes);
+        LibraryWindow.MarkDirty();
+        return true;
+    }
+
     static System.Threading.Mutex? _singleInstance;
     static System.Threading.EventWaitHandle? _showSignal;
     static MeetingDetector? _detector;
@@ -184,6 +201,14 @@ public partial class App : Application
         {
             Headless = true;                              // views must not touch the network or save settings
             Dev.RenderHarness.RenderAll(e.Args[r + 1]);
+            Shutdown();
+            return;
+        }
+        var ls = Array.IndexOf(e.Args, "--libshot");
+        if (ls >= 0 && ls + 1 < e.Args.Length)
+        {
+            Headless = true;
+            LibraryWindow.RenderShots(e.Args[ls + 1]);
             Shutdown();
             return;
         }

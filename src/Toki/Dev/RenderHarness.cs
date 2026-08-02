@@ -119,6 +119,14 @@ static class RenderHarness
         timer.Start();
     }
 
+    /// <summary>Render a laid-out element (e.g. the Library window's RootGrid) to a PNG at its actual size.</summary>
+    internal static void SaveVisual(FrameworkElement fe, string path)
+    {
+        var w = fe.ActualWidth > 0 ? fe.ActualWidth : 960;
+        var h = fe.ActualHeight > 0 ? fe.ActualHeight : 640;
+        Save(fe, w, h, path);
+    }
+
     static void Save(Visual visual, double w, double h, string path)
     {
         const double scale = 2.0;

@@ -33,7 +33,8 @@ public sealed class LlmNoteWriter
     readonly ILlm _llm;
     public LlmNoteWriter(ILlm llm) => _llm = llm;
 
-    public async Task<NoteSet> WriteAsync(IReadOnlyList<TranscriptSegment> transcript, CancellationToken ct = default)
+    public async Task<NoteSet> WriteAsync(IReadOnlyList<TranscriptSegment> transcript,
+        CancellationToken ct = default, NoteTemplate? force = null)
     {
         var heuristic = NoteExtractor.Extract(transcript);
         if (!_llm.Ready || transcript.Count == 0) return heuristic;
@@ -63,8 +64,8 @@ public sealed class LlmNoteWriter
             sourceIsDigests = true;
         }
 
-        // Pick the note template that fits this meeting, then write it in that shape.
-        var template = await ClassifyTemplate(source, sourceIsDigests, ct);
+        // Use the caller's forced template (manual override), else pick the one that fits this meeting.
+        var template = force ?? await ClassifyTemplate(source, sourceIsDigests, ct);
 
         // REDUCE / FINAL: the adaptive, honest note in the chosen template.
         var note = await FinalNote(source, sourceIsDigests, template, ct);
