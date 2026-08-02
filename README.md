@@ -452,3 +452,17 @@ Toki's notch runs **ghost mode** — it's excluded from **every** screen recorde
 - **Still open (parked):** with the toggle on the notch *is* capturable, but Snipping Tool pins its own control bar to the top-centre of the recorded screen — right where the notch sits — so they overlap regardless of how many monitors you have. The clean fix for a top-centre notch is a recorder whose controls live in their own window (e.g. OBS on a second screen, capturing the notch's screen). Tracked for a later pass.
 
 Verified: build clean, **82/82 tests pass**, new build launches cleanly (ghost affinity applied with no error in the log).
+
+## M10 (Look, feel & templated notes) — 2026-08-02
+
+A broad refinement pass across appearance, motion, and note quality.
+
+- **Live light/dark theme.** A sun/moon toggle in Settings flips the *whole* app — notch and Library — between the signature dark and a clean, warm Apple-white, instantly, no restart. `ThemeManager` swaps a small palette of brushes that every screen references dynamically. (Two dead ends recorded in ARCHITECTURE — poking Color resources, and mutating brushes, which WPF freezes; the fix is to *replace* the brush.)
+- **The notch is a tinted mirror.** The black and white notch are now semi-transparent, so the desktop colours behind them bleed through faintly — see-through, not blurred. Kept fairly opaque so text stays readable and it never washes out to grey.
+- **Templated notes (8 shapes).** Toki auto-detects the meeting type — Standup, 1:1, Interview, Brainstorm, Lecture, Sales call, Decision log, or General — and writes the note in that shape (a standup gets Updates/Blockers; an interview gets Strengths/Concerns/Recommendation). Tasks are name-tagged to whoever they were actually given to (or "You"), never guessed; summaries are tuned to cut filler. Notes store flexible sections; older notes still render.
+- **Smoothness.** Notch open/close is GPU-composited (an animated clip, no per-frame relayout); the Library grows out of the notch and retracts back to it; every scroller glides; maximise eases in.
+- **Cloud mascot.** Toki is now the pink cloud from the product design (three humps + eyes), not a single oval.
+- **Cleaner UI.** Theme + screen-recording controls are single header icons (shown once, not repeated under each notes-mode page); the recording icon is a camera crossed out when Toki is hidden. Deleting a note uses Toki's own rounded dialog, not the Windows box.
+- **Housekeeping.** Removed the dead `Waveform` control and a never-firing notes-update event chain. The dev PC was found to be 11.4 GB RAM + RTX 3050 (not the old 6 GB) — noted for on-device headroom.
+
+Verified: **83/83 tests pass** (incl. new template-detection and live-theme-swap self-tests), clean 130 MB build.
