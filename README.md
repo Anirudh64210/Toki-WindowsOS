@@ -502,3 +502,17 @@ Note: `NotesQa.cs` (retrieval for the Phase 2 chatbot) is new and untracked — 
 - A tighter prompt (context first, question last, today's date, short-answer constraint) keeps replies concise and on-topic.
 
 Verified: **87/87 tests pass** (incl. new FTS retrieval + open-tasks tests); `--llmtest` confirms the model still generates cleanly through the new streaming path. *(Voice input in the Ask bar is the next slice.)*
+
+## P2.1 (Ask — understand the question first) — 2026-08-02
+
+The chatbot was giving confidently wrong answers to questions about **time** — because it searched by keyword and let the AI guess dates. Fixed by understanding the question *before* answering (like Granola/Hyprnote/Notion do):
+
+- **Dates & recency are now handled by the database, not the AI.** "My most recent meeting" is a date sort; "meeting on July 30" / "last week" / "in March" are date filters (parsed offline by Microsoft's date recogniser). The AI is *told* the right meeting and only writes the answer — it can no longer pick the wrong one.
+- **Instant, exact answers** for "how many meetings…", "what meetings did I have this week", and task lists — straight from the database.
+- **Smarter task scoping** — "action items in the July 21 meeting" now lists *that* meeting's items (by date), not all 25.
+- **Intent is judged on your question, not note titles** — so a meeting named "…Follow-Up" no longer triggers the task list.
+- **Conversation memory** — follow-ups work: "before that" shifts the week, "what about the action items?" / "summarize it" stay on the meeting you were just discussing.
+
+Verified: **107/107 tests pass**; new `--querytest` / `--followuptest` / `--asktest` dev flags prove the routing and follow-ups on the real library.
+
+**Deferred — on-device meaning-search (embeddings):** planned as the next quality layer, but both ways to run a second small model on-device conflict with an engine Toki already ships (a native `onnxruntime.dll` version clash with the transcription engine; and the embedder *hangs* on the GPU/Vulkan backend that the notes AI needs). It was **not** forced in — that would risk transcription. The fix (run the embedder in an isolated CPU-only helper process) is scoped for the next iteration; the code is present but dormant and unused. Keyword search stays active meanwhile — the bugs above were about time/intent, which are now fixed. See ARCHITECTURE.md for the technical detail.

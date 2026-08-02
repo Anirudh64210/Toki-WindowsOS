@@ -318,6 +318,7 @@ public partial class LibraryWindow : Window
     readonly Storage.ChatStore _chatStore = new();
     List<Storage.ChatStore.Conversation> _chats = new();
     Storage.ChatStore.Conversation? _conv;   // the active conversation (null = fresh, on the landing)
+    Llm.ConversationContext _ctx = new();    // last-turn state for follow-ups ("before that", "its tasks")
 
     /// <summary>Build the hub's code-driven bits (called at construction and on a theme swap, since
     /// these are built with captured FindResource brushes).</summary>
@@ -499,7 +500,8 @@ public partial class LibraryWindow : Window
         {
             ans = await System.Threading.Tasks.Task.Run(() => Llm.NotesQa.AskStreamAsync(q,
                 srcs => Dispatcher.Invoke(() => stream.SetSources(srcs)),
-                tok => Dispatcher.Invoke(() => stream.Append(tok))));
+                tok => Dispatcher.Invoke(() => stream.Append(tok)),
+                default, _ctx));
         }
         catch (Exception ex) { App.Log($"ask failed: {ex.Message}"); ans = new Llm.NotesQa.Answer("Something went wrong — try again.", [], false); }
         finally { _asking = false; AskBtn.IsEnabled = true; MicBtn.IsEnabled = true; }
@@ -544,6 +546,7 @@ public partial class LibraryWindow : Window
     {
         if (_asking) return;
         _conv = null;                       // next question starts a fresh conversation
+        _ctx = new();                       // forget follow-up state
         Messages.Children.Clear();
         Messages.Visibility = Visibility.Collapsed;
         Landing.Visibility = Visibility.Visible;
@@ -561,6 +564,7 @@ public partial class LibraryWindow : Window
     void LoadConversation(Storage.ChatStore.Conversation c)
     {
         _conv = c;
+        _ctx = new();   // a reopened thread starts follow-up tracking fresh
         Messages.Children.Clear();
         foreach (var t in c.Turns)
         {

@@ -44,6 +44,9 @@ static class SelfTests
                 "--themetest" => ThemeTest(),
                 "--copytest" => CopyTest(),
                 "--asktest" => AskTest(args),
+                "--querytest" => QueryTest(),
+                "--followuptest" => FollowUpTest(),
+                "--embedtest" => EmbedTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -708,15 +711,137 @@ static class SelfTests
         Console.WriteLine($"open tasks in library: {open.Count} (showing up to 8)");
         foreach (var a in open) Console.WriteLine($"  • {a.Text}  —  {a.Meeting}");
 
-        // Exercise the actual router/answer path (App.Store points to the same real DB). Task queries
-        // return instantly without the model; content queries need a model (may be absent in this test).
-        Console.WriteLine("── NotesQa answer ──");
-        var ans = Toki.Llm.NotesQa.AskAsync(q).GetAwaiter().GetResult();
-        Console.WriteLine(ans.Text);
-        Console.WriteLine("────────────────────");
+        // Deterministic query understanding (no model): show intent, parsed time, and the meeting(s)
+        // the pipeline resolves — this proves "most recent"/"on <date>" pick the RIGHT meeting.
+        var plan = Toki.Llm.QueryUnderstanding.Parse(q, DateTimeOffset.Now);
+        Console.WriteLine($"── plan: intent={plan.Intent}  rank={(plan.Rank?.ToString() ?? "—")}  " +
+            $"range={(plan.HasDateRange ? $"{plan.RangeStart:MMM d}..{plan.RangeEnd:MMM d}" : "—")}  residual=\"{plan.Residual}\"");
+        if (plan.Rank == Toki.Llm.RecencyDir.Latest)
+            Console.WriteLine($"   resolved latest → {store.Get(store.LatestMeetingIds(1).FirstOrDefault())?.Title}");
+        if (plan.HasDateRange)
+            foreach (var id in store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value).Take(5))
+                Console.WriteLine($"   resolved in-range → {store.Get(id)?.Title}  ({store.Get(id)?.StartedAt:MMM d})");
+
+        // Only the DETERMINISTIC intents are answered here (they need no model). Summary/lookup would
+        // load Qwen (slow/absent in this headless test) — we've already shown their resolved meeting above.
+        var deterministic = plan.Intent is Toki.Llm.QueryIntent.Count or Toki.Llm.QueryIntent.ListMeetings or Toki.Llm.QueryIntent.ListTasks;
+        if (deterministic)
+        {
+            Console.WriteLine("── NotesQa answer (deterministic) ──");
+            var ans = Toki.Llm.NotesQa.AskAsync(q).GetAwaiter().GetResult();
+            Console.WriteLine(ans.Text);
+            Console.WriteLine("────────────────────");
+        }
+        else Console.WriteLine("(summary/lookup route → would call the model; resolution shown above)");
 
         var ok = ids.Count > 0 || open.Count >= 0;
         Console.WriteLine(ok ? "PASS: retrieval ran" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    // Verifies the deterministic query-understanding layer (temporal parse + intent) against a fixed
+    // reference date, so "most recent / July 30 / last week / follow up" all classify correctly offline.
+    static int QueryTest()
+    {
+        var now = new DateTimeOffset(2026, 8, 2, 12, 0, 0, TimeSpan.Zero);   // fixed ref so results are stable
+        Console.WriteLine($"(reference 'now' = {now:ddd MMM d yyyy})\n");
+
+        // query → expected intent (temporal/rank printed for eyeballing)
+        var cases = new (string q, Toki.Llm.QueryIntent intent)[]
+        {
+            ("summarise my most recent meeting", Toki.Llm.QueryIntent.SummarizeOne),
+            ("what happened in my last meeting", Toki.Llm.QueryIntent.SummarizeOne),
+            ("meeting on July 30", Toki.Llm.QueryIntent.SummarizeOne),
+            ("what did we decide about the survey forms", Toki.Llm.QueryIntent.LookupFact),
+            ("AI tool review and survey follow up", Toki.Llm.QueryIntent.LookupFact),   // NOT tasks — the bug
+            ("what are my open tasks", Toki.Llm.QueryIntent.ListTasks),
+            ("action items in the postgres meeting", Toki.Llm.QueryIntent.ListTasks),
+            ("what meetings did I have last week", Toki.Llm.QueryIntent.ListMeetings),
+            ("how many meetings in March", Toki.Llm.QueryIntent.Count),
+            ("who was worried about replication lag", Toki.Llm.QueryIntent.LookupFact),
+        };
+
+        var pass = 0;
+        foreach (var (q, want) in cases)
+        {
+            var p = Toki.Llm.QueryUnderstanding.Parse(q, now);
+            var temporal = p.Rank is { } r ? $"rank={r}" : p.HasDateRange ? $"{p.RangeStart:MMM d}..{p.RangeEnd:MMM d}" : "—";
+            var ok = p.Intent == want;
+            if (ok) pass++;
+            Console.WriteLine($"{(ok ? "ok " : "XX ")} \"{q}\"\n      intent={p.Intent} (want {want})  time=[{temporal}]  residual=\"{p.Residual}\"");
+        }
+        Console.WriteLine($"\n{pass}/{cases.Length} intents correct");
+        return pass == cases.Length ? 0 : 1;
+    }
+
+    // Scripted multi-turn conversation → verifies follow-up memory ("before that", "what about the
+    // action items?") resolves against the previous turn. Uses only deterministic routes (no model).
+    static int FollowUpTest()
+    {
+        var ctx = new Toki.Llm.ConversationContext();
+        var now = DateTimeOffset.Now;
+        var pass = true;
+
+        // Turn 1: a dated count → sets the range in context.
+        var a1 = Toki.Llm.NotesQa.AskAsync("how many meetings did I have last week", ctx).GetAwaiter().GetResult();
+        Console.WriteLine($"» how many meetings last week\n   {a1.Text}");
+        var r1s = ctx.LastRangeStart; var r1e = ctx.LastRangeEnd;
+
+        // Turn 2: "before that" → the range must shift ~7 days earlier and still answer a count.
+        var a2 = Toki.Llm.NotesQa.AskAsync("before that", ctx).GetAwaiter().GetResult();
+        Console.WriteLine($"» before that\n   {a2.Text}");
+        var shifted = ctx.LastRangeStart is { } s2 && r1s is { } s1 && s2 < s1;
+        Console.WriteLine(shifted ? "   ok range shifted earlier" : "   XX range did not shift");
+        pass &= shifted && a2.Text.StartsWith("You have", StringComparison.OrdinalIgnoreCase);
+
+        // Turn 3: a scoped task list → pins that meeting in context.
+        var a3 = Toki.Llm.NotesQa.AskAsync("action items in the postgres meeting", ctx).GetAwaiter().GetResult();
+        Console.WriteLine($"» action items in the postgres meeting\n   {Head(a3.Text)}");
+        var pinned = ctx.LastMeetingIds.Count > 0;
+
+        // Turn 4 (plan-only): "what about the summary?" must become SummarizeOne pinned to that meeting.
+        var p4 = Toki.Llm.QueryUnderstanding.ResolveFollowUp("what about the summary", ctx, now);
+        var p4ok = p4 is { Intent: Toki.Llm.QueryIntent.SummarizeOne, PinnedMeetingIds: { Count: > 0 } };
+        Console.WriteLine($"» what about the summary → {(p4 is null ? "not-a-followup" : $"{p4.Intent} pinned={p4.PinnedMeetingIds?.Count}")}  {(p4ok ? "ok" : "XX")}");
+        pass &= pinned && p4ok;
+
+        // Turn 5 (plan-only): "what about the action items?" must become ListTasks pinned.
+        var p5 = Toki.Llm.QueryUnderstanding.ResolveFollowUp("what about the action items", ctx, now);
+        var p5ok = p5 is { Intent: Toki.Llm.QueryIntent.ListTasks, PinnedMeetingIds: { Count: > 0 } };
+        Console.WriteLine($"» what about the action items → {(p5 is null ? "not-a-followup" : $"{p5.Intent} pinned={p5.PinnedMeetingIds?.Count}")}  {(p5ok ? "ok" : "XX")}");
+        pass &= p5ok;
+
+        Console.WriteLine(pass ? "PASS: follow-ups resolve against conversation state" : "FAIL");
+        return pass ? 0 : 1;
+    }
+
+    static string Head(string s) => s.Length > 120 ? s[..120] + "…" : s;
+
+    // Verifies the on-device embedder: a paraphrase pair must score higher than an unrelated pair
+    // (the whole point of meaning-search — matching words the transcript never used).
+    static int EmbedTest()
+    {
+        if (!ModelManager.EmbedInstalled)
+        {
+            Console.WriteLine($"embedder model not downloaded yet: {ModelManager.EmbedPath}");
+            Console.WriteLine("run with --downloadembed first (or it downloads at onboarding).");
+            return 2;
+        }
+        var svc = Toki.Llm.EmbeddingService.Instance;
+        float[] E(string t) => svc.EmbedAsync(t).GetAwaiter().GetResult() ?? Array.Empty<float>();
+
+        var q = E("what did we say about hiring");
+        var para = E("notes on bringing someone new onto the team");   // same meaning, different words
+        var un = E("the database replication lag on postgres");        // unrelated
+
+        if (q.Length == 0) { Console.WriteLine("FAIL: embedder returned nothing"); return 1; }
+        var simPara = Toki.Llm.EmbeddingService.Cosine(q, para);
+        var simUn = Toki.Llm.EmbeddingService.Cosine(q, un);
+        Console.WriteLine($"dim={q.Length}");
+        Console.WriteLine($"cosine(hiring, 'bringing someone onto the team') = {simPara:F3}   (paraphrase — should be higher)");
+        Console.WriteLine($"cosine(hiring, 'postgres replication lag')       = {simUn:F3}   (unrelated — should be lower)");
+        var ok = simPara > simUn && simPara > 0.4f;
+        Console.WriteLine(ok ? "PASS: meaning-search ranks the paraphrase above the unrelated text" : "FAIL: embeddings not discriminating");
         return ok ? 0 : 1;
     }
 

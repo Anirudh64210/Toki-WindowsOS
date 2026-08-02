@@ -31,6 +31,16 @@ public sealed class ModelManager
     public static Task EnsureQwenAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
         EnsureFileAsync(QwenUrl, QwenPath, progress, ct);
 
+    // Meaning-search embedder: bge-small-en-v1.5 (MIT), Q8_0 GGUF (~34MB, single file). Runs on CPU via
+    // LLamaSharp — no second inference runtime — so the GPU stays free for Qwen. Optional: when absent,
+    // retrieval falls back to keyword/FTS only.
+    public const string EmbedUrl =
+        "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf";
+    public static string EmbedPath => Path.Combine(ModelsRoot, "bge-small-en-v1.5-q8_0.gguf");
+    public static bool EmbedInstalled => File.Exists(EmbedPath);
+    public static Task EnsureEmbedAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(EmbedUrl, EmbedPath, progress, ct);
+
     /// <summary>Absolute path to a file inside an installed model (e.g. the encoder).</summary>
     public static string PathTo(ModelSpec spec, string file) =>
         Path.Combine(ModelsRoot, spec.Folder, file);
