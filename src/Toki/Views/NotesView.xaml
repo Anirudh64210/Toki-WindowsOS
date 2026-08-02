@@ -33,8 +33,8 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Style="{StaticResource PillButton}" Background="Transparent"
-                    Foreground="{StaticResource Coral}" Padding="14,7" Content="Delete"
+            <Button Grid.Column="0" Style="{StaticResource PillButton}"
+                    Foreground="{StaticResource Danger}" Padding="14,7" Content="Delete"
                     ToolTip="Discard this meeting — remove it and its audio" Click="OnDelete"/>
             <Button Grid.Column="1" Style="{StaticResource WhiteButton}" Padding="0,8" Margin="10,0,0,0"
                     HorizontalContentAlignment="Center" Content="Save to Library"

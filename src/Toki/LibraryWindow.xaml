@@ -7,12 +7,10 @@
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="SidebarCol" Width="204" MinWidth="72" MaxWidth="360"/>
+            <!-- Nav sidebar is a FIXED rail (no drag-resizer) — Ask/Library/Templates don't need resizing. -->
+            <ColumnDefinition x:Name="SidebarCol" Width="204"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
-
-        <!-- Drag the edge to resize the sidebar (sits on the seam, invisible until you hover). -->
-        <GridSplitter Grid.Column="1" Style="{StaticResource PaneSplitter}"/>
 
         <!-- ═══════════ Sidebar: mascot · nav · back ═══════════ -->
         <Border Grid.Column="0" Background="{DynamicResource Surface}">
@@ -72,6 +70,17 @@
                                          Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                          FontSize="14" VerticalContentAlignment="Center" Padding="12,11"
                                          FontFamily="{StaticResource UiFont}" KeyDown="OnAskKeyDown"/>
+                                <!-- Voice overlay: replaces the box while listening / transcribing (Google-/Safari-
+                                     style). A pulsing dot + status word; the mic drives it in code. -->
+                                <StackPanel x:Name="VoiceStatus" Grid.Column="0" Orientation="Horizontal"
+                                            VerticalAlignment="Center" Margin="14,0,0,0" Visibility="Collapsed"
+                                            IsHitTestVisible="False">
+                                    <Ellipse x:Name="VoiceDot" Width="9" Height="9" Fill="{DynamicResource Coral}"
+                                             VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <TextBlock x:Name="VoiceStatusText" Text="Listening…" FontSize="14"
+                                               Foreground="{DynamicResource TextDim}" FontFamily="{StaticResource UiFont}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
                                 <Button Grid.Column="1" x:Name="MicBtn" Style="{StaticResource IconButton}"
                                         Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic"/>
                                 <Button Grid.Column="2" x:Name="AskBtn" Style="{StaticResource IconButton}"
@@ -99,22 +108,36 @@
                 <!-- ── Library (list + detail) ── -->
                 <Grid x:Name="LibraryPage" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="ListCol" Width="312" MinWidth="180" MaxWidth="560"/>
+                        <!-- Fixed note-list column — no drag-resizer (owner: remove the VS Code resizer). -->
+                        <ColumnDefinition x:Name="ListCol" Width="300"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Drag the seam to resize the note list vs. the open note. -->
-                    <GridSplitter Grid.Column="1" Style="{StaticResource PaneSplitter}"/>
-
-                    <DockPanel x:Name="ListPanel" Grid.Column="0" Margin="22,20,14,16" Background="{DynamicResource Surface}" ClipToBounds="True">
-                        <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
-                            <StackPanel>
+                    <!-- NOT an inset Surface box: the list sits on the same background as the note pane and
+                         fills its column edge-to-edge (like the Ask panel). No outer margin/box = no strip
+                         of background showing between the box and the divider. Only the children carry a
+                         small inner inset so text isn't flush to the edges. -->
+                    <DockPanel x:Name="ListPanel" Grid.Column="0" Margin="20,18,16,0">
+                        <!-- Title row: "Library" + count on the left; small New-note (+) and book "My notes"
+                             filter on the right, vertically centred on the title. -->
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="Library" Style="{StaticResource Body}" FontSize="18" FontWeight="Bold"/>
-                                <TextBlock x:Name="CountLabel" Style="{StaticResource Dim}" FontSize="10" Margin="0,1,0,0"/>
+                                <TextBlock x:Name="CountLabel" Style="{StaticResource Dim}" FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="MyNotesToggle" Style="{StaticResource IconButton}" Content="&#xE736;"
+                                        Click="OnToggleMyNotes"/>
+                                <Button x:Name="NewNoteBtn" Style="{StaticResource IconButton}" Content="&#xE710;"
+                                        Margin="2,0,0,0" ToolTip="New note" Click="OnNewNote"/>
                             </StackPanel>
                         </Grid>
 
-                        <Grid DockPanel.Dock="Top">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -130,25 +153,21 @@
                                     Margin="6,0,0,0" Click="OnToggleDrag"/>
                         </Grid>
 
-                        <Button DockPanel.Dock="Top" Style="{StaticResource WhiteButton}" Content="+  New note"
-                                Margin="0,10,0,0" Padding="0,9" HorizontalContentAlignment="Center" Click="OnNewNote"/>
-
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0" controls:SmoothScroll.Enabled="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
                             <StackPanel x:Name="Cards"/>
                         </ScrollViewer>
                     </DockPanel>
 
+                    <!-- One subtle hairline divides the list from the note (the splitter that used to draw
+                         the seam is gone). -->
                     <Border Grid.Column="1" Background="{DynamicResource Ink}"
                             BorderBrush="{DynamicResource Hairline}" BorderThickness="1,0,0,0">
-                        <!-- Content fills the pane and hugs the LEFT (no centered max-width column, so no
-                             giant left gap when maximised). The note body's scrollbar sits flush to the
-                             pane's right edge; text keeps clear of it via the RichTextBox's own right padding. -->
-                        <DockPanel LastChildFill="True">
-                            <ContentControl x:Name="DetailHeader" DockPanel.Dock="Top" Margin="28,24,26,0"
-                                            HorizontalContentAlignment="Stretch"/>
-                            <ContentControl x:Name="DetailBody" Margin="28,10,0,16"
-                                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
-                        </DockPanel>
+                        <!-- ONE scroll fills the whole pane: the note (toolbar → title → body) is a single
+                             RichTextBox, so its scrollbar runs the FULL height from the very top of the pane,
+                             like a normal app scroll — not starting below a pinned toolbar. Left/right padding
+                             lives inside the RichTextBox so the scrollbar sits flush at the pane's right edge. -->
+                        <ContentControl x:Name="DetailBody"
+                                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
                     </Border>
                 </Grid>
 
