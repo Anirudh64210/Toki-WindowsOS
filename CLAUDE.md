@@ -2,6 +2,24 @@
 
 Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail is needed). This file carries the same rules.
 
+## Current state & roadmap (updated 2026-08-02)
+
+**Shipped:** M0–M6 (pill shell, audio, detection, transcription+echo-dedup, storage+heuristic notes+Library, LLM notes). Plus: theme toggle, 8 note templates, cloud mascot, tinted-mirror notch, the Library **hub** (Ask / Library / Templates), whole-note copy/select, BYO API key, and the **Ask chatbot** — streaming answers, FTS5 retrieval, and a deterministic **understand-first** layer (temporal + intent parse → SQL resolution) with **conversation memory** (follow-ups). Detail: `ARCHITECTURE.md`, and the `notes-and-chatbot-plan` / `build-and-run` memories.
+
+**Not yet done (roadmap) — see the fuller list below in this file's history or ask):**
+1. **On-device meaning-search (embeddings/hybrid/reranker)** — BLOCKED by a native backend conflict; fix = out-of-process CPU embedder (see ARCHITECTURE "Why on-device embeddings are deferred").
+2. **Ask-bar mic → voice-to-text** (click mic → speak → fills the box). `OnMic` is still a placeholder.
+3. **"Hey Toki" wake word + hotkey-opens-mic** — hotkey opens Ask with the mic live, AND a spoken "Hey Toki" wakes it. Must be **on-device** wake-word detection (e.g. openWakeWord/Porcupine, local, $0, no audio leaves) to stay within the privacy constraints — but note it means always-on *local* mic listening for the phrase, which touches Hard Constraint #3 ("Toki only activates for meetings"); owner wants it, so it's an owner-approved carve-out for the wake phrase only.
+4. **Toki animation in the Library/hub** — the mascot should feel alive (idle breathing/blink/ambient motion + richer click reactions), matching the Figma animated-Toki, not the near-static cloud today.
+5. **Library filter/sort menu** (Newest/Oldest/Longest/Manual-notes-only) — only a drag-reorder toggle exists today.
+6. **Manual/custom notes**: separate left-panel section vs a "Manual notes" filter — owner decision pending.
+7. **Notch acrylic on/off toggle** + blurrier white notch (background text unreadable). Acrylic exists but isn't user-toggleable.
+8. **Speaker diarisation** (named speakers, not just YOU/THEM) — task name-tags done; transcript diarisation not.
+9. **M7 Calendar** — Google OAuth loopback + prep cards (Outlook post-v1).
+10. **M8 Ship shape** — **Attribution/"Built with" screen (LICENCE OBLIGATION: Parakeet CC-BY-4.0, Qwen Apache-2.0, Whisper MIT, bge-small MIT — must ship before selling)**, signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
+11. **M9** character & polish. (Live transcription preview is parked — owner deprioritized.)
+
+
 ## What Toki is
 
 A meeting assistant that lives quietly at the edge of the screen. Detects when you're in a meeting, offers to record, transcribes and summarizes **entirely on-device**, and keeps every meeting in a searchable local Library. One-time $20, no subscription, nothing leaves the laptop.

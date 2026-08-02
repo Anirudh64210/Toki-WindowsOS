@@ -183,6 +183,32 @@ public sealed class MeetingStore
         return ids;
     }
 
+    // (id, started_at) for every real meeting — the basis for deterministic temporal resolution
+    // (recency / date-range), parsed in C# so it's robust to timezone-offset string differences.
+    List<(long Id, DateTimeOffset At)> MeetingTimes()
+    {
+        var list = new List<(long, DateTimeOffset)>();
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id, started_at FROM meetings WHERE kind='Meeting'";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            if (DateTimeOffset.TryParse(r.GetString(1), out var at)) list.Add((r.GetInt64(0), at));
+        return list;
+    }
+
+    /// <summary>The N most recent meetings by date (for "my most recent / latest meeting").</summary>
+    public List<long> LatestMeetingIds(int n) =>
+        MeetingTimes().OrderByDescending(x => x.At).Take(n).Select(x => x.Id).ToList();
+
+    /// <summary>The N oldest meetings by date (for "my first / earliest meeting").</summary>
+    public List<long> OldestMeetingIds(int n) =>
+        MeetingTimes().OrderBy(x => x.At).Take(n).Select(x => x.Id).ToList();
+
+    /// <summary>Meetings whose start falls in [start, end), newest first (for "meeting on July 30 / last week").</summary>
+    public List<long> MeetingIdsInRange(DateTimeOffset start, DateTimeOffset end) =>
+        MeetingTimes().Where(x => x.At >= start && x.At < end).OrderByDescending(x => x.At).Select(x => x.Id).ToList();
+
     /// <summary>Open (undone) action items across all meetings, newest meeting first — for the Ask
     /// "what are my open tasks / what did I commit to" router (answered from data, never hallucinated).</summary>
     public List<(string Meeting, string Text, string? Owner, string? Due)> OpenActions(int limit)

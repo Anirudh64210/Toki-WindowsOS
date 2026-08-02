@@ -30,30 +30,52 @@ public static class NotesQa
     public static Task<Answer> AskAsync(string question, CancellationToken ct = default)
         => AskStreamAsync(question, _ => { }, _ => { }, ct);
 
+    /// <summary>Non-streaming, with conversation context (for follow-ups / tests).</summary>
+    public static Task<Answer> AskAsync(string question, ConversationContext ctx, CancellationToken ct = default)
+        => AskStreamAsync(question, _ => { }, _ => { }, ct, ctx);
+
     /// <summary>Answer a question, calling <paramref name="onSources"/> once the source meetings are known
     /// and <paramref name="onToken"/> for each piece of the answer as it streams. Returns the final answer.
     /// Callbacks fire on a background thread — the UI must marshal them to the dispatcher.</summary>
     public static async Task<Answer> AskStreamAsync(
-        string question, Action<IReadOnlyList<Source>> onSources, Action<string> onToken, CancellationToken ct = default)
+        string question, Action<IReadOnlyList<Source>> onSources, Action<string> onToken,
+        CancellationToken ct = default, ConversationContext? ctx = null)
     {
         question = question?.Trim() ?? "";
         if (question.Length == 0) return new Answer("Ask me something about your meetings.", [], true);
 
-        // Router: open tasks / commitments answered straight from the DB — instant, exact, no hallucination.
-        var routed = TryTaskAnswer(question);
-        if (routed is not null) { onSources(routed.Sources); onToken(routed.Text); return routed; }
+        // 1) UNDERSTAND FIRST: resolve a follow-up against the conversation, else parse fresh (no model, ~1ms).
+        var now = DateTimeOffset.Now;
+        var plan = (ctx is not null ? QueryUnderstanding.ResolveFollowUp(question, ctx, now) : null)
+                   ?? QueryUnderstanding.Parse(question, now);
 
+        // 2) Deterministic routes — answered straight from the DB, exact, no model, no hallucination.
+        Answer? det = plan.Intent switch
+        {
+            QueryIntent.Count => CountAnswer(plan),
+            QueryIntent.ListMeetings => ListMeetingsAnswer(plan),
+            QueryIntent.ListTasks => TaskAnswer(plan),
+            _ => null,
+        };
+        if (det is not null) { Remember(ctx, plan, det.Sources); onSources(det.Sources); onToken(det.Text); return det; }
+
+        // 3) LLM routes (summary / factual lookup) — resolve the target meetings deterministically FIRST,
+        //    so "most recent"/"on July 30" is decided by SQL and the model can't pick the wrong meeting.
         var llm = LlmService.Instance.Active();
         if (llm is null || !llm.Ready)
             return new Answer("Add the on-device model or your API key in Settings, and I can answer questions about your meetings.", [], false);
 
-        var hits = Retrieve(question);
-        if (hits.Count == 0) return new Answer("I couldn't find anything about that in your meetings yet.", [], true);
+        var hits = ResolveForLlm(plan);
+        if (hits.Count == 0)
+            return new Answer(plan.HasDateRange
+                ? $"I couldn't find a meeting {DescribeRange(plan)}."
+                : "I couldn't find anything about that in your meetings yet.", [], true);
 
         var sources = hits.Select(h => new Source(h.Id, h.Title)).ToList();
-        onSources(sources);   // show the citations up-front, before the answer streams in
+        Remember(ctx, plan, sources);
+        onSources(sources);   // citations up-front, before the answer streams in
 
-        var prompt = BuildPrompt(question, hits);
+        var prompt = plan.Intent == QueryIntent.SummarizeOne ? BuildSummarizePrompt(hits[0]) : BuildPrompt(question, hits);
         var sb = new StringBuilder();
         try
         {
@@ -76,16 +98,105 @@ public static class NotesQa
         return new Answer(raw, sources, true);
     }
 
-    // ── task-query router ──
-    static readonly string[] TaskCues =
+    // Carry this turn's resolved state forward so the NEXT turn's follow-up ("before that", "its tasks") works.
+    static void Remember(ConversationContext? ctx, QueryPlan plan, IReadOnlyList<Source> sources)
     {
-        "open task", "open tasks", "task", "tasks", "action item", "action items",
-        "what do i need to do", "what do i have to do", "what did i commit", "what did i agree to",
-        "outstanding", "to-do", "to-dos", "todo", "todos", "assigned", "still need to", "follow up", "follow-up",
-    };
+        if (ctx is null) return;
+        ctx.LastIntent = plan.Intent;
+        if (sources.Count > 0) ctx.LastMeetingIds = sources.Select(s => s.Id).ToList();
+        if (plan.HasDateRange) { ctx.LastRangeStart = plan.RangeStart; ctx.LastRangeEnd = plan.RangeEnd; }
+        else if (plan.Rank is not null) { ctx.LastRangeStart = null; ctx.LastRangeEnd = null; }
+    }
 
-    // Words that are part of the task-question phrasing itself — stripped to see if the user ALSO named a
-    // specific meeting/topic (e.g. "action items in the data engineering meeting" → residual "data engineering").
+    // Resolve which meeting(s) the LLM should read, deterministically, from the plan.
+    static List<MeetingRecord> ResolveForLlm(QueryPlan plan)
+    {
+        var store = App.Store;
+
+        // Follow-up pinned the meeting(s) from the previous turn — use them directly.
+        if (plan.PinnedMeetingIds is { Count: > 0 } pinned)
+            return pinned.Select(id => store.Get(id)).OfType<MeetingRecord>().ToList();
+
+        List<long> ids;
+
+        if (plan.Rank == RecencyDir.Latest || plan.Rank == RecencyDir.Oldest)
+        {
+            // "most recent / oldest" (optionally about a topic) → pick by DATE, not relevance.
+            var pool = ThinResidual(plan.Residual) ? null : store.SearchRelevant(plan.Residual, 12);
+            var ranked = plan.Rank == RecencyDir.Latest ? store.LatestMeetingIds(200) : store.OldestMeetingIds(200);
+            ids = (pool is null ? ranked : ranked.Where(pool.Contains)).Take(Math.Max(1, plan.RankN)).ToList();
+            if (ids.Count == 0) ids = ranked.Take(1).ToList();   // topic had no match → fall back to pure recency
+        }
+        else if (plan.HasDateRange)
+        {
+            var inRange = store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value);
+            if (ThinResidual(plan.Residual)) ids = inRange.Take(3).ToList();
+            else
+            {
+                var matched = store.SearchRelevant(plan.Residual, 12).Where(inRange.Contains).Take(3).ToList();
+                ids = matched.Count > 0 ? matched : inRange.Take(3).ToList();   // topic within the date window, else the window
+            }
+        }
+        else if (plan.Intent == QueryIntent.SummarizeOne)
+        {
+            ids = store.SearchRelevant(string.IsNullOrWhiteSpace(plan.Residual) ? plan.Original : plan.Residual, 1);
+        }
+        else
+        {
+            return Retrieve(plan.Original);   // LOOKUP_FACT with no temporal → existing FTS+fallback top-3
+        }
+
+        return ids.Select(id => store.Get(id)).OfType<MeetingRecord>().ToList();
+    }
+
+    static bool ThinResidual(string residual) =>
+        residual.Split(' ', StringSplitOptions.RemoveEmptyEntries).Count(w => w.Length > 2 && !Stop.Contains(w)) == 0;
+
+    // ── deterministic count / list-meetings answers ──
+    static Answer CountAnswer(QueryPlan plan)
+    {
+        var ids = plan.HasDateRange ? App.Store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value) : App.Store.LatestMeetingIds(100000);
+        var where = plan.HasDateRange ? $" {DescribeRange(plan)}" : "";
+        return new Answer($"You have {ids.Count} meeting{(ids.Count == 1 ? "" : "s")}{where}.", [], true);
+    }
+
+    static Answer ListMeetingsAnswer(QueryPlan plan)
+    {
+        var ids = plan.HasDateRange
+            ? App.Store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value)
+            : App.Store.LatestMeetingIds(10);
+        var meetings = ids.Select(id => App.Store.Get(id)).OfType<MeetingRecord>().ToList();
+        if (meetings.Count == 0) return new Answer($"You had no meetings {DescribeRange(plan)}.", [], true);
+
+        var sb = new StringBuilder(plan.HasDateRange
+            ? $"You had {meetings.Count} meeting{(meetings.Count == 1 ? "" : "s")} {DescribeRange(plan)}:\n"
+            : $"Your {meetings.Count} most recent meeting{(meetings.Count == 1 ? "" : "s")}:\n");
+        foreach (var m in meetings)
+            sb.Append("• ").Append(m.Title).Append("   —   ").Append(m.StartedAt.ToString("ddd, MMM d")).Append('\n');
+        return new Answer(sb.ToString().TrimEnd(), meetings.Select(m => new Source(m.Id, m.Title)).ToList(), true);
+    }
+
+    static string DescribeRange(QueryPlan plan)
+    {
+        if (!plan.HasDateRange) return "";
+        var s = plan.RangeStart!.Value; var e = plan.RangeEnd!.Value;
+        if ((e - s).TotalDays <= 1) return $"on {s:MMM d, yyyy}";
+        return $"between {s:MMM d} and {e.AddDays(-1):MMM d, yyyy}";
+    }
+
+    // A single meeting, to be condensed by the model (its stored notes are the context — already good).
+    static string BuildSummarizePrompt(MeetingRecord m)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Today is ").Append(DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy")).Append('.').AppendLine().AppendLine();
+        sb.AppendLine("Summarize this meeting for the user in 2–4 sentences, then (if any) a short bullet list of the key points. Use ONLY these notes:").AppendLine();
+        sb.Append(BuildContext(new List<MeetingRecord> { m }));
+        return sb.ToString();
+    }
+
+    // ── task answers (intent already decided as ListTasks by QueryUnderstanding) ──
+    // Words that are just task phrasing — stripped from the residual to see if the user ALSO named a
+    // specific meeting/topic ("action items in the data engineering meeting" → topic "data engineering").
     static readonly HashSet<string> TaskWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "open","task","tasks","action","items","item","todo","todos","to-do","to-dos","outstanding","commit",
@@ -94,44 +205,52 @@ public static class NotesQa
         "what","are","is","in","for","from","of","on","about","do","i","have","to","any","there","were","was",
     };
 
-    static Answer? TryTaskAnswer(string question)
+    static Answer TaskAnswer(QueryPlan plan)
     {
-        var q = question.ToLowerInvariant();
-        if (!TaskCues.Any(q.Contains)) return null;
+        var store = App.Store;
 
-        // Did the user also name a specific meeting/topic? (content words beyond the task phrasing)
-        var residual = question
+        // Follow-up ("what about the action items?") pinned the prior meeting(s) → list theirs.
+        if (plan.PinnedMeetingIds is { Count: > 0 } pinned)
+        {
+            var scoped = pinned.Select(store.Get).OfType<MeetingRecord>().ToList();
+            if (scoped.Count > 0) return ScopedTaskAnswer(scoped, plan);
+        }
+
+        // Topic words = residual minus task phrasing → did the user name a specific meeting/topic?
+        var topic = plan.Residual
             .Split(new[] { ' ', '?', '.', ',', '!', ';', ':', '\'', '"', '(', ')', '/', '-' }, StringSplitOptions.RemoveEmptyEntries)
             .Where(w => w.Length > 2 && !TaskWords.Contains(w) && !Stop.Contains(w))
             .ToList();
 
-        // SCOPED: "action items in <meeting>" → list THAT meeting's items exactly (done + open), no global dump.
-        if (residual.Count > 0)
+        // Figure out the SCOPE of the task question, dynamically, from topic AND/OR date:
+        //   topic only          → the meeting(s) matching that topic
+        //   date only           → the meeting(s) on that date / in that range   (the "July 21" bug)
+        //   topic + date        → topic matches within that date window
+        //   neither             → global open tasks across all meetings
+        List<MeetingRecord> scope = new();
+        if (topic.Count > 0)
         {
-            var ids = App.Store.SearchRelevant(question, 1);
-            if (ids.Count == 0) return null;   // couldn't pin a meeting → let the model try
-            var m = App.Store.Get(ids[0]);
-            if (m is null) return null;
-            var sources = new List<Source> { new(m.Id, m.Title) };
-            if (m.Notes.Actions.Count == 0)
-                return new Answer($"No action items were recorded for “{m.Title}”.", sources, true);
-
-            var open = m.Notes.Actions.Count(a => !a.Done);
-            var sb = new StringBuilder($"“{m.Title}” has {m.Notes.Actions.Count} action item{(m.Notes.Actions.Count == 1 ? "" : "s")} ({open} open):\n");
-            foreach (var a in m.Notes.Actions)
+            var ids = store.SearchRelevant(plan.Residual, plan.HasDateRange ? 15 : 3);
+            if (plan.HasDateRange)
             {
-                var meta = new[] { a.Owner, a.Due }.Where(x => !string.IsNullOrWhiteSpace(x));
-                sb.Append(a.Done ? "• [x] " : "• [ ] ").Append(a.Text);
-                if (meta.Any()) sb.Append(" (").Append(string.Join(", ", meta)).Append(')');
-                sb.Append('\n');
+                var inRange = store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value);
+                ids = ids.Where(inRange.Contains).ToList();
             }
-            return new Answer(sb.ToString().TrimEnd(), sources, true);
+            // A named single meeting ("the postgres meeting") → the best match only; a topic within a
+            // date window may legitimately span a few.
+            scope = ids.Take(plan.HasDateRange ? 3 : 1).Select(store.Get).OfType<MeetingRecord>().ToList();
+        }
+        else if (plan.HasDateRange)
+        {
+            scope = store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value)
+                .Select(store.Get).OfType<MeetingRecord>().ToList();
         }
 
-        // GLOBAL: bare "what are my open tasks" → everything still open, across meetings.
-        var acts = App.Store.OpenActions(25);
-        if (acts.Count == 0) return new Answer("You have no open tasks — everything's checked off. 🎉", [], true);
+        if (scope.Count > 0) return ScopedTaskAnswer(scope, plan);
 
+        // GLOBAL: "what are my open tasks" → everything still open, across meetings.
+        var acts = store.OpenActions(25);
+        if (acts.Count == 0) return new Answer("You have no open tasks — everything's checked off. 🎉", [], true);
         var g = new StringBuilder($"You have {acts.Count} open task{(acts.Count == 1 ? "" : "s")}:\n");
         foreach (var a in acts)
         {
@@ -141,6 +260,50 @@ public static class NotesQa
             g.Append("   —   ").Append(a.Meeting).Append('\n');
         }
         return new Answer(g.ToString().TrimEnd(), [], true);
+    }
+
+    // List the action items of a specific set of meetings (grouped, done + open), exactly from the DB.
+    static Answer ScopedTaskAnswer(List<MeetingRecord> meetings, QueryPlan plan)
+    {
+        var sources = meetings.Select(m => new Source(m.Id, m.Title)).ToList();
+        var withActions = meetings.Where(m => m.Notes.Actions.Count > 0).ToList();
+        if (withActions.Count == 0)
+        {
+            var where = plan.HasDateRange ? DescribeRange(plan) : $"“{meetings[0].Title}”";
+            return new Answer($"No action items were recorded {(plan.HasDateRange ? "for meetings " + where : "for " + where)}.", sources, true);
+        }
+
+        var sb = new StringBuilder();
+        // Single meeting → a clean header; multiple (a date window) → group by meeting.
+        if (withActions.Count == 1)
+        {
+            var m = withActions[0];
+            var open = m.Notes.Actions.Count(a => !a.Done);
+            sb.Append($"“{m.Title}” has {m.Notes.Actions.Count} action item{(m.Notes.Actions.Count == 1 ? "" : "s")} ({open} open):\n");
+            AppendActions(sb, m.Notes.Actions);
+        }
+        else
+        {
+            sb.Append($"Action items {DescribeRange(plan)}:\n\n");
+            foreach (var m in withActions)
+            {
+                sb.Append("“").Append(m.Title).Append("”:\n");
+                AppendActions(sb, m.Notes.Actions);
+                sb.Append('\n');
+            }
+        }
+        return new Answer(sb.ToString().TrimEnd(), withActions.Select(m => new Source(m.Id, m.Title)).ToList(), true);
+    }
+
+    static void AppendActions(StringBuilder sb, IReadOnlyList<ActionItem> actions)
+    {
+        foreach (var a in actions)
+        {
+            var meta = new[] { a.Owner, a.Due }.Where(x => !string.IsNullOrWhiteSpace(x));
+            sb.Append(a.Done ? "• [x] " : "• [ ] ").Append(a.Text);
+            if (meta.Any()) sb.Append(" (").Append(string.Join(", ", meta)).Append(')');
+            sb.Append('\n');
+        }
     }
 
     // ── retrieval ──
