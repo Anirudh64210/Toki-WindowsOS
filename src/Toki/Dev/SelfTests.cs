@@ -42,6 +42,7 @@ static class SelfTests
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
                 "--themetest" => ThemeTest(),
+                "--copytest" => CopyTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -640,6 +641,53 @@ static class SelfTests
             ? "PASS: an already-rendered element re-resolves + recolours on theme swap"
             : "FAIL: element did not recolour (still the old brush)");
         return ok ? 0 : 1;
+    }
+
+    // Proves the Library note is selectable + copyable TOP TO BOTTOM. Builds the note document,
+    // programmatically selects the whole thing (exactly what a drag from top to bottom + Ctrl+C does),
+    // and checks the captured text contains every part — summary, a bullet, a to-do, a transcript line.
+    // This is the real artifact the screenshot could never show.
+    static int CopyTest()
+    {
+        var m = new MeetingRecord
+        {
+            Title = "Q3 Planning Sync",
+            Notes = new NoteSet
+            {
+                Tldr = "SUMMARY_MARKER — the team agreed to ship the beta in August.",
+                Sections = { new NoteSection { Heading = "Decisions", Bullets = { "BULLET_MARKER — cut scope to the core flow" } } },
+                Actions = { new ActionItem { Text = "TODO_MARKER — send the beta invite list", Owner = "Sid" } },
+            },
+            Transcript =
+            {
+                new TranscriptSegment(Speaker.You, 0, 1000, "YOU_MARKER — where are we on the timeline?"),
+                new TranscriptSegment(Speaker.Them, 1000, 2000, "THEM_MARKER — beta lands next week."),
+            },
+        };
+
+        var rtb = (System.Windows.Controls.RichTextBox)Views.NoteRenderer.MeetingDocument(m, spacious: true);
+        // Realise the transcript teaser's "show full" so the whole transcript is in the document.
+        // (The document already holds the first 3 lines; both our markers are within that preview.)
+        var doc = rtb.Document;
+        var captured = new System.Windows.Documents.TextRange(doc.ContentStart, doc.ContentEnd).Text;
+
+        Console.WriteLine("── captured by a full top-to-bottom select-all ──");
+        Console.WriteLine(captured.Trim());
+        Console.WriteLine("──────────────────────────────────────────────");
+
+        string[] markers = ["SUMMARY_MARKER", "BULLET_MARKER", "TODO_MARKER", "YOU_MARKER", "THEM_MARKER"];
+        var missing = markers.Where(x => !captured.Contains(x)).ToList();
+        var selOk = missing.Count == 0;
+        Console.WriteLine(selOk
+            ? "PASS: select-all captures the whole note (summary + bullet + to-do + transcript)"
+            : $"FAIL: selection missed {string.Join(", ", missing)}");
+
+        // And the Copy button's one-click "everything" must yield the same full note.
+        var full = Views.NoteRenderer.FullText(m);
+        var copyOk = markers.All(full.Contains);
+        Console.WriteLine(copyOk ? "PASS: Copy 'everything' includes every part" : "FAIL: Copy 'everything' is incomplete");
+
+        return selOk && copyOk ? 0 : 1;
     }
 
     static int Seconds(string[] args, int fallback)

@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Toki.Storage;
@@ -20,6 +22,30 @@ public static class NoteRenderer
     static Brush B(string key) => (Brush)Res(key);
     static FontFamily Ui => (FontFamily)Res("UiFont");
 
+    // A note is only useful if you can select + copy it. Every piece of note TEXT is a read-only,
+    // borderless, transparent TextBox — looks like plain text, but selectable with an I-beam cursor
+    // and Ctrl+C. (Bulk copy is the Copy menu; this is for grabbing a line or a phrase.)
+    static TextBox Sel(string text, double fs, Brush fg, TextAlignment align = TextAlignment.Left)
+    {
+        var tb = new TextBox
+        {
+            Text = text ?? "", IsReadOnly = true, IsReadOnlyCaretVisible = false,
+            BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            Foreground = fg, FontFamily = Ui, FontSize = fs, TextWrapping = TextWrapping.Wrap,
+            Padding = new Thickness(0), Margin = new Thickness(0), TextAlignment = align,
+            Cursor = System.Windows.Input.Cursors.IBeam, IsTabStop = false,
+            VerticalContentAlignment = VerticalAlignment.Top, FontStretch = FontStretches.Normal,
+        };
+        return tb;
+    }
+
+    static Button ShowFullButton(string text) => new()
+    {
+        Content = text, Style = (Style)Res("PillButton"), Background = B("Chip"), Foreground = B("TextDim"),
+        Padding = new Thickness(13, 7, 13, 7), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Left,
+        Margin = new Thickness(0, 2, 0, 0), Cursor = System.Windows.Input.Cursors.Hand,
+    };
+
     public static void Meeting(Panel body, MeetingRecord m, bool spacious)
     {
         body.Children.Clear();
@@ -33,13 +59,9 @@ public static class NoteRenderer
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
             SectionHeader(body, "SUMMARY", spacious, first: true);
-            body.Children.Add(new TextBlock
-            {
-                Text = m.Notes.Tldr, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
-                FontSize = fs, LineHeight = fs + 11, TextAlignment = TextAlignment.Justify,
-                Foreground = (Brush)System.Windows.Application.Current.FindResource("TextSoft"),
-                Margin = new Thickness(0, 0, 0, 2),
-            });
+            var s = Sel(m.Notes.Tldr, fs, B("TextSoft"));
+            s.Margin = new Thickness(0, 0, 0, 2);
+            body.Children.Add(s);
         }
 
         // Template middle sections (standup → Updates/Blockers, etc.), unified with legacy notes.
@@ -50,13 +72,23 @@ public static class NoteRenderer
         if (m.Transcript.Count > 0)
         {
             SectionHeader(body, "TRANSCRIPT", spacious);
-            // Do NOT build the whole transcript synchronously — a long meeting is hundreds
-            // to 1000+ segments (~5 visual elements each), and dumping them all into a
-            // non-virtualizing panel on the click froze the window open for ~2s. Render a
-            // small first batch now (instant open) and stream the rest in on Background
-            // priority so the UI thread never blocks. The transcript is below the fold
-            // anyway; it fills in as you'd scroll to it.
-            RenderTranscriptChunked(body, m.Transcript, fs, spacious, token, 0);
+            // Show a short PREVIEW (a few lines) — a full hour-long transcript shouldn't just lie
+            // there. A "Show full transcript" button reveals the rest on demand (streamed in so it
+            // never freezes the window). Most of the time the summary + tasks are all you want.
+            var preview = Math.Min(3, m.Transcript.Count);
+            for (var i = 0; i < preview; i++) body.Children.Add(TranscriptRow(m.Transcript[i], fs, spacious));
+            if (m.Transcript.Count > preview)
+            {
+                var more = m.Transcript.Count - preview;
+                var btn = ShowFullButton($"Show full transcript  ·  {more} more line{(more == 1 ? "" : "s")}");
+                body.Children.Add(btn);
+                btn.Click += (_, _) =>
+                {
+                    if (!ReferenceEquals(body.Tag, token)) return;
+                    body.Children.Remove(btn);
+                    RenderTranscriptChunked(body, m.Transcript, fs, spacious, token, preview);
+                };
+            }
         }
     }
 
@@ -102,11 +134,7 @@ public static class NoteRenderer
             Width = 3.5, Height = 3.5, Fill = B("TextDim"),
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(2, fs / 2, 12, 0),
         };
-        var tb = new TextBlock
-        {
-            Text = text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
-            Foreground = B("Text"), LineHeight = fs + 8, TextAlignment = TextAlignment.Justify,
-        };
+        var tb = Sel(text, fs, B("Text"), TextAlignment.Justify);
         Grid.SetColumn(tb, 1);
         row.Children.Add(dot);
         row.Children.Add(tb);
@@ -123,12 +151,8 @@ public static class NoteRenderer
         check.Checked += (_, _) => Toggle(a, true);
         check.Unchecked += (_, _) => Toggle(a, false);
 
-        var text = new TextBlock
-        {
-            Text = a.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = fs,
-            Foreground = B("Text"), LineHeight = fs + 7, TextAlignment = TextAlignment.Justify,
-        };
-        if (a.Done) { text.TextDecorations = TextDecorations.Strikethrough; text.Opacity = 0.5; }
+        var text = Sel(a.Text, fs, B("Text"), TextAlignment.Justify);
+        if (a.Done) text.Opacity = 0.5;   // done = dimmed (a TextBox can't strike-through, and it stays selectable)
 
         var right = new StackPanel();
         right.Children.Add(text);
@@ -166,11 +190,7 @@ public static class NoteRenderer
                 Foreground = B(you ? "Text" : "TextDim"), FontFamily = Ui, TextAlignment = TextAlignment.Center,
             },
         };
-        var text = new TextBlock
-        {
-            Text = seg.Text, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
-            FontSize = fs, Foreground = B(you ? "Text" : "TextDim"), LineHeight = fs + 8,
-        };
+        var text = Sel(seg.Text, fs, B(you ? "Text" : "TextDim"));
 
         var row = new Grid { Margin = new Thickness(0, 0, 0, spacious ? 14 : 12) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -190,12 +210,13 @@ public static class NoteRenderer
             or "tbd" or "tba" or "unknown" or "unassigned" or "name" or "when");
     }
 
-    // Monotone chip (owner / due) — neutral grey, no colour.
+    // Name/due chip — a bright accent chip (blue), not the old dim grey that vanished. These are
+    // important labels, so they read clearly on both themes (accent brushes swap per theme).
     static Border Tag(string text) => new()
     {
-        Background = B("Chip"), CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 2, 7, 2),
+        Background = B("BlueDark"), CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 2, 7, 2),
         Margin = new Thickness(0, 0, 6, 0),
-        Child = new TextBlock { Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontFamily = Ui },
+        Child = new TextBlock { Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold, Foreground = B("Blue"), FontFamily = Ui },
     };
 
     static void Toggle(ActionItem a, bool done)
@@ -204,8 +225,147 @@ public static class NoteRenderer
         if (a.Id > 0) try { App.Store.SetActionDone(a.Id, done); } catch { }
     }
 
+    // ══ Selectable document version (Library note view) ══
+    // The WHOLE note is ONE FlowDocument, so a single drag-select spans summary → bullets → tasks →
+    // transcript and Ctrl+C copies all of it. (Separate TextBoxes only let you select within one.)
+    // Checkboxes stay clickable inside the read-only document (FlowDocumentScrollViewer allows it).
+    public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious)
+    {
+        var fs = spacious ? 13.5 : 12.5;
+        var doc = new FlowDocument
+        {
+            FontFamily = Ui, FontSize = fs, Foreground = B("Text"), Background = Brushes.Transparent,
+            PagePadding = new Thickness(0), TextAlignment = TextAlignment.Left,
+        };
+
+        if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
+        {
+            doc.Blocks.Add(DocHeader("SUMMARY", first: true));
+            doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr)) { Foreground = B("TextSoft"), LineHeight = fs + 9, TextAlignment = TextAlignment.Justify, Margin = new Thickness(0, 0, 0, 2) });
+        }
+        foreach (var sec in m.Notes.EffectiveSections())
+        {
+            if (sec.Bullets.Count == 0) continue;
+            doc.Blocks.Add(DocHeader(sec.Heading.ToUpperInvariant()));
+            var list = new List { MarkerStyle = TextMarkerStyle.Disc, Padding = new Thickness(15, 0, 0, 0), Margin = new Thickness(0, 0, 0, 2) };
+            foreach (var b in sec.Bullets)
+                list.ListItems.Add(new ListItem(new Paragraph(new Run(b)) { LineHeight = fs + 7, Margin = new Thickness(0, 0, 0, 7) }));
+            doc.Blocks.Add(list);
+        }
+        if (m.Notes.Actions.Count > 0)
+        {
+            doc.Blocks.Add(DocHeader("ACTION ITEMS"));
+            foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs));
+        }
+        if (m.Transcript.Count > 0)
+        {
+            doc.Blocks.Add(DocHeader("TRANSCRIPT"));
+            var preview = Math.Min(3, m.Transcript.Count);
+            for (var i = 0; i < preview; i++) doc.Blocks.Add(DocTranscript(m.Transcript[i], fs));
+            if (m.Transcript.Count > preview)
+            {
+                var more = m.Transcript.Count - preview;
+                var btn = new Button
+                {
+                    Content = $"Show full transcript  ·  {more} more line{(more == 1 ? "" : "s")}", Style = (Style)Res("PillButton"),
+                    Background = B("Chip"), Foreground = B("TextDim"), Padding = new Thickness(13, 7, 13, 7), FontSize = 11,
+                    HorizontalAlignment = HorizontalAlignment.Left, Cursor = Cursors.Hand,
+                };
+                var holder = new BlockUIContainer(btn) { Margin = new Thickness(0, 3, 0, 0) };
+                doc.Blocks.Add(holder);
+                btn.Click += (_, _) =>
+                {
+                    Block after = holder;
+                    for (var i = preview; i < m.Transcript.Count; i++) { var p = DocTranscript(m.Transcript[i], fs); doc.Blocks.InsertAfter(after, p); after = p; }
+                    doc.Blocks.Remove(holder);
+                };
+            }
+        }
+
+        // A READ-ONLY RichTextBox — not a FlowDocumentScrollViewer. This is the one WPF control
+        // whose selection is rock-solid: click anywhere and drag from the very top to the very
+        // bottom and it highlights continuously across summary → bullets → to-dos → transcript;
+        // Ctrl+A selects the whole note, Ctrl+C copies it. Read-only blocks editing, not selection.
+        var rtb = new RichTextBox
+        {
+            Document = doc, IsReadOnly = true, IsReadOnlyCaretVisible = false, IsDocumentEnabled = true,
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0, 0, 16, 0),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Foreground = B("Text"), Cursor = Cursors.IBeam,
+        };
+        // Never the Win32 right-click menu — we don't ship Windows chrome. Ctrl+C / the Copy button do the copying.
+        rtb.ContextMenuOpening += (_, e) => e.Handled = true;
+        return rtb;
+    }
+
+    /// <summary>The plain text a full top-to-bottom select-all of the note document yields —
+    /// the real artifact the copy feature must produce. Used by the Copy button and --copytest.</summary>
+    public static string FullText(MeetingRecord m)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(NotesText(m));
+        if (m.Transcript.Count > 0)
+            sb.AppendLine().AppendLine().AppendLine("Transcript").Append(TranscriptText(m));
+        return sb.ToString().TrimEnd();
+    }
+
+    static Paragraph DocHeader(string title, bool first = false) =>
+        new(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontSize = 10.5 })
+        { Margin = new Thickness(0, first ? 0 : 20, 0, 8) };
+
+    static Paragraph DocAction(ActionItem a, double fs)
+    {
+        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 11), LineHeight = fs + 8 };
+        var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("TokiCheck"), Margin = new Thickness(0, 0, 9, 0) };
+        check.Checked += (_, _) => Toggle(a, true);
+        check.Unchecked += (_, _) => Toggle(a, false);
+        p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.TextTop });
+        p.Inlines.Add(new Run(a.Text) { Foreground = a.Done ? B("TextDim") : B("Text") });
+        // Owner / due are IMPORTANT labels — bright, bold, accent-coloured (person = blue, due = amber)
+        // so they stand out, with clear spacing. Kept as TEXT (not UI chips) so Copy still captures them.
+        if (Meaningful(a.Owner)) p.Inlines.Add(new Run($"   ·   {a.Owner}") { Foreground = B("Blue"), FontWeight = FontWeights.SemiBold });
+        if (Meaningful(a.Due)) p.Inlines.Add(new Run($"   ·   {a.Due}") { Foreground = B("Amber"), FontWeight = FontWeights.SemiBold });
+        return p;
+    }
+
+    static Paragraph DocTranscript(TranscriptSegment seg, double fs)
+    {
+        var you = seg.Speaker == Speaker.You;
+        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 9), LineHeight = fs + 7 };
+        p.Inlines.Add(new Run($"{(you ? "You" : "Them")}:  ") { FontWeight = FontWeights.SemiBold, Foreground = B(you ? "Text" : "TextDim") });
+        p.Inlines.Add(new Run(seg.Text) { Foreground = B(you ? "Text" : "TextDim") });
+        return p;
+    }
+
     /// <summary>Plain-text of a meeting's transcript, for the Copy button.</summary>
     public static string TranscriptText(MeetingRecord m) =>
         string.Join(Environment.NewLine, m.Transcript.Select(s =>
             $"{(s.Speaker == Speaker.You ? "You" : "Them")}: {s.Text}"));
+
+    /// <summary>Plain-text of the NOTES (title, summary, template sections, to-dos) for the Copy menu —
+    /// clean markdown-ish text the user can paste anywhere.</summary>
+    public static string NotesText(MeetingRecord m)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(m.Title).AppendLine();
+        if (!string.IsNullOrWhiteSpace(m.Notes.Tldr)) sb.AppendLine("Summary").AppendLine(m.Notes.Tldr).AppendLine();
+        foreach (var sec in m.Notes.EffectiveSections())
+        {
+            if (sec.Bullets.Count == 0) continue;
+            sb.AppendLine(sec.Heading);
+            foreach (var b in sec.Bullets) sb.AppendLine($"- {b}");
+            sb.AppendLine();
+        }
+        if (m.Notes.Actions.Count > 0)
+        {
+            sb.AppendLine("To do");
+            foreach (var a in m.Notes.Actions)
+            {
+                var meta = new[] { a.Owner, a.Due }.Where(x => Meaningful(x));
+                sb.AppendLine($"- [{(a.Done ? "x" : " ")}] {a.Text}" + (meta.Any() ? $" ({string.Join(", ", meta)})" : ""));
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString().TrimEnd();
+    }
 }

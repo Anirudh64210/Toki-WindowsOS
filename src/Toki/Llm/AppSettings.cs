@@ -62,6 +62,11 @@ public sealed class AppSettings
     /// stays human-readable and forward-compatible.</summary>
     public string Theme { get; set; } = "dark";
 
+    /// <summary>The note shape for NEW meetings: null = auto-detect (default); otherwise a fixed
+    /// template name from <see cref="Toki.Llm.NoteTemplates"/> (e.g. "Standup"). Any note can still
+    /// be re-shaped by hand from its template picker.</summary>
+    public string? DefaultTemplate { get; set; }
+
     /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
     /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
     /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the

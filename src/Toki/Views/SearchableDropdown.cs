@@ -37,6 +37,10 @@ public sealed class SearchableDropdown : Border
         // Use resource REFERENCES (not captured brushes) for every persistent surface, so the whole
         // control recolours live on a light/dark swap. (The transient popup rows are rebuilt per open.)
         SetResourceReference(BackgroundProperty, "SurfaceHi");
+        // A hairline outline so the control reads as a distinct button and never blends into a
+        // same-coloured surface behind it (the light-theme "invisible dropdown" bug).
+        SetResourceReference(BorderBrushProperty, "Hairline");
+        BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(9);
         Height = 34;
         Padding = new Thickness(11, 0, 9, 0);
@@ -92,8 +96,10 @@ public sealed class SearchableDropdown : Border
         var box = new Border
         {
             CornerRadius = new CornerRadius(10), Padding = new Thickness(6), Child = stack, Effect = null,
+            BorderThickness = new Thickness(1),
         };
         box.SetResourceReference(BackgroundProperty, "SurfaceHi");
+        box.SetResourceReference(BorderBrushProperty, "Hairline");
         _popup.Child = box;
         _popup.PlacementTarget = this;
         _popup.Placement = PlacementMode.Bottom;

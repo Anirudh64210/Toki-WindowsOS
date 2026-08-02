@@ -71,6 +71,31 @@ public partial class LibraryWindow : Window
             w.UpdateLayout();
             Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, $"hub-{page}.png"));
         }
+
+        // Button-centering calibration: the real buttons on a dark surface, big, so vertical
+        // centering of the label (and the Back chevron) can be judged precisely.
+        var probe = new Border
+        {
+            Background = (Brush)w.FindResource("Surface"), Padding = new Thickness(28), Width = 460,
+        };
+        var col = new StackPanel();
+        // Overlay a 1px true-center line across each button so vertical centering can be MEASURED,
+        // not eyeballed: the label's optical centre should sit on the red line.
+        void Add(FrameworkElement b)
+        {
+            b.HorizontalAlignment = HorizontalAlignment.Left;
+            var g = new Grid { Margin = new Thickness(0, 0, 0, 14), HorizontalAlignment = HorizontalAlignment.Left };
+            g.Children.Add(b);
+            g.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromArgb(180, 255, 60, 60)), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false });
+            col.Children.Add(g);
+        }
+        Add(new Button { Content = "Copy", Style = (Style)w.FindResource("PillButton"), Padding = new Thickness(14, 7, 14, 7), FontSize = 11.5, MinWidth = 120 });
+        Add(new Button { Content = "Delete", Style = (Style)w.FindResource("PillButton"), Foreground = (Brush)w.FindResource("Danger"), Padding = new Thickness(13, 6, 13, 6), FontSize = 11.5, MinWidth = 120 });
+        Add(new Button { Content = "+  New note", Style = (Style)w.FindResource("WhiteButton"), Padding = new Thickness(0, 9, 0, 9), MinWidth = 220, HorizontalContentAlignment = HorizontalAlignment.Center });
+        Add(w.BuildBackButtonProbe());
+        probe.Child = col;
+        probe.Measure(new Size(460, 400)); probe.Arrange(new Rect(0, 0, 460, 400)); probe.UpdateLayout();
+        Dev.RenderHarness.SaveVisual(probe, System.IO.Path.Combine(dir, "buttons.png"));
         w.Close();
     }
 
@@ -227,6 +252,7 @@ public partial class LibraryWindow : Window
     LibraryWindow()
     {
         InitializeComponent();
+        BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
         SourceInitialized += (_, _) => StyleChrome();
         // Soften the maximise/restore snap (the "min-to-max sizer" clunk): ease the content into
         // the new size on every WindowState change instead of a hard pop.
@@ -275,7 +301,7 @@ public partial class LibraryWindow : Window
         var toSelect = focus ?? _selected;
         if (toSelect is long id && App.Store.Get(id) is not null) Select(id);
         else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid);
-        else { Detail.Children.Clear(); Detail.Children.Add(Placeholder("Select a meeting or note, or make a new one.")); }
+        else { DetailHeader.Content = null; DetailBody.Content = Placeholder("Select a meeting or note, or make a new one."); }
     }
 
     // ══════════════════════ Hub: sidebar nav · Ask landing · Templates · mascot ══════════════════════
@@ -314,9 +340,50 @@ public partial class LibraryWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(icon); row.Children.Add(text);
         var b = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(11, 9, 11, 9), Margin = new Thickness(0, 0, 0, 4), Cursor = Cursors.Hand, Background = Brushes.Transparent, Child = row };
-        b.MouseLeftButtonUp += (_, _) => ShowPage(key);
+        b.MouseLeftButtonUp += (_, _) => OnNavClick(key);
         _navButtons[key] = b;
         return b;
+    }
+
+    // Clicking Library while already on Library toggles the note-list panel (VS Code sidebar feel):
+    // collapse it fully to give the note the whole width, click again to bring it back.
+    void OnNavClick(string key)
+    {
+        if (key == "library" && _page == "library") { ToggleList(); return; }
+        ShowPage(key);
+        if (key == "library" && _listCollapsed) SetList(open: true);   // navigating to Library always shows the list
+    }
+
+    bool _listCollapsed;
+    double _listWidthPx = 312;
+
+    void ToggleList() => SetList(open: _listCollapsed);
+
+    void SetList(bool open)
+    {
+        if (open == !_listCollapsed) return;      // already in that state
+        if (!open) _listWidthPx = Math.Max(180, ListCol.ActualWidth);   // remember width before closing
+        _listCollapsed = !open;
+        AnimateCol(ListCol, ListCol.ActualWidth, open ? _listWidthPx : 0);
+    }
+
+    // GridLength has no built-in animation, so lerp the pixel width on a timer with an ease — smooth,
+    // and cheap (a few frames). Headless just snaps.
+    void AnimateCol(System.Windows.Controls.ColumnDefinition col, double from, double to)
+    {
+        if (App.Headless) { col.Width = new GridLength(to); return; }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        const double ms = 200;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(15) };
+        timer.Tick += (_, _) =>
+        {
+            var t = Math.Min(1.0, sw.Elapsed.TotalMilliseconds / ms);
+            var v = from + (to - from) * ease.Ease(t);
+            col.Width = new GridLength(Math.Max(0, v));
+            if (t >= 1.0) { col.Width = new GridLength(Math.Max(0, to)); timer.Stop(); }
+        };
+        timer.Start();
     }
 
     void HighlightNav()
@@ -360,6 +427,9 @@ public partial class LibraryWindow : Window
 
     void RefreshGreeting()
     {
+        if (Messages.Children.Count > 0) return;   // a conversation is going — keep it, don't reset to the landing
+        Landing.Visibility = Visibility.Visible;
+        Messages.Visibility = Visibility.Collapsed;
         var name = Llm.AppSettings.Current.DisplayName;
         var full = string.Format(Greetings[_rng.Next(Greetings.Length)], string.IsNullOrEmpty(name) ? "there" : name);
         AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
@@ -397,20 +467,138 @@ public partial class LibraryWindow : Window
 
     void OnAskKeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { e.Handled = true; OnAsk(sender, e); } }
 
-    void OnAsk(object sender, RoutedEventArgs e)
+    bool _asking;
+
+    // Ask a question about the meetings → retrieve relevant notes + answer with the active model (off
+    // the UI thread), shown as a conversation with source-meeting chips.
+    async void OnAsk(object sender, RoutedEventArgs e)
     {
         var q = AskBox.Text?.Trim();
-        if (string.IsNullOrEmpty(q)) return;
-        // Phase 1: take the question into the Library and search it. Full conversational answering
-        // (retrieval over your notes) arrives with the chatbot — Phase 2.
-        SearchBox.Text = q;
+        if (string.IsNullOrEmpty(q) || _asking) return;
         AskBox.Text = "";
-        ShowPage("library");
+        Landing.Visibility = Visibility.Collapsed;
+        Messages.Visibility = Visibility.Visible;
+        Messages.Children.Add(UserBubble(q));
+        var thinking = LoaderBubble();
+        Messages.Children.Add(thinking);
+        ScrollChatToEnd();
+
+        _asking = true; AskBtn.IsEnabled = false; MicBtn.IsEnabled = false;
+        Llm.NotesQa.Answer ans;
+        try { ans = await System.Threading.Tasks.Task.Run(() => Llm.NotesQa.AskAsync(q)); }
+        catch (Exception ex) { App.Log($"ask failed: {ex.Message}"); ans = new Llm.NotesQa.Answer("Something went wrong — try again.", [], false); }
+        finally { _asking = false; AskBtn.IsEnabled = true; MicBtn.IsEnabled = true; }
+
+        Messages.Children.Remove(thinking);
+        Messages.Children.Add(AnswerBubble(ans));
+        ScrollChatToEnd();
     }
 
     void OnMic(object sender, RoutedEventArgs e)
     {
-        AskHint.Text = "Voice questions arrive with the chatbot — coming next.";
+        // Voice input (and the hotkey-opens-mic / "hey Toki" flow) is the next slice.
+        if (Landing.Visibility == Visibility.Visible)
+            AskHint.Text = "Voice is coming next — type your question for now.";
+        else { Messages.Children.Add(TokiBubble("Voice is coming next — type your question for now.", dim: true)); ScrollChatToEnd(); }
+    }
+
+    void ScrollChatToEnd() => Dispatcher.BeginInvoke(new Action(() => ChatScroll.ScrollToEnd()), System.Windows.Threading.DispatcherPriority.Background);
+
+    // Chat text is selectable + copyable (read-only transparent TextBox), like a normal chatbot.
+    TextBox SelText(string text, double fs, string fgKey)
+    {
+        var tb = new TextBox
+        {
+            Text = text ?? "", IsReadOnly = true, IsReadOnlyCaretVisible = false,
+            BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = fs, TextWrapping = TextWrapping.Wrap,
+            Padding = new Thickness(0), Cursor = Cursors.IBeam, IsTabStop = false,
+        };
+        tb.SetResourceReference(Control.ForegroundProperty, fgKey);
+        return tb;
+    }
+
+    Border UserBubble(string text)
+    {
+        var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(14, 10, 14, 10), Margin = new Thickness(70, 0, 0, 12), HorizontalAlignment = HorizontalAlignment.Right, Child = SelText(text, 13.5, "Text") };
+        b.SetResourceReference(Border.BackgroundProperty, "Chip");
+        return b;
+    }
+
+    // A simple non-selectable Toki notice (system messages like "voice coming soon").
+    Border TokiBubble(string text, bool dim = false)
+    {
+        var t = new TextBlock { Text = text, Style = St(dim ? "Dim" : "Body"), FontSize = dim ? 12.5 : 13.5, TextWrapping = TextWrapping.Wrap };
+        var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(15, 11, 15, 12), Margin = new Thickness(0, 0, 70, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = t };
+        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        return b;
+    }
+
+    // Toki's answer — selectable text + clickable source-meeting chips.
+    Border AnswerBubble(Llm.NotesQa.Answer ans)
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(SelText(ans.Text, 13.5, "Text"));
+        if (ans.Sources.Count > 0)
+        {
+            var chips = new WrapPanel { Margin = new Thickness(0, 11, 0, 0) };
+            chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+            foreach (var s in ans.Sources) chips.Children.Add(SourceChip(s));
+            stack.Children.Add(chips);
+        }
+        var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(15, 12, 15, 13), Margin = new Thickness(0, 0, 70, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = stack };
+        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        return b;
+    }
+
+    // A fun "cooking up an answer" loader — a Toki-pink bar sliding across + rotating status words.
+    Border LoaderBubble()
+    {
+        var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(15, 13, 15, 14), Margin = new Thickness(0, 0, 70, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = BuildLoader() };
+        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        return b;
+    }
+
+    static readonly string[] LoaderWords = { "Reading your notes…", "Understanding…", "Extracting…", "Cooking…", "Baking…", "Stewing…", "Roasting…", "Cleaning up…" };
+
+    FrameworkElement BuildLoader()
+    {
+        var stack = new StackPanel { MinWidth = 200 };
+        var status = new TextBlock { Text = LoaderWords[0], FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12.5, Margin = new Thickness(0, 0, 0, 9) };
+        status.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+        stack.Children.Add(status);
+
+        var trackGrid = new Grid { Width = 190, Height = 4, HorizontalAlignment = HorizontalAlignment.Left, ClipToBounds = true };
+        var track = new Border { Height = 4, CornerRadius = new CornerRadius(2) };
+        track.SetResourceReference(Border.BackgroundProperty, "Chip");
+        var dot = new Border { Width = 52, Height = 4, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, Background = (Brush)FindResource("Pink") };
+        var tt = new TranslateTransform();
+        dot.RenderTransform = tt;
+        trackGrid.Children.Add(track);
+        trackGrid.Children.Add(dot);
+        stack.Children.Add(trackGrid);
+
+        tt.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, 190 - 52, TimeSpan.FromMilliseconds(850))
+        {
+            AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+        });
+
+        var i = 0;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
+        timer.Tick += (_, _) => { i = (i + 1) % LoaderWords.Length; status.Text = LoaderWords[i]; };
+        timer.Start();
+        stack.Unloaded += (_, _) => timer.Stop();
+        return stack;
+    }
+
+    Border SourceChip(Llm.NotesQa.Source s)
+    {
+        var t = new TextBlock { Text = s.Title, FontSize = 10.5, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 };
+        t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+        var c = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(9, 3, 9, 4), Margin = new Thickness(0, 0, 6, 6), Cursor = Cursors.Hand, Child = t };
+        c.SetResourceReference(Border.BackgroundProperty, "Chip");
+        c.MouseLeftButtonUp += (_, _) => { Reload(s.Id); ShowPage("library"); };
+        return c;
     }
 
     // ── clickable mascot: a cute reaction that varies each poke ──
@@ -445,8 +633,25 @@ public partial class LibraryWindow : Window
         TemplatesList.Children.Add(new TextBlock
         {
             Text = "Toki picks the shape that fits each meeting automatically. Open any note to switch its template by hand.",
-            Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 18),
+            Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 16),
         });
+
+        // Default shape for NEW meetings: Auto-detect, or force one for every meeting.
+        var defRow = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
+        defRow.Children.Add(new TextBlock { Text = "DEFAULT SHAPE FOR NEW MEETINGS", Style = St("Dim"), FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(2, 0, 0, 5) });
+        var defDrop = new Views.SearchableDropdown { Width = 240, HorizontalAlignment = HorizontalAlignment.Left };
+        defDrop.SetItems(new[] { "Auto-detect" }.Concat(Llm.NoteTemplates.All.Select(t => t.Name)),
+            Llm.AppSettings.Current.DefaultTemplate ?? "Auto-detect");
+        defDrop.Changed += (_, _) =>
+        {
+            var sel = defDrop.Selected;
+            Llm.AppSettings.Current.DefaultTemplate = string.IsNullOrEmpty(sel) || sel == "Auto-detect" ? null : sel;
+            Llm.AppSettings.Current.Save();
+        };
+        defRow.Children.Add(defDrop);
+        defRow.Children.Add(new TextBlock { Text = "Auto-detect picks the best shape per meeting (recommended). Or force one shape for every new meeting.", Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 7, 0, 0) });
+        TemplatesList.Children.Add(defRow);
+
         foreach (var t in Llm.NoteTemplates.All) TemplatesList.Children.Add(TemplateCard(t));
     }
 
@@ -474,14 +679,14 @@ public partial class LibraryWindow : Window
     }
 
     // ── per-note template picker (manual override → Toki re-writes the note in the chosen shape) ──
-    FrameworkElement TemplatePicker(MeetingRecord m)
+    // Compact: a small "Template" caption + dropdown, sits in the top toolbar beside Copy/Delete.
+    FrameworkElement TemplatePicker(MeetingRecord m, TextBlock status)
     {
-        var wrap = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
-        wrap.Children.Add(new TextBlock { Text = "TEMPLATE", Style = St("Dim"), FontSize = 9, FontWeight = FontWeights.Bold, Margin = new Thickness(2, 0, 0, 4) });
+        var wrap = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        wrap.Children.Add(new TextBlock { Text = "Template", Style = St("Dim"), FontSize = 10.5, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
 
-        var drop = new Views.SearchableDropdown { Width = 190, HorizontalAlignment = HorizontalAlignment.Left };
+        var drop = new Views.SearchableDropdown { Width = 150, VerticalAlignment = VerticalAlignment.Center };
         drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
-        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(2, 6, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
 
         drop.Changed += async (_, _) =>
         {
@@ -504,10 +709,10 @@ public partial class LibraryWindow : Window
                 // showing a shape that wasn't actually applied.
                 drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
                 status.Text = "Couldn't rewrite — no transcript or model available.";
+                status.Visibility = Visibility.Visible;
             }
         };
         wrap.Children.Add(drop);
-        wrap.Children.Add(status);
         return wrap;
     }
 
@@ -730,8 +935,7 @@ public partial class LibraryWindow : Window
         if (m is null) return;
         if (m.Kind == MeetingKind.Manual) RenderManual(m);
         else RenderMeeting(m);
-        DetailScroll.ScrollToTop();
-        FadeIn(Detail);
+        FadeIn(DetailBody);   // FlowDocument viewer starts at the top on a fresh document
     }
 
     // Soft cross-fade so switching notes feels smooth, not a hard swap.
@@ -747,41 +951,41 @@ public partial class LibraryWindow : Window
 
     void RenderMeeting(MeetingRecord m)
     {
-        Detail.Children.Clear();
-        Detail.HorizontalAlignment = HorizontalAlignment.Center;   // reading: balanced column
+        var header = new StackPanel();
+        // ONE top toolbar row: template on the left, Copy/Delete on the right — all above the title,
+        // out of the note body so it reads cleanly. Title + meta are LEFT-aligned (a note, not a poster).
+        var row = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 14) };
+        var right = new StackPanel { Orientation = Orientation.Horizontal };
+        right.Children.Add(CopyButton(m));
+        right.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
+        DockPanel.SetDock(right, Dock.Right);
+        row.Children.Add(right);
 
-        var header = new Grid();
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var titleStack = new StackPanel();
-        titleStack.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 20, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
-        titleStack.Children.Add(new TextBlock { Text = Meta(m), Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) });
-        header.Children.Add(titleStack);
-
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
-        if (m.Transcript.Count > 0) actions.Children.Add(SmallButton("Copy transcript", () => CopyTranscript(m)));
-        actions.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
-        Grid.SetColumn(actions, 1);
-        header.Children.Add(actions);
-        Detail.Children.Add(header);
-
-        // Manual template override — pick a shape and Toki re-writes the note in it.
+        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
-            Detail.Children.Add(TemplatePicker(m));
+        {
+            var tmpl = TemplatePicker(m, status);
+            DockPanel.SetDock(tmpl, Dock.Left);
+            row.Children.Add(tmpl);
+        }
+        header.Children.Add(row);
+        header.Children.Add(status);
+        header.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 20, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
+        header.Children.Add(new TextBlock { Text = Meta(m), Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) });
 
-        var body = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
-        NoteRenderer.Meeting(body, m, spacious: true);
-        Detail.Children.Add(body);
+        DetailHeader.Content = header;
+        // The whole note as ONE selectable FlowDocument (drag-select spans everything, Ctrl+C copies all).
+        DetailBody.Content = NoteRenderer.MeetingDocument(m, spacious: true);
     }
 
     void RenderManual(MeetingRecord m)
     {
-        Detail.Children.Clear();
-        Detail.HorizontalAlignment = HorizontalAlignment.Left;   // editor sits at the left, not floating centre
+        DetailHeader.Content = null;
+        var panel = new StackPanel();
 
         var titleBox = new TextBox { Text = m.Title, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"), FontSize = 20, FontWeight = FontWeights.Bold, FontFamily = (FontFamily)FindResource("UiFont") };
-        Detail.Children.Add(titleBox);
-        Detail.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("SurfaceHi"), Margin = new Thickness(0, 8, 0, 0) });
+        panel.Children.Add(titleBox);
+        panel.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("SurfaceHi"), Margin = new Thickness(0, 8, 0, 0) });
 
         var bodyBox = new TextBox
         {
@@ -791,15 +995,15 @@ public partial class LibraryWindow : Window
             TextWrapping = TextWrapping.Wrap, MinHeight = 320, Margin = new Thickness(0, 12, 0, 0),
             VerticalContentAlignment = VerticalAlignment.Top,
         };
-        Detail.Children.Add(bodyBox);
+        panel.Children.Add(bodyBox);
 
-        // Dynamic footer — no static Save/Cancel. Toki saves as you type (debounced); a
-        // quiet monotone status flashes "Saved" and fades. Delete is a subtle monotone action.
         var status = new TextBlock { Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), Opacity = 0, Text = "Saved" };
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
-        bar.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true)); // monotone (dim), not red
+        bar.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
         bar.Children.Add(status);
-        Detail.Children.Add(bar);
+        panel.Children.Add(bar);
+
+        DetailBody.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 26, 0, 0) };
 
         _manualFlush = () =>
         {
@@ -843,6 +1047,112 @@ public partial class LibraryWindow : Window
         try { Clipboard.SetText(NoteRenderer.TranscriptText(m)); } catch (Exception ex) { App.Log($"copy failed: {ex.Message}"); }
     }
 
+    // Copy button → a clean THEMED dropdown (never the Win32 ContextMenu): Summary+to-dos, Transcript,
+    // or reveal the note's markdown file on disk.
+    FrameworkElement CopyButton(MeetingRecord m)
+    {
+        // Split button: the big "Copy" copies the ENTIRE note (top→bottom) in one click; the ▾ opens
+        // the narrower options. The main action is the whole thing because that's what people mean by "copy".
+        var main = new Button
+        {
+            Content = "Copy", Style = (Style)FindResource("PillButton"),
+            Padding = new Thickness(14, 7, 12, 7), FontSize = 11.5,
+        };
+        var caret = new Button
+        {
+            Content = "▾", Style = (Style)FindResource("PillButton"),
+            Padding = new Thickness(9, 7, 11, 7), FontSize = 10, Margin = new Thickness(1, 0, 0, 0),
+        };
+        void Copy(string text) { if (CopyText(text)) Flash(main, "Copied ✓"); }
+        main.Click += (_, _) => Copy(NoteRenderer.FullText(m));
+        caret.Click += (_, _) =>
+        {
+            var items = new List<(string, Action)>
+            {
+                ("Copy everything", () => Copy(NoteRenderer.FullText(m))),
+                ("Summary + to-dos", () => Copy(NoteRenderer.NotesText(m))),
+            };
+            if (m.Transcript.Count > 0) items.Add(("Transcript only", () => Copy(NoteRenderer.TranscriptText(m))));
+            items.Add(("Reveal note file", () => RevealNoteFile(m)));
+            ShowMenu(caret, items);
+        };
+        return new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0), Children = { main, caret } };
+    }
+
+    // Brief inline confirmation on a button, then restore its label — so a copy never feels silent.
+    static void Flash(Button b, string msg)
+    {
+        var was = b.Content;
+        b.Content = msg;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1100) };
+        t.Tick += (_, _) => { b.Content = was; t.Stop(); };
+        t.Start();
+    }
+
+    // A rounded, outlined, THEMED popup of hover-able rows — our own menu, matching the app.
+    void ShowMenu(FrameworkElement anchor, List<(string Label, Action Act)> items)
+    {
+        var stack = new StackPanel();
+        var popup = new System.Windows.Controls.Primitives.Popup
+        {
+            PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade, VerticalOffset = 4,
+        };
+        foreach (var (label, act) in items)
+        {
+            // A real Button, not a Border+MouseLeftButtonUp: Click fires reliably inside a StaysOpen=false
+            // popup (the mouse-up-on-Border approach got swallowed when the popup closed → dead menu items).
+            var t = new TextBlock { Text = label, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
+            t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
+            var row = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(11, 8, 22, 8), Background = Brushes.Transparent, Child = t };
+            var btn = new Button { Content = row, Cursor = Cursors.Hand, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Focusable = false };
+            btn.Template = TransparentButtonTemplate();
+            btn.MouseEnter += (_, _) => row.SetResourceReference(Border.BackgroundProperty, "Chip");
+            btn.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+            var captured = act;
+            btn.Click += (_, _) => { popup.IsOpen = false; captured(); };
+            stack.Children.Add(btn);
+        }
+        var box = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(5), BorderThickness = new Thickness(1), MinWidth = 176, Child = stack };
+        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        popup.Child = box;
+        popup.IsOpen = true;
+    }
+
+    // A button that renders exactly its content, no chrome — so our themed rows show through.
+    static ControlTemplate TransparentButtonTemplate()
+    {
+        var t = new ControlTemplate(typeof(Button));
+        var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+        t.VisualTree = cp;
+        return t;
+    }
+
+    // Returns true only if the text actually reached the clipboard. The Win32 clipboard can be
+    // momentarily held by another app (COMException "OpenClipboard failed") — retry a few times.
+    bool CopyText(string text)
+    {
+        text ??= "";
+        for (var i = 0; i < 5; i++)
+        {
+            try { Clipboard.SetText(text.Length == 0 ? " " : text); return true; }
+            catch (Exception ex) { App.Log($"copy retry {i}: {ex.Message}"); System.Threading.Thread.Sleep(40); }
+        }
+        return false;
+    }
+
+    // Toki already mirrors every note to a Markdown file — surface it (file export the easy way).
+    void RevealNoteFile(MeetingRecord m)
+    {
+        try
+        {
+            var path = Storage.MarkdownMirror.Write(m);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) { App.Log($"reveal note failed: {ex.Message}"); }
+    }
+
     void Delete(long id)
     {
         var m = App.Store.Get(id);
@@ -857,6 +1167,28 @@ public partial class LibraryWindow : Window
 
     Style St(string key) => (Style)FindResource(key);
 
+    // The "Back to Toki" content, composed so BOTH the chevron and the label are vertically centered.
+    // The chevron is the icon-font ChevronLeft glyph (designed centered on the em), not the "‹" text
+    // character (which Segoe sets low). Foreground is inherited from the button.
+    static UIElement BackButtonInner()
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        sp.Children.Add(new TextBlock
+        {
+            Text = "", FontFamily = (FontFamily)Application.Current.FindResource("IconFont"),
+            FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+        });
+        sp.Children.Add(new TextBlock { Text = "Back to Toki", VerticalAlignment = VerticalAlignment.Center });
+        return sp;
+    }
+
+    // Calibration-only: a full Back-to-Toki button for the buttons.png probe.
+    internal Button BuildBackButtonProbe() => new()
+    {
+        Content = BackButtonInner(), Style = St("PillButton"), Background = (Brush)FindResource("SurfaceHi"),
+        Padding = new Thickness(13, 9, 13, 9), FontSize = 11.5, MinWidth = 220, HorizontalContentAlignment = HorizontalAlignment.Center,
+    };
+
     FrameworkElement SmallButton(string label, Action onClick, bool primary = false, bool danger = false)
     {
         var b = new Button
@@ -864,7 +1196,7 @@ public partial class LibraryWindow : Window
             Content = label, Style = (Style)FindResource(primary ? "CoralButton" : "PillButton"),
             Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(13, 6, 13, 6), FontSize = 11.5,
         };
-        if (danger) b.Foreground = (Brush)FindResource("TextDim");
+        if (danger) { b.Foreground = (Brush)FindResource("Danger"); b.Background = (Brush)FindResource("DangerTint"); }
         b.Click += (_, _) => onClick();
         return b;
     }

@@ -7,9 +7,12 @@
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="204"/>
+            <ColumnDefinition x:Name="SidebarCol" Width="204" MinWidth="72" MaxWidth="360"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
+
+        <!-- Drag the edge to resize the sidebar (sits on the seam, invisible until you hover). -->
+        <GridSplitter Grid.Column="1" Style="{StaticResource PaneSplitter}"/>
 
         <!-- ═══════════ Sidebar: mascot · nav · back ═══════════ -->
         <Border Grid.Column="0" Background="{DynamicResource Surface}">
@@ -25,9 +28,10 @@
                 </Border>
 
                 <!-- Back to Toki (bottom) -->
+                <!-- Content (chevron+label) is set in code so both pieces are vertically centered. -->
                 <Button DockPanel.Dock="Bottom" x:Name="BackBtn" Style="{StaticResource PillButton}"
-                        Background="{DynamicResource SurfaceHi}" Content="‹  Back to Toki"
-                        HorizontalContentAlignment="Left" Padding="13,9" FontSize="11.5" Click="OnBack"/>
+                        Background="{DynamicResource SurfaceHi}"
+                        HorizontalContentAlignment="Center" Padding="13,9" FontSize="11.5" Click="OnBack"/>
 
                 <!-- Nav items (built in code so the active one highlights) -->
                 <StackPanel x:Name="Nav" DockPanel.Dock="Top"/>
@@ -39,13 +43,13 @@
                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1,0,0,0">
             <Grid x:Name="MainHost">
 
-                <!-- ── Ask (the landing) ── -->
+                <!-- ── Ask (conversation + landing) ── -->
                 <Grid x:Name="AskPage">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="580" Margin="40,0,40,40">
-                        <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="27" FontWeight="SemiBold"
-                                   TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,24"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="16"
-                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="6,4">
+                    <DockPanel>
+                        <!-- Input bar — always docked at the bottom. -->
+                        <Border DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
+                                Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="6,4" Cursor="IBeam">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -62,20 +66,35 @@
                                         Content="&#xE72A;" ToolTip="Ask" Click="OnAsk"/>
                             </Grid>
                         </Border>
-                        <TextBlock x:Name="AskHint" Style="{StaticResource Dim}" FontSize="10.5" TextAlignment="Center"
-                                   Margin="0,12,0,0" TextWrapping="Wrap"/>
-                        <WrapPanel x:Name="Suggestions" HorizontalAlignment="Center" Margin="0,14,0,0"/>
-                    </StackPanel>
+
+                        <!-- Conversation scroll: the landing (greeting + suggestions) when empty; the Q&A thread once asked. -->
+                        <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
+                            <Grid>
+                                <StackPanel x:Name="Landing" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="580" Margin="40,20">
+                                    <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="27" FontWeight="SemiBold"
+                                               TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,22"/>
+                                    <TextBlock x:Name="AskHint" Style="{StaticResource Dim}" FontSize="11" TextAlignment="Center"
+                                               Margin="0,0,0,16" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="Suggestions" HorizontalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel x:Name="Messages" HorizontalAlignment="Stretch" MaxWidth="720"
+                                            Margin="40,28,40,20" Visibility="Collapsed"/>
+                            </Grid>
+                        </ScrollViewer>
+                    </DockPanel>
                 </Grid>
 
                 <!-- ── Library (list + detail) ── -->
                 <Grid x:Name="LibraryPage" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="312"/>
+                        <ColumnDefinition x:Name="ListCol" Width="312" MinWidth="180" MaxWidth="560"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <DockPanel Grid.Column="0" Margin="22,20,14,16" Background="{DynamicResource Surface}">
+                    <!-- Drag the seam to resize the note list vs. the open note. -->
+                    <GridSplitter Grid.Column="1" Style="{StaticResource PaneSplitter}"/>
+
+                    <DockPanel x:Name="ListPanel" Grid.Column="0" Margin="22,20,14,16" Background="{DynamicResource Surface}" ClipToBounds="True">
                         <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
                             <StackPanel>
                                 <TextBlock Text="Library" Style="{StaticResource Body}" FontSize="18" FontWeight="Bold"/>
@@ -88,7 +107,8 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0">
+                            <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0" Cursor="IBeam"
+                                    BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                                 <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
                                          Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                          VerticalContentAlignment="Center" Height="36" FontSize="12.5" TextChanged="OnSearch"/>
@@ -108,10 +128,15 @@
 
                     <Border Grid.Column="1" Background="{DynamicResource Ink}"
                             BorderBrush="{DynamicResource Hairline}" BorderThickness="1,0,0,0">
-                        <ScrollViewer x:Name="DetailScroll" VerticalScrollBarVisibility="Auto" Padding="30,26,30,26"
-                                      controls:SmoothScroll.Enabled="True">
-                            <StackPanel x:Name="Detail" MaxWidth="560" HorizontalAlignment="Center"/>
-                        </ScrollViewer>
+                        <!-- Content fills the pane and hugs the LEFT (no centered max-width column, so no
+                             giant left gap when maximised). The note body's scrollbar sits flush to the
+                             pane's right edge; text keeps clear of it via the RichTextBox's own right padding. -->
+                        <DockPanel LastChildFill="True">
+                            <ContentControl x:Name="DetailHeader" DockPanel.Dock="Top" Margin="28,24,26,0"
+                                            HorizontalContentAlignment="Stretch"/>
+                            <ContentControl x:Name="DetailBody" Margin="28,10,0,16"
+                                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+                        </DockPanel>
                     </Border>
                 </Grid>
 
