@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -10,6 +10,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Toki.Llm;
 using Toki.State;
+using Toki.Theme;
 using Toki.Transcription;
 
 namespace Toki.Views;
@@ -54,6 +55,8 @@ public partial class SettingsView : UserControl
         // so sizing no longer depends on this timing. Loaded re-runs it in case settings changed.
         Load();
         Loaded += (_, _) => Load();
+        UpdateThemeIcon();
+        UpdateRecordingIcon();
     }
 
     void Load()
@@ -67,7 +70,6 @@ public partial class SettingsView : UserControl
         NotesModeSeg.Children.Add(SegButton("My API key", NotesMode.ApiKey, s.NotesMode));
 
         GpuToggle.IsChecked = s.GpuLayers >= 0; // on = auto (uses GPU when it fits safely)
-        ShowInRecordingsToggle.IsChecked = s.ShowInRecordings; // on = visible to recorders/screen-share (ghost off)
 
         LocalOptions.Visibility = s.NotesMode == NotesMode.Local ? Visibility.Visible : Visibility.Collapsed;
         ApiOptions.Visibility = s.NotesMode == NotesMode.ApiKey ? Visibility.Visible : Visibility.Collapsed;
@@ -248,6 +250,29 @@ public partial class SettingsView : UserControl
         Load(); // refresh the segmented control + conditional sections
     }
 
+    // ── appearance (light/dark): one quiet header toggle ──
+    // Deliberately NOT coupled to Load() — flipping the theme must never re-run the heavy settings
+    // reload (model fetches etc.), which is what could leave it stuck. It just recolours + re-icons.
+
+    void OnThemeToggle(object sender, RoutedEventArgs e)
+    {
+        var next = ThemeManager.Current == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark;
+        var s = AppSettings.Current;
+        s.Theme = next == AppTheme.Light ? "light" : "dark";
+        s.Save();
+        ThemeManager.Apply(next);   // recolours the whole app live (DynamicResource re-resolves)
+        Load();                     // rebuild this view's code-built bits (segmented control) in the new palette
+        UpdateThemeIcon();
+    }
+
+    // Show the glyph for the mode you'd switch TO: a sun in dark mode (→ light), a moon in light (→ dark).
+    void UpdateThemeIcon()
+    {
+        var dark = ThemeManager.Current == AppTheme.Dark;
+        ThemeToggle.Content = dark ? "" : "";   // Fluent: Brightness (sun, go light) / QuietHours (moon, go dark)
+        ThemeToggle.ToolTip = dark ? "Switch to light" : "Switch to dark";
+    }
+
     void OnGpuToggle(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
@@ -258,15 +283,45 @@ public partial class SettingsView : UserControl
         s.Save();
     }
 
-    void OnShowInRecordingsToggle(object sender, RoutedEventArgs e)
+    // ── screen-recording visibility (ghost): one header icon, shown once for the whole Settings ──
+    // (Previously a section that appeared under every notes-mode page — the owner's "three times" bug.)
+
+    void OnRecordingToggle(object sender, RoutedEventArgs e)
     {
-        if (_loading) return;
         var s = AppSettings.Current;
-        // On = show Toki in captures (ghost/capture-exclusion off); off (default) = hidden from
-        // recorders and screen-share. Applies live so the user can flip it and record immediately.
-        s.ShowInRecordings = ShowInRecordingsToggle.IsChecked == true;
+        s.ShowInRecordings = !s.ShowInRecordings;   // on = visible to recorders (ghost off); off = hidden (default)
         s.Save();
-        App.SetShowInRecordings(s.ShowInRecordings);
+        App.SetShowInRecordings(s.ShowInRecordings);   // applies live, no restart
+        UpdateRecordingIcon();
+    }
+
+    // A video camera, CROSSED OUT when Toki is hidden from recordings (ghost on, the default) and
+    // plain when it's visible — an immediate, obvious on/off, no colour change needed.
+    void UpdateRecordingIcon()
+    {
+        var hidden = !AppSettings.Current.ShowInRecordings;   // ghost on = not shown in recordings
+
+        var glyph = new TextBlock
+        {
+            Text = ((char)0xE714).ToString(),   // Fluent: Video
+            FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+        };
+        glyph.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+        var strike = new System.Windows.Shapes.Line
+        {
+            X1 = 4, Y1 = 19, X2 = 20, Y2 = 5, StrokeThickness = 1.8,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            Visibility = hidden ? Visibility.Visible : Visibility.Collapsed,
+        };
+        strike.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Text");
+        var box = new Grid { Width = 24, Height = 24 };
+        box.Children.Add(glyph);
+        box.Children.Add(strike);
+        RecordToggle.Content = box;
+        RecordToggle.ToolTip = hidden
+            ? "Hidden from screen recordings & sharing — tap to show Toki (to record a demo)"
+            : "VISIBLE in screen recordings & sharing — tap to hide Toki again";
     }
 
     // ── BYO API key ──

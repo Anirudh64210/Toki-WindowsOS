@@ -27,7 +27,7 @@
                 HorizontalContentAlignment="Center" Click="OnTakeNotes"
                 ToolTip="Start recording this meeting and take notes">
             <StackPanel Orientation="Horizontal">
-                <TextBlock Text="⁞⁞⁞" Foreground="{StaticResource Amber}" Margin="0,0,8,0"/>
+                <TextBlock Text="⁞⁞⁞" Foreground="{DynamicResource Amber}" Margin="0,0,8,0"/>
                 <TextBlock Text="Take Notes"/>
             </StackPanel>
         </Button>
@@ -42,7 +42,7 @@
         </Button>
 
         <Button Margin="0,11,0,0" Style="{StaticResource PillButton}" Background="Transparent"
-                Padding="4,5" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"
+                Padding="4,5" Foreground="{DynamicResource TextDim}" HorizontalAlignment="Center"
                 FontSize="10.5" Content="Library  ›" Click="OnLibrary"/>
     </StackPanel>
 </UserControl>

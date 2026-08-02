@@ -8,7 +8,7 @@
             <Button Style="{StaticResource CoralButton}" Content="Record" Padding="20,5"
                     Margin="0,0,8,0" Click="OnRecord"/>
             <Button Style="{StaticResource PillButton}" Content="Not now" Padding="14,5"
-                    Foreground="{StaticResource TextDim}" Click="OnDismiss"/>
+                    Foreground="{DynamicResource TextDim}" Click="OnDismiss"/>
         </StackPanel>
     </StackPanel>
 </UserControl>

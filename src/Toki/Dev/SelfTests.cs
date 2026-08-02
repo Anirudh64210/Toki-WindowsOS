@@ -41,6 +41,7 @@ static class SelfTests
                 "--livetest" => LiveTest(args),
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
+                "--themetest" => ThemeTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -602,6 +603,43 @@ static class SelfTests
     {
         var i = Array.IndexOf(args, key);
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    // Prove the live light/dark swap recolours an ALREADY-RENDERED element. The old bug: WPF froze the
+    // themed brushes so mutating .Color threw, and nothing repainted. Replace-based Apply must instead
+    // make the DynamicResource re-resolve to the new brush. Black notch → white notch on swap = PASS.
+    static int ThemeTest()
+    {
+        var border = new System.Windows.Controls.Border();
+        border.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Notch");
+        var win = new System.Windows.Window
+        {
+            Width = 60, Height = 60, Left = -4000, Top = -4000,
+            WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+            Content = border,
+        };
+        win.Show();
+        win.UpdateLayout();
+
+        Toki.Theme.ThemeManager.Apply(Toki.Theme.AppTheme.Dark);
+        win.UpdateLayout();
+        var dark = (border.Background as System.Windows.Media.SolidColorBrush)?.Color;
+
+        Toki.Theme.ThemeManager.Apply(Toki.Theme.AppTheme.Light);
+        win.UpdateLayout();
+        var light = (border.Background as System.Windows.Media.SolidColorBrush)?.Color;
+
+        win.Close();
+
+        Console.WriteLine($"notch  dark={dark}  light={light}");
+        // The element must actually change, and dark must be dark / light must be light.
+        var isDark = dark is { } d && d.R < 0x20 && d.G < 0x20 && d.B < 0x20;
+        var isLight = light is { } l && l.R > 0xE0 && l.G > 0xE0 && l.B > 0xE0;
+        var ok = dark != light && isDark && isLight;
+        Console.WriteLine(ok
+            ? "PASS: an already-rendered element re-resolves + recolours on theme swap"
+            : "FAIL: element did not recolour (still the old brush)");
+        return ok ? 0 : 1;
     }
 
     static int Seconds(string[] args, int fallback)

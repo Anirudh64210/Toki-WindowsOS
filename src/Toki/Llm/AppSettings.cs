@@ -57,6 +57,11 @@ public sealed class AppSettings
     /// a shared screen during a meeting. The user turns this on in Settings only to record a demo.</summary>
     public bool ShowInRecordings { get; set; }
 
+    /// <summary>UI theme: "dark" (default, Toki's signature black notch) or "light" (clean near-white).
+    /// Applied live by <see cref="Toki.Theme.ThemeManager"/>; a plain string so the settings file
+    /// stays human-readable and forward-compatible.</summary>
+    public string Theme { get; set; } = "dark";
+
     /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
     /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
     /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the

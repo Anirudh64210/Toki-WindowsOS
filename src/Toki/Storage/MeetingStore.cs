@@ -71,6 +71,27 @@ public sealed class MeetingStore
         using var seed = c.CreateCommand();
         seed.CommandText = "UPDATE meetings SET sort_order = (SELECT COUNT(*) FROM meetings m2 WHERE m2.started_at > meetings.started_at) WHERE sort_order IS NULL;";
         seed.ExecuteNonQuery();
+
+        // Migration: template name + its flexible sections (JSON). Older rows have neither and fall
+        // back to the legacy decisions/questions tables via NoteSet.EffectiveSections.
+        foreach (var col in new[] { "template", "sections_json" })
+            if (!ColumnExists(c, "meetings", col))
+            {
+                using var alter2 = c.CreateCommand();
+                alter2.CommandText = $"ALTER TABLE meetings ADD COLUMN {col} TEXT;";
+                alter2.ExecuteNonQuery();
+            }
+    }
+
+    // The template sections persist as a small JSON array on the meetings row (no extra table).
+    static string? SerializeSections(IReadOnlyList<NoteSection> s) =>
+        s.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(s);
+
+    static List<NoteSection> DeserializeSections(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<NoteSection>>(json) ?? []; }
+        catch { return []; }
     }
 
     static bool ColumnExists(SqliteConnection c, string table, string column)
@@ -108,8 +129,8 @@ public sealed class MeetingStore
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = """
-                INSERT INTO meetings (kind, title, app, started_at, duration_ms, folder, body, tldr)
-                VALUES ($kind, $title, $app, $started, $dur, $folder, $body, $tldr);
+                INSERT INTO meetings (kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json)
+                VALUES ($kind, $title, $app, $started, $dur, $folder, $body, $tldr, $template, $sections);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$kind", m.Kind.ToString());
@@ -120,6 +141,8 @@ public sealed class MeetingStore
             cmd.Parameters.AddWithValue("$folder", (object?)m.Folder ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$body", (object?)m.Body ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$tldr", m.Notes.Tldr);
+            cmd.Parameters.AddWithValue("$template", (object?)m.Notes.Template ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sections", (object?)SerializeSections(m.Notes.Sections) ?? DBNull.Value);
             id = (long)cmd.ExecuteScalar()!;
         }
 
@@ -192,7 +215,7 @@ public sealed class MeetingStore
         var m = new MeetingRecord { Id = id };
         using (var cmd = c.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind, title, app, started_at, duration_ms, folder, body, tldr FROM meetings WHERE id=$id";
+            cmd.CommandText = "SELECT kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json FROM meetings WHERE id=$id";
             cmd.Parameters.AddWithValue("$id", id);
             using var r = cmd.ExecuteReader();
             if (!r.Read()) return null;
@@ -204,9 +227,11 @@ public sealed class MeetingStore
             m.Folder = r.IsDBNull(5) ? null : r.GetString(5);
             m.Body = r.IsDBNull(6) ? null : r.GetString(6);
             m.Notes.Tldr = r.IsDBNull(7) ? "" : r.GetString(7);
+            m.Notes.Template = r.IsDBNull(8) ? null : r.GetString(8);
+            m.Notes.Sections = DeserializeSections(r.IsDBNull(9) ? null : r.GetString(9));
         }
         m.Transcript = ReadTranscript(c, id);
-        m.Notes.Decisions = ReadSimple(c, "decisions", id);
+        m.Notes.Decisions = ReadSimple(c, "decisions", id);   // legacy notes surface via EffectiveSections
         m.Notes.Questions = ReadSimple(c, "questions", id);
         m.Notes.Actions = ReadActions(c, id);
         return m;
@@ -226,8 +251,10 @@ public sealed class MeetingStore
         }
         using (var upd = c.CreateCommand())
         {
-            upd.CommandText = "UPDATE meetings SET tldr=$t WHERE id=$id";
+            upd.CommandText = "UPDATE meetings SET tldr=$t, template=$template, sections_json=$sections WHERE id=$id";
             upd.Parameters.AddWithValue("$t", notes.Tldr);
+            upd.Parameters.AddWithValue("$template", (object?)notes.Template ?? DBNull.Value);
+            upd.Parameters.AddWithValue("$sections", (object?)SerializeSections(notes.Sections) ?? DBNull.Value);
             upd.Parameters.AddWithValue("$id", meetingId);
             upd.ExecuteNonQuery();
         }

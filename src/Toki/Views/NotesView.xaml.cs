@@ -13,8 +13,8 @@ public partial class NotesView : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => Populate();
-        // Re-render when notes are upgraded (heuristic → LLM) while on screen.
-        App.NotesUpdated += () => { if (IsLoaded) Populate(); };
+        // Note content is built in code (NoteRenderer/FindResource) → re-render on a theme swap.
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { if (IsLoaded) Populate(); });
     }
 
     void Populate()
@@ -59,10 +59,10 @@ public partial class NotesView : UserControl
 
     void OnMaximise(object sender, RoutedEventArgs e)
     {
-        // Consistent with Home → Library: dismiss the pill first, then show the warm window
-        // so it opens instantly and smoothly (no old overlapping handoff).
+        // Consistent with Home → Library, and grow from the notch: capture the pill's spot first.
+        var from = App.PillRect();
         App.State.TryGo(PillState.Hidden);
-        LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id);
+        LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id, fromRect: from);
     }
 
     static string Meta(MeetingRecord m)

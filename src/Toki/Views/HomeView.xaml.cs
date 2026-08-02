@@ -30,9 +30,10 @@ public partial class HomeView : UserControl
 
     void OnLibrary(object sender, RoutedEventArgs e)
     {
-        // Clean, fast handoff: dismiss the pill first, then show the (warm) Library window
-        // so it appears instantly instead of visibly building while the pill lingers.
+        // Grow the Library out of the notch: capture the pill's spot BEFORE hiding it, then hand off
+        // to the warm window which blooms from that rect.
+        var from = App.PillRect();
         App.State.TryGo(PillState.Hidden);
-        Toki.LibraryWindow.ShowLibrary();
+        Toki.LibraryWindow.ShowLibrary(fromRect: from);
     }
 }

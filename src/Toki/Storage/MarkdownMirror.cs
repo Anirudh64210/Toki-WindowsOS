@@ -39,12 +39,14 @@ public static class MarkdownMirror
         }
 
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
-            sb.AppendLine("## TL;DR").AppendLine(m.Notes.Tldr).AppendLine();
+            sb.AppendLine("## Summary").AppendLine(m.Notes.Tldr).AppendLine();
 
-        if (m.Notes.Decisions.Count > 0)
+        // Template middle sections (unified with legacy decisions/questions via EffectiveSections).
+        foreach (var sec in m.Notes.EffectiveSections())
         {
-            sb.AppendLine("## Decisions");
-            foreach (var d in m.Notes.Decisions) sb.AppendLine($"- {d}");
+            if (sec.Bullets.Count == 0) continue;
+            sb.AppendLine($"## {sec.Heading}");
+            foreach (var b in sec.Bullets) sb.AppendLine($"- {b}");
             sb.AppendLine();
         }
         if (m.Notes.Actions.Count > 0)
@@ -56,12 +58,6 @@ public static class MarkdownMirror
                 var suffix = meta.Any() ? $" _({string.Join(", ", meta)})_" : "";
                 sb.AppendLine($"- [{(a.Done ? "x" : " ")}] {a.Text}{suffix}");
             }
-            sb.AppendLine();
-        }
-        if (m.Notes.Questions.Count > 0)
-        {
-            sb.AppendLine("## Open questions");
-            foreach (var q in m.Notes.Questions) sb.AppendLine($"- {q}");
             sb.AppendLine();
         }
         if (m.Transcript.Count > 0)

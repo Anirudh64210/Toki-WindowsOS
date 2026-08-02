@@ -1,24 +1,45 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Palette sampled from Toki-ProductDesign/ -->
+    <!-- ════════════════════════════════════════════════════════════════════════════
+         THEMEABLE BRUSHES. These are shared, MUTABLE SolidColorBrush objects with the DARK
+         defaults below. The light/dark toggle (ThemeManager.Apply) sets each brush's .Color
+         directly on the shared instance — so every consumer (StaticResource or DynamicResource)
+         recolours live, instantly, with no rebuild. Do NOT freeze these. ThemeManager.Palette
+         is the single source of truth for the dark↔light values.
+         ════════════════════════════════════════════════════════════════════════════ -->
     <SolidColorBrush x:Key="Surface" Color="#0B0B0C"/>
     <SolidColorBrush x:Key="SurfaceHi" Color="#1C1C1E"/>
     <SolidColorBrush x:Key="Chip" Color="#2C2C2E"/>
     <SolidColorBrush x:Key="Text" Color="#F5F5F4"/>
+    <SolidColorBrush x:Key="TextSoft" Color="#DDDDDB"/>
     <SolidColorBrush x:Key="TextDim" Color="#8E8E8E"/>
-    <!-- Softer, truer "coral" than the old fire red-orange (#F94A26), which read as harsh
-         on the record button. Used for record/stop + accents (dot, check, selection). -->
-    <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
+    <SolidColorBrush x:Key="Ink" Color="#141414"/>
+    <SolidColorBrush x:Key="Notch" Color="#000000"/>
+    <SolidColorBrush x:Key="NotchBorder" Color="#33000000"/>
+    <SolidColorBrush x:Key="WhiteBtn" Color="#F2F2F2"/>
+    <SolidColorBrush x:Key="CtaText" Color="#141414"/>
+    <SolidColorBrush x:Key="HoverOverlay" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="PressOverlay" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="Hairline" Color="#18FFFFFF"/>
+    <SolidColorBrush x:Key="SelectionBorder" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="CheckBorder" Color="#55FFFFFF"/>
+    <SolidColorBrush x:Key="CheckBorderHover" Color="#88FFFFFF"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3A3A3D"/>
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#565659"/>
+    <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#6A6A6E"/>
+    <!-- Accent tints (chip backgrounds behind coloured text) + the accent text on them.
+         Amber/Green/Blue text darkens in the light theme for contrast on the pale tints. -->
     <SolidColorBrush x:Key="Amber" Color="#E89B3C"/>
     <SolidColorBrush x:Key="AmberDark" Color="#3B2F1B"/>
-    <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
-    <SolidColorBrush x:Key="WhiteBtn" Color="#F2F2F2"/>
-    <SolidColorBrush x:Key="Ink" Color="#141414"/>
     <SolidColorBrush x:Key="Green" Color="#3DD68C"/>
     <SolidColorBrush x:Key="GreenDark" Color="#12351F"/>
     <SolidColorBrush x:Key="Blue" Color="#5AA9F9"/>
     <SolidColorBrush x:Key="BlueDark" Color="#12314F"/>
+
+    <!-- Accents that stay constant across themes (Coral CTA, Toki pink, purple). -->
+    <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
+    <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
 
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
@@ -26,8 +47,8 @@
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <Style x:Key="PillButton" TargetType="Button">
-        <Setter Property="Foreground" Value="{StaticResource Text}"/>
-        <Setter Property="Background" Value="{StaticResource Chip}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Background" Value="{DynamicResource Chip}"/>
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
@@ -60,13 +81,13 @@
     </Style>
 
     <Style x:Key="WhiteButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
-        <Setter Property="Background" Value="{StaticResource WhiteBtn}"/>
-        <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+        <Setter Property="Background" Value="{DynamicResource WhiteBtn}"/>
+        <Setter Property="Foreground" Value="{DynamicResource CtaText}"/>
     </Style>
 
     <Style x:Key="StarButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
-        <Setter Property="Background" Value="{StaticResource AmberDark}"/>
-        <Setter Property="Foreground" Value="{StaticResource Amber}"/>
+        <Setter Property="Background" Value="{DynamicResource AmberDark}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Amber}"/>
     </Style>
 
     <!-- Rounded-square action button (stop) -->
@@ -97,7 +118,7 @@
     <!-- Small icon button (gear, back, copy, open, close) — crisp Fluent glyph that
          floats until hovered, then lifts on a subtle rounded highlight (design style). -->
     <Style x:Key="IconButton" TargetType="Button">
-        <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
         <Setter Property="FontSize" Value="14"/>
         <Setter Property="Width" Value="30"/>
@@ -112,11 +133,11 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#1FFFFFFF"/>
-                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{StaticResource Text}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource Text}"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#33FFFFFF"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressOverlay}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -135,12 +156,12 @@
     <Style x:Key="Body" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
 
     <Style x:Key="Dim" TargetType="TextBlock" BasedOn="{StaticResource Body}">
-        <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
         <Setter Property="FontSize" Value="10.5"/>
     </Style>
 
@@ -150,13 +171,13 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border x:Name="Bd" Background="#3A3A3D" CornerRadius="4" Margin="2,0"/>
+                    <Border x:Name="Bd" Background="{DynamicResource ScrollThumbBrush}" CornerRadius="4" Margin="2,0"/>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#565659"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
                         </Trigger>
                         <Trigger Property="IsDragging" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#6A6A6E"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ScrollThumbDragBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -203,7 +224,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
                     <Border x:Name="Box" Width="17" Height="17" CornerRadius="5.5"
-                            Background="Transparent" BorderBrush="#55FFFFFF" BorderThickness="1.5"
+                            Background="Transparent" BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
                             SnapsToDevicePixels="True">
                         <Path x:Name="Tick" Stretch="Uniform" Margin="3.5" Opacity="0"
                               Stroke="White" StrokeThickness="2.2" StrokeEndLineCap="Round" StrokeStartLineCap="Round"
@@ -211,7 +232,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Box" Property="BorderBrush" Value="#88FFFFFF"/>
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource CheckBorderHover}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Box" Property="Background" Value="{StaticResource Coral}"/>

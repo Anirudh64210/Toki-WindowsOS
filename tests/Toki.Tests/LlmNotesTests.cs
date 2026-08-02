@@ -45,11 +45,29 @@ public class LlmNotesTests
             : "NONE");
 
         var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
-        Assert.Contains(notes.Decisions, d => d.Contains("Thursday"));   // "Decisions" holds key points
+        // Key points now live in the template's flexible Sections (not the legacy Decisions bucket).
+        Assert.Contains(notes.EffectiveSections().SelectMany(s => s.Bullets), b => b.Contains("Thursday"));
         Assert.Single(notes.Actions, a => a.Text.Contains("webhook") && a.Owner == "You" && a.Due == "This week");
         Assert.Contains("Thursday", notes.Tldr);
         Assert.Equal("Ship Thursday", notes.Title);
-        Assert.Empty(notes.Questions); // open-questions section retired
+        Assert.Equal("General", notes.Template);   // nothing signalled a niche type → General
+    }
+
+    [Fact]
+    public async Task DetectsTemplateAndWritesItsSections()
+    {
+        // Classify → Standup; final pass returns that template's sections (Updates / Blockers).
+        var llm = new FakeLlm(user =>
+            user.Contains("Write a title") ? "Sprint Standup"
+            : user.Contains("Pick the single best note template") ? "Standup"
+            : user.Contains("UPDATES") ?
+                "UPDATES\n- Alice finished the API\n\nBLOCKERS\n- Waiting on the design\n\nSUMMARY\nQuick team sync."
+            : "NONE");
+
+        var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
+        Assert.Equal("Standup", notes.Template);
+        Assert.Contains(notes.Sections, s => s.Heading == "Updates" && s.Bullets.Any(b => b.Contains("API")));
+        Assert.Contains(notes.Sections, s => s.Heading == "Blockers");
     }
 
     [Fact]

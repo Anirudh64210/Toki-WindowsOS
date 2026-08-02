@@ -37,13 +37,14 @@ public static class NoteRenderer
             {
                 Text = m.Notes.Tldr, TextWrapping = TextWrapping.Wrap, FontFamily = Ui,
                 FontSize = fs, LineHeight = fs + 11, TextAlignment = TextAlignment.Justify,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDB)),
+                Foreground = (Brush)System.Windows.Application.Current.FindResource("TextSoft"),
                 Margin = new Thickness(0, 0, 0, 2),
             });
         }
 
-        // "Decisions" storage is repurposed as key points (see NoteSet).
-        Section(body, "KEY POINTS", m.Notes.Decisions.Select(d => Bullet(d, fs, spacious)), spacious);
+        // Template middle sections (standup → Updates/Blockers, etc.), unified with legacy notes.
+        foreach (var sec in m.Notes.EffectiveSections())
+            Section(body, sec.Heading.ToUpperInvariant(), sec.Bullets.Select(b => Bullet(b, fs, spacious)), spacious);
         Section(body, "ACTION ITEMS", m.Notes.Actions.Select(a => ActionRow(a, fs, spacious)), spacious);
 
         if (m.Transcript.Count > 0)

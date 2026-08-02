@@ -13,6 +13,8 @@ public partial class LibraryView : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => { SearchBox.Text = ""; Reload(); };
+        // Cards are built in code (FindResource brushes) → rebuild them on a theme swap so they recolour.
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { if (IsLoaded) Reload(); });
     }
 
     void Reload()
@@ -111,9 +113,8 @@ public partial class LibraryView : UserControl
 
     void Delete(MeetingSummary m)
     {
-        var confirm = MessageBox.Show($"Delete \"{m.Title}\"? This can't be undone.",
-            "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.OK) return;
+        if (!ConfirmDialog.Show(null, "Delete this?",
+                $"“{m.Title}” and its audio will be removed for good. This can't be undone.")) return;
         try { App.Store.Delete(m.Id); Toki.LibraryWindow.MarkDirty(); } catch (Exception ex) { App.Log($"delete failed: {ex.Message}"); }
         Reload();
     }

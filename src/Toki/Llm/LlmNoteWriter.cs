@@ -63,18 +63,21 @@ public sealed class LlmNoteWriter
             sourceIsDigests = true;
         }
 
-        // REDUCE / FINAL: the adaptive, honest note.
-        var note = await FinalNote(source, sourceIsDigests, ct);
+        // Pick the note template that fits this meeting, then write it in that shape.
+        var template = await ClassifyTemplate(source, sourceIsDigests, ct);
+
+        // REDUCE / FINAL: the adaptive, honest note in the chosen template.
+        var note = await FinalNote(source, sourceIsDigests, template, ct);
         if (note is null) return heuristic;                       // total LLM failure → heuristic floor
-        if (IsNothing(note.Summary) && note.KeyPoints.Count == 0 && note.Actions.Count == 0)
+        if (IsNothing(note.Summary) && note.Sections.Count == 0 && note.Actions.Count == 0)
             return LowSubstanceNote();                            // model judged it low-substance
 
         var result = new NoteSet
         {
+            Template = template.Name,
             Tldr = string.IsNullOrWhiteSpace(note.Summary) ? heuristic.Tldr : note.Summary,
-            Decisions = note.KeyPoints,   // "Decisions" column is rendered as KEY POINTS; empty → section dropped
+            Sections = note.Sections,     // template middle sections (empty ones already dropped)
             Actions = note.Actions,       // empty → section dropped
-            Questions = [],
         };
         // The combined pass already produced the title in the SAME call — only fall back to a
         // separate title generation (an extra ~round-trip) if it somehow didn't.
@@ -87,58 +90,81 @@ public sealed class LlmNoteWriter
     {
         var prompt =
             $"This is part {part} of {total} of a meeting transcript. In 2 to 5 short dash bullets, list ONLY the "
-            + "concrete things in THIS part: topics discussed, any decisions, any tasks/follow-ups (with who and "
-            + "when if stated), and important facts. Capture real content even if the talk is informal, rambling, "
-            + "or in fragments. Do not editorialise.\n"
+            + "concrete things in THIS part: topics discussed, any decisions, any tasks/follow-ups (keeping the exact "
+            + "NAME of whoever the task was given to, and the due date, when stated), and important facts. Capture "
+            + "real content even if the talk is informal, rambling, or in fragments. Cut filler, greetings, and "
+            + "logistics. Do not editorialise.\n"
             + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk, or "
             + "connection/audio checks with no real topic at all.\n\n"
             + $"Transcript part:\n{chunk}";
         return await TextPass(prompt, 220, ct);
     }
 
-    // ── REDUCE / FINAL: adaptive, honest note ──
-    async Task<FinalSections?> FinalNote(string content, bool contentIsDigests, CancellationToken ct)
+    // ── template classification: which note shape fits this meeting ──
+    async Task<NoteTemplate> ClassifyTemplate(string source, bool isDigests, CancellationToken ct)
+    {
+        var prompt =
+            "Pick the single best note template for this meeting from the list below. "
+            + "Reply with ONLY the template name, exactly as written — nothing else.\n\n"
+            + NoteTemplates.Menu() + "\n\n"
+            + (isDigests ? "Notes:\n" : "Transcript:\n") + source;
+        return Pick(await TextPass(prompt, 12, ct));
+    }
+
+    static NoteTemplate Pick(string? raw)
+    {
+        var s = (raw ?? "").ToLowerInvariant();
+        // Longest name first, so "Decision log" wins over an incidental "1:1" substring, etc.
+        foreach (var t in NoteTemplates.All.OrderByDescending(t => t.Name.Length))
+            if (s.Contains(t.Name.ToLowerInvariant())) return t;
+        return NoteTemplates.General;
+    }
+
+    // ── REDUCE / FINAL: adaptive, honest note in the chosen template ──
+    async Task<FinalNoteResult?> FinalNote(string content, bool contentIsDigests, NoteTemplate template, CancellationToken ct)
     {
         var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
+        var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
+            $"{s.ToUpperInvariant()}\n- up to 5 tight bullets for \"{s}\". Every bullet must carry information a busy "
+            + "person needs — drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists."));
+
         var prompt =
-            $"Write the notes for {what}. First judge how much real substance the meeting had.\n\n"
+            $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
-            + "TITLE\n"
-            + "3 to 6 words, specific and concise, like a calendar event — no quotes, no \"Meeting\" prefix.\n\n"
-            + "SUMMARY\n"
-            + "2 to 4 plain-English sentences on what the meeting was about and what came of it. Capture what was "
-            + "genuinely discussed even if the talk was informal, wandering, or a working session — never inflate it, "
-            + "but never dismiss real content either.\n\n"
-            + "KEY POINTS\n"
-            + "- up to 5 short bullets on the main topics, facts, or decisions. Include this section ONLY if there "
-            + "are real points worth listing.\n\n"
+            + "TITLE\n3 to 6 words, specific and concise, like a calendar event — no quotes, no \"Meeting\" prefix.\n\n"
+            + "SUMMARY\n2 to 4 dense, plain-English sentences: what the meeting was about and what came of it. Capture "
+            + "real content from informal or wandering talk, but cut ALL filler.\n\n"
+            + sectionSpec + "\n\n"
             + "ACTION ITEMS\n"
-            + "- concrete follow-up tasks only, one per line as: task | owner: name | due: when (drop owner or due "
-            + "when not stated). Include this section ONLY if real tasks were actually agreed.\n\n"
-            + "Hard rules: never invent decisions, tasks, or points that aren't clearly present. Omit any section "
-            + $"that does not apply — a short, honest note is correct. Reply with exactly {NothingMarker} ONLY if the "
-            + "ENTIRE thing is greetings, small talk, or connection checks with no real topic discussed at all.\n\n"
+            + "- concrete follow-up tasks only, one per line as: task | owner: name | due: when\n"
+            + "  - owner = the EXACT name of the person the task was given to, as spoken (e.g. \"Priya\"). If the "
+            + "speaker took it on themselves, use owner: You. If no person is clearly named, DROP the owner field — never guess.\n"
+            + "  - drop the due field when no time was stated.\n"
+            + "  Include this section ONLY if real tasks were actually agreed.\n\n"
+            + "Hard rules: never invent points, tasks, or names that aren't clearly present. A short, honest note beats "
+            + $"a padded one — omit any section that doesn't apply. Reply with exactly {NothingMarker} ONLY if the ENTIRE "
+            + "thing is greetings, small talk, or connection checks with no real topic at all.\n\n"
             + $"{(contentIsDigests ? "Notes" : "Transcript")}:\n{content}";
 
-        var raw = await TextPass(prompt, 430, ct);
+        var raw = await TextPass(prompt, 480, ct);
         if (raw is null) return null;
-        if (IsNothing(raw)) return new FinalSections { Summary = NothingMarker };
+        if (IsNothing(raw)) return new FinalNoteResult { Summary = NothingMarker };
 
-        var (title, kp, ai, summary) = SplitSections(raw);
-        return new FinalSections
+        var (title, summary, sections, actionLines) = ParseNote(raw, template);
+        return new FinalNoteResult
         {
             Title = CleanTitle(title),
             Summary = summary,
-            KeyPoints = kp,
-            Actions = ai.Count > 0 ? ParseActions(ai) : [],
+            Sections = sections,
+            Actions = actionLines.Count > 0 ? ParseActions(actionLines) : [],
         };
     }
 
-    sealed class FinalSections
+    sealed class FinalNoteResult
     {
         public string? Title { get; set; }
         public string Summary { get; set; } = "";
-        public List<string> KeyPoints { get; set; } = [];
+        public List<NoteSection> Sections { get; set; } = [];
         public List<ActionItem> Actions { get; set; } = [];
     }
 
@@ -206,44 +232,56 @@ public sealed class LlmNoteWriter
         return chunks;
     }
 
-    // ── section parsing (shared) ──
-
-    static (string Title, List<string> KeyPoints, List<string> Actions, string Summary) SplitSections(string raw)
+    // ── section parsing (template-aware) ──
+    // Recognises TITLE / SUMMARY / ACTION ITEMS plus the chosen template's section headings; every
+    // other non-empty line is a bullet under the current section. Empty sections are dropped.
+    static (string Title, string Summary, List<NoteSection> Sections, List<string> ActionLines)
+        ParseNote(string raw, NoteTemplate template)
     {
-        var keyPoints = new List<string>();
-        var actions = new List<string>();
-        var summary = new StringBuilder();
+        var buckets = template.Sections.ToDictionary(s => s, _ => new List<string>(), StringComparer.OrdinalIgnoreCase);
         var title = new StringBuilder();
-        var section = 0; // 0 none, 1 key points, 2 actions, 3 summary, 4 title
+        var summary = new StringBuilder();
+        var actions = new List<string>();
+        string cur = "";   // "title" | "summary" | "actions" | a template section heading | ""
 
         foreach (var lineRaw in raw.Split('\n'))
         {
             var line = lineRaw.Trim();
             if (line.Length == 0) continue;
-            var header = HeaderOf(line);
-            if (header != 0) { section = header; continue; }
+
+            var head = line.Trim('*', '#', ':', '-', ' ', '\t');
+            // Template sections take precedence (so a heading the template defines is never mistaken
+            // for an action-items synonym), then the three fixed headers.
+            var sec = template.Sections.FirstOrDefault(s => string.Equals(s, head, StringComparison.OrdinalIgnoreCase));
+            if (sec is not null) { cur = sec; continue; }
+            var special = SpecialHeader(head);
+            if (special is not null) { cur = special; continue; }
             if (line.Equals("NONE", StringComparison.OrdinalIgnoreCase)) continue;
 
             var clean = line.TrimStart('-', '*', '•', ' ', '\t').Trim();
-            switch (section)
+            switch (cur)
             {
-                case 1 when clean.Length > 1: keyPoints.Add(clean); break;
-                case 2 when clean.Length > 1: actions.Add(clean); break;
-                case 3: if (summary.Length > 0) summary.Append(' '); summary.Append(clean); break;
-                case 4: if (title.Length == 0) title.Append(clean); break;   // first line only
+                case "title": if (title.Length == 0) title.Append(clean); break;   // first line only
+                case "summary": if (summary.Length > 0) summary.Append(' '); summary.Append(clean); break;
+                case "actions": if (clean.Length > 1) actions.Add(clean); break;
+                default: if (clean.Length > 1 && buckets.TryGetValue(cur, out var b)) b.Add(clean); break;
             }
         }
-        return (title.ToString().Trim(), keyPoints, actions, summary.ToString().Trim());
+
+        var sections = template.Sections
+            .Where(s => buckets[s].Count > 0)
+            .Select(s => new NoteSection { Heading = s, Bullets = buckets[s] })
+            .ToList();
+        return (title.ToString().Trim(), summary.ToString().Trim(), sections, actions);
     }
 
-    static int HeaderOf(string line)
+    static string? SpecialHeader(string head)
     {
-        var h = line.Trim('*', '#', ':', ' ', '\t').ToLowerInvariant();
-        if (h is "key points" or "keypoints" or "highlights" or "key point") return 1;
-        if (h is "action items" or "action item" or "actions" or "to-dos" or "todos" or "to dos" or "next steps") return 2;
-        if (h is "summary" or "tl;dr" or "tldr" or "overview") return 3;
-        if (h is "title") return 4;
-        return 0;
+        var h = head.ToLowerInvariant();
+        if (h is "title") return "title";
+        if (h is "summary" or "tl;dr" or "tldr" or "overview") return "summary";
+        if (h is "action items" or "action item" or "actions" or "to-dos" or "todos" or "to dos" or "next steps") return "actions";
+        return null;
     }
 
     static List<ActionItem> ParseActions(List<string> lines)

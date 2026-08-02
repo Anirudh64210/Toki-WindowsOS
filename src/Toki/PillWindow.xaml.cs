@@ -76,13 +76,12 @@ public partial class PillWindow : Window
     // Window bounds in physical pixels, for the (off-thread) click-outside hook.
     int _rectL, _rectT, _rectR, _rectB;
 
-    Brush? _surfaceBg, _surfaceBorder;   // the dark frosted notch fill (hidden while peeking)
+    // The notch surface is the themed "Notch"/"NotchBorder" resources — re-resolved via
+    // SetResourceReference (not a cached brush) so a live theme swap recolours the notch too.
 
     public PillWindow(AppState state)
     {
         InitializeComponent();
-        _surfaceBg = Root.Background;
-        _surfaceBorder = Root.BorderBrush;
         _state = state;
         // Clicking the Toki peek opens the remembered page (Home by default).
         App.OpenPeek = () => { if (_state.Current == PillState.Collapsed) _state.ForceForDemo(_context); };
@@ -162,8 +161,13 @@ public partial class PillWindow : Window
         int gap = (int)Math.Round(TopGap * dpi);
         int x = work.Left + ((work.Right - work.Left) - winW) / 2;
         int y = work.Top + gap;   // top edge fixed → height grows downward
+        // Skip the move when nothing changed — SizeChanged fires this on every frame of a size
+        // animation, but for a height-only morph x/y are constant, so the Win32 call is pure waste.
+        if (x == _lastPlaceX && y == _lastPlaceY) return;
+        _lastPlaceX = x; _lastPlaceY = y;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
     }
+    int _lastPlaceX = int.MinValue, _lastPlaceY = int.MinValue;
 
     // Work area of the monitor the CURSOR is on — so the notch appears on whichever screen
     // you're using (edge-summon on any monitor's top edge, events on the active screen).
@@ -285,18 +289,18 @@ public partial class PillWindow : Window
         }
         else if (fromHidden)
         {
-            // Drop DOWN out of the top edge: start tucked (tiny height) and grow to full,
-            // content fading in — the notch slides into view.
+            // Drop DOWN out of the top edge, GPU-COMPOSITED. The old path animated the transparent
+            // layered window's Height 8→full, which forced a full window relayout AND a Win32
+            // re-center on EVERY frame (the "ugly open"). Now the window is sized to its final
+            // bounds ONCE, and the notch unfurls via an animated clip (render-only, no layout, no
+            // move) while the content pops in — a clean extend-out-of-the-edge, no jank.
             BeginAnimation(WidthProperty, null);
             BeginAnimation(HeightProperty, null);
             Width = w;
-            Height = 8;
+            Height = targetH;
             Show(); ApplyGhost();          // re-apply WDA — hide/show can drop it
             PlaceTopCenter();
-            AnimateSize(w, targetH, 280);  // SizeChanged re-anchors top each frame → grows down
-            Host.BeginAnimation(OpacityProperty, null);
-            Host.Opacity = 0;
-            Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(240))));
+            RevealDown(w, targetH, 280);   // sets a 0-height clip synchronously first → no full-box flash
         }
         else
         {
@@ -348,8 +352,17 @@ public partial class PillWindow : Window
     /// the dark frosted box.</summary>
     void SetSurface(bool peek)
     {
-        Root.Background = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBg;
-        Root.BorderBrush = peek ? System.Windows.Media.Brushes.Transparent : _surfaceBorder;
+        if (peek)
+        {
+            Root.Background = System.Windows.Media.Brushes.Transparent;
+            Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
+        }
+        else
+        {
+            // Re-bind to the themed resources (not a cached brush) so a live light/dark swap recolours.
+            Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Notch");
+            Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "NotchBorder");
+        }
         Root.BorderThickness = peek ? default : new Thickness(1, 0, 1, 1);
         Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -396,7 +409,7 @@ public partial class PillWindow : Window
         if (Environment.OSVersion.Version.Build < 22000) return;
         try
         {
-            var dark = 1;
+            var dark = Theme.ThemeManager.Current == Theme.AppTheme.Light ? 0 : 1;
             DwmSetWindowAttribute(_hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
         }
         catch (Exception ex) { App.Log($"dark mode attr failed (non-fatal): {ex.Message}"); }
@@ -416,14 +429,40 @@ public partial class PillWindow : Window
 
     void HideAnimated()
     {
-        // Tuck back UP into the top edge: retract the height (top is fixed, so the bottom
-        // slides up) while the content fades — reads as the notch sliding away.
-        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
-        BeginAnimation(HeightProperty, new DoubleAnimation(Math.Max(ActualHeight, 8), 8,
-            new Duration(TimeSpan.FromMilliseconds(170))) { EasingFunction = ease });
-        var fade = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(150)));
-        fade.Completed += (_, _) => { BeginAnimation(HeightProperty, null); Hide(); };
-        Host.BeginAnimation(OpacityProperty, fade);
+        // Retract UP into the top edge, GPU-COMPOSITED: only an animated clip + content fade run —
+        // the window is NOT resized per frame (the old close animated Window.Height → relayout every
+        // frame). Reads as the notch retracting cleanly into the edge, then hides.
+        ConcealUp(ActualWidth, 170, Hide);
+    }
+
+    /// <summary>Composited "unfurl": reveal the notch downward via an animated clip (render-only — no
+    /// layout, no window resize, no SetWindowPos) while the content settles in. The window must
+    /// already be at its final size. The initial 0-height clip is set synchronously so no full-height
+    /// dark box flashes before the first frame.</summary>
+    void RevealDown(double w, double h, int ms)
+    {
+        var geo = new RectangleGeometry(new Rect(0, 0, w, 0));
+        Root.Clip = geo;
+        var anim = new RectAnimation(new Rect(0, 0, w, 0), new Rect(0, 0, w, h),
+            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        anim.Completed += (_, _) => { if (ReferenceEquals(Root.Clip, geo)) Root.Clip = null; };  // drop the clip so content isn't capped
+        geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
+        MorphContent();   // content settles in with the soft pop + fade
+    }
+
+    /// <summary>Composited "retract": conceal the notch upward via an animated clip + fade (render-only),
+    /// then run <paramref name="done"/> (Hide). No per-frame window resize.</summary>
+    void ConcealUp(double w, int ms, Action done)
+    {
+        var h = ActualHeight > 0 ? ActualHeight : Height;
+        var geo = new RectangleGeometry(new Rect(0, 0, w, h));
+        Root.Clip = geo;
+        var anim = new RectAnimation(new Rect(0, 0, w, h), new Rect(0, 0, w, 0),
+            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
+        anim.Completed += (_, _) => { Root.Clip = null; done(); };
+        geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(Math.Max(60, ms - 20)))));
     }
 
     void OnKeyDown(object sender, KeyEventArgs e)

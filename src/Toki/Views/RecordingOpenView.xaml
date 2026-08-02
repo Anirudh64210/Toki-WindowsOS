@@ -24,13 +24,13 @@
                 <Ellipse x:Name="Dot" Width="7" Height="7" Fill="{StaticResource Coral}"
                          VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <TextBlock Text="Recording" Style="{StaticResource Body}" FontSize="11"
-                           Foreground="{StaticResource TextDim}" VerticalAlignment="Center"/>
+                           Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
             </StackPanel>
         </Grid>
 
         <!-- Live transcript: the most recent finalized line, fading in as Toki hears it. -->
         <TextBlock x:Name="LiveLine" Margin="0,11,0,0" Text="Listening…" Style="{StaticResource Body}"
-                   FontSize="11.5" Foreground="{StaticResource TextDim}" TextWrapping="NoWrap"
+                   FontSize="11.5" Foreground="{DynamicResource TextDim}" TextWrapping="NoWrap"
                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
 
         <Button Margin="0,11,0,0" Style="{StaticResource CoralButton}"

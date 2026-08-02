@@ -9,9 +9,18 @@
                 <ScaleTransform x:Name="Breathe" CenterX="60" CenterY="106"/>
             </Grid.RenderTransform>
 
-            <!-- Body -->
-            <Border Width="120" Height="106" Background="#F48AAE"
-                    CornerRadius="60,60,46,46"/>
+            <!-- Body: a soft pink CLOUD, matching the Toki-ProductDesign logo — a wide rounded base
+                 with three humps on top (union of ellipses), NOT a single oval. -->
+            <Path Fill="#F48AAE">
+                <Path.Data>
+                    <GeometryGroup FillRule="Nonzero">
+                        <EllipseGeometry Center="60,67" RadiusX="58" RadiusY="37"/>
+                        <EllipseGeometry Center="30,52" RadiusX="25" RadiusY="25"/>
+                        <EllipseGeometry Center="61,37" RadiusX="33" RadiusY="33"/>
+                        <EllipseGeometry Center="91,52" RadiusX="25" RadiusY="25"/>
+                    </GeometryGroup>
+                </Path.Data>
+            </Path>
             <!-- Cheek blush -->
             <Ellipse Width="18" Height="12" Fill="#EC6E99" Opacity="0.55"
                      HorizontalAlignment="Left" VerticalAlignment="Center"

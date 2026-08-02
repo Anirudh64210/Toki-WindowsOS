@@ -46,7 +46,7 @@ public partial class LibraryWindow : Window
         // Rebuild only when data changed (or a specific note was requested); otherwise the
         // already-rendered content is reused and opening is just Show() → instant.
         if (_dirty || focusMeetingId is not null) { w.Reload(focusMeetingId); _dirty = false; }
-        if (!w.IsVisible) { w.CenterOnWorkArea(); w.Show(); w.PlayOpen(); }
+        if (!w.IsVisible) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
         w.Activate();
     }
 
@@ -90,25 +90,84 @@ public partial class LibraryWindow : Window
         w.ShowActivated = true;
     }
 
+    // The pill's on-screen rect when the Library was opened — so the window blooms FROM the notch
+    // and shrinks back TO it (a connected morph), not from a disembodied centre.
+    Rect? _originRect;
+    bool _closing;
+
     /// <summary>
-    /// Smooth appear: the content scales up subtly from centre with a fade — GPU-composited
-    /// (a RenderTransform + element Opacity on RootGrid), so it's smooth and cheap. NOT the
-    /// window's Opacity (that forces a layered window + CPU re-blit → stutter). Mirrors the
-    /// "Back to Toki" feel where the pill morphs, and adds nothing to the ~80ms open cost
-    /// (it runs after Show, non-blocking).
+    /// Grow the window out of the notch: the content scales up from the pill's location with a
+    /// fade — GPU-composited (a RenderTransform + element Opacity on RootGrid), smooth and cheap.
+    /// NOT the window's Opacity (that forces a layered window + CPU re-blit → stutter). Runs after
+    /// Show, non-blocking, so it adds nothing to the instant open cost.
     /// </summary>
-    void PlayOpen()
+    void PlayOpen(Rect? fromRect)
     {
+        _closing = false;
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var dur = new Duration(TimeSpan.FromMilliseconds(180));
-        RootGrid.RenderTransformOrigin = new Point(0.5, 0.5);
-        var scale = new ScaleTransform(0.96, 0.96);
+        var dur = new Duration(TimeSpan.FromMilliseconds(230));
+        RootGrid.RenderTransformOrigin = OriginFrom(fromRect);
+        var scale = new ScaleTransform(0.9, 0.9);
         RootGrid.RenderTransform = scale;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
-        var fade = new DoubleAnimation(0.0, 1, dur) { EasingFunction = ease };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
+        var fade = new DoubleAnimation(0.0, 1, new Duration(TimeSpan.FromMilliseconds(190))) { EasingFunction = ease };
         fade.Completed += (_, _) => { RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1; };
         RootGrid.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>Shrink the window back toward the notch (mirror of <see cref="PlayOpen"/>) with a fade,
+    /// then run <paramref name="done"/> — which hides the window and re-reveals the pill, so the two
+    /// motions read as one continuous "back to Toki".</summary>
+    void PlayClose(Action done)
+    {
+        if (_closing) return;   // ignore a double back/close while the retract is already playing
+        _closing = true;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var dur = new Duration(TimeSpan.FromMilliseconds(160));
+        RootGrid.RenderTransformOrigin = OriginFrom(_originRect);
+        var scale = RootGrid.RenderTransform as ScaleTransform ?? new ScaleTransform(1, 1);
+        RootGrid.RenderTransform = scale;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, 0.9, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, 0.9, dur) { EasingFunction = ease });
+        var fade = new DoubleAnimation(RootGrid.Opacity, 0, dur) { EasingFunction = ease };
+        fade.Completed += (_, _) =>
+        {
+            done();
+            // Reset so the NEXT open starts clean (window is hidden now → no visible flash).
+            RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1;
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            scale.ScaleX = scale.ScaleY = 1;
+            _closing = false;
+        };
+        RootGrid.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>The pill's centre as a 0..1 origin within the window, so the scale grows/shrinks
+    /// toward the notch. Clamped (the notch sits above the window → origin Y pins to the top edge).
+    /// Falls back to centre when the pill's rect is unknown (e.g. opened from the tray).</summary>
+    Point OriginFrom(Rect? r)
+    {
+        if (r is not Rect pr || pr.Width <= 0 || ActualWidth <= 0 || ActualHeight <= 0) return new Point(0.5, 0.5);
+        var ox = (pr.X + pr.Width / 2 - Left) / ActualWidth;
+        var oy = (pr.Y + pr.Height / 2 - Top) / ActualHeight;
+        return new Point(Math.Clamp(ox, 0, 1), Math.Clamp(oy, 0, 1));
+    }
+
+    /// <summary>Soften the OS maximise/restore snap: the frame resizes instantly (OS), but the content
+    /// eases into the new size instead of hard-popping — so the size change reads smooth.</summary>
+    void PlayStateSettle()
+    {
+        if (WindowState == WindowState.Minimized || !IsVisible) return;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var dur = new Duration(TimeSpan.FromMilliseconds(200));
+        RootGrid.RenderTransformOrigin = new Point(0.5, 0.5);
+        var scale = new ScaleTransform(0.99, 0.99);
+        RootGrid.RenderTransform = scale;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.99, 1, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.99, 1, dur) { EasingFunction = ease });
+        RootGrid.BeginAnimation(OpacityProperty, new DoubleAnimation(0.55, 1, dur) { EasingFunction = ease });
     }
 
     void CenterOnWorkArea()
@@ -120,12 +179,18 @@ public partial class LibraryWindow : Window
         Top = wa.Top + (wa.Height - wh) / 2;
     }
 
-    /// <summary>Hide the window (keep it warm) and bring the pill back.</summary>
+    /// <summary>Retract to the notch and bring the pill back — one continuous motion: the window
+    /// shrinks toward the pill's spot, then hides (kept warm) as the pill re-reveals at the top edge.</summary>
     void HideToPill()
     {
         FlushManual();          // don't lose an in-progress manual-note edit on close
-        Hide();
-        App.State.ForceForDemo(PillState.Home);
+        // Restore first if maximised, so the retract animates from the normal bounds (not full-screen).
+        if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
+        PlayClose(() =>
+        {
+            Hide();
+            App.State.ForceForDemo(PillState.Home);   // pill blooms back in (composited RevealDown)
+        });
     }
 
     /// <summary>Open the Library and start a fresh manual note in the editor.</summary>
@@ -139,6 +204,12 @@ public partial class LibraryWindow : Window
     {
         InitializeComponent();
         SourceInitialized += (_, _) => StyleChrome();
+        // Soften the maximise/restore snap (the "min-to-max sizer" clunk): ease the content into
+        // the new size on every WindowState change instead of a hard pop.
+        StateChanged += (_, _) => PlayStateSettle();
+        // The list cards + note detail are built in code (FindResource brushes), so they don't
+        // recolour on their own — rebuild them (and re-apply the title-bar theme) on a theme swap.
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { StyleChrome(); Reload(); });
         _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
         // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
         // already call Reload() explicitly — a Loaded handler here made every open rebuild
@@ -150,10 +221,11 @@ public partial class LibraryWindow : Window
         try
         {
             var hwnd = new WindowInteropHelper(this).Handle;
-            var dark = 1;
-            DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE)
-            int borderColor = 0x00161616;
-            DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR — dark, not white
+            var light = Toki.Theme.ThemeManager.Current == Toki.Theme.AppTheme.Light;
+            var dark = light ? 0 : 1;
+            DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // title bar follows theme (DWMWA_USE_IMMERSIVE_DARK_MODE)
+            int borderColor = light ? 0x00E2E2E2 : 0x00161616;      // window border matches the theme
+            DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR (COLORREF 0x00BBGGRR)
             // The Library is an ordinary window: it is NOT hidden from screen capture. (The pill has
             // an opt-in ghost toggle; the Library deliberately does not — owner decision.)
 
@@ -225,9 +297,9 @@ public partial class LibraryWindow : Window
         var card = new Border
         {
             Background = (Brush)FindResource(selected ? "Chip" : "SurfaceHi"),
-            // Monotone selection: a soft white hairline (not the coral outline, which read
-            // as an alarming red box), on the slightly-brighter Chip background.
-            BorderBrush = selected ? new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)) : Brushes.Transparent,
+            // Monotone selection: a soft hairline (not the coral outline, which read as an
+            // alarming red box), on the slightly-brighter Chip background. Theme-aware.
+            BorderBrush = selected ? (Brush)FindResource("SelectionBorder") : Brushes.Transparent,
             BorderThickness = new Thickness(selected ? 1 : 0),
             CornerRadius = new CornerRadius(12), Padding = new Thickness(11, 11, 11, 12),
             Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
@@ -442,7 +514,7 @@ public partial class LibraryWindow : Window
         var bodyBox = new TextBox
         {
             Text = m.Body ?? "", Background = Brushes.Transparent, BorderThickness = new Thickness(0),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xD5, 0xD5, 0xD3)), CaretBrush = (Brush)FindResource("Text"),
+            Foreground = (Brush)FindResource("TextSoft"), CaretBrush = (Brush)FindResource("Text"),
             FontSize = 13, FontFamily = (FontFamily)FindResource("UiFont"), AcceptsReturn = true, AcceptsTab = true,
             TextWrapping = TextWrapping.Wrap, MinHeight = 320, Margin = new Thickness(0, 12, 0, 0),
             VerticalContentAlignment = VerticalAlignment.Top,
@@ -502,8 +574,8 @@ public partial class LibraryWindow : Window
     void Delete(long id)
     {
         var m = App.Store.Get(id);
-        if (MessageBox.Show(this, $"Delete \"{m?.Title}\"? This can't be undone.", "Delete",
-                MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+        if (!Views.ConfirmDialog.Show(this, "Delete this?",
+                $"“{m?.Title}” and its audio will be removed for good. This can't be undone.")) return;
         App.Store.Delete(id);
         if (_selected == id) _selected = null;
         Reload();

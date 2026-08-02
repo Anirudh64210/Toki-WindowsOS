@@ -34,7 +34,9 @@ public sealed class SearchableDropdown : Border
 
     public SearchableDropdown()
     {
-        Background = Res<Brush>("SurfaceHi");
+        // Use resource REFERENCES (not captured brushes) for every persistent surface, so the whole
+        // control recolours live on a light/dark swap. (The transient popup rows are rebuilt per open.)
+        SetResourceReference(BackgroundProperty, "SurfaceHi");
         CornerRadius = new CornerRadius(9);
         Height = 34;
         Padding = new Thickness(11, 0, 9, 0);
@@ -49,13 +51,14 @@ public sealed class SearchableDropdown : Border
         _valueText.TextTrimming = TextTrimming.CharacterEllipsis;
         _valueText.FontFamily = Res<FontFamily>("UiFont");
         _valueText.FontSize = 11.5;
-        _valueText.Foreground = Res<Brush>("Text");
+        _valueText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
 
         var chevron = new TextBlock
         {
             Text = "▾", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
-            FontSize = 10, Foreground = Res<Brush>("TextDim"),
+            FontSize = 10,
         };
+        chevron.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
         Grid.SetColumn(chevron, 1);
         grid.Children.Add(_valueText);
         grid.Children.Add(chevron);
@@ -64,13 +67,14 @@ public sealed class SearchableDropdown : Border
         // ── popup ──
         _searchBox = new Border
         {
-            Background = Res<Brush>("Surface"), CornerRadius = new CornerRadius(7),
+            CornerRadius = new CornerRadius(7),
             Padding = new Thickness(9, 0, 9, 0), Margin = new Thickness(0, 0, 0, 6), Height = 32,
         };
+        _searchBox.SetResourceReference(BackgroundProperty, "Surface");
         _search.Background = Brushes.Transparent;
         _search.BorderThickness = new Thickness(0);
-        _search.Foreground = Res<Brush>("Text");
-        _search.CaretBrush = Res<Brush>("Text");
+        _search.SetResourceReference(Control.ForegroundProperty, "Text");
+        _search.SetResourceReference(TextBoxBase.CaretBrushProperty, "Text");
         _search.FontFamily = Res<FontFamily>("UiFont");
         _search.FontSize = 11.5;
         _search.VerticalContentAlignment = VerticalAlignment.Center;
@@ -87,10 +91,9 @@ public sealed class SearchableDropdown : Border
 
         var box = new Border
         {
-            Background = Res<Brush>("SurfaceHi"), CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(6), Child = stack,
-            Effect = null,
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(6), Child = stack, Effect = null,
         };
+        box.SetResourceReference(BackgroundProperty, "SurfaceHi");
         _popup.Child = box;
         _popup.PlacementTarget = this;
         _popup.Placement = PlacementMode.Bottom;
@@ -119,7 +122,8 @@ public sealed class SearchableDropdown : Border
         _placeholder = placeholder;
         _selected = _items.FirstOrDefault(x => string.Equals(x, select, StringComparison.OrdinalIgnoreCase));
         _valueText.Text = _selected ?? (select ?? placeholder);
-        _valueText.Foreground = Res<Brush>(_selected is null && string.IsNullOrEmpty(select) ? "TextDim" : "Text");
+        _valueText.SetResourceReference(TextBlock.ForegroundProperty,
+            _selected is null && string.IsNullOrEmpty(select) ? "TextDim" : "Text");
     }
 
     void Toggle()
@@ -168,7 +172,7 @@ public sealed class SearchableDropdown : Border
         if (string.Equals(item, _selected, StringComparison.OrdinalIgnoreCase)) return;
         _selected = item;
         _valueText.Text = item;
-        _valueText.Foreground = Res<Brush>("Text");
+        _valueText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         Changed?.Invoke(this, EventArgs.Empty);
     }
 }

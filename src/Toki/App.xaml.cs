@@ -53,10 +53,6 @@ public partial class App : Application
     /// <summary>The meeting the Notes screen should display (saved after transcription).</summary>
     public static MeetingRecord? CurrentMeeting { get; set; }
 
-    /// <summary>Raised when CurrentMeeting's notes were updated (e.g. LLM upgrade) — the Notes view re-reads.</summary>
-    public static event Action? NotesUpdated;
-    public static void RaiseNotesUpdated() => Current?.Dispatcher.BeginInvoke(() => NotesUpdated?.Invoke());
-
     /// <summary>The manual note currently being edited.</summary>
     public static MeetingRecord? CurrentManualNote { get; private set; }
 
@@ -117,6 +113,10 @@ public partial class App : Application
         (Current as App)?._pill?.RefreshGhost();
     }
 
+    /// <summary>The pill's current on-screen rect in DIPs (for the Library morph to grow from the
+    /// notch), or null if the pill isn't up. Read it BEFORE hiding the pill.</summary>
+    public static System.Windows.Rect? PillRect() => (Current as App)?._pill?.ScreenDipRect();
+
     static System.Threading.Mutex? _singleInstance;
     static System.Threading.EventWaitHandle? _showSignal;
     static MeetingDetector? _detector;
@@ -136,6 +136,14 @@ public partial class App : Application
 
         Log($"startup args=[{string.Join(" ", e.Args)}]");
         GhostDisabled = e.Args.Contains("--noghost") || AppSettings.Current.ShowInRecordings;
+
+        // Apply the saved light/dark theme before any window is built (a `--theme dark|light` arg
+        // overrides it, so --render can capture both palettes).
+        var ti = Array.IndexOf(e.Args, "--theme");
+        var theme = ti >= 0 && ti + 1 < e.Args.Length
+            ? Theme.ThemeManager.Parse(e.Args[ti + 1])
+            : Theme.ThemeManager.Parse(AppSettings.Current.Theme);
+        Theme.ThemeManager.Apply(theme);
 
         // How much RAM does this PC have? Toki's two heavy models (2.5GB LLM + 630MB
         // recognizer) don't both fit alongside a browser + meeting app on a small
@@ -158,7 +166,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
