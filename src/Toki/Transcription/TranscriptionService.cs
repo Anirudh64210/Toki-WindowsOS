@@ -75,6 +75,30 @@ public sealed class TranscriptionService
         }
     }
 
+    /// <summary>
+    /// Transcribe a SINGLE mic recording (the Ask-bar "ask by voice" flow) to plain text, using the
+    /// same gated recognizer. Returns null if the model isn't installed or the decode errors; "" if the
+    /// clip was silent; otherwise the joined text. Runs on a background thread (never the UI thread).
+    /// </summary>
+    public string? TranscribeFile(string wavPath)
+    {
+        if (!ModelReady) { App.Log("voice transcribe skipped: Parakeet not installed"); return null; }
+        if (App.LowMemoryMode) Toki.Llm.LlmService.Instance.Release();
+        lock (_gate)
+        {
+            try { _transcriber ??= new Transcriber(); }
+            catch (Exception ex) { App.Log($"transcriber init failed: {ex.Message}"); return null; }
+            try
+            {
+                var samples = AudioLoader.To16kMono(wavPath);
+                if (IsSilent(samples)) return "";
+                var segs = _transcriber!.Transcribe(samples, Speaker.You);
+                return string.Join(" ", segs.Select(s => s.Text)).Trim();
+            }
+            catch (Exception ex) { App.Log($"voice transcribe failed: {ex.Message}"); return null; }
+        }
+    }
+
     IReadOnlyList<TranscriptSegment> TranscribeStream(string wavPath, Speaker speaker)
     {
         if (!File.Exists(wavPath)) return [];

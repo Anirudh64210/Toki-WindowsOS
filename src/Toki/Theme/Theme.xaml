@@ -41,10 +41,10 @@
     <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
     <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
-    <!-- Destructive action (Delete). A clear, readable red on both black and white surfaces —
-         not the pale grey that made Delete look disabled. Constant across themes. -->
-    <SolidColorBrush x:Key="Danger" Color="#F0524B"/>
-    <SolidColorBrush x:Key="DangerTint" Color="#26F0524B"/>
+    <!-- Destructive action (Delete). A clean, professional crimson (Radix red 9) — reads as a
+         serious action, not the loud orange-coral it was. Subtle tint behind it. Constant across themes. -->
+    <SolidColorBrush x:Key="Danger" Color="#E5484D"/>
+    <SolidColorBrush x:Key="DangerTint" Color="#1AE5484D"/>
 
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
     <!-- Windows' crisp monochrome icon font (Win11 Fluent, falls back to Win10 MDL2). -->
@@ -116,20 +116,21 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="GridSplitter">
+                    <!-- No always-on divider line (the panels' own background difference is the boundary).
+                         A subtle grey seam appears only while you hover the grab strip to resize — never a
+                         loud coloured line. -->
                     <Border Background="Transparent">
                         <Border x:Name="Seam" Width="1" HorizontalAlignment="Center"
-                                Background="{DynamicResource Hairline}">
+                                Background="Transparent">
                             <Border.RenderTransform><ScaleTransform x:Name="SeamScale" ScaleX="1"/></Border.RenderTransform>
                         </Border>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource Pink}"/>
-                            <Setter TargetName="Seam" Property="Width" Value="2"/>
+                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
                         </Trigger>
-                        <Trigger Property="IsFocused" Value="True">
-                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource Pink}"/>
-                            <Setter TargetName="Seam" Property="Width" Value="2"/>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Seam" Property="Background" Value="{DynamicResource ScrollThumbDragBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

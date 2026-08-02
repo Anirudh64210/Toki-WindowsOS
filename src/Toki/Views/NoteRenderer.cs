@@ -59,7 +59,8 @@ public static class NoteRenderer
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
             SectionHeader(body, "SUMMARY", spacious, first: true);
-            var s = Sel(m.Notes.Tldr, fs, B("TextSoft"));
+            // Justified like the bullets/actions below it, so the summary reads as a clean block, not ragged.
+            var s = Sel(m.Notes.Tldr, fs, B("TextSoft"), TextAlignment.Justify);
             s.Margin = new Thickness(0, 0, 0, 2);
             body.Children.Add(s);
         }
@@ -229,7 +230,7 @@ public static class NoteRenderer
     // The WHOLE note is ONE FlowDocument, so a single drag-select spans summary → bullets → tasks →
     // transcript and Ctrl+C copies all of it. (Separate TextBoxes only let you select within one.)
     // Checkboxes stay clickable inside the read-only document (FlowDocumentScrollViewer allows it).
-    public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious)
+    public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null)
     {
         var fs = spacious ? 13.5 : 12.5;
         var doc = new FlowDocument
@@ -237,6 +238,23 @@ public static class NoteRenderer
             FontFamily = Ui, FontSize = fs, Foreground = B("Text"), Background = Brushes.Transparent,
             PagePadding = new Thickness(0), TextAlignment = TextAlignment.Left,
         };
+
+        // The action toolbar (Copy/Delete/Template) rides at the very top of the SAME scroll, so the
+        // scrollbar runs the full pane height from the top instead of starting below a pinned bar.
+        if (topBar is not null)
+            doc.Blocks.Add(new BlockUIContainer(topBar) { Margin = new Thickness(0, 0, 0, 14) });
+
+        // Title + date/time live at the TOP of the scroll (not a pinned header above it), so the note
+        // reads from the very top and the title scrolls WITH the body — and both are selectable as part
+        // of the one document (drag-select / Ctrl+C spans title → transcript).
+        doc.Blocks.Add(new Paragraph(new Run(m.Title))
+        {
+            FontSize = spacious ? 22 : 18, FontWeight = FontWeights.Bold, Foreground = B("Text"),
+            Margin = new Thickness(0, 0, 0, 3),
+        });
+        var meta = MeetingMeta(m);
+        if (!string.IsNullOrEmpty(meta))
+            doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, spacious ? 20 : 15) });
 
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
@@ -289,7 +307,10 @@ public static class NoteRenderer
         var rtb = new RichTextBox
         {
             Document = doc, IsReadOnly = true, IsReadOnlyCaretVisible = false, IsDocumentEnabled = true,
-            Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0, 0, 16, 0),
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            // Padding lives INSIDE the box so the scrollbar sits flush at the pane's right edge while text
+            // still clears it; top padding gives the toolbar room, left matches the old pane inset.
+            Padding = new Thickness(28, 20, 16, 18),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Foreground = B("Text"), Cursor = Cursors.IBeam,
         };
@@ -307,6 +328,16 @@ public static class NoteRenderer
         if (m.Transcript.Count > 0)
             sb.AppendLine().AppendLine().AppendLine("Transcript").Append(TranscriptText(m));
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>Duration · full date/time · app — the note's meta line, sitting under the title.</summary>
+    static string MeetingMeta(MeetingRecord m)
+    {
+        var parts = new List<string>();
+        if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
+        parts.Add(m.StartedAt.ToString("dddd, MMM d · h:mm tt"));
+        if (!string.IsNullOrWhiteSpace(m.App)) parts.Add(m.App!);
+        return string.Join("  ·  ", parts);
     }
 
     static Paragraph DocHeader(string title, bool first = false) =>

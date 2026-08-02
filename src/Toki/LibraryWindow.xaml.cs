@@ -302,13 +302,14 @@ public partial class LibraryWindow : Window
         var toSelect = focus ?? _selected;
         if (toSelect is long id && App.Store.Get(id) is not null) Select(id);
         else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid);
-        else { DetailHeader.Content = null; DetailBody.Content = Placeholder("Select a meeting or note, or make a new one."); }
+        else DetailBody.Content = Placeholder("Select a meeting or note, or make a new one.");
     }
 
     // ══════════════════════ Hub: sidebar nav · Ask landing · Templates · mascot ══════════════════════
 
     string _page = "ask";
     bool _dragEnabled;                       // drag-reorder is OFF by default (no accidental moves)
+    bool _myNotesOnly;                       // book filter: show only hand-written (manual) notes
     readonly Dictionary<string, Border> _navButtons = new();
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
@@ -328,6 +329,7 @@ public partial class LibraryWindow : Window
         BuildSuggestions();
         BuildTemplatesPage();
         UpdateDragToggle();
+        UpdateMyNotesToggle();
         HighlightNav();
     }
 
@@ -352,14 +354,7 @@ public partial class LibraryWindow : Window
         return b;
     }
 
-    // Clicking Library while already on Library toggles the note-list panel (VS Code sidebar feel):
-    // collapse it fully to give the note the whole width, click again to bring it back.
-    void OnNavClick(string key)
-    {
-        if (key == "library" && _page == "library") { ToggleList(); return; }
-        ShowPage(key);
-        if (key == "library" && _listCollapsed) SetList(open: true);   // navigating to Library always shows the list
-    }
+    void OnNavClick(string key) => ShowPage(key);
 
     bool _listCollapsed;
     double _listWidthPx = 312;
@@ -475,6 +470,18 @@ public partial class LibraryWindow : Window
     void OnAskKeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { e.Handled = true; OnAsk(sender, e); } }
 
     bool _asking;
+
+    // ── ask by voice (on-device Parakeet) ──
+    Audio.MicCapture? _mic;
+    string? _micWav;
+    bool _listening;
+    volatile bool _heardSpeech;
+    long _lastSpeechTick, _listenStartTick;   // x64 long reads/writes are atomic (cross-thread with the tap)
+    System.Windows.Threading.DispatcherTimer? _voiceMonitor;
+    const float VoiceSpeechThreshold = 0.02f;   // peak amplitude that counts as "speaking"
+    const long VoiceSilenceMs = 1800;           // generous end-of-speech gap before auto-stop
+    const long VoiceNoSpeechMs = 6000;          // give up if nothing is said
+    const long VoiceMaxMs = 30000;              // hard cap on one utterance
 
     // Ask a question about the meetings → retrieve relevant notes + answer with the active model (off
     // the UI thread), STREAMING the answer into the bubble as it's written, with source-meeting chips.
@@ -636,12 +643,154 @@ public partial class LibraryWindow : Window
         return t.ToString("MMM d");
     }
 
-    void OnMic(object sender, RoutedEventArgs e)
+    // Ask by voice: click the mic → record → click again → transcribe on-device (Parakeet) into the box.
+    // Toggle-to-record (not push-to-talk) so it's one clear tap to start and one to stop.
+    async void OnMic(object sender, RoutedEventArgs e)
     {
-        // Voice input (and the hotkey-opens-mic / "hey Toki" flow) is the next slice.
+        if (_asking) return;
+        if (!_listening && !Transcription.TranscriptionService.ModelReady)
+        {
+            VoiceHint("Add the on-device speech model (in onboarding) to ask by voice.");
+            return;
+        }
+        if (!_listening) { StartListening(); return; }
+        await StopListeningAndTranscribe();
+    }
+
+    void StartListening()
+    {
+        try
+        {
+            var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Toki", "voice");
+            System.IO.Directory.CreateDirectory(dir);
+            _micWav = System.IO.Path.Combine(dir, $"ask-{Guid.NewGuid():N}.wav");
+            _mic = new Audio.MicCapture();
+            _mic.Start(_micWav);
+            var fmt = _mic.Format;
+            _heardSpeech = false;
+            _lastSpeechTick = _listenStartTick = Environment.TickCount64;
+            // Passive level tap (runs on the capture thread) → remember when we last heard speech, for
+            // the end-of-speech auto-stop. Never touches the capture itself.
+            _mic.OnBuffer = (buf, n) =>
+            {
+                if (fmt is null) return;
+                if (Audio.MicCapture.PeakOf(buf, n, fmt) >= VoiceSpeechThreshold)
+                {
+                    _lastSpeechTick = Environment.TickCount64;
+                    _heardSpeech = true;
+                }
+            };
+            _listening = true;
+            ShowVoiceUi(listening: true);
+            StartVoiceMonitor();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"voice: mic start failed: {ex.Message}");
+            _listening = false; HideVoiceUi();
+            try { _mic?.Dispose(); } catch { } _mic = null;
+            VoiceHint("Couldn't reach the microphone — check Windows mic permissions.");
+        }
+    }
+
+    // End-of-speech auto-stop, Google/Safari-style: once we've heard speech, stop after a generous silence
+    // gap; give up if nothing is said; hard-cap the utterance. Polls the level the tap records.
+    void StartVoiceMonitor()
+    {
+        _voiceMonitor ??= new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+        { Interval = TimeSpan.FromMilliseconds(150) };
+        _voiceMonitor.Tick -= OnVoiceMonitorTick;
+        _voiceMonitor.Tick += OnVoiceMonitorTick;
+        _voiceMonitor.Start();
+    }
+
+    async void OnVoiceMonitorTick(object? sender, EventArgs e)
+    {
+        if (!_listening) { _voiceMonitor?.Stop(); return; }
+        var now = Environment.TickCount64;
+        var stop = (now - _listenStartTick > VoiceMaxMs)
+                || (_heardSpeech && now - _lastSpeechTick > VoiceSilenceMs)
+                || (!_heardSpeech && now - _listenStartTick > VoiceNoSpeechMs);
+        if (stop) await StopListeningAndTranscribe();
+    }
+
+    async System.Threading.Tasks.Task StopListeningAndTranscribe()
+    {
+        if (!_listening && _mic is null) return;   // already stopping (guards the async monitor re-entry)
+        _listening = false;
+        _voiceMonitor?.Stop();
+        var mic = _mic; _mic = null;
+        var path = _micWav; _micWav = null;
+        var heard = _heardSpeech;
+        try { mic?.Stop(); } catch { }
+        try { mic?.Dispose(); } catch { }
+
+        if (path is null || !System.IO.File.Exists(path) || !heard)
+        {
+            HideVoiceUi();
+            try { if (path is not null) System.IO.File.Delete(path); } catch { }
+            if (!heard) VoiceHint("Didn't catch anything — tap the mic and speak.");
+            return;
+        }
+
+        ShowVoiceUi(listening: false);   // "Transcribing…" loader
+        MicBtn.IsEnabled = false;
+        var text = await System.Threading.Tasks.Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(path));
+        MicBtn.IsEnabled = true;
+        HideVoiceUi();
+        try { System.IO.File.Delete(path); } catch { }
+
+        if (text is null) { VoiceHint("Couldn't transcribe that — try again."); return; }
+        if (text.Length == 0) { VoiceHint("Didn't catch that — try again."); return; }
+
+        // Fill the box (append if there's already text) and focus so you can glance + press Enter.
+        AskBox.Text = string.IsNullOrWhiteSpace(AskBox.Text) ? text : AskBox.Text.TrimEnd() + " " + text;
+        AskBox.CaretIndex = AskBox.Text.Length;
+        ClearVoiceHint();
+        AskBox.Focus();
+    }
+
+    // Voice overlay states: replace the input box with a pulsing dot + word ("Listening…" coral →
+    // "Transcribing…" pink), and tint the mic. HideVoiceUi restores the box.
+    void ShowVoiceUi(bool listening)
+    {
+        VoiceStatusText.Text = listening ? "Listening…" : "Transcribing…";
+        VoiceDot.Fill = (Brush)FindResource(listening ? "Coral" : "Pink");
+        AskBox.Visibility = Visibility.Collapsed;
+        VoiceStatus.Visibility = Visibility.Visible;
+        MicBtn.Foreground = (Brush)FindResource("Coral");
+        MicBtn.ToolTip = listening ? "Listening… tap to stop" : "Transcribing…";
+        PulseDot(true);
+    }
+
+    void HideVoiceUi()
+    {
+        PulseDot(false);
+        VoiceStatus.Visibility = Visibility.Collapsed;
+        AskBox.Visibility = Visibility.Visible;
+        MicBtn.ClearValue(ForegroundProperty);
+        MicBtn.ToolTip = "Ask by voice";
+    }
+
+    void PulseDot(bool on)
+    {
+        if (on && !App.Headless)
+            VoiceDot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.35, TimeSpan.FromMilliseconds(650))
+            { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } });
+        else { VoiceDot.BeginAnimation(OpacityProperty, null); VoiceDot.Opacity = 1; }
+    }
+
+    // A small transient hint — on the landing it uses AskHint; in a conversation, a dim Toki note.
+    void VoiceHint(string msg)
+    {
+        if (Landing.Visibility == Visibility.Visible) AskHint.Text = msg;
+        else { Messages.Children.Add(TokiBubble(msg, dim: true)); ScrollChatToEnd(); }
+    }
+
+    void ClearVoiceHint()
+    {
         if (Landing.Visibility == Visibility.Visible)
-            AskHint.Text = "Voice is coming next — type your question for now.";
-        else { Messages.Children.Add(TokiBubble("Voice is coming next — type your question for now.", dim: true)); ScrollChatToEnd(); }
+            AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
     }
 
     void ScrollChatToEnd() => Dispatcher.BeginInvoke(new Action(() => ChatScroll.ScrollToEnd()), System.Windows.Threading.DispatcherPriority.Background);
@@ -792,6 +941,16 @@ public partial class LibraryWindow : Window
         MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(sy, 1, dur) { EasingFunction = ease });
     }
 
+    // ── "My notes" filter: show only the notes you wrote by hand ──
+    void OnToggleMyNotes(object sender, RoutedEventArgs e) { _myNotesOnly = !_myNotesOnly; UpdateMyNotesToggle(); LoadList(); }
+
+    void UpdateMyNotesToggle()
+    {
+        if (_myNotesOnly) MyNotesToggle.Foreground = (Brush)FindResource("Coral");
+        else MyNotesToggle.ClearValue(ForegroundProperty);
+        MyNotesToggle.ToolTip = _myNotesOnly ? "Showing your notes only — tap to show everything" : "Show only my hand-written notes";
+    }
+
     // ── drag-reorder on/off toggle ──
     void OnToggleDrag(object sender, RoutedEventArgs e) { _dragEnabled = !_dragEnabled; UpdateDragToggle(); }
 
@@ -859,41 +1018,39 @@ public partial class LibraryWindow : Window
     }
 
     // ── per-note template picker (manual override → Toki re-writes the note in the chosen shape) ──
-    // Compact: a small "Template" caption + dropdown, sits in the top toolbar beside Copy/Delete.
+    // A real Button that opens the SAME themed popup as Copy (ShowMenu). The old SearchableDropdown was
+    // a Border+MouseLeftButtonUp, which the read-only RichTextBox (the note now lives in) SWALLOWS — so it
+    // was "stuck". Real Buttons' Click fires fine inside the document, matching Copy/Delete.
     FrameworkElement TemplatePicker(MeetingRecord m, TextBlock status)
     {
-        var wrap = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        wrap.Children.Add(new TextBlock { Text = "Template", Style = St("Dim"), FontSize = 10.5, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-
-        var drop = new Views.SearchableDropdown { Width = 150, VerticalAlignment = VerticalAlignment.Center };
-        drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
-
-        drop.Changed += async (_, _) =>
+        var btn = new Button
         {
-            var name = drop.Selected;
-            if (string.IsNullOrWhiteSpace(name) || string.Equals(name, m.Notes.Template ?? "General", StringComparison.OrdinalIgnoreCase)) return;
-            if (!Llm.LlmService.Instance.CanWrite())
-            {
-                status.Text = "Add the on-device model or an API key (Settings) to change templates.";
-                status.Visibility = Visibility.Visible;
-                return;
-            }
-            status.Text = $"Rewriting as {name}…"; status.Visibility = Visibility.Visible;
-            drop.IsEnabled = false;
-            var ok = await App.RewriteNotesAsync(m.Id, name);
-            drop.IsEnabled = true;
-            if (ok) { var fresh = App.Store.Get(m.Id); if (fresh is not null) RenderMeeting(fresh); }
-            else
-            {
-                // Nothing changed — put the dropdown back to the note's real template so it isn't
-                // showing a shape that wasn't actually applied.
-                drop.SetItems(Llm.NoteTemplates.All.Select(t => t.Name), m.Notes.Template ?? "General");
-                status.Text = "Couldn't rewrite — no transcript or model available.";
-                status.Visibility = Visibility.Visible;
-            }
+            Style = (Style)FindResource("PillButton"),
+            Padding = new Thickness(12, 6, 11, 6), FontSize = 11.5, Margin = new Thickness(0, 0, 8, 0),
+            Content = $"Template · {m.Notes.Template ?? "General"}   ▾",
         };
-        wrap.Children.Add(drop);
-        return wrap;
+        btn.Click += (_, _) =>
+        {
+            var items = Llm.NoteTemplates.All
+                .Select(t => (t.Name, (Action)(() => ApplyTemplate(m, t.Name, status)))).ToList();
+            ShowMenu(btn, items);
+        };
+        return btn;
+    }
+
+    async void ApplyTemplate(MeetingRecord m, string name, TextBlock status)
+    {
+        if (string.Equals(name, m.Notes.Template ?? "General", StringComparison.OrdinalIgnoreCase)) return;
+        if (!Llm.LlmService.Instance.CanWrite())
+        {
+            status.Text = "Add the on-device model or an API key (Settings) to change templates.";
+            status.Visibility = Visibility.Visible;
+            return;
+        }
+        status.Text = $"Rewriting as {name}…"; status.Visibility = Visibility.Visible;
+        var ok = await App.RewriteNotesAsync(m.Id, name);
+        if (ok) { var fresh = App.Store.Get(m.Id); if (fresh is not null) RenderMeeting(fresh); }
+        else { status.Text = "Couldn't rewrite — no transcript or model available."; status.Visibility = Visibility.Visible; }
     }
 
     void LoadList()
@@ -903,10 +1060,14 @@ public partial class LibraryWindow : Window
         try { items = App.Store.List(string.IsNullOrWhiteSpace(SearchBox.Text) ? null : SearchBox.Text); }
         catch (Exception ex) { App.Log($"library window load: {ex.Message}"); items = []; }
 
-        CountLabel.Text = $"{items.Count} · all on this PC";
+        if (_myNotesOnly) items = items.Where(m => m.Kind == MeetingKind.Manual).ToList();
+
+        CountLabel.Text = _myNotesOnly ? $"{items.Count} · my notes" : $"{items.Count} · all on this PC";
         foreach (var m in items) Cards.Children.Add(Card(m));
         if (items.Count == 0)
-            Cards.Children.Add(Placeholder(string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches."));
+            Cards.Children.Add(Placeholder(
+                _myNotesOnly ? "No hand-written notes yet — tap + to write one."
+                : string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches."));
     }
 
     Border Card(MeetingSummary m)
@@ -916,7 +1077,9 @@ public partial class LibraryWindow : Window
         // Left: a calendar-style date badge (day over month), like the design.
         var badge = new Border
         {
-            Background = (Brush)FindResource("Chip"), CornerRadius = new CornerRadius(9),
+            // SurfaceHi (not Chip) so the date tile stays visible on BOTH a transparent row and the
+            // Chip-filled selected row, without being a heavy box.
+            Background = (Brush)FindResource("SurfaceHi"), CornerRadius = new CornerRadius(9),
             Width = 42, Height = 46, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 11, 0),
         };
         var badgeStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -943,16 +1106,17 @@ public partial class LibraryWindow : Window
         Grid.SetColumn(content, 1);
         row.Children.Add(content);
 
+        // Airy list (like the Ask panel): rows are OPEN — no card fill, no boxed boundary. Only the
+        // selected row carries a soft fill, and hovering shows a subtle one. This drops the "wall of
+        // boxes" that read as tight and heavy.
         var card = new Border
         {
-            Background = (Brush)FindResource(selected ? "Chip" : "SurfaceHi"),
-            // Monotone selection: a soft hairline (not the coral outline, which read as an
-            // alarming red box), on the slightly-brighter Chip background. Theme-aware.
-            BorderBrush = selected ? (Brush)FindResource("SelectionBorder") : Brushes.Transparent,
-            BorderThickness = new Thickness(selected ? 1 : 0),
-            CornerRadius = new CornerRadius(12), Padding = new Thickness(11, 11, 11, 12),
-            Margin = new Thickness(0, 0, 2, 8), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
+            Background = selected ? (Brush)FindResource("Chip") : Brushes.Transparent,
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 11, 12, 12),
+            Margin = new Thickness(0, 0, 2, 3), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
         };
+        card.MouseEnter += (_, _) => { if (_selected != m.Id) card.Background = (Brush)FindResource("SurfaceHi"); };
+        card.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
         card.PreviewMouseLeftButtonDown += (_, e) => OnCardDown(card, e);
         card.PreviewMouseMove += (_, e) => OnCardMove(e);
         card.PreviewMouseLeftButtonUp += (_, e) => OnCardUp(card, m.Id);
@@ -1131,36 +1295,35 @@ public partial class LibraryWindow : Window
 
     void RenderMeeting(MeetingRecord m)
     {
-        var header = new StackPanel();
-        // ONE top toolbar row: template on the left, Copy/Delete on the right — all above the title,
-        // out of the note body so it reads cleanly. Title + meta are LEFT-aligned (a note, not a poster).
-        var row = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 14) };
+        // The action toolbar (Template left · Copy/Delete right) rides at the TOP of the scroll document,
+        // so the whole note — toolbar, title, body — is one scroll from the very top of the pane.
+        var toolbar = new StackPanel();
+        var row = new DockPanel { LastChildFill = false };
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         right.Children.Add(CopyButton(m));
         right.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
         DockPanel.SetDock(right, Dock.Right);
         row.Children.Add(right);
 
-        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
         {
             var tmpl = TemplatePicker(m, status);
             DockPanel.SetDock(tmpl, Dock.Left);
             row.Children.Add(tmpl);
         }
-        header.Children.Add(row);
-        header.Children.Add(status);
-        header.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 20, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
-        header.Children.Add(new TextBlock { Text = Meta(m), Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) });
+        toolbar.Children.Add(row);
+        toolbar.Children.Add(status);
 
-        DetailHeader.Content = header;
-        // The whole note as ONE selectable FlowDocument (drag-select spans everything, Ctrl+C copies all).
-        DetailBody.Content = NoteRenderer.MeetingDocument(m, spacious: true);
+        var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar);
+        DetailBody.Content = body;
+        // Start at the very TOP once laid out (a fresh RichTextBox occasionally came up scrolled down).
+        if (body is RichTextBox rtb)
+            Dispatcher.BeginInvoke(new Action(() => rtb.ScrollToHome()), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     void RenderManual(MeetingRecord m)
     {
-        DetailHeader.Content = null;
         var panel = new StackPanel();
 
         var titleBox = new TextBox { Text = m.Title, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"), FontSize = 20, FontWeight = FontWeights.Bold, FontFamily = (FontFamily)FindResource("UiFont") };
@@ -1183,7 +1346,8 @@ public partial class LibraryWindow : Window
         bar.Children.Add(status);
         panel.Children.Add(bar);
 
-        DetailBody.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 26, 0, 0) };
+        // Fills the pane with its own inset (DetailBody no longer supplies a margin) and scrolls from the top.
+        DetailBody.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(28, 24, 16, 16) };
 
         _manualFlush = () =>
         {
@@ -1376,7 +1540,9 @@ public partial class LibraryWindow : Window
             Content = label, Style = (Style)FindResource(primary ? "CoralButton" : "PillButton"),
             Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(13, 6, 13, 6), FontSize = 11.5,
         };
-        if (danger) { b.Foreground = (Brush)FindResource("Danger"); b.Background = (Brush)FindResource("DangerTint"); }
+        // Destructive = red TEXT on the same neutral button as Copy (not a loud red-filled pill) — clean,
+        // still clearly a delete. Red fill is reserved for the final confirm dialog.
+        if (danger) b.Foreground = (Brush)FindResource("Danger");
         b.Click += (_, _) => onClick();
         return b;
     }

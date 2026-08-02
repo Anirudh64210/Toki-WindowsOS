@@ -58,21 +58,7 @@
                 <!-- BYO API key: pick a provider (sets the address), paste your key, pick a model.
                      Provider + model are iOS-style wheels built in code (ProviderHost / ModelHost). -->
                 <StackPanel x:Name="ApiOptions" Visibility="Collapsed">
-                    <!-- Single source of truth for connection state: a status dot (green + pulse when
-                         connected, dim otherwise) + one line of text. The only "connected" message. -->
-                    <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,9" Margin="0,12,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid x:Name="StatusDotHost" Width="16" Height="16" Margin="0,0,9,0" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="ApiStateText" Grid.Column="1" Style="{StaticResource Body}" FontSize="11.5"
-                                       LineHeight="16" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                        </Grid>
-                    </Border>
-
-                    <TextBlock Style="{StaticResource SettingTitle}" Text="Provider"/>
+                    <TextBlock Style="{StaticResource SettingTitle}" Text="Provider" Margin="0,14,0,2"/>
                     <ContentControl x:Name="ProviderHost" Margin="0,4,0,0"/>
 
                     <!-- Only when Provider = Custom: the address is otherwise set for you. -->

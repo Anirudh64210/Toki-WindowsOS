@@ -3,8 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
     <!-- Toki resting quietly: a tiny alive character. Hover reveals Home; click also opens. -->
+    <!-- UseLayoutRounding + snapping: at the peek size the 120px mascot is scaled down to ~28px, so the
+         white eye edges landed on fractional device pixels and shimmered on the left during the open
+         (the "little glitch left of centre"). Snapping keeps those edges on whole pixels. -->
     <Grid Background="Transparent" Cursor="Hand" MouseLeftButtonUp="OnOpen"
-          ToolTip="Toki — hover to open">
+          ToolTip="Toki — hover to open"
+          UseLayoutRounding="True" SnapsToDevicePixels="True"
+          RenderOptions.BitmapScalingMode="HighQuality">
         <Viewbox Width="28" HorizontalAlignment="Center" VerticalAlignment="Center">
             <controls:TokiBlob/>
         </Viewbox>

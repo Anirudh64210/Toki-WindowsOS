@@ -26,6 +26,7 @@ public sealed class SearchableDropdown : Border
     List<string> _items = new();
     string? _selected;
     string _placeholder = "";
+    long _justClosedTick;   // suppresses the click-to-reopen that StaysOpen=false would otherwise cause
 
     // Show the search box only once the list is long enough to warrant it.
     const int SearchThreshold = 8;
@@ -111,10 +112,14 @@ public sealed class SearchableDropdown : Border
         MouseLeftButtonUp += (_, _) => Toggle();
         _popup.Opened += (_, _) =>
         {
+            NotchPopups.Register(_popup);   // the open list counts as part of the notch (don't let it retract)
             box.MinWidth = ActualWidth;
             if (_searchBox.Visibility == Visibility.Visible)
                 Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => _search.Focus()));
         };
+        // When the popup closes (a pick, Esc, or a StaysOpen=false click-away), remember WHEN — so a
+        // click that lands back on this pill row is read as "close", never as an immediate re-open.
+        _popup.Closed += (_, _) => { NotchPopups.Unregister(_popup); _justClosedTick = Environment.TickCount64; };
     }
 
     static T Res<T>(string key) => (T)Application.Current.Resources[key];
@@ -135,6 +140,10 @@ public sealed class SearchableDropdown : Border
     void Toggle()
     {
         if (_popup.IsOpen) { _popup.IsOpen = false; return; }
+        // Clicking the pill while its popup is open first triggers StaysOpen=false to CLOSE the popup
+        // (on the mouse-down), THEN this mouse-up would re-open it — so it never seemed to close. If it
+        // only just closed, treat this click as the close and stay shut.
+        if (Environment.TickCount64 - _justClosedTick < 250) return;
         if (_items.Count == 0) return;
         _searchBox.Visibility = _items.Count > SearchThreshold ? Visibility.Visible : Visibility.Collapsed;
         _search.Text = "";

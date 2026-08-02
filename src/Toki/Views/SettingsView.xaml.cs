@@ -37,9 +37,6 @@ public partial class SettingsView : UserControl
     List<string> _models = new();          // last fetched model list for the current provider
     CancellationTokenSource? _modelsCts;   // cancels an in-flight model fetch when things change
 
-    Ellipse _statusDot = null!, _statusHalo = null!;
-    Storyboard? _pulse;
-
     public SettingsView()
     {
         InitializeComponent();
@@ -48,7 +45,6 @@ public partial class SettingsView : UserControl
         ModelHost.Content = _modelDrop;
         _providerDrop.Changed += (_, _) => OnProviderChanged();
         _modelDrop.Changed += (_, _) => OnModelChanged();
-        BuildStatusDot();
 
         // Populate NOW, not just on Loaded, so the view is fully filled in before its first frame —
         // no blank flash. Settings uses a fixed size + internal scroll (see PillWindow.AutoHeight),
@@ -372,7 +368,8 @@ public partial class SettingsView : UserControl
         {
             s.ApiVerified = true;
             s.Save();
-            ApiTestStatus.Visibility = Visibility.Collapsed;   // the green status dot is the single confirmation
+            // Immediate feedback on the button you pressed, plus the green status line just below it.
+            FlashTestButton();
             UpdateStateText();
         }
         else
@@ -380,6 +377,22 @@ public partial class SettingsView : UserControl
             ShowApiStatus(message, ok: false);
         }
         TestApiButton.IsEnabled = true;
+    }
+
+    // Briefly turn the Test button into a green "Connected ✓", then restore it — immediate,
+    // unmissable feedback at the point of the click.
+    void FlashTestButton()
+    {
+        TestApiButton.Content = "Connected";
+        TestApiButton.Foreground = (Brush)FindResource("Green");
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1800) };
+        t.Tick += (_, _) =>
+        {
+            t.Stop();
+            TestApiButton.Content = "Test connection";
+            TestApiButton.ClearValue(ForegroundProperty);   // back to the PillButton default
+        };
+        t.Start();
     }
 
     // One-tap opt-out: wipe the key from disk and go back to the free on-device model.
@@ -395,84 +408,24 @@ public partial class SettingsView : UserControl
         Load();                             // refresh: On-device selected, the API section collapses
     }
 
-    /// <summary>The single connection line + its status dot. Three steps: no key → key saved but
-    /// unconfirmed → confirmed working (green dot + pulse). This is the ONLY "connected" message.</summary>
+    /// <summary>One quiet status line under the buttons (no dot, no card). Green when connected, dim
+    /// otherwise; hidden entirely before a key is entered (the field placeholders guide instead).</summary>
     void UpdateStateText()
     {
         var s = AppSettings.Current;
         var hasKey = !string.IsNullOrWhiteSpace(s.ApiKey);
         var connected = hasKey && s.ApiVerified;
-        ApiStateText.Text = connected
-            ? "Connected — notes now come from the cloud, in seconds."
-            : hasKey
-                ? "Key saved. Tap Test connection to confirm notes will come from the cloud."
-                : "Pick your provider, paste your API key, then choose a model. Your key stays encrypted on this PC.";
-        SetConnected(connected);
+        if (connected) ShowApiStatus("Connected — notes now come from the cloud.", ok: true, connected: true);
+        else if (hasKey) ShowApiStatus("Key saved — tap Test connection to confirm.", ok: null);
+        else { ApiTestStatus.Text = ""; ApiTestStatus.Visibility = Visibility.Collapsed; }
     }
 
-    // ── connection status dot: a small green dot with a soft outward pulse when connected ──
-
-    void BuildStatusDot()
-    {
-        _statusHalo = new Ellipse
-        {
-            Width = 16, Height = 16, Fill = (Brush)FindResource("Green"), Opacity = 0,
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new ScaleTransform(0.6, 0.6),
-            IsHitTestVisible = false,
-        };
-        _statusDot = new Ellipse
-        {
-            Width = 8, Height = 8, Fill = (Brush)FindResource("TextDim"),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-        };
-        StatusDotHost.Children.Add(_statusHalo);
-        StatusDotHost.Children.Add(_statusDot);
-    }
-
-    void SetConnected(bool on)
-    {
-        _statusDot.Fill = (Brush)FindResource(on ? "Green" : "TextDim");
-        if (on) StartPulse(); else StopPulse();
-    }
-
-    void StartPulse()
-    {
-        if (_pulse is not null || App.Headless) return;   // no looping animation in the render harness
-        var dur = new Duration(TimeSpan.FromMilliseconds(1500));
-        // A separate timeline per animated property — Storyboard target/property are attached to
-        // the timeline instance, so ScaleX and ScaleY each need their own.
-        var pairs = new (AnimationTimeline Anim, string Path)[]
-        {
-            (new DoubleAnimation(0.6, 2.4, dur) { RepeatBehavior = RepeatBehavior.Forever }, "RenderTransform.ScaleX"),
-            (new DoubleAnimation(0.6, 2.4, dur) { RepeatBehavior = RepeatBehavior.Forever }, "RenderTransform.ScaleY"),
-            (new DoubleAnimation(0.5, 0.0, dur) { RepeatBehavior = RepeatBehavior.Forever }, "Opacity"),
-        };
-        _pulse = new Storyboard();
-        foreach (var (anim, path) in pairs)
-        {
-            Storyboard.SetTarget(anim, _statusHalo);
-            Storyboard.SetTargetProperty(anim, new PropertyPath(path));
-            _pulse.Children.Add(anim);
-        }
-        _pulse.Begin();
-    }
-
-    void StopPulse()
-    {
-        _pulse?.Stop();
-        _pulse = null;
-        _statusHalo.Opacity = 0;
-        ((ScaleTransform)_statusHalo.RenderTransform).ScaleX = 0.6;
-        ((ScaleTransform)_statusHalo.RenderTransform).ScaleY = 0.6;
-    }
-
-    /// <summary>Inline test/validation result. Success is plain white text (no green, no tick);
-    /// errors are coral; in-progress is dim. Never shows the key.</summary>
-    void ShowApiStatus(string message, bool? ok)
+    /// <summary>The single status line under the buttons. Connected = green; errors = coral;
+    /// in-progress/neutral = dim; a plain ok = normal text. Never shows the key.</summary>
+    void ShowApiStatus(string message, bool? ok, bool connected = false)
     {
         ApiTestStatus.Text = message;
-        ApiTestStatus.Foreground = (Brush)FindResource(ok switch
+        ApiTestStatus.Foreground = (Brush)FindResource(connected ? "Green" : ok switch
         {
             true => "Text",
             false => "Coral",

@@ -122,7 +122,10 @@ public partial class PillWindow : Window
     }
 
     bool PointInWindow(int x, int y) =>
-        (_rectR <= _rectL) || (x >= _rectL && x <= _rectR && y >= _rectT && y <= _rectB);
+        (_rectR <= _rectL) || (x >= _rectL && x <= _rectR && y >= _rectT && y <= _rectB)
+        // A dropdown that dropped BELOW the notch is logically part of it — a click in the model/provider
+        // list must never read as "outside" and tuck the panel away mid-selection.
+        || Views.NotchPopups.ContainsScreenPoint(x, y);
 
     void CacheWindowRect()
     {
@@ -168,6 +171,23 @@ public partial class PillWindow : Window
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
     }
     int _lastPlaceX = int.MinValue, _lastPlaceY = int.MinValue;
+
+    /// <summary>Set the window's PHYSICAL size AND top-centre position in one Win32 call — used before
+    /// Show() on a reveal so the first painted frame is already the right size at the right place (no
+    /// stale-width notch flashing off-centre). Sizes from the target DIPs, not the stale current rect.</summary>
+    void PlaceExactTopCenter(double dipW, double dipH)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        var work = PhysicalWorkArea();
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int pw = Math.Max(1, (int)Math.Round(dipW * dpi.DpiScaleX));
+        int ph = Math.Max(1, (int)Math.Round(dipH * dpi.DpiScaleY));
+        int gap = (int)Math.Round(TopGap * dpi.DpiScaleY);
+        int x = work.Left + ((work.Right - work.Left) - pw) / 2;
+        int y = work.Top + gap;
+        SetWindowPos(_hwnd, IntPtr.Zero, x, y, pw, ph, SwpNoZOrder | SwpNoActivate);   // NOT SwpNoSize — set both
+        _lastPlaceX = x; _lastPlaceY = y;
+    }
 
     // Work area of the monitor the CURSOR is on — so the notch appears on whichever screen
     // you're using (edge-summon on any monitor's top edge, events on the active screen).
@@ -298,9 +318,20 @@ public partial class PillWindow : Window
             BeginAnimation(HeightProperty, null);
             Width = w;
             Height = targetH;
+            // Clip to ZERO height and hide the content BEFORE Show(), so the very first composited frame
+            // is empty — not a full-height black box that then unfurls. That single un-clipped frame was
+            // the "black/white glitch" on hover-to-summon. RevealDown animates the clip open from here.
+            Root.Clip = new RectangleGeometry(new Rect(0, 0, w, 0));
+            Host.Opacity = 0;
+            // Force the window to its FINAL physical size + centred position BEFORE Show. Coming from a
+            // previously-wider panel, the window was still at the OLD width/left when the first frame
+            // painted, so the notch surface flashed off-centre on the LEFT for a frame before snapping to
+            // the centred peek — the "asymmetric darker strip on the left" during the drop. Pre-sizing +
+            // pre-centring makes the first visible frame already correct.
+            PlaceExactTopCenter(w, targetH);
             Show(); ApplyGhost();          // re-apply WDA — hide/show can drop it
-            PlaceTopCenter();
-            RevealDown(w, targetH, 280);   // sets a 0-height clip synchronously first → no full-box flash
+            PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
+            RevealDown(w, targetH, 280);   // animates the 0-height clip open while content settles in
         }
         else
         {
@@ -788,6 +819,9 @@ public partial class PillWindow : Window
     // The physical cursor position, tested against the pill's cached physical rectangle.
     bool CursorOverPill()
     {
+        // While a notch dropdown is open, keep the panel "held" — the cursor is likely down in the
+        // list (below the notch), which must not trigger the idle-tuck.
+        if (Views.NotchPopups.AnyOpen) return true;
         if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
         return p.X >= _rectL && p.X <= _rectR && p.Y >= _rectT && p.Y <= _rectB;
     }

@@ -516,3 +516,37 @@ The chatbot was giving confidently wrong answers to questions about **time** —
 Verified: **107/107 tests pass**; new `--querytest` / `--followuptest` / `--asktest` dev flags prove the routing and follow-ups on the real library.
 
 **Deferred — on-device meaning-search (embeddings):** planned as the next quality layer, but both ways to run a second small model on-device conflict with an engine Toki already ships (a native `onnxruntime.dll` version clash with the transcription engine; and the embedder *hangs* on the GPU/Vulkan backend that the notes AI needs). It was **not** forced in — that would risk transcription. The fix (run the embedder in an isolated CPU-only helper process) is scoped for the next iteration; the code is present but dormant and unused. Keyword search stays active meanwhile — the bugs above were about time/intent, which are now fixed. See ARCHITECTURE.md for the technical detail.
+
+## P3 (UI polish — notch behaviour + Library refinements) — 2026-08-02
+
+A pass focused entirely on how it *feels*, driven by a short set of design rules (dividers-not-boxes, selection-isn't-an-outline, motion is brief, professional colour, one clean scroll from the top). No new features.
+
+**Notch behaviour**
+- **Dropdowns no longer shut the notch.** When the model/provider list drops *below* the notch, it now counts as part of the notch — you can scroll and click an option without it retracting mid-pick. Clicking the dropdown again closes it (fixed a Windows toggle quirk).
+- **Cleaner open.** The reveal is clipped to zero height *before* the window shows, removing a one-frame flash on hover-to-open.
+
+**Library**
+- **Airy note list** — rows are open (no boxed tiles); only the selected note carries a soft fill, hover shows a subtle one. The bright divider line is gone (a faint grey seam appears only while you drag to resize).
+- **Normal top-to-bottom scroll** — the whole note (actions, title, body) is one scroll filling the pane, so the scrollbar runs the full height from the very top.
+- **Small "＋ New note" and a book "My notes" filter** by the Library title; the filter shows only your hand-written notes.
+- **Title & date are selectable/copyable**, and a freshly opened note starts at the top.
+
+**Settings**
+- **Connection status redesigned** — dropped the pulsing dot + status card; one quiet line under *Test connection* (green "Connected" when verified), and the button itself confirms.
+
+**Colour** — Delete is a cleaner crimson shown as red *text* on the neutral button (no loud red pill); the red fill is reserved for the confirm dialog.
+
+Verified by rendering the Library (`--libshot`) and **107/107 tests pass**. Known-open: a small transient glitch to the left of the mascot during hover-to-open — being tracked; needs a live capture to pin down.
+
+## P4 (Ask by voice — on-device) — 2026-08-02
+
+The Ask bar's mic is live. Click it, speak, click again — Toki transcribes your question **on-device** (the same Parakeet speech model already used for meetings, warmed at launch) and drops the text into the box for you to glance over and send. Nothing leaves the machine; no extra download. It's user-initiated and mic-only — not always-listening (that's the later "Hey Toki" carve-out).
+
+- **Auto-stops when you finish** (Google-/Safari-style): once it's heard you speak, it ends on a generous ~1.8 s silence, transcribes, and fills the box — no need to tap stop (you still can). Gives up gracefully if nothing's said, and hard-caps a single utterance.
+- **Live feedback**: the input box shows a pulsing coral **"Listening…"**, then a pink **"Transcribing…"** loader while it thinks — the mic glows coral throughout.
+- Fills the box for review rather than auto-sending, so a mis-hear never fires the wrong question.
+- Degrades kindly: a clear hint if the speech model isn't installed or the mic can't be reached.
+
+Verified end-to-end with a new `--voicetest <wav>` dev flag (synth a clip → `TranscribeFile` → text); the live mic capture, auto-stop, and loader are confirmed by ear/eye. 107/107 tests still pass.
+
+Also this pass: the Library note list renders **edge-to-edge on one background** (no inset box / padding strip), the note toolbar's **Template** picker works inside the scroll (rebuilt as a real button + themed menu), and the VS Code pane resizer was removed.

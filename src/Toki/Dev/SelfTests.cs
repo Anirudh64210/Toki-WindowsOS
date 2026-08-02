@@ -34,6 +34,7 @@ static class SelfTests
                 "--detecttest" => DetectTest(Seconds(args, 30)),
                 "--recordtest" => RecordTest(args, Seconds(args, 6)),
                 "--asrtest" => AsrTest(args),
+                "--voicetest" => VoiceTest(args),
                 "--transcribetest" => TranscribeTest(args),
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
@@ -54,6 +55,25 @@ static class SelfTests
         {
             return Fail($"{flag} threw: {ex.Message}");
         }
+    }
+
+    // Verifies the Ask-bar "ask by voice" pipeline: TranscriptionService.TranscribeFile on a WAV →
+    // plain text. Generate a spoken clip with `--mictest` (speak into it) or any speech WAV.
+    static int VoiceTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--voicetest");
+        if (i < 0 || i + 1 >= args.Length) return Fail("usage: --voicetest <path-to-wav>");
+        var file = args[i + 1];
+        if (!File.Exists(file)) return Fail($"file not found: {file}");
+        if (!Toki.Transcription.TranscriptionService.ModelReady)
+            return Fail("Parakeet model not installed — run --asrtest once to fetch it.");
+        Console.WriteLine($"[--voicetest] transcribing {Path.GetFileName(file)} via TranscribeFile()...");
+        var text = Toki.Transcription.TranscriptionService.Instance.TranscribeFile(file);
+        if (text is null) return Fail("TranscribeFile returned null (model/decoder error).");
+        Console.WriteLine($"[--voicetest] result: \"{text}\"");
+        if (text.Length == 0) { Console.WriteLine("[--voicetest] empty — PASS only if the clip was silent."); return 0; }
+        Console.WriteLine("[--voicetest] PASS — non-empty transcription returned.");
+        return 0;
     }
 
     static int MicTest(string outDir, int seconds)
