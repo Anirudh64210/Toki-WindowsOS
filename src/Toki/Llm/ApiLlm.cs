@@ -180,6 +180,64 @@ public sealed class ApiLlm : ILlm
         }
     }
 
+    public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (_endpoint is null) throw new ArgumentException("The API base URL must be https:// (http:// only for a local proxy).");
+        if (_apiKey.Length == 0) throw new InvalidOperationException("No API key is set.");
+        if (_model.Length == 0) throw new InvalidOperationException("No API model is set.");
+
+        var body = new
+        {
+            model = _model,
+            messages = new[]
+            {
+                new { role = "system", content = system },
+                new { role = "user", content = user },
+            },
+            temperature = 0.7,
+            max_tokens = maxTokens,
+            stream = true,
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(body) };
+        req.Headers.Authorization = new("Bearer", _apiKey);
+        HttpResponseMessage resp;
+        try { resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { throw new HttpRequestException("Couldn't reach the provider (timed out)."); }
+        catch (HttpRequestException) { throw new HttpRequestException("Couldn't reach the provider (network error)."); }
+
+        using (resp)
+        {
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                throw new HttpRequestException(ErrorFor(resp.StatusCode, err));
+            }
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new System.IO.StreamReader(stream);
+            // OpenAI-style Server-Sent Events: lines of "data: {json}", terminated by "data: [DONE]".
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
+                var payload = line[5..].Trim();
+                if (payload == "[DONE]") break;
+                string? piece = null;
+                try
+                {
+                    using var doc = JsonDocument.Parse(payload);
+                    var delta = doc.RootElement.GetProperty("choices")[0].GetProperty("delta");
+                    if (delta.TryGetProperty("content", out var cnt) && cnt.ValueKind == JsonValueKind.String)
+                        piece = cnt.GetString();
+                }
+                catch { /* keep-alive / non-JSON line — skip */ }
+                if (!string.IsNullOrEmpty(piece)) yield return piece;
+            }
+        }
+    }
+
     /// <summary>
     /// Tiny 1-token round trip for the Settings "Test connection" button. Never throws
     /// and never hangs — a short timeout and a (success, human message) result instead.

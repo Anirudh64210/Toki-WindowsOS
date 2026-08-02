@@ -37,6 +37,16 @@ public sealed class LlamaLlm : ILlm, IDisposable
 
     public async Task<string> CompleteAsync(string system, string user, int maxTokens, CancellationToken ct = default)
     {
+        var sb = new StringBuilder();
+        await foreach (var tok in StreamAsync(system, user, maxTokens, ct).ConfigureAwait(false))
+            sb.Append(tok);
+        return sb.ToString().Trim();
+    }
+
+    public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        // Serialize generations (a llama context isn't concurrent) — hold the gate across the whole stream.
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -59,10 +69,12 @@ public sealed class LlamaLlm : ILlm, IDisposable
                 },
             };
 
-            var sb = new StringBuilder();
             await foreach (var tok in _executor.InferAsync(prompt, infer, ct).ConfigureAwait(false))
-                sb.Append(tok);
-            return sb.ToString().Replace("<|im_end|>", "").Trim();
+            {
+                // Never surface the template's own markers if one slips through mid-stream.
+                var piece = tok.Replace("<|im_end|>", "").Replace("<|im_start|>", "");
+                if (piece.Length > 0) yield return piece;
+            }
         }
         finally { _gate.Release(); }
     }

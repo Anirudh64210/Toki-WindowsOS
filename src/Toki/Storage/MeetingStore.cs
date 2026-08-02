@@ -81,6 +81,126 @@ public sealed class MeetingStore
                 alter2.CommandText = $"ALTER TABLE meetings ADD COLUMN {col} TEXT;";
                 alter2.ExecuteNonQuery();
             }
+
+        // Full-text search index for "Ask your notes" (FTS5, bundled in e_sqlite3). A standalone
+        // table keyed by meeting id; body = every searchable field concatenated. If FTS5 is somehow
+        // unavailable, retrieval falls back to keyword LIKE — never fatal.
+        try
+        {
+            using (var mk = c.CreateCommand())
+            {
+                mk.CommandText = "CREATE VIRTUAL TABLE IF NOT EXISTS meeting_fts USING fts5(title, body, tokenize='porter unicode61');";
+                mk.ExecuteNonQuery();
+            }
+            // Backfill / self-heal: if the index count doesn't match the meetings count, rebuild it.
+            if (Scalar(c, "SELECT COUNT(*) FROM meeting_fts") != Scalar(c, "SELECT COUNT(*) FROM meetings"))
+                RebuildAllFts(c);
+            _ftsOk = true;
+        }
+        catch (Exception ex) { App.Log($"FTS unavailable, using keyword fallback: {ex.Message}"); _ftsOk = false; }
+    }
+
+    bool _ftsOk;
+
+    static long Scalar(SqliteConnection c, string sql)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L);
+    }
+
+    // The one place the FTS "body" is defined: title + summary + sections + manual body + transcript +
+    // action items + legacy decisions/questions — everything the user might search for.
+    const string FtsSelect = """
+        SELECT m.id, m.title,
+          COALESCE(m.tldr,'') || ' ' || COALESCE(m.sections_json,'') || ' ' || COALESCE(m.body,'') || ' ' ||
+          COALESCE((SELECT group_concat(text,' ') FROM transcript   WHERE meeting_id=m.id),'') || ' ' ||
+          COALESCE((SELECT group_concat(text,' ') FROM action_items WHERE meeting_id=m.id),'') || ' ' ||
+          COALESCE((SELECT group_concat(text,' ') FROM decisions    WHERE meeting_id=m.id),'') || ' ' ||
+          COALESCE((SELECT group_concat(text,' ') FROM questions    WHERE meeting_id=m.id),'')
+        FROM meetings m
+        """;
+
+    void RebuildAllFts(SqliteConnection c)
+    {
+        using var del = c.CreateCommand();
+        del.CommandText = "DELETE FROM meeting_fts;";
+        del.ExecuteNonQuery();
+        using var ins = c.CreateCommand();
+        ins.CommandText = $"INSERT INTO meeting_fts(rowid, title, body) {FtsSelect};";
+        ins.ExecuteNonQuery();
+    }
+
+    // Re-index ONE meeting (call inside the caller's transaction, after its rows are written).
+    void ReindexFts(SqliteConnection c, long id)
+    {
+        if (!_ftsOk) return;
+        try
+        {
+            using (var del = c.CreateCommand())
+            {
+                del.CommandText = "DELETE FROM meeting_fts WHERE rowid=$id;";
+                del.Parameters.AddWithValue("$id", id);
+                del.ExecuteNonQuery();
+            }
+            using var ins = c.CreateCommand();
+            ins.CommandText = $"INSERT INTO meeting_fts(rowid, title, body) {FtsSelect} WHERE m.id=$id;";
+            ins.Parameters.AddWithValue("$id", id);
+            ins.ExecuteNonQuery();
+        }
+        catch (Exception ex) { App.Log($"FTS reindex {id}: {ex.Message}"); }
+    }
+
+    /// <summary>Best-matching MEETING ids for a free-text query, ranked by BM25 (title weighted). Empty
+    /// if FTS is unavailable or nothing matches — the caller then falls back to keyword/recent.</summary>
+    public List<long> SearchRelevant(string query, int limit)
+    {
+        var ids = new List<long>();
+        if (!_ftsOk) return ids;
+        var terms = (query ?? "")
+            .Split(new[] { ' ', '\t', '\n', '?', '.', ',', '!', ';', ':', '\'', '"', '(', ')', '/', '-' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => new string(w.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant())
+            .Where(w => w.Length > 1)
+            .Distinct()
+            .ToList();
+        if (terms.Count == 0) return ids;
+        var match = string.Join(" OR ", terms.Select(t => $"{t}*"));   // prefix-OR, sanitized to alnum
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                SELECT f.rowid FROM meeting_fts f JOIN meetings m ON m.id = f.rowid
+                WHERE meeting_fts MATCH $q AND m.kind = 'Meeting'
+                ORDER BY bm25(meeting_fts, 5.0, 1.0) LIMIT $n;
+                """;
+            cmd.Parameters.AddWithValue("$q", match);
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) ids.Add(r.GetInt64(0));
+        }
+        catch (Exception ex) { App.Log($"FTS search: {ex.Message}"); }
+        return ids;
+    }
+
+    /// <summary>Open (undone) action items across all meetings, newest meeting first — for the Ask
+    /// "what are my open tasks / what did I commit to" router (answered from data, never hallucinated).</summary>
+    public List<(string Meeting, string Text, string? Owner, string? Due)> OpenActions(int limit)
+    {
+        var list = new List<(string, string, string?, string?)>();
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT m.title, a.text, a.owner, a.due FROM action_items a
+            JOIN meetings m ON m.id = a.meeting_id
+            WHERE a.done = 0
+            ORDER BY m.started_at DESC, a.ord ASC LIMIT $n;
+            """;
+        cmd.Parameters.AddWithValue("$n", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add((r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
+        return list;
     }
 
     // The template sections persist as a small JSON array on the meetings row (no extra table).
@@ -172,6 +292,7 @@ public sealed class MeetingStore
             cmd.ExecuteNonQuery();
         }
 
+        ReindexFts(c, id);
         tx.Commit();
         m.Id = id;
         return id;
@@ -273,6 +394,7 @@ public sealed class MeetingStore
             cmd.Parameters.AddWithValue("$ord", i);
             cmd.ExecuteNonQuery();
         }
+        ReindexFts(c, meetingId);
         tx.Commit();
     }
 
@@ -295,6 +417,7 @@ public sealed class MeetingStore
         cmd.Parameters.AddWithValue("$b", (object?)body ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$id", id);
         cmd.ExecuteNonQuery();
+        ReindexFts(c, id);
     }
 
     public void Delete(long id)
@@ -304,6 +427,15 @@ public sealed class MeetingStore
         cmd.CommandText = "DELETE FROM meetings WHERE id=$id";
         cmd.Parameters.AddWithValue("$id", id);
         cmd.ExecuteNonQuery();
+        if (_ftsOk)
+            try
+            {
+                using var fdel = c.CreateCommand();
+                fdel.CommandText = "DELETE FROM meeting_fts WHERE rowid=$id;";
+                fdel.Parameters.AddWithValue("$id", id);
+                fdel.ExecuteNonQuery();
+            }
+            catch (Exception ex) { App.Log($"FTS delete {id}: {ex.Message}"); }
     }
 
     // ---- helpers ----
