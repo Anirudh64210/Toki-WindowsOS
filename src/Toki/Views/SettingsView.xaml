@@ -31,6 +31,16 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
             <StackPanel>
+                <!-- Google Calendar: connect / disconnect. The sign-in itself happens in the browser. -->
+                <TextBlock Style="{StaticResource SettingTitle}" Text="Google Calendar" Margin="0,4,0,2"/>
+                <TextBlock x:Name="GoogleStatus" Style="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                    <Button x:Name="GoogleConnectBtn" Style="{StaticResource PillButton}" Click="OnGoogleConnect"/>
+                    <Button x:Name="GoogleDisconnectBtn" Style="{StaticResource PillButton}" Background="Transparent"
+                            Foreground="{StaticResource Coral}" Content="Disconnect" Margin="8,0,0,0"
+                            ToolTip="Sign out of Google and remove the stored token" Click="OnGoogleDisconnect"/>
+                </StackPanel>
+
                 <TextBlock Style="{StaticResource SettingTitle}" Text="AI summaries"/>
                 <TextBlock Style="{StaticResource Dim}"
                            Text="On-device is free forever &amp; private. Or bring your own key and use ANY model, from any provider or router — you choose, you pay the model, not us."/>

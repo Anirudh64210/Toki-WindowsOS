@@ -637,3 +637,30 @@ The owner's verdict after live use: still "not smart — like the first version 
 - **Zero fabrication.** A retrieval with no matching content is an honest miss (never "analyse 5 random meetings"); an answer that admits a miss carries **no** source chips; a garbled command gets "did you mean the light theme?" instead of an invented notes answer.
 
 428/428 tests pass. What tests can't judge — how *natural* the conversation feels — is the owner's live run (script in the doc).
+
+## M7.0 (Google Calendar — the foundation) — 2026-08-03
+
+The plumbing that connects Toki to Google Calendar, built to carry the calendar features that come next
+(notch preview, prep cards, meeting creator). Owner setup guide: [`docs/google-setup.md`](docs/google-setup.md); decisions in `ARCHITECTURE.md`; plain-language story in [`mansplain/24-connecting-your-calendar.md`](mansplain/24-connecting-your-calendar.md).
+
+- **Sign in, direct to Google.** Standard installed-app OAuth: **loopback redirect + PKCE**, the browser
+  talks straight to Google, tokens land on the user's PC. No Toki server — hard constraint #1 intact.
+- **Least privilege.** One scope pair — `openid email` + `calendar.events` (read **and** create, so the
+  meeting-creator needs no second consent). No Gmail/Drive/contacts.
+- **Secure at rest.** Only the long-lived refresh token is stored, **DPAPI-encrypted** (per-Windows-user,
+  reusing the API-key pattern); access tokens live in memory and refresh lazily. Tokens are never logged.
+  Verified: `settings.json` holds an opaque DPAPI blob, zero plaintext token.
+- **Lean by choice.** No Google SDK — three REST endpoints hand-rolled over the shared `HttpClient` in the
+  `ApiLlm` house style, so the single-file publish stays small.
+- **New `Calendar/` module** — `GoogleAuth` (PKCE/loopback/exchange/refresh/revoke), `CalendarClient`
+  (events list/insert/delete), `CalendarModels`, `CalendarService` (the facade every UI surface uses).
+  Wired into the Home "Connect Google" button and a Settings "Google Calendar" connect/disconnect section.
+- **Proven live**, not just compiled — `--caltest connect | list | insert | disconnect` ran against a real
+  Google account: signed in, read the next 7 days, created+deleted an event, auto-refreshed the token. One
+  real bug caught and fixed (an un-encoded `+` in the `timeMin`/`timeMax` timestamps → HTTP 400 → now
+  `EscapeDataString`d).
+
+446/446 tests pass (+18 calendar: PKCE correctness against the RFC 7636 vector, event-JSON parsing across
+timed/all-day/cancelled/Meet-link shapes, id_token email decode). Ship-side follow-up: Google's free
+**sensitive-scope verification** (privacy-policy page + demo video) before selling, to drop the
+"unverified app" warning — queued with the M8 attribution/licensing work.
