@@ -15,9 +15,13 @@ Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail
 6. **Manual/custom notes**: separate left-panel section vs a "Manual notes" filter — owner decision pending.
 7. **Notch acrylic on/off toggle** + blurrier white notch (background text unreadable). Acrylic exists but isn't user-toggleable.
 8. **Speaker diarisation** (named speakers, not just YOU/THEM) — task name-tags done; transcript diarisation not.
-9. **M7 Calendar** — Google OAuth loopback + prep cards (Outlook post-v1).
-10. **M8 Ship shape** — **Attribution/"Built with" screen (LICENCE OBLIGATION: Parakeet CC-BY-4.0, Qwen Apache-2.0, Whisper MIT, bge-small MIT — must ship before selling)**, signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
+9. **M7 Calendar** — ✅ **foundation DONE (2026-08-03, live-verified):** Google OAuth (loopback+PKCE), DPAPI refresh token, raw-HTTP `Calendar/` module, `CalendarService` facade, Home+Settings connect/disconnect, `--caltest`, `docs/google-setup.md`. **Surfaces next (on the facade):** notch calendar preview · prep cards · meeting creator (write path built). Outlook post-v1; Google scope verification → M8. See `calendar-foundation` memory.
+10. **M8 Ship shape** — **Attribution/"Built with" screen (LICENCE OBLIGATION: Parakeet CC-BY-4.0, Qwen Apache-2.0, Whisper MIT, bge-small MIT — must ship before selling)** ← **CHOSEN NEXT (2026-08-03)**, signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
 11. **M9** character & polish. (Live transcription preview is parked — owner deprioritized.)
+12. **Graduated adaptive-resource scaling (RAM tiers)** — TODAY'S IDEA, not built. Resource adaptation is coarse: RAM = a single binary switch (`App.LowMemoryMode`, <8GB), VRAM = 3 GPU tiers (`LlmRuntime`), context follows VRAM not RAM, model always Qwen3-4B. Proposed: RAM tiers (16GB+ → bigger context/history; 6–8 → low-memory; <~6 → heuristic-only floor), maybe a 1–2B fallback model on tiny machines. See `docs/backlog.md`.
+13. **BYO-API "sharp brain" lever** — the P10 dialogue brain drives EITHER backend identically; on-device general chat is competent-but-modest (4-bit 4B ceiling), so the API key is the real sharpness upgrade. Not-yet-built: surface/encourage it better while keeping on-device the $0 default. See `docs/backlog.md`.
+
+**Full backlog with reasoning: `docs/backlog.md`.**
 
 
 ## What Toki is

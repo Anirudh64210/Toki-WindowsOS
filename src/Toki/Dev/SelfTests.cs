@@ -22,6 +22,10 @@ static class SelfTests
 
     public static int Run(string flag, string[] args)
     {
+        // Render “—”, “✓” etc. correctly in the console instead of mojibake (ΓÇö). Best-effort:
+        // throws if stdout is redirected in some shells, which is harmless here.
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+
         var outDir = ArgValue(args, "--out") ?? Directory.GetCurrentDirectory();
         Directory.CreateDirectory(outDir);
         try
@@ -48,6 +52,7 @@ static class SelfTests
                 "--querytest" => QueryTest(),
                 "--followuptest" => FollowUpTest(),
                 "--embedtest" => EmbedTest(),
+                "--caltest" => CalTest(args),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -863,6 +868,78 @@ static class SelfTests
         var ok = simPara > simUn && simPara > 0.4f;
         Console.WriteLine(ok ? "PASS: meaning-search ranks the paraphrase above the unrelated text" : "FAIL: embeddings not discriminating");
         return ok ? 0 : 1;
+    }
+
+    // Exercises the Google Calendar plumbing end to end (no UI). Subcommands:
+    //   --caltest connect      → interactive sign-in (opens your browser); stores the encrypted token
+    //   --caltest              → list the next 7 days (head + tail), proving read + refresh work
+    //   --caltest insert       → create a throwaway event, print its link, then delete it (nothing left)
+    //   --caltest disconnect   → wipe + revoke the local grant
+    static int CalTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--caltest");
+        var sub = i >= 0 && i + 1 < args.Length && !args[i + 1].StartsWith('-') ? args[i + 1].ToLowerInvariant() : "list";
+        var svc = Toki.Calendar.CalendarService.Instance;
+
+        if (!svc.IsConfigured)
+            return Fail("Google OAuth client not set up. Add TOKI_GOOGLE_CLIENT_ID + TOKI_GOOGLE_CLIENT_SECRET " +
+                        "env vars, or drop the console's client JSON at %APPDATA%\\Toki\\google_client.json (see docs/google-setup.md).");
+
+        try
+        {
+            switch (sub)
+            {
+                case "connect":
+                    if (svc.IsConnected) { Console.WriteLine($"[--caltest] already connected as {svc.AccountEmail}. Run '--caltest disconnect' to reset."); return 0; }
+                    Console.WriteLine("[--caltest connect] opening your browser — sign in to Google and click Allow...");
+                    svc.ConnectAsync().GetAwaiter().GetResult();
+                    Console.WriteLine($"[--caltest] PASS — connected as {svc.AccountEmail}. Refresh token stored (DPAPI-encrypted).");
+                    Console.WriteLine("  verify: open %APPDATA%\\Toki\\settings.json — GoogleRefreshTokenProtected is opaque base64 (no plaintext token).");
+                    return 0;
+
+                case "disconnect":
+                    svc.DisconnectAsync().GetAwaiter().GetResult();
+                    Console.WriteLine("[--caltest] disconnected + token revoked at Google.");
+                    return 0;
+
+                case "insert":
+                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    var start = DateTimeOffset.Now.AddMinutes(10);
+                    var draft = new Toki.Calendar.NewEvent("Toki self-test — safe to ignore", start, start.AddMinutes(15));
+                    Console.WriteLine("[--caltest insert] creating a throwaway event 10 min from now...");
+                    var created = svc.CreateAsync(draft).GetAwaiter().GetResult();
+                    Console.WriteLine($"  created id={created.Id}");
+                    Console.WriteLine($"  link  : {created.HtmlLink}");
+                    svc.DeleteAsync(created.Id).GetAwaiter().GetResult();
+                    Console.WriteLine("[--caltest] PASS — event created then deleted; nothing left in your calendar.");
+                    return 0;
+
+                default: // list
+                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    Console.WriteLine("[--caltest] refreshing token + listing the next 7 days...");
+                    var events = svc.UpcomingAsync(7).GetAwaiter().GetResult();
+                    Console.WriteLine($"  {events.Count} event(s) in the next 7 days for {svc.AccountEmail}:");
+                    if (events.Count == 0)
+                    {
+                        Console.WriteLine("[--caltest] PASS — read path works (calendar is just empty for the next week).");
+                        return 0;
+                    }
+                    void Print(Toki.Calendar.CalEvent e) => Console.WriteLine(
+                        $"   {e.StartLocal:ddd MMM d HH:mm}  {e.Summary}" +
+                        $"  ({e.Attendees.Count} attendee{(e.Attendees.Count == 1 ? "" : "s")}{(e.HasMeetLink ? ", meet" : "")})");
+                    Console.WriteLine("  --- HEAD ---");
+                    foreach (var e in events.Take(3)) Print(e);
+                    if (events.Count > 6)
+                    {
+                        Console.WriteLine("   ...");
+                        Console.WriteLine("  --- TAIL ---");
+                        foreach (var e in events.TakeLast(3)) Print(e);
+                    }
+                    Console.WriteLine("[--caltest] PASS — read + auto-refresh work. Do these match your real calendar?");
+                    return 0;
+            }
+        }
+        catch (Toki.Calendar.GoogleAuthException ex) { return Fail(ex.Message); }
     }
 
     static int Seconds(string[] args, int fallback)

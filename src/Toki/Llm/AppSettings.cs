@@ -85,6 +85,28 @@ public sealed class AppSettings
         set => ApiKeyProtected = Protect(value?.Trim());   // trimmed: pasted keys carry stray whitespace
     }
 
+    // ---- Google Calendar (M7) ----
+
+    /// <summary>DPAPI-encrypted Google OAuth refresh token (base64) — the ONLY long-lived Google
+    /// credential kept at rest. Access tokens are never persisted; they live in CalendarService memory
+    /// and refresh lazily. Use <see cref="GoogleRefreshToken"/> to read/write in the clear.</summary>
+    public string? GoogleRefreshTokenProtected { get; set; }
+
+    [JsonIgnore]
+    public string? GoogleRefreshToken
+    {
+        get => Unprotect(GoogleRefreshTokenProtected);
+        set => GoogleRefreshTokenProtected = Protect(value?.Trim());
+    }
+
+    /// <summary>The connected Google account's email (from the id_token) — display only
+    /// ("Connected as sid@…"). Null when not connected.</summary>
+    public string? GoogleAccountEmail { get; set; }
+
+    /// <summary>True when a Google refresh token is stored (the calendar is connected).</summary>
+    [JsonIgnore]
+    public bool GoogleConnected => !string.IsNullOrEmpty(GoogleRefreshTokenProtected);
+
     // ---- persistence ----
 
     static AppSettings? _current;

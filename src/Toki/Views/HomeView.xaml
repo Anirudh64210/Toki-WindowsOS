@@ -32,12 +32,12 @@
             </StackPanel>
         </Button>
 
-        <Button Margin="0,11,0,0" Style="{StaticResource WhiteButton}" Padding="0,10"
-                HorizontalContentAlignment="Center"
-                ToolTip="Google Calendar connect lands in Milestone 7">
+        <Button x:Name="GoogleButton" Margin="0,11,0,0" Style="{StaticResource WhiteButton}" Padding="0,10"
+                HorizontalContentAlignment="Center" Click="OnGoogleConnect"
+                ToolTip="Connect your Google Calendar (sign in in your browser)">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="G" FontWeight="Bold" Foreground="#4285F4" Margin="0,0,8,0"/>
-                <TextBlock Text="Connect Google"/>
+                <TextBlock x:Name="GoogleLabel" Text="Connect Google"/>
             </StackPanel>
         </Button>
 

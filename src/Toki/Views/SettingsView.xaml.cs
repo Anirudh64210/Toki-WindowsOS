@@ -60,6 +60,8 @@ public partial class SettingsView : UserControl
         _loading = true;
         var s = AppSettings.Current;
 
+        RefreshGoogle();
+
         NotesModeSeg.Children.Clear();
         NotesModeSeg.Children.Add(SegButton("On-device", NotesMode.Local, s.NotesMode));
         NotesModeSeg.Children.Add(SegButton("Heuristic", NotesMode.HeuristicOnly, s.NotesMode));
@@ -432,6 +434,51 @@ public partial class SettingsView : UserControl
             _ => "TextDim",
         });
         ApiTestStatus.Visibility = Visibility.Visible;
+    }
+
+    // ── Google Calendar ──
+
+    void RefreshGoogle()
+    {
+        var svc = Toki.Calendar.CalendarService.Instance;
+        if (svc.IsConnected)
+        {
+            GoogleStatus.Text = svc.AccountEmail is { Length: > 0 } m
+                ? $"Connected as {m}." : "Connected to Google Calendar.";
+            GoogleConnectBtn.Content = "Reconnect";
+            GoogleDisconnectBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            GoogleStatus.Text = svc.IsConfigured
+                ? "Not connected. Sign in to see upcoming meetings and let Toki prep you."
+                : "Google sign-in isn’t set up in this build yet.";
+            GoogleConnectBtn.Content = "Connect Google";
+            GoogleConnectBtn.IsEnabled = svc.IsConfigured;
+            GoogleDisconnectBtn.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    async void OnGoogleConnect(object sender, RoutedEventArgs e)
+    {
+        var svc = Toki.Calendar.CalendarService.Instance;
+        if (!svc.IsConfigured) { GoogleStatus.Text = "Google sign-in isn’t set up in this build yet."; return; }
+        GoogleConnectBtn.IsEnabled = false;
+        GoogleStatus.Text = "Opening your browser — sign in and click Allow…";
+        try
+        {
+            await svc.ConnectAsync();
+        }
+        catch (Toki.Calendar.GoogleAuthException ex) { GoogleStatus.Text = ex.Message; }
+        catch { GoogleStatus.Text = "Couldn’t connect to Google."; }
+        finally { GoogleConnectBtn.IsEnabled = true; RefreshGoogle(); }
+    }
+
+    async void OnGoogleDisconnect(object sender, RoutedEventArgs e)
+    {
+        GoogleDisconnectBtn.IsEnabled = false;
+        try { await Toki.Calendar.CalendarService.Instance.DisconnectAsync(); }
+        finally { GoogleDisconnectBtn.IsEnabled = true; RefreshGoogle(); }
     }
 
     void OnBack(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Home);
