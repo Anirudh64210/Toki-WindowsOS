@@ -18,9 +18,10 @@ public sealed class AppState
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
         [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Library],
         [PillState.NoSpeech]      = [PillState.Hidden, PillState.Home, PillState.Collapsed],
-        [PillState.Home]          = [PillState.Hidden, PillState.Collapsed, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings, PillState.ManualNote],
+        [PillState.Home]          = [PillState.Hidden, PillState.Collapsed, PillState.MeetingPrompt, PillState.RecordingBar, PillState.Library, PillState.Settings, PillState.ManualNote, PillState.Calendar],
         [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings, PillState.Notes, PillState.ManualNote],
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library],
+        [PillState.Calendar]      = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Settings],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
         // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
         // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.

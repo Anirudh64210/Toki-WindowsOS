@@ -664,3 +664,31 @@ The plumbing that connects Toki to Google Calendar, built to carry the calendar 
 timed/all-day/cancelled/Meet-link shapes, id_token email decode). Ship-side follow-up: Google's free
 **sensitive-scope verification** (privacy-policy page + demo video) before selling, to drop the
 "unverified app" warning — queued with the M8 attribution/licensing work.
+
+## M7.1 (Calendar UI — the surfaces) — 2026-08-03
+
+The visible calendar, built on the foundation's `CalendarService` facade. Design matches
+`Toki-ProductDesign/③ Home` exactly; plain-language story in
+[`mansplain/25-calendar-in-the-notch.md`](mansplain/25-calendar-in-the-notch.md); decisions in `ARCHITECTURE.md`.
+
+- **Home redesign (connected):** a two-up **Meeting** + **Take Notes** row, a **"COMING UP"** list (date
+  badge · title · time · **Join**, with an amber "in N min" treatment for imminent meetings), and an
+  account footer with a live green dot. Not-connected keeps the Connect-Google CTA.
+- **Calendar page** (`PillState.Calendar`, 392×472): an **agenda-by-day** week view (the right form for a
+  narrow surface — not a cramped 7-col grid), today picked out in amber with a live **"now" line**, week
+  nav (this week + 3, no fake past), Join, and a per-event **…** menu (Join · Edit · Open in Google · Delete).
+- **Create — natural language, one box:** type "Design sync tomorrow 2pm with ana@work.com"; a live green
+  preview shows the parsed time; chips for duration / Google Meet (default on) / people. Backed by the
+  already-shipped `Microsoft.Recognizers` (future-preferred) in `QuickEventParser`.
+- **Edit** reopens the same composer prefilled (Save mode) via a new `events.patch` (`sendUpdates=all`).
+- **Delete — safe but fast:** instant + an **Undo** bar for solo events; a one-tap **confirm** when guests
+  would get a cancellation email (that one isn't reversible).
+- **Provider-neutral by construction** — views touch only `CalendarService` + the models, so Outlook
+  drops in later with no UI rewrite (`CalendarService.ProviderName` is the one naming seam).
+- New: `Calendar/UpcomingCache` (stale-while-revalidate, shared by Home + Calendar), `Views/CalendarRows`
+  (shared row builders), `Views/CalendarView`, `Views/NotchMenu`, `Calendar/QuickEventParser`,
+  `Dev/CalendarSamples`. Self-tests: `--caltest update`, `--caltest parse`.
+- **Verified:** all screens render-checked (connected Home, week view, create composer with live preview);
+  create / **edit** / delete / parse run live against a real Google account (edit = insert→patch→verify→delete PASS).
+
+450/450 tests pass (+4 natural-language parser: title/time/email extraction, 30-min default, no-time, past-rolls-forward).

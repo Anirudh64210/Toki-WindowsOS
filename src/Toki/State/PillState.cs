@@ -20,4 +20,5 @@ public enum PillState
     Settings,
     ManualNote,
     Ask,   // push-to-talk voice ask on the notch: listening → thinking → answer
+    Calendar, // Google Calendar week view: upcoming meetings + create/edit/delete
 }

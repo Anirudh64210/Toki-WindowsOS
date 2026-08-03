@@ -28,3 +28,4 @@ Read them in order:
 22. [Ask Toki gets smart](22-ask-toki-gets-smart.md) — the assistant learns to route questions (facts vs. thinking vs. commands), ground to the meeting on screen, know people's names, and stop making things up.
 23. [Toki learns to talk](23-toki-learns-to-talk.md) — the dialogue brain: Toki remembers who you are, can just chat, keeps meeting answers grounded, and never fabricates.
 24. [Toki connects to your calendar](24-connecting-your-calendar.md) — the private, safe link to Google Calendar (the foundation): browser-direct sign-in, an encrypted "valet key," the smallest possible permission, and proof it reads/creates events live.
+25. [Your week, in the notch](25-calendar-in-the-notch.md) — the calendar UI: the redesigned home card ("COMING UP" + Join), an agenda-style week view with a "now" line, one-box natural-language create, edit, and delete (instant + Undo for solo events, confirm for guested ones).
