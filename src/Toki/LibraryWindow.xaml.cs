@@ -39,17 +39,33 @@ public partial class LibraryWindow : Window
     /// slow, visible "the window builds while the pill is still up, then the pill closes"
     /// handoff was the clunk — a warm window just appears.
     /// </summary>
-    public static void ShowLibrary(long? focusMeetingId = null, Rect? fromRect = null)
+    public static void ShowLibrary(long? focusMeetingId = null, Rect? fromRect = null, string? page = null)
     {
         EnsureCreated();
         var w = _open!;
         // Rebuild only when data changed (or a specific note was requested); otherwise the
         // already-rendered content is reused and opening is just Show() → instant.
         if (_dirty || focusMeetingId is not null) { w.Reload(focusMeetingId); _dirty = false; }
-        if (!w.IsVisible) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
-        // A specific note → open on the Library page showing it; otherwise the Ask landing (fresh greeting).
-        w.ShowPage(focusMeetingId is not null ? "library" : "ask", animate: false);
-        w.Activate();
+        // Always POP UP: closed → open with the bloom; minimized → restore; already open → bring to front.
+        var wasHidden = !w.IsVisible;
+        if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal;
+        if (wasHidden) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
+        else w.Show();
+        // An explicit page (assistant command) wins; a specific note → the Library page showing it;
+        // otherwise the Ask landing (fresh greeting). This is what makes "take me to the library" land
+        // on the actual notes LIST instead of the Ask page (the wrong-page bug).
+        w.ShowPage(page ?? (focusMeetingId is not null ? "library" : "ask"), animate: false);
+        w.BringToFront();
+    }
+
+    /// <summary>Force the window to the foreground even when it was minimized or behind — the Topmost
+    /// flip is the reliable way to steal focus back for our own window without a Win32 hack.</summary>
+    void BringToFront()
+    {
+        Activate();
+        var wasTop = Topmost;
+        Topmost = true; Topmost = wasTop;
+        Focus();
     }
 
     /// <summary>Dev: render the hub's three pages to PNGs (Library window isn't in the pill harness).</summary>
@@ -130,11 +146,13 @@ public partial class LibraryWindow : Window
         w.ShowActivated = false;
         w.ShowInTaskbar = false;
         w.Left = -32000; w.Top = -32000;
+        _warming = true;  // nothing here is "on screen" — never ground Ask on the pre-warm render
         w.Show();
         w.Reload();       // build the real content once, off-screen (pre-JIT + pre-render)
         _dirty = false;   // content is now current; first real open can skip the rebuild
         w.UpdateLayout();
         w.Hide();
+        _warming = false;
         w.ShowInTaskbar = true;
         w.ShowActivated = true;
     }
@@ -242,12 +260,31 @@ public partial class LibraryWindow : Window
         });
     }
 
+    /// <summary>Open the hub on a specific page (ask / library / templates) — for assistant commands.
+    /// The page rides into ShowLibrary directly, so the window lands there in one step (no Ask-page flash).</summary>
+    public static void OpenHubPage(string page) => ShowLibrary(page: page);
+
+    /// <summary>Open the Library Ask and ask <paramref name="question"/> in full — the notch's "See full
+    /// answer in Library" hand-off (a fuller, non-concise answer).</summary>
+    public static void AskInLibrary(string question)
+    {
+        ShowLibrary();
+        _open?.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _open.ShowPage("ask");
+            _open.OnNewChat(_open, new RoutedEventArgs());   // the hand-off starts a NEW conversation
+            _open.AskBox.Text = question;
+            _open.OnAsk(_open, new RoutedEventArgs());
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
     /// <summary>Open the Library and start a fresh manual note in the editor.</summary>
     public static void ShowNewNote()
     {
         var id = App.Store.CreateManualNote("Untitled note", "");
         ShowLibrary(id);
     }
+
 
     LibraryWindow()
     {
@@ -300,8 +337,10 @@ public partial class LibraryWindow : Window
     {
         LoadList();
         var toSelect = focus ?? _selected;
-        if (toSelect is long id && App.Store.Get(id) is not null) Select(id);
-        else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid);
+        // An explicit focus (e.g. "open this note") counts as user intent; re-selecting the previous
+        // note keeps its sticky user/auto status; the silent first-card fallback is NOT user-viewed.
+        if (toSelect is long id && App.Store.Get(id) is not null) Select(id, byUser: focus is not null);
+        else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid, byUser: false);
         else DetailBody.Content = Placeholder("Select a meeting or note, or make a new one.");
     }
 
@@ -313,7 +352,6 @@ public partial class LibraryWindow : Window
     readonly Dictionary<string, Border> _navButtons = new();
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
-    int _pokeKind;
 
     // ── Ask conversations (persisted history) ──
     readonly Storage.ChatStore _chatStore = new();
@@ -469,6 +507,51 @@ public partial class LibraryWindow : Window
 
     void OnAskKeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { e.Handled = true; OnAsk(sender, e); } }
 
+    // A typed assistant command in the Ask box → do the thing (navigation acts as its own confirmation;
+    // Help explains what Toki can do).
+    void ExecuteLibraryCommand(Llm.AppCommand c, string q)
+    {
+        switch (c)
+        {
+            case Llm.AppCommand.OpenLibrary:   ShowPage("library"); break;
+            case Llm.AppCommand.OpenAsk:       ShowPage("ask"); break;
+            case Llm.AppCommand.OpenTemplates: ShowPage("templates"); break;
+            case Llm.AppCommand.OpenSettings:  App.State.ForceForDemo(PillState.Settings); break;
+            case Llm.AppCommand.NewNote:       OnNewNote(this, new RoutedEventArgs()); break;
+            case Llm.AppCommand.NewChat:       OnNewChat(this, new RoutedEventArgs()); break;
+            case Llm.AppCommand.GoHome:
+            case Llm.AppCommand.Close:         HideToPill(); break;
+            case Llm.AppCommand.StartRecording:
+                // Start the manual recording on the notch; the Library stays put (hiding it here would
+                // race the pill's state change — the recording bar appearing IS the confirmation).
+                if (App.IsRecording) { CommandReply(q, "Already recording — the bar's up top."); break; }
+                App.StartRecordingFromCommand();
+                CommandReply(q, "Recording — the bar's up top. Click it when you're done.");
+                break;
+            case Llm.AppCommand.UseApiModel:      CommandReply(q, App.SwitchNotesMode(Llm.NotesMode.ApiKey)); break;
+            case Llm.AppCommand.UseLocalModel:    CommandReply(q, App.SwitchNotesMode(Llm.NotesMode.Local)); break;
+            case Llm.AppCommand.UseHeuristicMode: CommandReply(q, App.SwitchNotesMode(Llm.NotesMode.HeuristicOnly)); break;
+            case Llm.AppCommand.ThemeLight:       CommandReply(q, App.SwitchTheme(light: true)); break;
+            case Llm.AppCommand.ThemeDark:        CommandReply(q, App.SwitchTheme(light: false)); break;
+            case Llm.AppCommand.GhostOn:          CommandReply(q, App.SetGhostMode(on: true)); break;
+            case Llm.AppCommand.GhostOff:         CommandReply(q, App.SetGhostMode(on: false)); break;
+            case Llm.AppCommand.Help:
+                CommandReply(q, "I can answer about your meetings — decisions, tasks, who said what — and do quick things like “start taking notes”, “new note”, “open templates”, “switch to dark theme”, or “ghost mode off”. Just ask.");
+                break;
+        }
+    }
+
+    // A command asked in the chat gets a short confirmation bubble (navigation confirms itself; state
+    // changes like a model/theme switch need the words).
+    void CommandReply(string q, string message)
+    {
+        EnsureConversation();
+        Landing.Visibility = Visibility.Collapsed; Messages.Visibility = Visibility.Visible;
+        Messages.Children.Add(UserBubble(q));
+        Messages.Children.Add(TokiBubble(message, dim: true));
+        ScrollChatToEnd();
+    }
+
     bool _asking;
 
     // ── ask by voice (on-device Parakeet) ──
@@ -490,6 +573,10 @@ public partial class LibraryWindow : Window
         var q = AskBox.Text?.Trim();
         if (string.IsNullOrEmpty(q) || _asking) return;
         AskBox.Text = "";
+        // Tier 0: a little assistant command ("open templates", "new note", "go home") runs instantly;
+        // a question (even one mentioning those words) falls through to the Q&A (the router vetoes questions).
+        if (Llm.CommandRouter.TryMatch(q) is Llm.AppCommand lc && lc != Llm.AppCommand.ShowTasks)
+        { ExecuteLibraryCommand(lc, q); return; }
         EnsureConversation();
         Landing.Visibility = Visibility.Collapsed;
         Messages.Visibility = Visibility.Visible;
@@ -502,16 +589,23 @@ public partial class LibraryWindow : Window
         ScrollChatToEnd();
 
         _asking = true; AskBtn.IsEnabled = false; MicBtn.IsEnabled = false;
+        // Patch streaming: buffer tokens and flush in ~70ms chunks so words render up in patches, not char-by-char.
+        var accSb = new System.Text.StringBuilder();
+        var gate = new object();
+        var flusher = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+            { Interval = TimeSpan.FromMilliseconds(70) };
+        flusher.Tick += (_, _) => { string cur; lock (gate) cur = accSb.ToString(); if (cur.Length > 0) stream.SetFinalText(cur); };
+        flusher.Start();
         Llm.NotesQa.Answer ans;
         try
         {
             ans = await System.Threading.Tasks.Task.Run(() => Llm.NotesQa.AskStreamAsync(q,
                 srcs => Dispatcher.Invoke(() => stream.SetSources(srcs)),
-                tok => Dispatcher.Invoke(() => stream.Append(tok)),
-                default, _ctx));
+                tok => { lock (gate) accSb.Append(tok); },
+                default, _ctx, screenMeetingId: App.CurrentViewedMeeting?.Id));
         }
         catch (Exception ex) { App.Log($"ask failed: {ex.Message}"); ans = new Llm.NotesQa.Answer("Something went wrong — try again.", [], false); }
-        finally { _asking = false; AskBtn.IsEnabled = true; MicBtn.IsEnabled = true; }
+        finally { _asking = false; AskBtn.IsEnabled = true; MicBtn.IsEnabled = true; flusher.Stop(); }
 
         // The final answer is authoritative (streamed text may have been a rejected/degenerate draft).
         stream.SetFinalText(ans.Text);
@@ -871,7 +965,14 @@ public partial class LibraryWindow : Window
             SetFinalText = txt => { Reveal(); answer.Text = txt ?? ""; ScrollChatToEnd(); },
             SetSources = srcs =>
             {
-                if (srcs is null || srcs.Count == 0) return;
+                // An empty FINAL source list retracts chips shown during streaming: a miss answer
+                // must never sit above "From <meetings>" chips (no citations on a non-answer).
+                if (srcs is null || srcs.Count == 0)
+                {
+                    chips.Children.Clear();
+                    chips.Visibility = Visibility.Collapsed;
+                    return;
+                }
                 chips.Children.Clear();
                 chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
                 foreach (var s in srcs) chips.Children.Add(SourceChip(s));
@@ -930,16 +1031,9 @@ public partial class LibraryWindow : Window
         return c;
     }
 
-    // ── clickable mascot: a cute reaction that varies each poke ──
-    void OnMascotClick(object sender, MouseButtonEventArgs e)
-    {
-        SideToki.BlinkNow();
-        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.55 };
-        var (sx, sy) = (_pokeKind++ % 3) switch { 0 => (0.72, 0.72), 1 => (0.6, 0.9), _ => (0.92, 0.58) };
-        var dur = TimeSpan.FromMilliseconds(380);
-        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(sx, 1, dur) { EasingFunction = ease });
-        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(sy, 1, dur) { EasingFunction = ease });
-    }
+    // ── clickable mascot: a different fun reaction every poke (squish / hop / wobble / wink / spin /
+    //    big-eyes / nod), cycled inside TokiBlob so it feels alive rather than one canned bounce. ──
+    void OnMascotClick(object sender, MouseButtonEventArgs e) => SideToki.React();
 
     // ── "My notes" filter: show only the notes you wrote by hand ──
     void OnToggleMyNotes(object sender, RoutedEventArgs e) { _myNotesOnly = !_myNotesOnly; UpdateMyNotesToggle(); LoadList(); }
@@ -1270,13 +1364,30 @@ public partial class LibraryWindow : Window
         return t.ToString("MMM d");
     }
 
-    void Select(long id)
+    // ── screen-aware Ask grounding state (read via VisibleMeeting; see App.CurrentViewedMeeting) ──
+    MeetingRecord? _viewedRecord;   // the record currently rendered in the detail pane
+    bool _viewedByUser;             // true when the USER chose it (click / focus) — not an auto-select
+    static bool _warming;           // true during the off-screen startup pre-warm (nothing is "on screen")
+
+    /// <summary>The meeting note ACTUALLY on the user's screen right now: the Library window is visible
+    /// (not the off-screen warm-up), the rendered note is a real meeting (not a manual note), and the
+    /// user chose it (a click or an explicit open — never the list's silent auto-select, which is what
+    /// made "this meeting" ground on a note nobody had looked at). Derived, so it can't go stale.</summary>
+    internal static MeetingRecord? VisibleMeeting =>
+        _open is { } w && w.IsVisible && !_warming && w._viewedByUser
+        && w._viewedRecord is { Kind: MeetingKind.Meeting } m ? m : null;
+
+    void Select(long id, bool byUser = true)
     {
         FlushManual();          // save the previous manual note before switching away
+        // "User-viewed" is sticky per note: re-selecting the same note during an auto Reload must not
+        // demote a note the user genuinely opened.
+        _viewedByUser = byUser || (_viewedByUser && _viewedRecord?.Id == id);
         _selected = id;
         LoadList(); // refresh selection highlight
         var m = App.Store.Get(id);
-        if (m is null) return;
+        if (m is null) { _viewedRecord = null; return; }
+        _viewedRecord = m;
         if (m.Kind == MeetingKind.Manual) RenderManual(m);
         else RenderMeeting(m);
         FadeIn(DetailBody);   // FlowDocument viewer starts at the top on a fresh document
@@ -1295,6 +1406,7 @@ public partial class LibraryWindow : Window
 
     void RenderMeeting(MeetingRecord m)
     {
+        // (Screen-aware Ask grounding is DERIVED from _viewedRecord/_viewedByUser — see VisibleMeeting.)
         // The action toolbar (Template left · Copy/Delete right) rides at the TOP of the scroll document,
         // so the whole note — toolbar, title, body — is one scroll from the very top of the pane.
         var toolbar = new StackPanel();
@@ -1324,6 +1436,7 @@ public partial class LibraryWindow : Window
 
     void RenderManual(MeetingRecord m)
     {
+        // (A manual note never grounds Ask — VisibleMeeting filters on Kind == Meeting.)
         var panel = new StackPanel();
 
         var titleBox = new TextBox { Text = m.Title, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"), FontSize = 20, FontWeight = FontWeights.Bold, FontFamily = (FontFamily)FindResource("UiFont") };
@@ -1503,7 +1616,7 @@ public partial class LibraryWindow : Window
         if (!Views.ConfirmDialog.Show(this, "Delete this?",
                 $"“{m?.Title}” and its audio will be removed for good. This can't be undone.")) return;
         App.Store.Delete(id);
-        if (_selected == id) _selected = null;
+        if (_selected == id) { _selected = null; _viewedRecord = null; _viewedByUser = false; }
         Reload();
     }
 

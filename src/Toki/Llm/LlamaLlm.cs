@@ -44,7 +44,8 @@ public sealed class LlamaLlm : ILlm, IDisposable
     }
 
     public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
+        IReadOnlyList<string>? stop = null)
     {
         // Serialize generations (a llama context isn't concurrent) — hold the gate across the whole stream.
         await _gate.WaitAsync(ct).ConfigureAwait(false);
@@ -56,15 +57,24 @@ public sealed class LlamaLlm : ILlm, IDisposable
             template.Add("user", user);
             var prompt = Encoding.UTF8.GetString(template.Apply());
 
+            // Caller-supplied stop sequences ride as extra anti-prompts (llama.cpp stops when the
+            // accumulated output ends with one) — a clean stop beats generating long then trimming.
+            var anti = new List<string> { "<|im_end|>", "<|im_start|>" };
+            if (stop is not null) anti.AddRange(stop);
+
             var infer = new InferenceParams
             {
                 MaxTokens = maxTokens,
-                AntiPrompts = ["<|im_end|>", "<|im_start|>"],
+                AntiPrompts = anti,
+                // Qwen3-4B-Instruct-2507 model-card "Best Practices" values: T=0.7, TopP=0.8, TopK=20,
+                // MinP=0 (explicit — the LLamaSharp default is 0.1), presence penalty in [0,2] against
+                // repetition (0.5 keeps it mild; high values cause language mixing). NEVER greedy (lesson 8).
                 SamplingPipeline = new DefaultSamplingPipeline
                 {
                     Temperature = 0.7f,
                     TopP = 0.8f,
                     TopK = 20,
+                    MinP = 0f,
                     PresencePenalty = 0.5f,
                 },
             };

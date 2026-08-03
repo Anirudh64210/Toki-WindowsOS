@@ -53,6 +53,15 @@ public partial class App : Application
     /// <summary>The meeting the Notes screen should display (saved after transcription).</summary>
     public static MeetingRecord? CurrentMeeting { get; set; }
 
+    /// <summary>The meeting note the user is currently LOOKING AT in the Library (null if none / a manual
+    /// note / the window is closed). Powers screen-aware Ask: "what were the action items?" resolves to
+    /// THIS meeting when it's on screen. DERIVED live from the Library window's actual state (visible +
+    /// user-opened note) — the old set/clear-from-scattered-callsites version went stale: it was cleared
+    /// on hide but never restored when the warm window re-showed its old content, and the startup
+    /// pre-warm set it to a note nobody was looking at, so "this meeting" grounded on the WRONG meeting
+    /// (screenshot-verified). A computed property can't go stale.</summary>
+    public static MeetingRecord? CurrentViewedMeeting => LibraryWindow.VisibleMeeting;
+
     /// <summary>The manual note currently being edited.</summary>
     public static MeetingRecord? CurrentManualNote { get; private set; }
 
@@ -141,7 +150,7 @@ public partial class App : Application
 
     PillWindow? _pill;
     TaskbarIcon? _tray;
-    HotkeyManager? _hotkey;
+    Interop.PushToTalkHook? _ptt;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -241,7 +250,10 @@ public partial class App : Application
         signalThread.Start();
 
         _pill = new PillWindow(State);
-        _hotkey = new HotkeyManager(_pill, ToggleHome);
+        // Ctrl+Alt+Space is PUSH-TO-TALK (hold to speak, release to answer) — see PushToTalkHook.
+        _ptt = new Interop.PushToTalkHook(
+            onStart: () => Dispatcher.BeginInvoke(new Action(PttStart)),
+            onStop: () => Dispatcher.BeginInvoke(new Action(PttStop)));
         _tray = BuildTray();
 
         // Dev/demo: `Toki.exe --state home` opens directly in a state.
@@ -376,6 +388,75 @@ public partial class App : Application
         State.TryGo(PillState.RecordingBar);
     }
 
+    /// <summary>True while a recording is running (for the "start taking notes" command's guard).</summary>
+    public static bool IsRecording => State.Current is PillState.RecordingBar or PillState.RecordingOpen;
+
+    /// <summary>"Start taking notes" as an assistant command (voice or typed). Same manual-start path
+    /// as the Home button — the user explicitly asked, so this IS the human in the loop (constraint #3).
+    /// Forced state (not TryGo): the command can arrive from the Ask notch or with the Library open,
+    /// where the pill may be in a state with no direct edge to RecordingBar.</summary>
+    public static void StartRecordingFromCommand()
+    {
+        if (IsRecording) return;
+        CurrentApp = null;
+        BeginRecording(null);
+        State.ForceForDemo(PillState.RecordingBar);
+    }
+
+    /// <summary>Switch the notes/answers engine from an assistant command. Returns the reply to show.
+    /// Persists through the normal settings path; refuses an API switch when no key is set (an honest
+    /// "add the key first" beats silently degrading to heuristic notes).</summary>
+    public static string SwitchNotesMode(Llm.NotesMode mode)
+    {
+        var s = Llm.AppSettings.Current;
+        if (mode == Llm.NotesMode.ApiKey && string.IsNullOrWhiteSpace(s.ApiKey))
+            return "There's no API key saved yet — add one in Settings, then I can switch.";
+        if (s.NotesMode == mode)
+            return mode switch
+            {
+                Llm.NotesMode.ApiKey => "Already using your API model.",
+                Llm.NotesMode.HeuristicOnly => "Already on the fast built-in notes (no AI model).",
+                _ => "Already on the on-device model.",
+            };
+        s.NotesMode = mode;
+        s.Save();
+        Log($"notes mode switched by command → {mode}");
+        return mode switch
+        {
+            Llm.NotesMode.ApiKey => "Switched to your API model.",
+            Llm.NotesMode.HeuristicOnly => "Switched to the fast built-in notes — no AI model.",
+            _ => "Switched to the on-device model.",
+        };
+    }
+
+    /// <summary>Switch the theme from an assistant command (applies live + persists). Returns the reply.</summary>
+    public static string SwitchTheme(bool light)
+    {
+        var target = light ? Theme.AppTheme.Light : Theme.AppTheme.Dark;
+        if (Theme.ThemeManager.Current == target)
+            return light ? "You're already in the light theme." : "You're already in the dark theme.";
+        var s = Llm.AppSettings.Current;
+        s.Theme = light ? "light" : "dark";
+        s.Save();
+        Theme.ThemeManager.Apply(target);
+        return light ? "Light theme on." : "Dark theme on.";
+    }
+
+    /// <summary>Ghost mode from an assistant command: on = hidden from screen capture (the default),
+    /// off = visible in recordings. Applies live + persists. Returns the reply.</summary>
+    public static string SetGhostMode(bool on)
+    {
+        var s = Llm.AppSettings.Current;
+        var wanted = !on;   // ghost ON == ShowInRecordings OFF
+        if (s.ShowInRecordings == wanted && GhostDisabled == wanted)
+            return on ? "Ghost mode is already on — Toki stays out of screen captures." : "Ghost mode is already off — Toki shows in recordings.";
+        s.ShowInRecordings = wanted;
+        s.Save();
+        SetShowInRecordings(wanted);
+        return on ? "Ghost mode on — Toki is hidden from screen recordings and shares."
+                  : "Ghost mode off — Toki will show up in recordings.";
+    }
+
     public static void StopRecording()
     {
         var session = _session;
@@ -388,7 +469,10 @@ public partial class App : Application
         // Wall-clock duration = stop − start (lesson 10), captured at stop time.
         var startedAt = State.RecordingStartedAt ?? DateTimeOffset.UtcNow;
         var durationMs = (int)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        var app = session?.Target?.DisplayName ?? CurrentApp?.DisplayName;
+        // The FRIENDLY app name ("Slack", not "Com.tinyspeck.slackdesktop") — it labels the saved
+        // meeting and seeds the fallback title "<app> — <date>", both user-facing.
+        var rawApp = session?.Target?.DisplayName ?? CurrentApp?.DisplayName;
+        var app = string.IsNullOrWhiteSpace(rawApp) ? rawApp : Detection.AppNames.Friendly(rawApp);
 
         // Show the loader immediately; finalize capture + transcribe + save entirely
         // off the UI thread (never freeze the pill), then advance when done.
@@ -590,7 +674,7 @@ public partial class App : Application
         Exiting = true;
         _detector?.Stop();
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
-        _hotkey?.Dispose();
+        _ptt?.Dispose();
         _tray?.Dispose();
         _showSignal?.Dispose();
         _singleInstance?.Dispose();
@@ -615,6 +699,159 @@ public partial class App : Application
         // Force-applied so the user can never get stuck.
         if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
         else State.ForceForDemo(PillState.Hidden);
+    }
+
+    // ── push-to-talk on the notch: hold Ctrl+Alt+Space → Toki drops down and listens; release →
+    //    transcribe → answer, all on the notch. No always-on mic — the mic runs ONLY while held. ──
+    bool _pttOn;
+    Audio.MicCapture? _pttMic;
+    string? _pttWav;
+    Llm.ConversationContext? _notchCtx;   // the notch's session memory (multi-turn until it closes)
+    long? _notchScreenId;                 // meeting on screen when the notch opened (pill Notes view)
+
+    /// <summary>Re-fit the notch to its current Ask content (listening → thinking → answer).</summary>
+    public static void GrowNotch() => (Current as App)?._pill?.GrowToContent();
+
+    void PttStart()
+    {
+        if (_pttOn) return;
+        _pttOn = true;
+        // Fresh conversation each time the notch opens from closed; keep the thread while it stays open (multi-turn).
+        var fresh = State.Current != PillState.Ask;
+        if (fresh) _notchCtx = null;
+        // Screen-grounding for the notch: if the pill is showing a just-finished meeting's NOTES,
+        // "this meeting" means that one. Captured BEFORE the notch takes over the pill state.
+        if (fresh) _notchScreenId = State.Current == PillState.Notes ? CurrentMeeting?.Id : null;
+        State.ForceForDemo(PillState.Ask);   // notch drops down into the listening view
+        if (fresh) Views.AskView.Instance?.NewSession();
+        if (!Transcription.TranscriptionService.ModelReady)
+        {
+            Views.AskView.Instance?.Failed("Add the on-device speech model (in onboarding) to ask by voice.");
+            return;   // _pttOn stays true; PttStop resets it (there's just no WAV to transcribe)
+        }
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "Toki", "voice");
+            Directory.CreateDirectory(dir);
+            _pttWav = Path.Combine(dir, $"ptt-{Guid.NewGuid():N}.wav");
+            _pttMic = new Audio.MicCapture();
+            _pttMic.Start(_pttWav);
+            Views.AskView.Instance?.Listening();
+        }
+        catch (Exception ex)
+        {
+            Log($"ptt mic start failed: {ex.Message}");
+            Views.AskView.Instance?.Failed("Couldn't reach the microphone — check Windows mic permissions.");
+        }
+    }
+
+    async void PttStop()
+    {
+        if (!_pttOn) return;
+        _pttOn = false;
+        var mic = _pttMic; _pttMic = null;
+        var wav = _pttWav; _pttWav = null;
+        try { mic?.Stop(); } catch { }
+        try { mic?.Dispose(); } catch { }
+        if (wav is null || !File.Exists(wav)) return;   // e.g. model missing — the Failed hint already shows
+
+        Views.AskView.Instance?.Thinking();
+        var text = await Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(wav));
+        try { File.Delete(wav); } catch { }
+        if (string.IsNullOrWhiteSpace(text)) { Views.AskView.Instance?.Failed("Didn't catch that — hold and speak."); return; }
+        await HandleNotchText(text!);
+    }
+
+    // Route a notch utterance: a little assistant COMMAND (open the library, new note, …) runs instantly;
+    // otherwise it's a QUESTION answered from your notes. The command router (Tier 0) has a question-veto
+    // so "what did we decide in the settings review?" is answered, never mis-fired as "open settings".
+    async System.Threading.Tasks.Task HandleNotchText(string text)
+    {
+        var cmd = Llm.CommandRouter.TryMatch(text);
+        if (cmd is Llm.AppCommand c && c != Llm.AppCommand.ShowTasks) { ExecuteNotchCommand(c); return; }
+
+        Views.AskView.Instance?.Answer(text);
+
+        var acc = new System.Text.StringBuilder();
+        var gate = new object();
+        var capped = false;
+        using var cts = new System.Threading.CancellationTokenSource();
+
+        // Flush the answer to the notch in PATCHES (~70ms) so words appear in chunks, not char-by-char.
+        var flusher = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+            { Interval = TimeSpan.FromMilliseconds(70) };
+        flusher.Tick += (_, _) => { string cur; lock (gate) cur = acc.ToString(); Views.AskView.Instance?.SetAnswerText(StripMore(cur)); };
+        flusher.Start();
+
+        try
+        {
+            _notchCtx ??= new Llm.ConversationContext();
+            // Screen-aware: the note open in the Library wins; else the notes the pill was showing
+            // when the notch opened. Both derived from real view state — never a stale cached id.
+            var screenId = CurrentViewedMeeting?.Id ?? _notchScreenId;
+            var ans = await Task.Run(() => Llm.NotesQa.AskStreamAsync(text,
+                srcs =>
+                {
+                    // Grounding must be VISIBLE to be trusted: when the answer is scoped to the
+                    // on-screen note, show a small "About: <title>" line above it.
+                    if (screenId is long sid && srcs.Count == 1 && srcs[0].Id == sid)
+                        Dispatcher.BeginInvoke(new Action(() => Views.AskView.Instance?.Scope(srcs[0].Title)));
+                },
+                tok =>
+                {
+                    string s;
+                    lock (gate) { acc.Append(tok); s = acc.ToString(); }
+                    // Stop generating once we have a full sentence past the glance budget (or the model
+                    // flagged [MORE]) — so the notch NEVER overshoots then visibly cuts back.
+                    if (!capped && NotchOverBudget(s)) { capped = true; try { cts.Cancel(); } catch { } }
+                },
+                cts.Token, _notchCtx, concise: true, screenMeetingId: screenId));
+
+            flusher.Stop();
+            string finalRaw; lock (gate) finalRaw = acc.Length >= ans.Text.Length ? acc.ToString() : ans.Text;
+            var (teaser, over) = Llm.NotesQa.NotchTrim(finalRaw);
+            Views.AskView.Instance?.Final(teaser, capped || over, text);
+        }
+        catch (Exception ex) { flusher.Stop(); Log($"notch answer failed: {ex.Message}"); Views.AskView.Instance?.Final("Something went wrong — try again."); }
+    }
+
+    static string StripMore(string s) => s.Replace("[MORE]", "").TrimEnd();
+
+    // A completed sentence past ~240 chars, or the model's [MORE] flag → stop the stream at a clean boundary.
+    static bool NotchOverBudget(string acc)
+    {
+        if (acc.Contains("[MORE]")) return true;
+        var s = acc.Replace("[MORE]", "").TrimEnd();
+        return s.Length >= 240 && (s[^1] is '.' or '!' or '?');
+    }
+
+    void ExecuteNotchCommand(Llm.AppCommand c)
+    {
+        switch (c)
+        {
+            // "Take me to the library" means the LIBRARY LIST — not the hub's Ask landing (that was
+            // the wrong-page bug: ShowLibrary() defaults to the Ask page).
+            case Llm.AppCommand.OpenLibrary:   Views.AskView.Instance?.Command("Opening your Library."); LibraryWindow.OpenHubPage("library"); break;
+            case Llm.AppCommand.OpenAsk:       Views.AskView.Instance?.Command("Opening the assistant."); LibraryWindow.OpenHubPage("ask"); break;
+            case Llm.AppCommand.OpenSettings:  State.ForceForDemo(PillState.Settings); break;
+            case Llm.AppCommand.GoHome:        State.ForceForDemo(PillState.Home); break;
+            case Llm.AppCommand.OpenTemplates: Views.AskView.Instance?.Command("Opening Templates."); LibraryWindow.OpenHubPage("templates"); break;
+            case Llm.AppCommand.NewNote:       Views.AskView.Instance?.Command("New note — go ahead."); LibraryWindow.ShowNewNote(); break;
+            case Llm.AppCommand.NewChat:       _notchCtx = new Llm.ConversationContext(); Views.AskView.Instance?.Command("Fresh start — ask away."); break;
+            case Llm.AppCommand.Close:         State.ForceForDemo(PillState.Hidden); break;
+            case Llm.AppCommand.Help:          Views.AskView.Instance?.Help(); break;
+            case Llm.AppCommand.StartRecording:
+                if (IsRecording) { Views.AskView.Instance?.Command("Already recording — the bar's up top."); break; }
+                StartRecordingFromCommand();   // notch morphs straight into the recording bar
+                break;
+            case Llm.AppCommand.UseApiModel:      Views.AskView.Instance?.Command(SwitchNotesMode(Llm.NotesMode.ApiKey)); break;
+            case Llm.AppCommand.UseLocalModel:    Views.AskView.Instance?.Command(SwitchNotesMode(Llm.NotesMode.Local)); break;
+            case Llm.AppCommand.UseHeuristicMode: Views.AskView.Instance?.Command(SwitchNotesMode(Llm.NotesMode.HeuristicOnly)); break;
+            case Llm.AppCommand.ThemeLight:       Views.AskView.Instance?.Command(SwitchTheme(light: true)); break;
+            case Llm.AppCommand.ThemeDark:        Views.AskView.Instance?.Command(SwitchTheme(light: false)); break;
+            case Llm.AppCommand.GhostOn:          Views.AskView.Instance?.Command(SetGhostMode(on: true)); break;
+            case Llm.AppCommand.GhostOff:         Views.AskView.Instance?.Command(SetGhostMode(on: false)); break;
+        }
     }
 
     TaskbarIcon BuildTray()

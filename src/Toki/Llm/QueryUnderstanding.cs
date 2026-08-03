@@ -6,8 +6,12 @@ using Microsoft.Recognizers.Text.DateTime;
 namespace Toki.Llm;
 
 /// <summary>What kind of thing the user is asking for — decided from the QUERY (never from note
-/// titles/content, which is what caused the "a title containing 'follow up' triggered the task list" bug).</summary>
-public enum QueryIntent { SummarizeOne, LookupFact, ListTasks, ListMeetings, Count }
+/// titles/content, which is what caused the "a title containing 'follow up' triggered the task list" bug).
+/// <see cref="Analyze"/> is the REASONING route: questions that need thinking/synthesis across meetings
+/// ("what should I focus on?", "themes across my meetings", "how is X progressing?") rather than a
+/// direct lookup — they get broader retrieval and a reasoning prompt (the Adaptive-RAG pattern:
+/// route by question complexity, don't force everything through one narrow pipeline).</summary>
+public enum QueryIntent { SummarizeOne, LookupFact, ListTasks, ListMeetings, Count, Analyze }
 
 public enum RecencyDir { Latest, Oldest }
 
@@ -19,7 +23,7 @@ public enum RecencyDir { Latest, Oldest }
 /// Fully local, ~1ms, no model. Past-preference: meetings are history, so an ambiguous date resolves
 /// to the most recent PAST reading.
 /// </summary>
-public sealed class QueryPlan
+public sealed record QueryPlan
 {
     public QueryIntent Intent { get; init; }
     public DateTimeOffset? RangeStart { get; init; }   // inclusive
@@ -44,6 +48,25 @@ public sealed class ConversationContext
     public List<long> LastMeetingIds = new();
     public DateTimeOffset? LastRangeStart;
     public DateTimeOffset? LastRangeEnd;
+
+    /// <summary>The conversation transcript so far — ("user"/"toki", text) pairs, appended by the
+    /// dialogue brain after every answered turn. This is the WORKING MEMORY that lets the general
+    /// conversation path hold a real multi-turn chat (the model sees the recent turns), which the
+    /// old pipeline never had — every turn was answered as if it were the first.</summary>
+    public List<(string Role, string Text)> Turns = new();
+
+    /// <summary>Facts the user stated THIS session ("Works at Contoso") — echoed into the general
+    /// prompt so "I work at X" → "where do I work?" holds within the conversation. Durable facts
+    /// also persist via <see cref="UserProfile"/>.</summary>
+    public List<string> SessionFacts = new();
+
+    /// <summary>Record an answered turn (both roles), keeping the transcript small.</summary>
+    public void RecordTurn(string question, string answer)
+    {
+        if (!string.IsNullOrWhiteSpace(question)) Turns.Add(("user", question.Trim()));
+        if (!string.IsNullOrWhiteSpace(answer)) Turns.Add(("toki", answer.Trim()));
+        while (Turns.Count > 20) Turns.RemoveAt(0);
+    }
 }
 
 public static class QueryUnderstanding
@@ -96,7 +119,9 @@ public static class QueryUnderstanding
                 return new QueryPlan { Intent = QueryIntent.ListTasks, PinnedMeetingIds = new(ctx.LastMeetingIds), Original = q };
             if (AspectSummaryRx.IsMatch(lower))
                 return new QueryPlan { Intent = QueryIntent.SummarizeOne, PinnedMeetingIds = new(ctx.LastMeetingIds), Original = q };
-            if (words <= 8 && StartsQuestion(lower) && Regex.IsMatch(lower, @"\b(it|that|those|them|this|the meeting)\b", RegexOptions.IgnoreCase))
+            // NB: "this" is deliberately NOT here — it's PROXIMAL (points at the on-screen note), handled by
+            // the screen-aware layer. Only anaphora ("it/that/those/them") points back at the last turn.
+            if (words <= 8 && StartsQuestion(lower) && Regex.IsMatch(lower, @"\b(it|that|those|them|the meeting)\b", RegexOptions.IgnoreCase))
                 return new QueryPlan { Intent = QueryIntent.LookupFact, PinnedMeetingIds = new(ctx.LastMeetingIds), Residual = q, Original = q };
         }
 
@@ -219,7 +244,11 @@ public static class QueryUnderstanding
     // Clear task-REQUESTS only. NOTE: "follow up/follow-up" is deliberately NOT a cue — it lives inside
     // meeting titles and caused the false task-list trigger. Requires an actual task noun.
     static readonly Regex TasksRx = new(
-        @"\b(action\s+items?|open\s+items?|to-?dos?|tasks?)\b|\bwhat\s+(do|did)\s+i\s+(need\s+to\s+do|have\s+to\s+do|commit|agree)\b|\bassigned\s+to\s+me\b|\bwhat\s+are\s+my\b.*\b(tasks?|to-?dos?|items?)\b",
+        @"\b(action\s+items?|open\s+items?|to-?dos?|tasks?)\b|\bwhat\s+(do|did)\s+i\s+(need\s+to\s+do|have\s+to\s+do|commit|agree)\b|\bassigned\s+to\s+me\b|\bwhat\s+are\s+my\b.*\b(tasks?|to-?dos?|items?)\b"
+        // Self-assignment shapes without a task noun ("did I get anything?", "was I assigned?",
+        // "anything for me?", "did they mention me?") — these are task questions about the USER and
+        // must reach the deterministic self-filtered task route, not the LLM (P9.1).
+        + @"|\bdid\s+i\s+get\s+(any(thing)?|some(thing)?|assigned)\b|\bwas\s+i\s+(assigned|given|tasked|mentioned)\b|\b(anything|something)\s+for\s+me\b|\b(give|gave|given)\s+me\s+anything\b|\bmention(ed)?\s+me\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     // Asking for a LIST of meetings — requires the PLURAL "meetings" (singular "the most recent meeting
     // about…" is a summary of ONE meeting, not a list — that was the over-trigger bug).
@@ -227,12 +256,55 @@ public static class QueryUnderstanding
         @"\b(what|which|list|show|all\s+(my|the))\b.*\bmeetings\b|\bmy\s+meetings\b|\bmeetings\s+(did\s+i\s+have|this|last|today|yesterday)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // The "chrome" of a list request — every word a pure "list my meetings (in <window>)" can be made
+    // of. If the query has ANY word outside this set, the user named a TOPIC ("what was discussed
+    // about Kai in my meetings?") and wants a LOOKUP about it, not an unfiltered 10-item dump — that
+    // was the screenshot bug where a person question was answered with "Your 10 most recent meetings".
+    static readonly HashSet<string> ListChrome = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "what","which","list","show","all","my","our","the","a","an","and","of","in","on","for","me","i","we","you",
+        "meetings","meeting","calls","call","notes","recordings","conversations","chats",
+        "do","did","does","have","had","has","are","is","was","were","there","any","many","much",
+        "give","tell","please","recent","latest","new","newest","old","past","over","recently","far","so",
+        "this","that","these","week","month","year","today","yesterday",
+        "discussed","discuss","talked","talk","about","happened","happening","going","went","covered","attend","attended",
+    };
+    static bool OnlyListChrome(string residual)
+    {
+        foreach (var w in residual.Split(new[] { ' ', '?', '.', ',', '!', ';', ':', '\'', '"' }, StringSplitOptions.RemoveEmptyEntries))
+            if (w.Length > 1 && !ListChrome.Contains(w)) return false;
+        return true;
+    }
+
+    // ── the ANALYTICAL route: questions that need thinking/synthesis, not a lookup ──
+    // Fires on explicit reasoning-demand cues ("should I…", "risks", "themes", "compare", "progress",
+    // "what do you think"). Kept PHRASE-level where a bare word would over-trigger ("focus on", not
+    // "focus" — so "the focus group meeting" stays a lookup/summary). A who/when/where lead is always
+    // a FACTUAL question ("who was worried about X" is a lookup, not analysis) — guarded out.
+    static readonly Regex AnalyticalRx = new(
+        @"\bshould\s+(i|we)\b|\bfocus\s+on\b|\bpriorit(y|ies|i[sz]e[ds]?)\b|\brisks?\b|\bblockers?\b"
+        + @"|\bconcerns?\b|\bworr(y|ied|ies|ying)\b|\bthemes?\b|\bpatterns?\b|\btrends?\b|\binsights?\b"
+        + @"|\bcompare\b|\bcomparison\b|\bversus\b|\bvs\.?\b|\bdifference\s+between\b"
+        + @"|\bprogress(ing|ed)?\b|\bcoming\s+along\b|\bunresolved\b|\bundecided\b|\bopen\s+questions?\b"
+        + @"|\bacross\b|\bbiggest\b|\bmost\s+important\b|\boverall\b"
+        + @"|\badvice\b|\brecommend\w*\b|\bsuggest\w*\b|\banaly[sz]\w*\b"
+        + @"|\bwhat\s+do\s+you\s+think\b|\byour\s+(take|read|thoughts|opinion)\b|\bam\s+i\s+missing\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex FactualLeadRx = new(@"^\s*(who|whom|whose|when|where)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     static QueryIntent Classify(string query, string residual, bool hasTemporal)
     {
         if (CountRx.IsMatch(query) && Regex.IsMatch(query, @"\bmeetings?\b", RegexOptions.IgnoreCase))
             return QueryIntent.Count;
         if (TasksRx.IsMatch(query)) return QueryIntent.ListTasks;
-        if (ListMeetingsRx.IsMatch(query) && !SummarizeRx.IsMatch(query)) return QueryIntent.ListMeetings;
+        // A list request must be ONLY list-chrome (+ an already-stripped date). Any topical word means
+        // the user is asking ABOUT something and "in my meetings" is just scope → LookupFact below.
+        if (ListMeetingsRx.IsMatch(query) && !SummarizeRx.IsMatch(query) && OnlyListChrome(residual)) return QueryIntent.ListMeetings;
+        // Analysis beats Summarize on purpose: "summarize the themes across my meetings" is a
+        // multi-meeting synthesis, not a one-meeting recap. Plain summaries have no analytical cue
+        // and are untouched.
+        if (AnalyticalRx.IsMatch(query) && !FactualLeadRx.IsMatch(query)) return QueryIntent.Analyze;
         if (SummarizeRx.IsMatch(query)) return QueryIntent.SummarizeOne;
 
         // A temporal query whose residual is basically empty ("my most recent meeting", "July 30 meeting")

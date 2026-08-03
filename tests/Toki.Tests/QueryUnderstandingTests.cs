@@ -32,6 +32,32 @@ public sealed class QueryUnderstandingTests
         Assert.False(p.HasDateRange);
     }
 
+    // ── P9.1: oldest/first must parse as a recency rank even with "recorded"/"title" chrome around
+    //    it (the live run answered "the notes do not mention any recorded meeting dates or titles"). ──
+    [Theory]
+    [InlineData("what was the oldest meeting that i recorded", RecencyDir.Oldest)]
+    [InlineData("what was the first meeting i had", RecencyDir.Oldest)]
+    [InlineData("what was my earliest meeting", RecencyDir.Oldest)]
+    [InlineData("what was the title of the most recent meeting i had", RecencyDir.Latest)]
+    public void RecencyRank_ParsesThroughChrome(string q, RecencyDir expected)
+        => Assert.Equal(expected, Parse(q).Rank);
+
+    // ── P9.1: self-assignment shapes without a task noun still route to the task path ──
+    [Theory]
+    [InlineData("did i get anything?", QueryIntent.ListTasks)]
+    [InlineData("was i assigned anything in this meeting", QueryIntent.ListTasks)]
+    [InlineData("anything for me?", QueryIntent.ListTasks)]
+    [InlineData("did they mention me or give me any tasks in this meeting?", QueryIntent.ListTasks)]
+    public void SelfAssignmentShapes_AreTaskQueries(string q, QueryIntent expected)
+        => Assert.Equal(expected, Parse(q).Intent);
+
+    // …but ordinary content questions with "get/give" stay lookups (no over-trigger).
+    [Theory]
+    [InlineData("did i get the budget approved", QueryIntent.LookupFact)]
+    [InlineData("what details did we give the vendor", QueryIntent.LookupFact)]
+    public void GetGive_ContentQuestions_StayLookups(string q, QueryIntent expected)
+        => Assert.Equal(expected, Parse(q).Intent);
+
     [Fact]
     public void SpecificDate_ParsesToThatDay()   // bug #2
     {
@@ -65,6 +91,54 @@ public sealed class QueryUnderstandingTests
     [Fact]
     public void PluralMeetings_IsAListRequest()
         => Assert.Equal(QueryIntent.ListMeetings, Parse("what meetings did I have this week").Intent);
+
+    // ── screenshot bug: a TOPICAL question mentioning "my meetings" is a LOOKUP, not a list dump ──
+    [Theory]
+    [InlineData("What was discussed about Kai Sinat in my meetings?")]
+    [InlineData("what did we say about the pricing page in my meetings")]
+    [InlineData("which meetings mentioned the budget")]
+    [InlineData("show me what my meetings said about onboarding")]
+    public void TopicInsideAMeetingsMention_IsALookup_NotAList(string q)
+        => Assert.Equal(QueryIntent.LookupFact, Parse(q).Intent);
+
+    // Pure list requests (only list-chrome words) must STAY list requests.
+    [Theory]
+    [InlineData("what meetings did I have last week")]
+    [InlineData("show me all my meetings")]
+    [InlineData("list my meetings")]
+    [InlineData("what did we discuss in my meetings this week")]
+    public void PureListRequest_IsStillAList(string q)
+        => Assert.Equal(QueryIntent.ListMeetings, Parse(q).Intent);
+
+    // ── the ANALYTICAL route: thinking/synthesis questions get their own intent (broader retrieval +
+    //    a reasoning prompt + a real token budget), instead of falling into the narrow lookup path ──
+    [Theory]
+    [InlineData("What should I focus on this week?")]
+    [InlineData("what are my biggest risks or blockers")]
+    [InlineData("what is the team worried about")]
+    [InlineData("what are the main themes across my SLO meetings")]
+    [InlineData("how is the MR rate work progressing")]
+    [InlineData("compare what we decided about MR rates vs SLOs")]
+    [InlineData("what's still unresolved")]
+    [InlineData("did we make progress since last week")]
+    [InlineData("what do you think I should prioritize")]
+    [InlineData("any advice based on my meetings")]
+    public void AnalyticalQuestion_IsAnalyze(string q)
+        => Assert.Equal(QueryIntent.Analyze, Parse(q).Intent);
+
+    // The deterministic P8 wins must NOT be stolen by the new route.
+    [Theory]
+    [InlineData("what did we decide about the survey forms", QueryIntent.LookupFact)]
+    [InlineData("who was worried about replication lag", QueryIntent.LookupFact)]   // who-lead = factual
+    [InlineData("summarize my last meeting", QueryIntent.SummarizeOne)]
+    [InlineData("what happened in my last meeting", QueryIntent.SummarizeOne)]
+    [InlineData("what are my open tasks", QueryIntent.ListTasks)]
+    [InlineData("was anything assigned to me in this meeting", QueryIntent.ListTasks)]
+    [InlineData("show me all my meetings", QueryIntent.ListMeetings)]
+    [InlineData("how many meetings in March", QueryIntent.Count)]
+    [InlineData("What was discussed about Kai Sinat in my meetings?", QueryIntent.LookupFact)]
+    public void AnalyzeRoute_DoesNotStealDeterministicIntents(string q, QueryIntent expected)
+        => Assert.Equal(expected, Parse(q).Intent);
 
     // ── follow-ups ──
     static ConversationContext Ctx(QueryIntent intent, DateTimeOffset? s = null, DateTimeOffset? e = null, params long[] ids)

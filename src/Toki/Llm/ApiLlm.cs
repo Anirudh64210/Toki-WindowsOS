@@ -181,24 +181,28 @@ public sealed class ApiLlm : ILlm
     }
 
     public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
+        IReadOnlyList<string>? stop = null)
     {
         if (_endpoint is null) throw new ArgumentException("The API base URL must be https:// (http:// only for a local proxy).");
         if (_apiKey.Length == 0) throw new InvalidOperationException("No API key is set.");
         if (_model.Length == 0) throw new InvalidOperationException("No API model is set.");
 
-        var body = new
+        // Dictionary (not an anonymous type) so the optional "stop" field is only sent when set —
+        // some OpenAI-compatible providers reject stop:null.
+        var body = new Dictionary<string, object>
         {
-            model = _model,
-            messages = new[]
+            ["model"] = _model,
+            ["messages"] = new object[]
             {
                 new { role = "system", content = system },
                 new { role = "user", content = user },
             },
-            temperature = 0.7,
-            max_tokens = maxTokens,
-            stream = true,
+            ["temperature"] = 0.7,
+            ["max_tokens"] = maxTokens,
+            ["stream"] = true,
         };
+        if (stop is { Count: > 0 }) body["stop"] = stop;
 
         using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(body) };
         req.Headers.Authorization = new("Bearer", _apiKey);

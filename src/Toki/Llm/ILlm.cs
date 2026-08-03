@@ -10,6 +10,9 @@ public interface ILlm
 
     /// <summary>Same as <see cref="CompleteAsync"/>, but yields the answer token-by-token as it's
     /// generated — so the UI can show words appearing live (huge perceived-speed win vs. waiting for
-    /// the whole thing). Markers like the chat-template end tag are stripped from the yielded pieces.</summary>
-    IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens, CancellationToken ct = default);
+    /// the whole thing). Markers like the chat-template end tag are stripped from the yielded pieces.
+    /// <paramref name="stop"/>: optional extra stop sequences — generation ends cleanly when the output
+    /// reaches one (e.g. "\n\n" for a one-glance answer), instead of overrunning and being trimmed.</summary>
+    IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens, CancellationToken ct = default,
+        IReadOnlyList<string>? stop = null);
 }

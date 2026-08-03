@@ -25,7 +25,8 @@ public class LlmNotesTests
         public Task<string> CompleteAsync(string system, string user, int maxTokens, CancellationToken ct = default)
             => Task.FromResult(reply(user));
         public async IAsyncEnumerable<string> StreamAsync(string system, string user, int maxTokens,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
+            IReadOnlyList<string>? stop = null)
         { await Task.Yield(); yield return reply(user); }
     }
 
@@ -106,7 +107,8 @@ public class LlmNotesTests
         public bool Ready => false;
         public Task<string> CompleteAsync(string s, string u, int m, CancellationToken ct = default)
             => throw new InvalidOperationException("should not be called");
-        public IAsyncEnumerable<string> StreamAsync(string s, string u, int m, CancellationToken ct = default)
+        public IAsyncEnumerable<string> StreamAsync(string s, string u, int m, CancellationToken ct = default,
+            IReadOnlyList<string>? stop = null)
             => throw new InvalidOperationException("should not be called");
     }
 }

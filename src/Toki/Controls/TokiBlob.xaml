@@ -3,48 +3,85 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Scales to whatever Width/Height the host sets, keeping proportions. -->
     <Viewbox Stretch="Uniform">
-        <Grid x:Name="Root" Width="120" Height="106">
-            <Grid.RenderTransform>
-                <!-- Squash/stretch from the base, so Toki "breathes". -->
-                <ScaleTransform x:Name="Breathe" CenterX="60" CenterY="106"/>
-            </Grid.RenderTransform>
+        <!-- A little padding around the 120x106 art so the soft drop shadow isn't clipped. -->
+        <Grid Width="132" Height="120">
+            <Grid x:Name="Root" Width="120" Height="106" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  RenderTransformOrigin="0.5,0.9">
+                <Grid.RenderTransform>
+                    <!-- Breathe = squash/stretch · Hop = vertical bounce · Tilt = wobble/spin. Each animation
+                         targets its own transform so they compose without fighting. -->
+                    <TransformGroup>
+                        <ScaleTransform x:Name="Breathe" CenterX="60" CenterY="106"/>
+                        <TranslateTransform x:Name="Hop"/>
+                        <RotateTransform x:Name="Tilt" CenterX="60" CenterY="74"/>
+                    </TransformGroup>
+                </Grid.RenderTransform>
 
-            <!-- Body: a soft pink CLOUD, matching the Toki-ProductDesign logo — a wide rounded base
-                 with three humps on top (union of ellipses), NOT a single oval. -->
-            <Path Fill="#F48AAE">
-                <Path.Data>
-                    <GeometryGroup FillRule="Nonzero">
-                        <EllipseGeometry Center="60,67" RadiusX="58" RadiusY="37"/>
-                        <EllipseGeometry Center="30,52" RadiusX="25" RadiusY="25"/>
-                        <EllipseGeometry Center="61,37" RadiusX="33" RadiusY="33"/>
-                        <EllipseGeometry Center="91,52" RadiusX="25" RadiusY="25"/>
-                    </GeometryGroup>
-                </Path.Data>
-            </Path>
-            <!-- Cheek blush -->
-            <Ellipse Width="18" Height="12" Fill="#EC6E99" Opacity="0.55"
-                     HorizontalAlignment="Left" VerticalAlignment="Center"
-                     Margin="12,26,0,0"/>
-            <Ellipse Width="18" Height="12" Fill="#EC6E99" Opacity="0.55"
-                     HorizontalAlignment="Right" VerticalAlignment="Center"
-                     Margin="0,26,12,0"/>
+                <!-- Body: the soft pink CLOUD. A vertical gradient (light, glossy top → deep pink base) gives
+                     it a puffy, dimensional look instead of the old flat fill; a soft blurred shadow lifts it
+                     off the surface. Same cloud silhouette as the Toki-ProductDesign logo. -->
+                <Path>
+                    <Path.Effect>
+                        <DropShadowEffect Color="#E0559A" BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.30"/>
+                    </Path.Effect>
+                    <Path.Fill>
+                        <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.42,1">
+                            <GradientStop Color="#FBC8DD" Offset="0.0"/>
+                            <GradientStop Color="#F79EBE" Offset="0.42"/>
+                            <GradientStop Color="#F07FAB" Offset="0.72"/>
+                            <GradientStop Color="#E75F9E" Offset="1.0"/>
+                        </LinearGradientBrush>
+                    </Path.Fill>
+                    <Path.Data>
+                        <GeometryGroup FillRule="Nonzero">
+                            <EllipseGeometry Center="60,67" RadiusX="58" RadiusY="37"/>
+                            <EllipseGeometry Center="30,52" RadiusX="25" RadiusY="25"/>
+                            <EllipseGeometry Center="61,37" RadiusX="33" RadiusY="33"/>
+                            <EllipseGeometry Center="91,52" RadiusX="25" RadiusY="25"/>
+                        </GeometryGroup>
+                    </Path.Data>
+                </Path>
 
-            <!-- Eyes -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                        VerticalAlignment="Center" Margin="0,-4,0,0">
-                <Border x:Name="LeftEye" Width="15" Height="34" Background="White"
-                        CornerRadius="7.5" Margin="0,0,13,0" RenderTransformOrigin="0.5,0.5">
-                    <Border.RenderTransform>
-                        <ScaleTransform x:Name="LeftBlink"/>
-                    </Border.RenderTransform>
-                </Border>
-                <Border x:Name="RightEye" Width="15" Height="34" Background="White"
-                        CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
-                    <Border.RenderTransform>
-                        <ScaleTransform x:Name="RightBlink"/>
-                    </Border.RenderTransform>
-                </Border>
-            </StackPanel>
+                <!-- Glossy top highlight: a soft white sheen near the crown, so light reads as coming from
+                     above. Purely decorative (never hit-tested). -->
+                <Ellipse Width="52" Height="30" IsHitTestVisible="False"
+                         HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10,6,0">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush GradientOrigin="0.4,0.3" Center="0.4,0.3" RadiusX="0.7" RadiusY="0.7">
+                            <GradientStop Color="#73FFFFFF" Offset="0.0"/>
+                            <GradientStop Color="#00FFFFFF" Offset="1.0"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+
+                <!-- Cheek blush -->
+                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
+                         HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,28,0,0"/>
+                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
+                         HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,28,14,0"/>
+
+                <!-- Eyes: clean white rounded pills, each with a scale transform so they blink (and can widen
+                     for a "surprised" reaction). A tiny highlight dot keeps them glossy, not flat. -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                            VerticalAlignment="Center" Margin="0,-4,0,0">
+                    <Grid Margin="0,0,13,0">
+                        <Border x:Name="LeftEye" Width="15" Height="33" Background="White"
+                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform x:Name="LeftBlink"/></Border.RenderTransform>
+                        </Border>
+                        <Ellipse Width="4.5" Height="4.5" Fill="#FFE9F1" IsHitTestVisible="False"
+                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,7,0,0"/>
+                    </Grid>
+                    <Grid>
+                        <Border x:Name="RightEye" Width="15" Height="33" Background="White"
+                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform x:Name="RightBlink"/></Border.RenderTransform>
+                        </Border>
+                        <Ellipse Width="4.5" Height="4.5" Fill="#FFE9F1" IsHitTestVisible="False"
+                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,7,0,0"/>
+                    </Grid>
+                </StackPanel>
+            </Grid>
         </Grid>
     </Viewbox>
 </UserControl>
