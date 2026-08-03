@@ -146,4 +146,47 @@ public class CalendarTests
 
     static string B64Url(string s)
         => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(s)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    // ── quick-add natural-language parsing ──
+
+    static readonly DateTimeOffset Ref = new(2026, 8, 3, 9, 0, 0, TimeSpan.Zero); // Mon Aug 3, 09:00
+
+    [Fact]
+    public void QuickParse_ExtractsTitleTimeAndEmail()
+    {
+        var q = QuickEventParser.Parse("Design sync tomorrow 2pm with ana@work.com", Ref);
+        Assert.Equal("Design sync", q.Summary);
+        Assert.NotNull(q.Start);
+        Assert.Equal(4, q.Start!.Value.Day);          // "tomorrow" = Aug 4
+        Assert.Equal(14, q.Start!.Value.Hour);        // 2pm
+        Assert.Contains("ana@work.com", q.Emails);
+        Assert.True(q.HasTime);
+    }
+
+    [Fact]
+    public void QuickParse_DefaultsThirtyMinutes()
+    {
+        var q = QuickEventParser.Parse("Coffee at 10am tomorrow", Ref);
+        Assert.NotNull(q.Start);
+        Assert.NotNull(q.End);
+        Assert.Equal(30, (q.End!.Value - q.Start!.Value).TotalMinutes);
+    }
+
+    [Fact]
+    public void QuickParse_NoTime_LeavesStartNull()
+    {
+        var q = QuickEventParser.Parse("Catch up with the team", Ref);
+        Assert.Null(q.Start);
+        Assert.False(q.HasTime);
+        Assert.Equal("Catch up with the team", q.Summary);
+    }
+
+    [Fact]
+    public void QuickParse_PastTimeRollsToTomorrow()
+    {
+        // Ref is 9am; "at 8am" already passed today → should land tomorrow, never in the past.
+        var q = QuickEventParser.Parse("Standup at 8am", Ref);
+        Assert.NotNull(q.Start);
+        Assert.True(q.Start!.Value > Ref);
+    }
 }

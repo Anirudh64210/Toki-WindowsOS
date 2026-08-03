@@ -40,11 +40,17 @@ product's design language (dividers-not-boxes, calm). Small, self-contained, unb
   DPAPI-encrypted refresh token, raw-HTTP `Calendar/` module (list/insert/delete), `CalendarService`
   facade, Home + Settings connect/disconnect, `--caltest`. See `docs/google-setup.md`, `ARCHITECTURE.md`
   "Google Calendar foundation", the `calendar-foundation` memory. **Surfaces still to build (sit on the
-  facade):** (1) **notch calendar preview** — next meeting quietly at the edge; (2) **prep cards** — before
-  a meeting: last decisions, open action items, who's attending (356×306 design state, new `PillState`);
-  (3) **meeting creator** — the write path is built + tested; needs UI/voice (natural-language time via the
-  already-referenced `Microsoft.Recognizers.Text.DateTime`). Outlook is post-v1. Ship-side: Google
-  sensitive-scope **verification** (privacy policy + demo video) before selling → queue with M8.
+  facade). **UI DONE (M7.1, 2026-08-03, render + live verified):** connected Home "COMING UP" glance;
+  Calendar page (`PillState.Calendar`) agenda-by-day week view + now-line + week nav + Join; **create**
+  (one-box natural language via `QuickEventParser`), **edit** (`events.patch`), **delete** (undo for solo /
+  confirm for guested). See `mansplain/25`, README M7.1, ARCHITECTURE "Google Calendar UI", the
+  `calendar-foundation` memory.
+  **Still to build:** (1) **prep cards** — before a meeting: last decisions, open action items, who's
+  attending (356×306 design state, likely a new `PillState`/an assistant surface); (2) **voice create**
+  ("schedule a call with Ana tomorrow at 3" via the push-to-talk Ask path → `QuickEventParser`); (3) an
+  ambient **imminent-meeting auto-surface** on the notch (owner decision: auto-appear vs hover-only).
+  Outlook is post-v1 (UI is already provider-neutral — `CalendarService.ProviderName` is the seam).
+  Ship-side: Google sensitive-scope **verification** (privacy policy + demo video) before selling → M8.
 - **Speaker diarisation** — real named speakers in transcripts instead of just YOU/THEM. (Task
   name-tags already done; transcript-level diarisation is the remaining, bigger piece — pairs well with
   the on-device-embeddings unblock.)

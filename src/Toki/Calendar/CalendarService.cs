@@ -60,6 +60,13 @@ public sealed class CalendarService
     public async Task<CalEvent> CreateAsync(NewEvent ev, CancellationToken ct = default)
         => await CalendarClient.InsertAsync(await AccessTokenAsync(ct).ConfigureAwait(false), ev, ct).ConfigureAwait(false);
 
+    public async Task<CalEvent> UpdateAsync(string eventId, NewEvent ev, bool hasMeetAlready, CancellationToken ct = default)
+        => await CalendarClient.PatchAsync(await AccessTokenAsync(ct).ConfigureAwait(false), eventId, ev, hasMeetAlready, ct).ConfigureAwait(false);
+
+    /// <summary>The connected calendar provider's display name — the one place the UI names it, so an
+    /// Outlook backend later is a string swap, not a UI rewrite.</summary>
+    public string ProviderName => "Google Calendar";
+
     public async Task DeleteAsync(string eventId, CancellationToken ct = default)
         => await CalendarClient.DeleteAsync(await AccessTokenAsync(ct).ConfigureAwait(false), eventId, ct).ConfigureAwait(false);
 

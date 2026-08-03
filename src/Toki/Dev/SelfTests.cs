@@ -914,6 +914,28 @@ static class SelfTests
                     Console.WriteLine("[--caltest] PASS — event created then deleted; nothing left in your calendar.");
                     return 0;
 
+                case "update":
+                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    var s0 = DateTimeOffset.Now.AddMinutes(20);
+                    Console.WriteLine("[--caltest update] insert → patch (rename + move +30 min) → verify → delete...");
+                    var ins = svc.CreateAsync(new Toki.Calendar.NewEvent("Toki update-test A", s0, s0.AddMinutes(15))).GetAwaiter().GetResult();
+                    var s1 = s0.AddMinutes(30);
+                    var patched = svc.UpdateAsync(ins.Id, new Toki.Calendar.NewEvent("Toki update-test B", s1, s1.AddMinutes(15)), ins.HasMeetLink).GetAwaiter().GetResult();
+                    var ok = patched.Summary == "Toki update-test B" && Math.Abs((patched.StartUtc - s1.ToUniversalTime()).TotalMinutes) < 1;
+                    Console.WriteLine($"  now: \"{patched.Summary}\" at {patched.StartLocal:HH:mm}");
+                    svc.DeleteAsync(ins.Id).GetAwaiter().GetResult();
+                    Console.WriteLine(ok ? "[--caltest] PASS — edit applied then cleaned up." : "FAIL: patch didn't take");
+                    return ok ? 0 : 1;
+
+                case "parse":
+                    var line = i + 2 < args.Length ? args[i + 2] : "Design sync tomorrow 2pm with ana@work.com";
+                    var qp = Toki.Calendar.QuickEventParser.Parse(line, DateTimeOffset.Now);
+                    Console.WriteLine($"[--caltest parse] \"{line}\"");
+                    Console.WriteLine($"  title : {qp.Summary}");
+                    Console.WriteLine($"  when  : {(qp.Start is { } st ? $"{st:ddd MMM d HH:mm} – {qp.End:HH:mm}" : "(no time)")}");
+                    Console.WriteLine($"  emails: {(qp.Emails.Count > 0 ? string.Join(", ", qp.Emails) : "(none)")}");
+                    return qp.Start is not null ? 0 : 1;
+
                 default: // list
                     if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
                     Console.WriteLine("[--caltest] refreshing token + listing the next 7 days...");

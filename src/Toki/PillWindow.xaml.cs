@@ -33,11 +33,12 @@ public partial class PillWindow : Window
         [PillState.Summarizing]   = (232, 66),   // small, cute working loader (mostly lives as a sliver)
         [PillState.Notes]         = (360, 320),  // scrollable window into the notes
         [PillState.NoSpeech]      = (300, 92),
-        [PillState.Home]          = (320, 190),
+        [PillState.Home]          = (344, 190),   // widened 320→344 to fit the COMING UP list + Join pills (design ③)
         [PillState.Library]       = (404, 440),
         [PillState.Settings]      = (380, 360),   // FIXED height + internal scroll (not auto) — see AutoHeight note
         [PillState.ManualNote]    = (392, 410),
         [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
+        [PillState.Calendar]      = (392, 472),   // FIXED height + internal scroll — content varies (skeleton → many events)
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
@@ -66,7 +67,7 @@ public partial class PillWindow : Window
     // lives as a hover-able sliver. (Summarizing is excluded — it must stay to reach its
     // result; recording/prompt have their own lifecycles.)
     static readonly HashSet<PillState> DismissOnClickOutside =
-        [PillState.Home, PillState.Notes, PillState.NoSpeech, PillState.Settings];
+        [PillState.Home, PillState.Notes, PillState.NoSpeech, PillState.Settings, PillState.Calendar];
 
     readonly AppState _state;
     readonly Dictionary<PillState, UserControl> _views = new();
@@ -234,6 +235,7 @@ public partial class PillWindow : Window
             PillState.Settings      => new SettingsView(),
             PillState.ManualNote    => new ManualNoteView(),
             PillState.Ask           => new AskView(),
+            PillState.Calendar      => new CalendarView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
@@ -612,7 +614,7 @@ public partial class PillWindow : Window
     bool _idleWired, _autoHideWired;
 
     static bool IsStayable(PillState s) =>
-        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings;
+        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar;
 
     void ArmIdle()
     {
@@ -705,17 +707,27 @@ public partial class PillWindow : Window
     /// <summary>Re-measure the current AUTO-HEIGHT view and smoothly grow/shrink the notch to fit — for
     /// when a page's content changes size WITHOUT a state change (the Ask notch going from the short
     /// "listening" state to the taller answer).</summary>
+    bool _growing;
     public void GrowToContent()
     {
+        // Re-entrancy guard: GrowToContent → ContentHeight → ViewFor could, if a view triggers a grow
+        // from its own constructor (before it's cached), recurse forever building duplicate views. Never
+        // let this method re-enter itself.
+        if (_growing) return;
         var s = _state.Current;
         if (!AutoHeight.Contains(s)) return;
-        var (w, h) = Sizes[s];
-        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
-        var work = PhysicalWorkArea();
-        var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
-        var target = Math.Min(ContentHeight(s, w, h), availH);
-        if (Math.Abs(target - ActualHeight) < 2) return;
-        AnimateSize(w, target, 150);   // snappy so it keeps up as the answer streams in patches
+        _growing = true;
+        try
+        {
+            var (w, h) = Sizes[s];
+            var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
+            var work = PhysicalWorkArea();
+            var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
+            var target = Math.Min(ContentHeight(s, w, h), availH);
+            if (Math.Abs(target - ActualHeight) < 2) return;
+            AnimateSize(w, target, 150);   // snappy so it keeps up as the answer streams in patches
+        }
+        finally { _growing = false; }
     }
 
     void HoverTick()

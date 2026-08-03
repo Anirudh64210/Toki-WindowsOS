@@ -25,10 +25,11 @@ static class RenderHarness
         (PillState.Summarizing,   232, 300),
         (PillState.Notes,         360, 320),
         (PillState.NoSpeech,      300, 300),
-        (PillState.Home,          320, 400),
+        (PillState.Home,          344, 400),
         (PillState.Library,       404, 440),
         (PillState.Settings,      380, 440),
         (PillState.Ask,           344, 340),
+        (PillState.Calendar,      392, 480),
     ];
 
     public static void RenderAll(string dir)
@@ -49,6 +50,10 @@ static class RenderHarness
         // at its measured height (the regression shots for the cut-off-notch bug).
         var slack = new MeetingPromptView(); slack.Refresh("Com.tinyspeck.slackdesktop");
         Shot(dir, "MeetingPrompt-slack", slack, 288, 300);
+
+        // The Calendar create composer, opened with sample text — proves the parse-preview line renders.
+        var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
+        Shot(dir, "Calendar-composer", composer, 392, 520);
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
         Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
     }
@@ -155,6 +160,7 @@ static class RenderHarness
         PillState.Library       => new LibraryView(),
         PillState.Settings      => new SettingsView(),
         PillState.Ask           => new AskView(),
+        PillState.Calendar      => new CalendarView(),
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 }

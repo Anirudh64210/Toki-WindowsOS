@@ -1,0 +1,115 @@
+<UserControl x:Class="Toki.Views.CalendarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Toki.Controls">
+    <DockPanel Margin="14,12,14,10">
+        <!-- Header: back · title/subtitle · (＋ New in Increment B) -->
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
+            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Calendar" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
+                <TextBlock x:Name="Subtitle" Style="{StaticResource Dim}" FontSize="9.5" Text="This week"/>
+            </StackPanel>
+            <Button x:Name="NewButton" Grid.Column="2" Style="{StaticResource PillButton}" FontSize="11.5"
+                    Padding="11,7" Content="＋ New" Click="OnNew"/>
+        </Grid>
+
+        <!-- Week navigation -->
+        <Grid x:Name="WeekNav" DockPanel.Dock="Top" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="PrevWeek" Style="{StaticResource IconButton}" Width="26" Height="26"
+                    Content="&#xE76B;" Click="OnPrevWeek"/>
+            <TextBlock x:Name="WeekRange" Grid.Column="1" Style="{StaticResource Body}" FontSize="11.5"
+                       FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Button x:Name="TodayButton" Grid.Column="2" Style="{StaticResource PillButton}" Background="Transparent"
+                    Foreground="{DynamicResource TextDim}" FontSize="10.5" Padding="8,4" Content="Today"
+                    Visibility="Collapsed" Click="OnToday"/>
+            <Button x:Name="NextWeek" Grid.Column="3" Style="{StaticResource IconButton}" Width="26" Height="26"
+                    Content="&#xE76C;" Click="OnNextWeek"/>
+        </Grid>
+
+        <!-- Quick-create composer (natural language). Collapsed until ＋ New. -->
+        <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,10,0,0"
+                Background="{DynamicResource SurfaceHi}" BorderBrush="{DynamicResource Hairline}"
+                BorderThickness="1" CornerRadius="12" Padding="11,10">
+            <StackPanel>
+                <Border Background="{DynamicResource Chip}" CornerRadius="9" Padding="10,0">
+                    <TextBox x:Name="QuickBox" Background="Transparent" BorderThickness="0" Height="32"
+                             Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                             FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                             TextChanged="OnQuickText" PreviewKeyDown="OnQuickKey"/>
+                </Border>
+                <TextBlock x:Name="ComposerHint" Style="{StaticResource Dim}" FontSize="9" Margin="2,3,0,0"
+                           Text="Try &quot;Design sync tomorrow 2pm with ana@work.com&quot;"/>
+                <TextBlock x:Name="ParsePreview" FontSize="11" FontFamily="{StaticResource UiFont}"
+                           Foreground="{DynamicResource Green}" Margin="2,5,0,0" Visibility="Collapsed"/>
+
+                <!-- Optional attendees, revealed by the People chip -->
+                <Border x:Name="PeopleRow" Visibility="Collapsed" Background="{DynamicResource Chip}"
+                        CornerRadius="9" Padding="10,0" Margin="0,7,0,0">
+                    <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="30"
+                             Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                             FontSize="11.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"/>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                    <Button x:Name="DurationChip" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                            FontSize="10.5" Padding="10,5" Content="30 min" Click="OnCycleDuration"/>
+                    <Button x:Name="MeetChip" Style="{StaticResource PillButton}" FontSize="10.5" Padding="10,5"
+                            Margin="7,0,0,0" Click="OnToggleMeet"/>
+                    <Button x:Name="PeopleChip" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                            FontSize="10.5" Padding="10,5" Margin="7,0,0,0" Content="＋ People" Click="OnTogglePeople"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,9,0,0">
+                    <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"
+                            Foreground="{DynamicResource TextDim}" FontSize="11" Padding="10,5" Content="Cancel"
+                            Click="OnComposerCancel"/>
+                    <Button x:Name="ComposerCreate" Style="{StaticResource WhiteButton}" FontSize="11" Padding="14,5"
+                            Margin="8,0,0,0" Content="Create" Click="OnComposerCreate"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Content area: the day list, plus overlay state panels + the undo/confirm bar -->
+        <Grid>
+            <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto"
+                          controls:SmoothScroll.Enabled="True" Margin="0,8,0,0">
+                <StackPanel x:Name="Days"/>
+            </ScrollViewer>
+
+            <!-- Empty / loading / error / disconnected — one panel, populated in code -->
+            <StackPanel x:Name="StatePanel" VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Visibility="Collapsed" Margin="20,0"/>
+
+            <!-- Undo / confirm bar, pinned to the bottom -->
+            <Border x:Name="ActionBar" VerticalAlignment="Bottom" Visibility="Collapsed"
+                    Background="{DynamicResource SurfaceHi}" BorderBrush="{DynamicResource Hairline}"
+                    BorderThickness="1" CornerRadius="11" Padding="12,8" Margin="0,0,0,2">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ActionText" Style="{StaticResource Body}" FontSize="11.5"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button x:Name="ActionSecondary" Grid.Column="1" Style="{StaticResource PillButton}"
+                            Background="Transparent" FontSize="11" Padding="8,4" Margin="8,0,0,0"/>
+                    <Button x:Name="ActionPrimary" Grid.Column="2" Style="{StaticResource PillButton}"
+                            FontSize="11" Padding="10,4" Margin="8,0,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

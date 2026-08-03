@@ -88,6 +88,47 @@ public static class CalendarClient
         return ParseEvent(doc.RootElement) ?? throw new GoogleAuthException("Google created the event but sent an odd reply.", needsReconnect: false);
     }
 
+    /// <summary>Edit an existing event (PATCH — only the fields we send change). <c>sendUpdates=all</c>
+    /// so guests are notified of a time change. Adds a Meet link only if the event doesn't already have one.</summary>
+    public static async Task<CalEvent> PatchAsync(string accessToken, string eventId, NewEvent ev, bool hasMeetAlready, CancellationToken ct = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["summary"] = ev.Summary,
+            ["start"] = new { dateTime = Rfc3339(ev.Start) },
+            ["end"] = new { dateTime = Rfc3339(ev.End) },
+        };
+        if (ev.Description is { Length: > 0 }) body["description"] = ev.Description;
+        if (ev.AttendeeEmails is { Count: > 0 })
+            body["attendees"] = ev.AttendeeEmails.Select(e => new { email = e }).ToArray();
+        var url = $"{Base}/{Uri.EscapeDataString(eventId)}?sendUpdates=all";
+        if (ev.AddMeet && !hasMeetAlready)
+        {
+            body["conferenceData"] = new
+            {
+                createRequest = new { requestId = Guid.NewGuid().ToString("N"), conferenceSolutionKey = new { type = "hangoutsMeet" } },
+            };
+            url += "&conferenceDataVersion=1";
+        }
+
+        using var req = new HttpRequestMessage(new HttpMethod("PATCH"), url) { Content = JsonContent.Create(body) };
+        req.Headers.Authorization = new("Bearer", accessToken);
+
+        HttpResponseMessage resp;
+        string raw;
+        try
+        {
+            resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
+            using (resp) raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google Calendar (network error).", needsReconnect: false); }
+
+        if (!resp.IsSuccessStatusCode) throw ErrorFor(resp.StatusCode, raw);
+        using var doc = JsonDocument.Parse(raw);
+        return ParseEvent(doc.RootElement) ?? throw new GoogleAuthException("Google updated the event but sent an odd reply.", needsReconnect: false);
+    }
+
     /// <summary>Delete an event by id (204 on success; a 404/410 "already gone" is treated as success).</summary>
     public static async Task DeleteAsync(string accessToken, string eventId, CancellationToken ct = default)
     {
