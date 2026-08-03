@@ -28,6 +28,7 @@ static class RenderHarness
         (PillState.Home,          320, 400),
         (PillState.Library,       404, 440),
         (PillState.Settings,      380, 440),
+        (PillState.Ask,           344, 340),
     ];
 
     public static void RenderAll(string dir)
@@ -41,44 +42,47 @@ static class RenderHarness
         }
         catch { /* no store yet — Notes renders its fallback */ }
         foreach (var (state, w, cap) in Shots)
+            Shot(dir, $"{state}", Build(state), w, cap);
+
+        // The meeting prompt with REAL raw app identities — proves the friendly-name mapping
+        // ("Com.tinyspeck.slackdesktop" → "Slack") and that a long/wrapping prompt is fully visible
+        // at its measured height (the regression shots for the cut-off-notch bug).
+        var slack = new MeetingPromptView(); slack.Refresh("Com.tinyspeck.slackdesktop");
+        Shot(dir, "MeetingPrompt-slack", slack, 288, 300);
+        var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
+        Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
+    }
+
+    /// <summary>Render one view into a pill PNG at its MEASURED content height (mirrors the runtime's
+    /// content-tight auto-height, capped).</summary>
+    static void Shot(string dir, string name, UserControl view, double w, double cap)
+    {
+        // Measure the view's real content height at this width, cap it — mirrors the runtime.
+        view.Measure(new Size(w - 2, double.PositiveInfinity));
+        var h = Math.Min(cap, Math.Ceiling(view.DesiredSize.Height) + 1);
+        var pill = new Border
         {
-            var view = Build(state);
-            // Measure the view's real content height at this width, cap it — mirrors the runtime.
-            view.Measure(new Size(w - 2, double.PositiveInfinity));
-            var h = Math.Min(cap, Math.Ceiling(view.DesiredSize.Height) + 1);
-            var pill = new Border
-            {
-                Background = (Brush)Application.Current.Resources["Surface"],
-                CornerRadius = new CornerRadius(26),
-                Width = w,
-                Height = h,
-                Child = view,
-            };
-            // Neutral backdrop so the pill's rounded edges are visible in the PNG.
-            var canvas = new Border
-            {
-                Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
-                Padding = new Thickness(20),
-                Child = pill,
-            };
+            Background = (Brush)Application.Current.Resources["Surface"],
+            CornerRadius = new CornerRadius(26),
+            Width = w,
+            Height = h,
+            Child = view,
+        };
+        // Neutral backdrop so the pill's rounded edges are visible in the PNG.
+        var canvas = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+            Padding = new Thickness(20),
+            Child = pill,
+        };
 
-            var totalW = w + 40;
-            var totalH = h + 40;
-            canvas.Measure(new Size(totalW, totalH));
-            canvas.Arrange(new Rect(0, 0, totalW, totalH));
-            canvas.UpdateLayout();
+        var totalW = w + 40;
+        var totalH = h + 40;
+        canvas.Measure(new Size(totalW, totalH));
+        canvas.Arrange(new Rect(0, 0, totalW, totalH));
+        canvas.UpdateLayout();
 
-            const double scale = 2.0;
-            var rtb = new RenderTargetBitmap(
-                (int)(totalW * scale), (int)(totalH * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
-            rtb.Render(canvas);
-
-            var enc = new PngBitmapEncoder();
-            enc.Frames.Add(BitmapFrame.Create(rtb));
-            var path = Path.Combine(dir, $"{state}.png");
-            using var fs = File.Create(path);
-            enc.Save(fs);
-        }
+        Save(canvas, totalW, totalH, Path.Combine(dir, $"{name}.png"));
     }
 
     /// <summary>
@@ -150,6 +154,7 @@ static class RenderHarness
         PillState.Home          => new HomeView(),
         PillState.Library       => new LibraryView(),
         PillState.Settings      => new SettingsView(),
+        PillState.Ask           => new AskView(),
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 }

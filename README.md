@@ -550,3 +550,90 @@ The Ask bar's mic is live. Click it, speak, click again — Toki transcribes you
 Verified end-to-end with a new `--voicetest <wav>` dev flag (synth a clip → `TranscribeFile` → text); the live mic capture, auto-stop, and loader are confirmed by ear/eye. 107/107 tests still pass.
 
 Also this pass: the Library note list renders **edge-to-edge on one background** (no inset box / padding strip), the note toolbar's **Template** picker works inside the scroll (rebuilt as a real button + themed menu), and the VS Code pane resizer was removed.
+
+## P5 (Mascot redesign + press-to-talk hotkey) — 2026-08-02
+
+**Toki looks like Toki now.** The flat, sharp cloud was redrawn as the soft, dimensional character from the product design — a glossy light crown fading to a deep pink base, cheek blush, glossy eyes, a gentle lift-shadow. It's one control, so it upgraded everywhere at once (the notch peek, Home, the Library sidebar).
+
+**Toki feels alive.** The corner mascot plays a *different* reaction every time you poke it — squish, hop, wobble, wink, spin, big-eyes, nod — and there's a springy "drop-in" hello. Idle breathing and blinking continue underneath.
+
+**Hotkey = press-to-talk.** `Ctrl+Alt+Space` now opens Ask and starts listening straight away — a silent, always-reliable way to ask by voice. There is **no always-on mic and no wake word**: the owner chose press-to-talk only, so Toki still only listens when you ask it to (Hard Constraint #3 stays fully intact). The "Hey Toki" wake word was researched (sherpa-onnx keyword spotting) and deliberately dropped.
+
+107/107 tests pass; mascot verified by render, voice/hotkey by ear.
+
+## P6 (Push-to-talk on the notch) — 2026-08-02
+
+`Ctrl+Alt+Space` is now **hold-to-talk**, Wispr-Flow style: **hold** it and Toki drops down from the top into a listening notch (Toki + a pink waveform); **speak** while holding; **release** and it thinks, then the answer streams onto the notch. The mic runs **only while you hold the key** — there's no always-on listening and no wake word, so Toki still only listens when you ask it to.
+
+- New `PushToTalkHook` (a low-level keyboard hook) sees the key *release* that `RegisterHotKey` can't, so hold/release works.
+- New `AskView` notch flow: listening (waveform) → thinking (loader) → answer (selectable, scrolls); the notch grows to fit each phase. Esc / × / a 30 s timeout dismiss it.
+- Reuses the on-device Parakeet transcription and the Ask engine — nothing new leaves the machine.
+- Full polished Q&A-on-the-notch is a future refinement; this is the working first cut.
+
+107/107 tests pass; the listening notch verified by render, the live hold→speak→answer flow by ear.
+
+## P7 (Toki becomes an assistant) — 2026-08-02
+
+The push-to-talk notch is now a proper quick-access assistant, built on deep research into how the best assistants (Claude, ChatGPT voice, Perplexity, Raycast, Granola, Apple App Intents, Copilot/Dia) behave.
+
+- **Quick-view answers.** The notch answers in 1–3 short, personal sentences — "a sharp colleague who was in the room," not a report. Brevity is enforced in code (≤280 chars, cut on a sentence boundary); when an answer is genuinely long, Toki gives the one-line takeaway and a **"See full answer in Library →"** button that jumps there. The Library keeps giving fuller answers.
+- **Assistant commands.** "Take me to the library", "open settings", "new note", "go home", "close", "help" — Toki just does them. A deterministic router runs first, with a question-veto so "what did we decide in the *settings* review?" is still *answered*, never mis-fired as a command. (35 adversarial tests.)
+- **Screen-aware.** Ask "what were the action items?" while looking at a meeting's notes and Toki answers about *that* meeting — because it reads its *own* window state (which note is open), never your screen. No screenshots, no OCR, nothing leaves the machine — a privacy story Copilot/Recall can't tell.
+- **Session memory.** The notch remembers the thread while it's open (follow-ups like "and who owns them?"), and starts fresh when you close it.
+
+142/142 tests pass.
+
+## P7.1 (Assistant polish) — 2026-08-02
+
+Refinements to the notch assistant from real use:
+
+- **Words render in patches**, not letter-by-letter — both the notch and the Library Ask buffer tokens and flush in ~70 ms chunks.
+- **No ugly cut-back.** A long answer used to stream out in full then snap down to a short one. Now the notch stops generating at a clean sentence boundary once it's past the glance budget, so what you see is what you get — with the "See full answer in Library" button for the rest.
+- **Adjustable notch.** The answer panel starts as small as its content and grows to fit as words arrive, then scrolls past a cap.
+- **Conversation thread.** The notch now keeps the whole session as a scrollable thread of questions and answers (until you close it), with follow-up memory.
+- **Natural commands.** "Pull up my library", "jump to settings", "let me see my notes" — not just one hard-coded phrase. (Questions still never mis-fire — 155 tests.)
+- **Screen-aware actually works** — "what were the action items?" grounds on the meeting you're viewing.
+- **The Library always pops up** — from closed, minimized, or behind — and a "full answer" hand-off opens a fresh conversation there.
+
+## P8 (Ask Toki redesign — the "it's dumb" fixes) — 2026-08-02
+
+Five verified live-session failures were root-caused in the code and fixed deterministically — the full story (root causes, research, and the owner live-test script) is in [`docs/ask-toki-redesign.md`](docs/ask-toki-redesign.md).
+
+- **A person question isn't a meeting list.** "What was discussed about Kai Sinat in my meetings?" now *searches for Kai Sinat* (and says honestly when nothing's there) instead of dumping "your 10 most recent meetings". Retrieval also queries only the words that carry meaning, so filler like "discussed"/"meetings" can't drag in random notes.
+- **"This meeting" means the note on your screen — reliably.** The "what's open right now" state is now *derived* from the real window state instead of a cached value that went stale (that's what answered about the wrong meeting). The notch also shows a small "About: <note title>" line whenever it answers about the open note, so you can *see* what it grounded on.
+- **"What did Mac have to do?" filters by Mac.** Names are recognised against the owners that actually exist in your action items (first names and "Mac's" included), on every task question — with an honest "no items for Mac here; those are owned by Sid" when that's the truth.
+- **Toki answers for itself.** "Why are you so rude?", "do you see my screen?", "is my data private?" get short, warm, in-character replies — never a search of your notes ("there's no mention of rudeness in the meeting notes" is gone). The screen one names the open note honestly.
+- **Tighter voice.** The sampler now matches the Qwen3 model card exactly, prompts carry an example answer in the target "sharp colleague" voice, and quick answers stop cleanly at the end of the answer instead of overrunning and being trimmed.
+
+228/228 tests pass — every screenshot bug is now a permanent regression test. Final tone check is the owner's live run (script in the doc).
+
+## P9 (Ask Toki — the reasoning route, "me", and the full command set) — 2026-08-02
+
+Full story in [`docs/ask-toki-reasoning.md`](docs/ask-toki-reasoning.md).
+
+- **"Assigned to me" now knows who "me" is.** Self-questions filter to the items owned by *you* ("You" in the notes), with an honest "nothing here is yours — these belong to Lily and Mac" when that's the truth. Multi-owner items ("Lily, Mac") now match each named person too.
+- **Thinking questions get a thinking pipeline.** "What should I focus on?", "themes across my meetings", "how is X progressing?" now read up to six related meetings (not three), with a conclusion-first reasoning prompt and four times the answer budget — instead of being forced through the one-glance lookup pipe.
+- **A whole command vocabulary.** "Start taking notes", "switch to the api/on-device/heuristic model", "switch to white/dark theme", "ghost mode on/off", "open templates", "open the assistant" — and "take me to the library" now lands on the actual notes list. All question-vetoed, all instant.
+
+300/300 tests pass.
+
+## P9.1 (Ask Toki refinements — the wake-name cluster) — 2026-08-03
+
+Full story in [`docs/ask-toki-refinements.md`](docs/ask-toki-refinements.md).
+
+- **Toki recognises its own name however the mic mangles it** (Doki/Toky/Docie/Toku/Tokyo…) — so spoken commands and "I love you, Toky" stop falling into notes retrieval (where the model *invented* answers).
+- **"Which meeting was it?" is answered from the database** — oldest/first/most-recent (+ title) exactly; a date with several meetings lists them all instead of silently picking one; a topic that matches a meeting *title* ("the meeting regarding Amazon") is found deterministically.
+- **Friendly app names + no more clipped notch** — "Slack is in a call. Record it?", measured *after* the text is set so the prompt always fits.
+
+389/389 tests pass.
+
+## P10 (The dialogue brain — Toki learns to talk) — 2026-08-03
+
+The owner's verdict after live use: still "not smart — like the first version of ChatGPT". The root cause was architectural — **every** utterance was force-fit into meeting-notes retrieval ("what is my name" was *searched in the notes* and answered with citations; a misheard "switch to like theme" was "answered" with a fabricated link to an unrelated meeting). P10 rebuilds the orchestration into a real dialogue manager — full design, research and live-test script in [`docs/ask-toki-brain.md`](docs/ask-toki-brain.md).
+
+- **Toki knows who you are.** "Call me Anirudh" is remembered (persisted — the greeting uses it too); "what's my name / who am I / what do you know about me" answer from that memory, never a search.
+- **Toki can just talk.** Turns that aren't about your meetings — chit-chat, world knowledge, "I'm stressed about tomorrow" — go to the model's *own* knowledge with the conversation as context. No retrieval, no citations, no "not in your notes".
+- **Meetings stay grounded.** Everything P8/P9/P9.1 built is preserved as the meeting branch, entered when the turn is actually about the meetings (wording cues, dates, screen, or real evidence in your notes).
+- **Zero fabrication.** A retrieval with no matching content is an honest miss (never "analyse 5 random meetings"); an answer that admits a miss carries **no** source chips; a garbled command gets "did you mean the light theme?" instead of an invented notes answer.
+
+428/428 tests pass. What tests can't judge — how *natural* the conversation feels — is the owner's live run (script in the doc).

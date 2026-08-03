@@ -22,6 +22,9 @@ public sealed class AppState
         [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings, PillState.Notes, PillState.ManualNote],
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
+        // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
+        // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.
+        [PillState.Ask]           = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.RecordingBar],
     };
 
     public PillState Current { get; private set; } = PillState.Hidden;

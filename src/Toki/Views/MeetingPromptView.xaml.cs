@@ -8,30 +8,26 @@ public partial class MeetingPromptView : UserControl
     public MeetingPromptView()
     {
         InitializeComponent();
-        Loaded += (_, _) =>
-        {
-            // "Zoom is in a call. Record it?" when we know the app; generic otherwise.
-            var app = App.CurrentApp?.DisplayName;
-            var name = string.IsNullOrWhiteSpace(app) ? null : PrettyName(app!);
-            Prompt.Text = name is null ? "Record this meeting?" : $"{name} is in a call. Record it?";
-        };
+        Refresh();
+        // Belt and braces: if the detected app changed while the cached view was off-screen, re-fit
+        // the notch to the (possibly re-wrapped) text once shown. The AUTHORITATIVE text update runs
+        // in Refresh() BEFORE PillWindow measures the content height — Loaded fires after layout, so
+        // updating only here was the real clip bug (height measured on stale one-line text, longer
+        // text then wrapped past the reveal clip and the prompt rendered cut off).
+        Loaded += (_, _) => { Refresh(); App.GrowNotch(); };
     }
 
-    static string PrettyName(string exeOrName)
+    /// <summary>Set the prompt text from the currently detected app. Called by PillWindow right
+    /// before it measures this view's height, so the measured height always reflects the REAL text.</summary>
+    public void Refresh() => Refresh(App.CurrentApp?.DisplayName);
+
+    /// <summary>Testable/render-harness seam: set the prompt for a specific raw app identity.</summary>
+    public void Refresh(string? rawAppName)
     {
-        var n = exeOrName.Replace(".exe", "", System.StringComparison.OrdinalIgnoreCase);
-        return n switch
-        {
-            "chrome" => "Chrome",
-            "msedge" => "Edge",
-            "firefox" => "Firefox",
-            "brave" => "Brave",
-            "Zoom" or "zoom" => "Zoom",
-            "ms-teams" or "MSTeams" or "Teams" => "Teams",
-            "Discord" or "discord" => "Discord",
-            "slack" or "Slack" => "Slack",
-            _ => char.ToUpperInvariant(n[0]) + n[1..],
-        };
+        // "Slack is in a call. Record it?" when we know the app; generic otherwise. The FRIENDLY name,
+        // never the raw process identity ("Com.tinyspeck.slackdesktop" leaking here was a live bug).
+        var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
+        Prompt.Text = string.IsNullOrWhiteSpace(name) ? "Record this meeting?" : $"{name} is in a call. Record it?";
     }
 
     void OnRecord(object sender, RoutedEventArgs e) => App.AcceptPrompt();

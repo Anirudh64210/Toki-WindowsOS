@@ -44,6 +44,11 @@ public sealed class AppSettings
         return char.ToUpperInvariant(first[0]) + (first.Length > 1 ? first[1..].ToLowerInvariant() : "");
     }
 
+    /// <summary>Durable user-stated facts from the Ask chat ("Works at Contoso") — the lightweight
+    /// user profile the dialogue brain reads (see <see cref="UserProfile"/>). Null until the first
+    /// fact is stored, so existing settings files are untouched. Capped small by the writer.</summary>
+    public List<string>? UserFacts { get; set; }
+
     /// <summary>Local-model GPU offload policy. 0 = auto (detect VRAM and offload a
     /// safe number of layers — the default); -1 = force CPU only; &gt;0 = force that
     /// many layers. Resolved once at launch by <see cref="LlmRuntime"/>.</summary>

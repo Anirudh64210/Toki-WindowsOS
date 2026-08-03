@@ -37,6 +37,7 @@ public partial class PillWindow : Window
         [PillState.Library]       = (404, 440),
         [PillState.Settings]      = (380, 360),   // FIXED height + internal scroll (not auto) — see AutoHeight note
         [PillState.ManualNote]    = (392, 410),
+        [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
@@ -54,7 +55,7 @@ public partial class PillWindow : Window
     // came up short (scrollbar) and every later re-open (after one arrange) came up full-size (big
     // notch). A fixed height + the ScrollViewer already in SettingsView makes every open identical.
     static readonly HashSet<PillState> AutoHeight =
-        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen];
+        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask];
 
     // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
     // transient "nothing was said" toast). Everything with content you actually work
@@ -232,6 +233,7 @@ public partial class PillWindow : Window
             PillState.Library       => new LibraryView(),
             PillState.Settings      => new SettingsView(),
             PillState.ManualNote    => new ManualNoteView(),
+            PillState.Ask           => new AskView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
@@ -263,6 +265,10 @@ public partial class PillWindow : Window
         if (view is Views.RecordingBarView rbv) rbv.FlipOnShow = old != PillState.RecordingOpen;
         Host.Children.Clear();
         Host.Children.Add(view);
+        // Views whose text depends on live app state must be refreshed BEFORE the height is measured
+        // below — otherwise the reveal height is computed on stale text and longer text (a wrapped
+        // app name in the meeting prompt) renders cut off by the clip (a real live bug).
+        if (view is Views.MeetingPromptView mp) mp.Refresh();
         if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
 
         var hoverMorph = !fromHidden && IsHoverPair(old, next);
@@ -694,6 +700,22 @@ public partial class PillWindow : Window
             return m > 8 ? Math.Ceiling(m) + 1 : fallback;   // +1 for the bottom border hairline
         }
         catch { return fallback; }
+    }
+
+    /// <summary>Re-measure the current AUTO-HEIGHT view and smoothly grow/shrink the notch to fit — for
+    /// when a page's content changes size WITHOUT a state change (the Ask notch going from the short
+    /// "listening" state to the taller answer).</summary>
+    public void GrowToContent()
+    {
+        var s = _state.Current;
+        if (!AutoHeight.Contains(s)) return;
+        var (w, h) = Sizes[s];
+        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
+        var work = PhysicalWorkArea();
+        var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
+        var target = Math.Min(ContentHeight(s, w, h), availH);
+        if (Math.Abs(target - ActualHeight) < 2) return;
+        AnimateSize(w, target, 150);   // snappy so it keeps up as the answer streams in patches
     }
 
     void HoverTick()

@@ -183,6 +183,38 @@ public sealed class MeetingStore
         return ids;
     }
 
+    /// <summary>Meetings whose TITLE contains any of the given terms (case-insensitive substring),
+    /// newest first. The recall backstop for the Ask retrieval: on a small corpus a query term
+    /// appearing in a meeting's title is near-certain relevance (BM25F-style field priority), and it
+    /// must never be drowned by prefix-OR BM25 noise — the live "meeting regarding Amazon" miss.
+    /// Terms should already be content-filtered (no stop/ask words); this method additionally ignores
+    /// terms shorter than 3 chars so a fragment can't over-match.</summary>
+    public List<long> TitleMatchIds(IEnumerable<string> terms)
+    {
+        var ts = (terms ?? []).Where(t => !string.IsNullOrWhiteSpace(t) && t.Trim().Length > 2)
+            .Select(t => t.Trim().ToLowerInvariant()).Distinct().Take(6).ToList();
+        var found = new List<(long Id, DateTimeOffset At)>();
+        if (ts.Count == 0) return new List<long>();
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            var clauses = new List<string>();
+            for (var i = 0; i < ts.Count; i++)
+            {
+                clauses.Add($"lower(title) LIKE $t{i} ESCAPE '\\'");
+                var esc = ts[i].Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+                cmd.Parameters.AddWithValue($"$t{i}", $"%{esc}%");
+            }
+            cmd.CommandText = $"SELECT id, started_at FROM meetings WHERE kind='Meeting' AND ({string.Join(" OR ", clauses)})";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                if (DateTimeOffset.TryParse(r.GetString(1), out var at)) found.Add((r.GetInt64(0), at));
+        }
+        catch (Exception ex) { App.Log($"title match: {ex.Message}"); }
+        return found.OrderByDescending(x => x.At).Select(x => x.Id).ToList();
+    }
+
     // (id, started_at) for every real meeting — the basis for deterministic temporal resolution
     // (recency / date-range), parsed in C# so it's robust to timezone-offset string differences.
     List<(long Id, DateTimeOffset At)> MeetingTimes()
@@ -226,6 +258,25 @@ public sealed class MeetingStore
         using var r = cmd.ExecuteReader();
         while (r.Read())
             list.Add((r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
+        return list;
+    }
+
+    /// <summary>Every distinct action-item owner name across all meetings (done or not) — the closed
+    /// vocabulary the Ask person-filter resolves against ("what did Mac have as action items?"). A
+    /// query word only counts as a PERSON when it matches a name that actually exists in the data, so
+    /// the filter can't fire on an arbitrary word.</summary>
+    public List<string> ActionOwners()
+    {
+        var list = new List<string>();
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT owner FROM action_items WHERE owner IS NOT NULL AND TRIM(owner) != '';";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) list.Add(r.GetString(0));
+        }
+        catch (Exception ex) { App.Log($"action owners: {ex.Message}"); }
         return list;
     }
 

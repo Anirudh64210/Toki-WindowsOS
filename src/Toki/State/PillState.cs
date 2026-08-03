@@ -19,4 +19,5 @@ public enum PillState
     Library,
     Settings,
     ManualNote,
+    Ask,   // push-to-talk voice ask on the notch: listening → thinking → answer
 }
