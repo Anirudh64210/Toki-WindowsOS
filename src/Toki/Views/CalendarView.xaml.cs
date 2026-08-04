@@ -10,20 +10,23 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The Calendar page: an agenda-by-day week view over <see cref="CalendarService"/> with Join, a
-/// low-friction natural-language create composer, and delete (undo for solo events, confirm for
-/// guested ones). Fixed height + internal scroll. Talks only to the provider-neutral facade + models.
+/// The Calendar page: ONE continuous agenda scroll over the ~31-day horizon (week bands separate it —
+/// no week paging, so only the back arrow remains), a scroll-synced subtitle + a Today pill that appears
+/// when you scroll away, per-event Join, a natural-language create composer, and delete (undo for solo
+/// events, confirm for guested). Fixed height + internal scroll. Talks only to the provider-neutral facade + models.
 /// </summary>
 public partial class CalendarView : UserControl
 {
     static bool _lastAddMeet = true;   // sticky across opens within a session
 
-    int _weekOffset;                   // 0 = this week, 1 = next, … (backend is upcoming-only, so never < 0)
     int _durationMin = 30;
     bool _addMeet;
     QuickEvent? _parsed;
     CalEvent? _pendingUndo;
     CalEvent? _editing;                // non-null while the composer is editing an existing event
+    string? _lastRenderSig;            // render-key of the last agenda — skip redundant rebuilds
+    bool _entranceDone;                // the entrance stagger runs ONCE, never on a refresh
+    readonly List<(FrameworkElement El, string Label, int Count)> _bands = new();  // week separators, for scroll-synced subtitle
 
     readonly DispatcherTimer _parseDebounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     readonly DispatcherTimer _nowTick = new() { Interval = TimeSpan.FromSeconds(60) };
@@ -38,7 +41,7 @@ public partial class CalendarView : UserControl
         _parseDebounce.Tick += (_, _) => { _parseDebounce.Stop(); ReparseComposer(); };
         _nowTick.Tick += (_, _) => { if (IsVisible) RenderFromSnapshot(); };
 
-        if (App.Headless) { RenderWeek(Dev.CalendarSamples.Events()); return; }
+        if (App.Headless) { RenderAgenda(Dev.CalendarSamples.Events()); return; }
 
         // Subscribe on Loaded / release on Unloaded (the view is cached and reshown). Idempotent so a
         // repeat Loaded can't double-subscribe.
@@ -46,11 +49,13 @@ public partial class CalendarView : UserControl
         {
             UpcomingCache.Instance.Changed -= OnCacheChanged; UpcomingCache.Instance.Changed += OnCacheChanged;
             CalendarService.Instance.ConnectionChanged -= OnCacheChanged; CalendarService.Instance.ConnectionChanged += OnCacheChanged;
+            Theme.ThemeManager.ThemeChanged -= OnThemeChanged; Theme.ThemeManager.ThemeChanged += OnThemeChanged;
         };
         Unloaded += (_, _) =>
         {
             UpcomingCache.Instance.Changed -= OnCacheChanged;
             CalendarService.Instance.ConnectionChanged -= OnCacheChanged;
+            Theme.ThemeManager.ThemeChanged -= OnThemeChanged;
             _nowTick.Stop(); _cts?.Cancel(); _cts = null;
         };
         IsVisibleChanged += (_, e) =>
@@ -62,6 +67,10 @@ public partial class CalendarView : UserControl
 
     void OnCacheChanged() => Dispatcher.Invoke(() => { if (IsVisible) RenderFromSnapshot(); });
 
+    // A theme swap must recolour the code-built rows. The render-key carries the theme, so invalidating it
+    // and re-rendering rebuilds every row with the new palette (fixes black-on-dark after a light→dark toggle).
+    void OnThemeChanged() => Dispatcher.Invoke(() => { _lastRenderSig = null; if (IsVisible) RenderFromSnapshot(); });
+
     // ── loading / refresh ──
 
     async void Refresh(bool force = false)
@@ -69,12 +78,12 @@ public partial class CalendarView : UserControl
         if (!CalendarService.Instance.IsConnected) { ShowDisconnected(); return; }
 
         var snap = UpcomingCache.Instance.Snapshot;
-        if (snap is not null) RenderWeek(snap); else ShowLoading();
+        if (snap is not null) RenderAgenda(snap); else ShowLoading();
 
         try
         {
             var fresh = await UpcomingCache.Instance.GetAsync(force);
-            if (!ReferenceEquals(fresh, snap)) RenderWeek(fresh);   // avoid a double render when the cache was fresh
+            if (!ReferenceEquals(fresh, snap)) RenderAgenda(fresh);   // avoid a double render when the cache was fresh
         }
         catch (GoogleAuthException ex) { ShowError(ex); }
         catch { ShowError(null); }
@@ -84,51 +93,76 @@ public partial class CalendarView : UserControl
     {
         if (!CalendarService.Instance.IsConnected) { ShowDisconnected(); return; }
         var snap = UpcomingCache.Instance.Snapshot;
-        if (snap is not null) RenderWeek(snap);
+        if (snap is not null) RenderAgenda(snap);
     }
 
-    // ── the week ──
+    // ── the agenda (one continuous scroll over the whole ~31-day horizon; week bands separate it) ──
 
-    DateTimeOffset WeekStart => new DateTimeOffset(DateTimeOffset.Now.Date, DateTimeOffset.Now.Offset).AddDays(_weekOffset * 7);
+    static DateTime WeekStartOf(DateTime d) => d.AddDays(-(int)d.DayOfWeek);   // Sunday-start week
 
-    void RenderWeek(IReadOnlyList<CalEvent> all)
+    void RenderAgenda(IReadOnlyList<CalEvent> all)
     {
-        var start = WeekStart;
-        var end = start.AddDays(7);
         var now = DateTimeOffset.Now;
+        var upcoming = all.Where(e => e.EndUtc > now).OrderBy(e => e.StartUtc).ToList();
 
-        var inWeek = all.Where(e => e.StartLocal >= start && e.StartLocal < end).ToList();
+        // Render-key: skip the whole rebuild when nothing changed. The page refreshes from several sources
+        // (snapshot + fetch, cache events, the 60s tick); rebuilding + re-staggering identical rows is what
+        // flickered. Today's date is in the key so a midnight rollover forces one rebuild.
+        // Theme is in the key too: the rows are code-built and capture their brushes, so a light↔dark swap
+        // MUST rebuild them — otherwise the dedup keeps the old theme's text colour (black text on dark).
+        var sig = string.Join(",", upcoming.Select(e => $"{e.Id}:{e.StartUtc.Ticks}:{e.Summary}:{e.HasMeetLink}"))
+                  + "#" + DateTime.Today.Ticks + "@" + Theme.ThemeManager.Current;
+        if (sig == _lastRenderSig && StatePanel.Visibility != Visibility.Visible) return;
+        _lastRenderSig = sig;
 
-        WeekRange.Text = FormatRange(start, end.AddDays(-1));
-        Subtitle.Text = (_weekOffset == 0 ? "This week" : _weekOffset == 1 ? "Next week" : FormatRange(start, end.AddDays(-1)))
-            + $" · {inWeek.Count} event{(inWeek.Count == 1 ? "" : "s")}";
-        TodayButton.Visibility = _weekOffset == 0 ? Visibility.Collapsed : Visibility.Visible;
-        PrevWeek.IsEnabled = _weekOffset > 0;
-        NextWeek.IsEnabled = _weekOffset < 3;
-
-        if (inWeek.Count == 0) { ShowEmpty(); return; }
+        if (upcoming.Count == 0) { Subtitle.Text = "All clear"; ShowEmpty(); return; }
 
         HideState();
         Days.Children.Clear();
+        _bands.Clear();
         var today = now.Date;
+        var stagger = !_entranceDone && !App.Headless;   // entrance animates ONCE, never on refresh
         var delay = 0;
-        foreach (var byDay in inWeek.GroupBy(e => e.StartLocal.Date).OrderBy(g => g.Key))
+
+        foreach (var byWeek in upcoming.GroupBy(e => WeekStartOf(e.StartLocal.Date)).OrderBy(g => g.Key))
         {
-            Days.Children.Add(DayHeader(byDay.Key, byDay.Key == today));
-            var dayEvents = byDay.OrderBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.StartLocal).ToList();
-            var nowInserted = false;
-            foreach (var e in dayEvents)
+            var (band, label) = WeekBand(byWeek.Key, today);
+            Days.Children.Add(band);
+            _bands.Add((band, label, byWeek.Count()));
+
+            foreach (var byDay in byWeek.GroupBy(e => e.StartLocal.Date).OrderBy(g => g.Key))
             {
-                if (byDay.Key == today && !nowInserted && !e.IsAllDay && e.StartLocal > now)
+                var day = byDay.Key;
+                Days.Children.Add(DayHeader(day, day == today));
+                var dayEvents = byDay.OrderBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.StartLocal).ToList();
+                var nowInserted = false;
+                foreach (var e in dayEvents)
                 {
-                    Days.Children.Add(NowLine(now));
-                    nowInserted = true;
+                    if (day == today && !nowInserted && !e.IsAllDay && e.StartLocal > now) { Days.Children.Add(NowLine(now)); nowInserted = true; }
+                    var ev = e;
+                    var row = CalendarRows.AgendaRow(ev, () => BeginEdit(ev), () => BeginDelete(ev), CanEdit(ev));
+                    if (stagger) { Stagger(row, delay); delay += 24; }
+                    Days.Children.Add(row);
                 }
-                var row = CalendarRows.AgendaRow(e, ShowEventMenu);
-                Stagger(row, delay); delay += 24;
-                Days.Children.Add(row);
             }
         }
+        _entranceDone = true;
+        UpdateSubtitleFromScroll();
+    }
+
+    // A week separator + its friendly label (for the scroll-synced subtitle).
+    (FrameworkElement, string) WeekBand(DateTime weekStart, DateTime today)
+    {
+        var thisWeek = WeekStartOf(today);
+        var label = weekStart == thisWeek ? "This week"
+                  : weekStart == thisWeek.AddDays(7) ? "Next week"
+                  : $"{weekStart:MMM d} – {weekStart.AddDays(6):MMM d}";
+        var tb = new TextBlock
+        {
+            Text = label.ToUpperInvariant(), FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 9.5,
+            FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TextDim"), Margin = new Thickness(2, 16, 0, 2),
+        };
+        return (tb, label);
     }
 
     Border DayHeader(DateTime day, bool today)
@@ -160,13 +194,24 @@ public partial class CalendarView : UserControl
             FontFamily = (FontFamily)FindResource("UiFont"),
         };
         Grid.SetColumn(t, 0);
+        // A coral dot at the left end + the line (the Amie "now" marker).
+        var col1 = new Grid();
+        col1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        col1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var dot = new System.Windows.Shapes.Ellipse
+        {
+            Width = 5, Height = 5, Fill = (Brush)FindResource("Coral"),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0),
+        };
         var line = new Border
         {
             Height = 1.5, Background = (Brush)FindResource("Coral"), VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 0, 0), CornerRadius = new CornerRadius(1),
+            Margin = new Thickness(3, 0, 0, 0), CornerRadius = new CornerRadius(1),
         };
-        Grid.SetColumn(line, 1);
-        grid.Children.Add(t); grid.Children.Add(line);
+        Grid.SetColumn(dot, 0); Grid.SetColumn(line, 1);
+        col1.Children.Add(dot); col1.Children.Add(line);
+        Grid.SetColumn(col1, 1);
+        grid.Children.Add(t); grid.Children.Add(col1);
         return grid;
     }
 
@@ -183,20 +228,7 @@ public partial class CalendarView : UserControl
         tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(6, 0, TimeSpan.FromMilliseconds(180)) { BeginTime = begin, EasingFunction = ease });
     }
 
-    static string FormatRange(DateTimeOffset a, DateTimeOffset b) =>
-        a.Month == b.Month ? $"{a:MMM} {a.Day} – {b.Day}" : $"{a:MMM} {a.Day} – {b:MMM} {b.Day}";
-
-    // ── overflow menu + delete ──
-
-    void ShowEventMenu(CalEvent e, FrameworkElement anchor)
-    {
-        var items = new List<(string, bool, Action)>();
-        if (e.HasMeetLink) items.Add(("Join", false, () => { CalendarRows.OpenUrl(e.MeetLink); App.State.ForceForDemo(PillState.Hidden); }));
-        if (CanEdit(e)) items.Add(("Edit", false, () => BeginEdit(e)));
-        items.Add(("Open in Google Calendar", false, () => CalendarRows.OpenUrl(e.HtmlLink)));
-        items.Add(("Delete", true, () => BeginDelete(e)));
-        NotchMenu.Show(anchor, items);
-    }
+    // ── delete + undo/confirm ──
 
     bool HasGuests(CalEvent e) => e.Attendees.Any(a => !a.IsSelf);
 
@@ -301,7 +333,10 @@ public partial class CalendarView : UserControl
     void ShowEmpty()
     {
         Days.Children.Clear();
-        SetState(TokiArt(), "Nothing scheduled this week.", null);
+        var blob = new Controls.TokiBlob();
+        var art = new Viewbox { Width = 48, Height = 48, Child = blob, HorizontalAlignment = HorizontalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand };
+        art.MouseEnter += (_, _) => blob.React();   // a little delight on hover
+        SetState(art, "Nothing coming up — all clear.", ("＋ Plan something", () => OnNew(this, new RoutedEventArgs())));
     }
 
     void ShowError(GoogleAuthException? ex)
@@ -356,12 +391,46 @@ public partial class CalendarView : UserControl
         Width = 42, Height = 42, Child = new Controls.TokiBlob(), HorizontalAlignment = HorizontalAlignment.Center,
     };
 
-    // ── week navigation ──
+    // ── navigation: one continuous scroll (no week paging) ──
 
-    void OnPrevWeek(object s, RoutedEventArgs e) { if (_weekOffset > 0) { _weekOffset--; RenderFromSnapshot(); } }
-    void OnNextWeek(object s, RoutedEventArgs e) { if (_weekOffset < 3) { _weekOffset++; RenderFromSnapshot(); } }
-    void OnToday(object s, RoutedEventArgs e) { _weekOffset = 0; RenderFromSnapshot(); }
     void OnBack(object s, RoutedEventArgs e) => App.State.TryGo(PillState.Home);
+
+    void OnToday(object s, RoutedEventArgs e) => Scroller.ScrollToTop();
+
+    // The header subtitle tracks whatever week is at the top of the viewport; the Today pill appears only
+    // once you've scrolled away from the top (Amie style).
+    void OnScroll(object s, ScrollChangedEventArgs e)
+    {
+        UpdateSubtitleFromScroll();
+        var away = Scroller.VerticalOffset > 24;
+        if (away && TodayButton.Visibility != Visibility.Visible)
+        {
+            TodayButton.Visibility = Visibility.Visible;
+            TodayButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
+        }
+        else if (!away && TodayButton.Visibility == Visibility.Visible)
+        {
+            var a = new DoubleAnimation(TodayButton.Opacity, 0, TimeSpan.FromMilliseconds(120));
+            a.Completed += (_, _) => { if (Scroller.VerticalOffset <= 24) TodayButton.Visibility = Visibility.Collapsed; };
+            TodayButton.BeginAnimation(OpacityProperty, a);
+        }
+    }
+
+    void UpdateSubtitleFromScroll()
+    {
+        if (_bands.Count == 0) return;
+        var current = _bands[0];
+        foreach (var b in _bands)
+        {
+            try
+            {
+                var y = b.El.TransformToAncestor(Scroller).Transform(new Point(0, 0)).Y;
+                if (y <= 8) current = b; else break;   // the last band that's scrolled to/above the top is the current one
+            }
+            catch { break; }   // not laid out yet — keep the first band
+        }
+        Subtitle.Text = $"{current.Label} · {current.Count} event{(current.Count == 1 ? "" : "s")}";
+    }
 
     // ── create composer ──
 
@@ -514,9 +583,9 @@ public partial class CalendarView : UserControl
                 ? await CalendarService.Instance.CreateAsync(ev, _cts.Token)
                 : await CalendarService.Instance.UpdateAsync(editing.Id, ev, editing.HasMeetLink, _cts.Token);
             UpcomingCache.Instance.Upsert(result);
-            if (editing is null) _weekOffset = 0;   // jump to this week to reveal a new event; an edit stays put
             CloseComposer();
             RenderFromSnapshot();
+            if (editing is null) Scroller.ScrollToTop();   // reveal the newly-created event
         }
         catch (GoogleAuthException ex) { CreateFailed(ex.Message); }
         catch { CreateFailed(editing is null ? "Couldn’t create — try again." : "Couldn’t save — try again."); }

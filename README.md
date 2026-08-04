@@ -773,3 +773,37 @@ references (Wispr Flow, Linear, Vercel, Cron…). Story in `mansplain/`, decisio
 472/472 tests pass. **Still to build (redesign pass 2):** the Wispr/Vercel hover-expand "section pills"
 (rows growing on hover to reveal actions), the remaining type/spacing sweep (Library + small states), and
 the motion-consistency pass.
+
+## M9.1 (Calendar page revamp) — 2026-08-04
+
+The Calendar page read too big and busy (three arrows, week paging) and flickered on refresh.
+
+- **One continuous agenda** replaces week paging — the upcoming cache already holds ~31 days, so the
+  two week arrows were artificial. Now a single scroll with **week bands** ("This week" / "Next week" /
+  date range) separating it; only the **back** arrow remains.
+- **Scroll-synced subtitle** (header updates to the week you're viewing + its count) and a **Today pill**
+  that fades in only once you scroll away.
+- **Smooth**: a render-key skips the rebuild when nothing changed (the 60s tick + multi-source refresh
+  no longer re-stagger identical rows), and the entrance animation runs **once**. Fixed-height page with a
+  real internal scroller (an earlier auto-height attempt fought the ScrollViewer → no scroll); smaller at
+  360×430. Coral **now-line dot**, mascot empty state ("＋ Plan something") that reacts on hover.
+- **Theme fix**: the render-key carries the theme and the page listens for theme swaps, so the code-built
+  rows recolour on a light↔dark toggle (they were staying black-on-dark before).
+
+## M8.0 (Attribution — the "Built with" screen) — 2026-08-04
+
+The licence-obligation screen — Toki cannot be sold without crediting the open models it ships (Parakeet is
+**CC-BY-4.0**). First real step onto the ship runway.
+
+- **`AboutView`** (`PillState.About`), reached from **Settings → About → "Built with — open source &
+  licences"**. Scrollable credits list, design-system native (type ramp, dividers, amber/neutral chips).
+- **MODELS**: Parakeet TDT 0.6b v2 (NVIDIA · **CC-BY-4.0**, with an "int8 quantised" note to satisfy the
+  modification clause), Qwen3-4B-Instruct-2507 (Alibaba · **Apache-2.0**), bge-small-en-v1.5 (BAAI · MIT).
+- **ENGINES & LIBRARIES**: sherpa-onnx (Apache-2.0), ONNX Runtime, LLamaSharp · llama.cpp, NAudio, SQLite,
+  H.NotifyIcon, SharpCompress, Recognizers-Text (all MIT). Each row opens its upstream source.
+- Attribution-required licences (CC-BY, Apache) get **amber chips**; MIT stays neutral. **Whisper is
+  deliberately omitted** — it's a stubbed error-fallback, not shipped, so crediting it would be false.
+- Repo **`THIRD-PARTY-NOTICES.md`** holds the full, authoritative attributions + licence links.
+
+472/472 tests pass. **Still to build (M8):** signed installer + auto-update, licence-key gate, onboarding
+download polish.

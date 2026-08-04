@@ -67,12 +67,19 @@ namespace Toki.Controls
         {
             var sv = (ScrollViewer)sender;
             if (sv.ScrollableHeight <= 0) return; // nothing to scroll here — let it bubble to a parent
-
             e.Handled = true;
+            Nudge(sv, e.Delta);
+        }
 
+        /// <summary>Animate the viewer by one wheel delta (120 = one notch). Shared by the ScrollViewer's own
+        /// wheel handler AND the global mouse-hook path (which scrolls the notch even when it isn't the focused
+        /// window — the reason meeting-overlay scrolling otherwise fell through to the window behind).</summary>
+        public static void Nudge(ScrollViewer sv, int delta)
+        {
+            if (sv.ScrollableHeight <= 0) return;
             var target = (double)sv.GetValue(TargetProperty);
             if (double.IsNaN(target)) target = sv.VerticalOffset;
-            target -= e.Delta / 120.0 * StepPx;
+            target -= delta / 120.0 * StepPx;
             target = Math.Max(0, Math.Min(sv.ScrollableHeight, target));
             sv.SetValue(TargetProperty, target);
 

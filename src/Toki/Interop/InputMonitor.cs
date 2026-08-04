@@ -18,21 +18,25 @@ public sealed class InputMonitor : IDisposable
     const int WhMouseLl = 14;
     const int WmLButtonDown = 0x0201;
     const int WmRButtonDown = 0x0204;
+    const int WmMouseWheel = 0x020A;
     const int WmQuit = 0x0012;
 
     readonly LowLevelProc _mouseProc;   // kept alive against GC
     readonly Func<bool> _isArmed;
     readonly Func<int, int, bool> _isInsidePanel;
     readonly Action _dismiss;
+    readonly Func<int, int, int, bool>? _onWheel;   // (x, y, delta) → true to CONSUME (block the window behind)
     readonly Thread _thread;
     uint _threadId;
     IntPtr _hook;
 
-    public InputMonitor(Func<bool> isArmed, Func<int, int, bool> isInsidePanel, Action dismiss)
+    public InputMonitor(Func<bool> isArmed, Func<int, int, bool> isInsidePanel, Action dismiss,
+                        Func<int, int, int, bool>? onWheel = null)
     {
         _isArmed = isArmed;
         _isInsidePanel = isInsidePanel;
         _dismiss = dismiss;
+        _onWheel = onWheel;
         _mouseProc = MouseHook;
         _thread = new Thread(Run) { IsBackground = true, Name = "Toki.MouseHook" };
         _thread.Start();
@@ -58,10 +62,23 @@ public sealed class InputMonitor : IDisposable
         try
         {
             var w = (int)wParam;
-            if (code >= 0 && (w == WmLButtonDown || w == WmRButtonDown) && _isArmed())
+            if (code >= 0)
             {
-                var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                if (!_isInsidePanel(data.pt.x, data.pt.y)) _dismiss();
+                if ((w == WmLButtonDown || w == WmRButtonDown) && _isArmed())
+                {
+                    var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                    if (!_isInsidePanel(data.pt.x, data.pt.y)) _dismiss();
+                }
+                else if (w == WmMouseWheel && _onWheel is not null)
+                {
+                    // The wheel goes to the FOCUSED window by default (or the hovered one only if the OS
+                    // "scroll inactive windows" setting is on) — so scrolling the notch fell through to the
+                    // app behind it. We catch every wheel here: if it's over the notch's scrollable content,
+                    // scroll the notch AND return non-zero to CONSUME it, so the window behind never moves.
+                    var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                    var delta = (short)(data.mouseData >> 16);
+                    if (_onWheel(data.pt.x, data.pt.y, delta)) return (IntPtr)1;
+                }
             }
         }
         catch { /* a hook must never throw into the message pump */ }
