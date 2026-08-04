@@ -7,8 +7,10 @@ namespace Toki.Llm;
 
 /// <summary>
 /// Meaning-based text embeddings via a small on-device model (bge-small-en-v1.5, GGUF) run through
-/// LLamaSharp — the SAME inference stack as the notes LLM, so there's no second runtime and no conflict
-/// with the sherpa-onnx transcription engine. Runs on CPU (tiny model), keeping the GPU free for Qwen.
+/// LLamaSharp. NOTE: production retrieval does NOT use this yet — in-process loading conflicts with
+/// the sherpa-onnx native backend (see ARCHITECTURE "Why on-device embeddings are deferred"; the fix
+/// is an out-of-process CPU embedder). It ships for the --embedtest self-test and as the seam for
+/// that future work. Runs on CPU (tiny model), keeping the GPU free for Qwen.
 ///
 /// Optional by design: if the model isn't downloaded, <see cref="Ready"/> is false and retrieval falls
 /// back to keyword/FTS search — the app never depends on it being present.
@@ -31,8 +33,14 @@ public sealed class EmbeddingService : IDisposable
 
     EmbeddingService() { }
 
+    readonly object _loadGate = new();
+
     bool Ensure()
     {
+        if (_embedder is not null) return true;
+        if (_tried) return false;
+        lock (_loadGate)
+        {
         if (_embedder is not null) return true;
         if (_tried) return false;
         _tried = true;
@@ -59,6 +67,9 @@ public sealed class EmbeddingService : IDisposable
             _embedder = null;
             return false;
         }
+        }   // _loadGate — the whole check-and-load is atomic so two concurrent Ready/EmbedAsync
+            // callers can never double-load the native weights (leaking one copy) or see a
+            // spurious permanent "not ready" from a half-set _tried.
     }
 
     /// <summary>Embed one text → a unit-normalized vector, or null if the embedder isn't available.</summary>

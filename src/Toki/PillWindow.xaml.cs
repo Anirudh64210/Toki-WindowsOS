@@ -96,6 +96,9 @@ public partial class PillWindow : Window
         _state = state;
         // Clicking the Toki peek opens the remembered page (Home by default).
         App.OpenPeek = () => { if (_state.Current == PillState.Collapsed) _state.ForceForDemo(_context); };
+        // A summarize that finished while the pill was forced elsewhere: retarget the remembered
+        // context so an edge-summon restores the RESULT, not a Summarizing loader that never ends.
+        App.ResultMissed += t => Dispatcher.Invoke(() => { if (_context == PillState.Summarizing) _context = t; });
         _state.StateChanged += (o, n) => Dispatcher.Invoke(() => OnStateChanged(o, n));
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
@@ -272,10 +275,17 @@ public partial class PillWindow : Window
     static bool EdgeSuppressed()
     {
         if ((GetAsyncKeyState(VkLButton) & 0x8000) != 0) return true;
-        if (SHQueryUserNotificationState(out var st) == 0 &&
-            (st == QunsBusy || st == QunsRunningD3dFullScreen || st == QunsPresentationMode)) return true;
-        return false;
+        return QuietFullscreen();
     }
+
+    /// <summary>True while a fullscreen app / game / presentation is up (the "do not disturb"
+    /// signal Windows itself uses for toasts). Shared by the edge-summon, PrepWatcher, and the
+    /// meeting-prompt gate — a notch popping over slide 3 of a deck is the overlay cardinal sin.
+    /// Suppression only DELAYS a prompt: the detector re-checks every poll and offers the
+    /// meeting the moment the user leaves fullscreen.</summary>
+    public static bool QuietFullscreen() =>
+        SHQueryUserNotificationState(out var st) == 0 &&
+        (st == QunsBusy || st == QunsRunningD3dFullScreen || st == QunsPresentationMode);
 
     UserControl ViewFor(PillState s)
     {
@@ -661,7 +671,7 @@ public partial class PillWindow : Window
 
     void OnKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape) _state.ForceForDemo(PillState.Hidden);
+        if (e.Key == Key.Escape) App.CloseOverlay();   // recording-aware: never hides a live mic
     }
 
     // ── Hover-to-expand while recording (WisprFlow-style) ──
@@ -818,7 +828,7 @@ public partial class PillWindow : Window
         if (!_autoHideWired)
         {
             _autoHideWired = true;
-            _autoHide.Tick += (_, _) => { _autoHide.Stop(); if (_tucked && !CursorOverPill()) _state.ForceForDemo(PillState.Hidden); };
+            _autoHide.Tick += (_, _) => { _autoHide.Stop(); if (_tucked && !CursorOverPill()) App.CloseOverlay(); };
         }
         _autoHide.Interval = TimeSpan.FromMilliseconds(ms);
         _autoHide.Stop();
@@ -844,7 +854,7 @@ public partial class PillWindow : Window
         // EVERYTHING ELSE closes off completely (context kept) rather than leaving a sliver
         // hanging in your way while you work in another app. You bring it back — as whatever
         // Toki was showing — by hovering the top-centre edge. Workflow stays undisturbed.
-        _state.ForceForDemo(PillState.Hidden);
+        App.CloseOverlay();   // recording-aware: a live session collapses to the bar, never vanishes
     }
 
     void ExpandCurrent()

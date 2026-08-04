@@ -208,11 +208,11 @@ public partial class AskView : UserControl
     void OnMore()
     {
         var q = _moreQuestion;
-        App.State.ForceForDemo(PillState.Hidden);
+        App.CloseOverlay();   // recording-aware: a live session keeps its bar
         if (!string.IsNullOrEmpty(q)) LibraryWindow.AskInLibrary(q);
     }
 
-    void OnClose(object sender, RoutedEventArgs e) => App.State.ForceForDemo(PillState.Hidden);
+    void OnClose(object sender, RoutedEventArgs e) => App.CloseOverlay();
 
     void ArmAutoHide(int ms = 30000)
     {
@@ -227,7 +227,7 @@ public partial class AskView : UserControl
     void AutoHideTick(object? sender, EventArgs e)
     {
         _autoHide?.Stop();
-        if (App.State.Current == PillState.Ask) App.State.ForceForDemo(PillState.Hidden);
+        if (App.State.Current == PillState.Ask) App.CloseOverlay();
     }
 
     // ── listening waveform ──

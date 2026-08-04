@@ -83,9 +83,12 @@ public static class QuickEventParser
         }
         if (past is not null)
         {
-            // Bump a same-day-but-past reading to tomorrow so "lunch at 1pm" (when it's 3pm) means tomorrow.
+            // Bump a same-day-but-past reading to tomorrow so "lunch at 1pm" (when it's 3pm) means
+            // tomorrow. Rebuild from the local WALL CLOCK, not the instant: AddDays on the
+            // DateTimeOffset keeps today's UTC offset, which lands one hour off across a DST change.
             var span = past.Value.e - past.Value.s;
-            var s = past.Value.s.AddDays(1);
+            var localTomorrow = past.Value.s.DateTime.AddDays(1);
+            var s = new DateTimeOffset(localTomorrow, TimeZoneInfo.Local.GetUtcOffset(localTomorrow));
             return (s, s + span);
         }
         return null;

@@ -2,11 +2,13 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ════════════════════════════════════════════════════════════════════════════
-         THEMEABLE BRUSHES. These are shared, MUTABLE SolidColorBrush objects with the DARK
-         defaults below. The light/dark toggle (ThemeManager.Apply) sets each brush's .Color
-         directly on the shared instance — so every consumer (StaticResource or DynamicResource)
-         recolours live, instantly, with no rebuild. Do NOT freeze these. ThemeManager.Palette
-         is the single source of truth for the dark↔light values.
+         THEMEABLE BRUSHES, with the DARK defaults below. The light/dark toggle
+         (ThemeManager.Apply) REPLACES each brush in the application resources with a fresh
+         one — it does NOT mutate these in place (see ARCHITECTURE "replace the brush, don't
+         mutate it") — so only DynamicResource consumers recolour live; code-built UI that
+         captured a brush via FindResource must rebuild on ThemeChanged. ThemeManager.Palette
+         is the single source of truth for the dark↔light values; add new colours there as a
+         Color+brush pair, not only here.
          ════════════════════════════════════════════════════════════════════════════ -->
     <SolidColorBrush x:Key="Surface" Color="#0B0B0C"/>
     <SolidColorBrush x:Key="SurfaceHi" Color="#1C1C1E"/>

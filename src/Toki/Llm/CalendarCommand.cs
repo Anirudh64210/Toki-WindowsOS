@@ -100,7 +100,16 @@ public static class CalendarCommand
 
     public static string ConfirmPrompt(PendingCalendarCreate p)
     {
-        var when = p.Start is { } s ? $"{DayLabel(s)}, {s:h:mm}–{(p.End ?? s.AddMinutes(30)):h:mm tt}" : "sometime";
+        // The start keeps its own am/pm whenever it differs from the end's — "11:30–12:00 PM"
+        // read as an EVENING slot ("11:30 PM"), on the one line whose job is time verification.
+        var when = "sometime";
+        if (p.Start is { } s)
+        {
+            var end = p.End ?? s.AddMinutes(30);
+            var sameHalf = s.ToString("tt") == end.ToString("tt");
+            when = sameHalf ? $"{DayLabel(s)}, {s:h:mm}–{end:h:mm tt}"
+                            : $"{DayLabel(s)}, {s:h:mm tt}–{end:h:mm tt}";
+        }
         var msg = $"Create “{p.Title}” — {when} on {Provider}? Say yes to create it, or no to skip.";
         if (p.PersonMentioned is { } who) msg += $" {who}’s in the title — I can only invite people by email.";
         return msg;

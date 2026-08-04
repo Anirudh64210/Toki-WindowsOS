@@ -92,17 +92,11 @@ public sealed class PrepWatcher
         try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline — the next tick retries */ }
     }
 
-    // Don't interrupt a fullscreen app / game / presentation (same quiet check the edge-summon uses).
+    // Don't interrupt a fullscreen app / game / presentation — the one shared quiet check
+    // (edge-summon, meeting prompt, and this watcher all consult PillWindow.QuietFullscreen).
     static bool Suppressed()
     {
-        try
-        {
-            return SHQueryUserNotificationState(out var st) == 0
-                && st is QunsBusy or QunsRunningD3dFullScreen or QunsPresentationMode;
-        }
+        try { return PillWindow.QuietFullscreen(); }
         catch { return false; }
     }
-
-    [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
-    const int QunsBusy = 2, QunsRunningD3dFullScreen = 3, QunsPresentationMode = 4;
 }

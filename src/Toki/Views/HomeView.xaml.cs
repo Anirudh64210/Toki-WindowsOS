@@ -23,8 +23,14 @@ public partial class HomeView : UserControl
         Greeting.Text = string.IsNullOrEmpty(name) ? "Welcome back!" : $"Welcome back, {name}!";
         RefreshGoogle();
         // Keep the card in step if the connection or the events change elsewhere.
-        CalendarService.Instance.ConnectionChanged += OnCalendarChanged;
-        UpcomingCache.Instance.Changed += OnCalendarChanged;
+        // Subscribe on LOADED (not the ctor): this view is a cached singleton, and a
+        // ctor-subscribe + Unloaded-unsubscribe pair goes permanently deaf after the first
+        // navigation away (the CalendarView already does it this way).
+        Loaded += (_, _) =>
+        {
+            CalendarService.Instance.ConnectionChanged += OnCalendarChanged;
+            UpcomingCache.Instance.Changed += OnCalendarChanged;
+        };
         Unloaded += (_, _) =>
         {
             CalendarService.Instance.ConnectionChanged -= OnCalendarChanged;

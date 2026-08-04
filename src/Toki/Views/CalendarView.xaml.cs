@@ -261,6 +261,16 @@ public partial class CalendarView : UserControl
             RenderFromSnapshot();
             ShowActionBar($"Couldn’t delete — {ex.Message}", ("OK", false, HideActionBar), null);
         }
+        catch (Exception ex)
+        {
+            // Belt and braces: this is an async void with an OPTIMISTIC removal above — any
+            // unexpected throw (cancel, a future client change) must still roll the event
+            // back, or it silently vanishes from the UI while still existing at Google.
+            App.Log($"calendar delete failed: {ex.Message}");
+            UpcomingCache.Instance.Upsert(e);
+            RenderFromSnapshot();
+            ShowActionBar("Couldn’t delete — try again.", ("OK", false, HideActionBar), null);
+        }
     }
 
     void OfferUndo(CalEvent e)

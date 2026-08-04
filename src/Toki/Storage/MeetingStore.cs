@@ -153,18 +153,29 @@ public sealed class MeetingStore
 
     /// <summary>Best-matching MEETING ids for a free-text query, ranked by BM25 (title weighted). Empty
     /// if FTS is unavailable or nothing matches — the caller then falls back to keyword/recent.</summary>
-    public List<long> SearchRelevant(string query, int limit)
+    /// <summary>The ONE FTS5 query builder. Parameter binding does NOT protect a MATCH argument — the
+    /// bound value is still parsed by FTS5's own grammar (AND/OR/NOT/NEAR/quotes/column filters), so a
+    /// raw <c>"</c> or <c>*</c> could throw or alter the query. Safety comes from reducing every term to
+    /// alphanumerics and emitting a grammar-free prefix-OR. Returns "" when nothing usable remains (the
+    /// caller must then skip the MATCH entirely — an empty MATCH is a syntax error). Public + static so
+    /// it is the single, testable choke point for anything that reaches a MATCH clause.</summary>
+    public static string ToFtsQuery(string? query)
     {
-        var ids = new List<long>();
-        if (!_ftsOk) return ids;
         var terms = (query ?? "")
             .Split(new[] { ' ', '\t', '\n', '?', '.', ',', '!', ';', ':', '\'', '"', '(', ')', '/', '-' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(w => new string(w.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant())
             .Where(w => w.Length > 1)
             .Distinct()
             .ToList();
-        if (terms.Count == 0) return ids;
-        var match = string.Join(" OR ", terms.Select(t => $"{t}*"));   // prefix-OR, sanitized to alnum
+        return terms.Count == 0 ? "" : string.Join(" OR ", terms.Select(t => $"{t}*"));   // prefix-OR, alnum-only
+    }
+
+    public List<long> SearchRelevant(string query, int limit)
+    {
+        var ids = new List<long>();
+        if (!_ftsOk) return ids;
+        var match = ToFtsQuery(query);
+        if (match.Length == 0) return ids;
         try
         {
             using var c = Open();
@@ -258,6 +269,29 @@ public sealed class MeetingStore
         using var r = cmd.ExecuteReader();
         while (r.Read())
             list.Add((r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
+        return list;
+    }
+
+    /// <summary>Open action items with their source meeting's id + start time — for due-date-aware task
+    /// scoping ("what's due this week"): the meeting date is the reference point for resolving a free-text
+    /// due like "Friday" (it means the Friday after THAT meeting).</summary>
+    public List<OpenAction> OpenActionsWithDates(int limit)
+    {
+        var list = new List<OpenAction>();
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT m.id, m.title, m.started_at, a.text, a.owner, a.due FROM action_items a
+            JOIN meetings m ON m.id = a.meeting_id
+            WHERE a.done = 0
+            ORDER BY m.started_at DESC, a.ord ASC LIMIT $n;
+            """;
+        cmd.Parameters.AddWithValue("$n", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add(new OpenAction(
+                r.GetInt64(0), r.GetString(1), DateTimeOffset.Parse(r.GetString(2)),
+                r.GetString(3), r.IsDBNull(4) ? null : r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5)));
         return list;
     }
 
@@ -382,6 +416,18 @@ public sealed class MeetingStore
         Body = body,
         StartedAt = DateTimeOffset.Now,
     });
+
+    /// <summary>Every recording folder referenced by a saved meeting (for the orphan-recovery sweep).</summary>
+    public List<string> AllFolders()
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT folder FROM meetings WHERE folder IS NOT NULL AND folder <> ''";
+        var list = new List<string>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
 
     public IReadOnlyList<MeetingSummary> List(string? search = null)
     {
@@ -526,11 +572,14 @@ public sealed class MeetingStore
         else if (s.StartsWith("them:", StringComparison.OrdinalIgnoreCase)) { speaker = "Them"; s = s[5..].Trim(); }
         if (s.Length == 0) return ("", null, null);
 
+        // Escape LIKE wildcards so a literal % or _ in the search box matches itself
+        // (TitleMatchIds already does this — the two paths had diverged).
+        s = s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
         var transcriptFilter = speaker is null
-            ? "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.text LIKE $term"
-            : "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.speaker=$speaker AND t.text LIKE $term";
+            ? "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.text LIKE $term ESCAPE '\\'"
+            : "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.speaker=$speaker AND t.text LIKE $term ESCAPE '\\'";
         var where = speaker is null
-            ? $"WHERE (m.title LIKE $term OR m.tldr LIKE $term OR m.body LIKE $term OR EXISTS ({transcriptFilter}))"
+            ? $"WHERE (m.title LIKE $term ESCAPE '\\' OR m.tldr LIKE $term ESCAPE '\\' OR m.body LIKE $term ESCAPE '\\' OR EXISTS ({transcriptFilter}))"
             : $"WHERE EXISTS ({transcriptFilter})";
         return (where, speaker, s);
     }

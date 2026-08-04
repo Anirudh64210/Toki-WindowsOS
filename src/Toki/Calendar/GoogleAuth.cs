@@ -214,6 +214,11 @@ public static class GoogleAuth
         for (var attempt = 0; attempt < 5; attempt++)
         {
             var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            // ExclusiveAddressUse (RFC 8252 §8.10): stop another local process from also binding this
+            // loopback port and racing for the OAuth redirect. Set before Start.
+            try { probe.Server.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket,
+                    System.Net.Sockets.SocketOptionName.ExclusiveAddressUse, true); }
+            catch { /* best-effort; the PKCE verifier + CSRF state remain the real defenses */ }
             probe.Start();
             var port = ((IPEndPoint)probe.LocalEndpoint).Port;
             probe.Stop();
@@ -242,8 +247,11 @@ public static class GoogleAuth
                 catch (ObjectDisposedException) { throw new GoogleAuthException("Google sign-in was cancelled.", needsReconnect: false); }
 
                 var q = ParseQuery(ctx.Request.Url?.Query);
-                // Ignore favicon and any stray hit that isn't the redirect.
-                if (!q.ContainsKey("code") && !q.ContainsKey("error"))
+                // STATE FIRST: only a request carrying the state WE generated is Google's redirect.
+                // Anything else — favicon, a port-scanning browser tab firing ?error=x at loopback
+                // ports, a stray local process — is served a neutral page and IGNORED, so a bogus
+                // hit can no longer tear down the listener while the real redirect is in flight.
+                if (!q.TryGetValue("state", out var gotState) || !FixedEquals(gotState, expectedState))
                 {
                     await WritePage(ctx, Page("One moment…", "You can return to Toki.")).ConfigureAwait(false);
                     continue;
@@ -257,11 +265,10 @@ public static class GoogleAuth
                         : $"Google returned an error ({err}).", needsReconnect: false);
                 }
 
-                // CSRF: the returned state must match the one we sent, compared in constant time.
-                if (!q.TryGetValue("state", out var gotState) || !FixedEquals(gotState, expectedState))
+                if (!q.ContainsKey("code"))
                 {
-                    await WritePage(ctx, Page("Sign-in couldn't be verified", "Please try connecting again from Toki.")).ConfigureAwait(false);
-                    throw new GoogleAuthException("Google sign-in failed a security check (state mismatch).", needsReconnect: false);
+                    await WritePage(ctx, Page("One moment…", "You can return to Toki.")).ConfigureAwait(false);
+                    continue;
                 }
 
                 await WritePage(ctx, Page("Toki is connected ✓", "You can close this tab and return to Toki.")).ConfigureAwait(false);
@@ -303,6 +310,9 @@ public static class GoogleAuth
             using (resp) raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw new GoogleAuthException("Google sign-in timed out.", needsReconnect: false); }
+        // HttpClient's OWN timeout (caller's ct not cancelled) must also map to the documented
+        // GoogleAuthException contract — a raw TaskCanceledException flew past every caller.
+        catch (OperationCanceledException) { throw new GoogleAuthException("Google didn't respond — check your connection.", needsReconnect: false); }
         catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google (network error).", needsReconnect: false); }
 
         if (!resp.IsSuccessStatusCode)

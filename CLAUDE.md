@@ -2,7 +2,16 @@
 
 Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail is needed). This file carries the same rules.
 
-## Current state & roadmap (updated 2026-08-03)
+## Current state & roadmap (updated 2026-08-04)
+
+**H1 hardening pass DONE (2026-08-04):** full multi-agent audit (67 verified findings — all 14 high +
+21 medium fixed), recording-lifecycle integrity (a live mic can never be hidden; session is the truth),
+delete-removes-audio, crash/quit recovery (`RecordingRecovery` startup sweep + periodic WAV-header
+flush), mic device-change rebuild (`IMMNotificationClient` + `BufferConverter`), denylist/new-Teams
+detection fixes, LLM dispose race, ApiLlm streaming timeouts, calendar pagination/timeout contracts +
+OAuth listener resilience, atomic settings writes, fullscreen prompt suppression, notes-prompt quality
+rules, API→local notes fallback, SharpCompress CVE bump. See README H1, ARCHITECTURE "The hardening
+pass", `mansplain/29`, and `docs/backlog.md` (research-derived opportunities + deliberate deferrals).
 
 **Shipped:** M0–M6 (pill shell, audio, detection, transcription+echo-dedup, storage+heuristic notes+Library, LLM notes). Plus: theme toggle, 8 note templates, cloud mascot, tinted-mirror notch, the Library **hub** (Ask / Library / Templates), whole-note copy/select, BYO API key, and the **Ask chatbot** — streaming answers, FTS5 retrieval, a deterministic **understand-first** layer (temporal + intent parse → SQL resolution) with **conversation memory** (follow-ups), and (P10) a **dialogue brain**: turn-type routing (command / small-talk / persona / **user-fact & identity** / misheard-command clarification / meeting-QA / **general conversation**), a persisted user profile ("call me Anirudh" → remembered, used by the greeting and prompts), RAG-vs-parametric routing (general turns answered from the model's own knowledge — no forced retrieval), and anti-fabrication rails (relevance floor; no citations on a miss). Detail: `ARCHITECTURE.md`, `docs/ask-toki-brain.md`, and the `notes-and-chatbot-plan` / `build-and-run` memories.
 

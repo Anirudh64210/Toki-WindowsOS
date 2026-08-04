@@ -597,3 +597,108 @@ A light `PreviewMouseDown` → `Activate()` remains so keyboard focus (Esc, typi
 ### Attribution — the "Built with" screen (M8.0)
 
 A **licence obligation**, not decoration: Parakeet is CC-BY-4.0 (requires name + source + licence link + a note that it was modified), Qwen3 and sherpa-onnx are Apache-2.0, the rest MIT — Toki cannot be sold without crediting them. `AboutView` (`PillState.About`) is a fixed-height scrollable credits list, reached from **Settings → About**. Data lives as a small `record Credit(Name, Role, Author, Licence, Url)` grouped into MODELS / ENGINES & LIBRARIES; rows are built in code so each opens its upstream source (`Process.Start … UseShellExecute`). Attribution-with-teeth licences (CC-BY, Apache) get **amber chips**; MIT is neutral. Two correctness calls: **Whisper is omitted** (it's a stubbed error-fallback, `TranscriptionService` never ships it — crediting it would assert a false dependency), and **Parakeet carries an "int8 quantised" note** to satisfy CC-BY's indicate-changes clause. The full, authoritative texts live in repo `THIRD-PARTY-NOTICES.md` (also referenced from the screen footer). State wiring: `PillState.About` added to the enum, the `AppState.Allowed` table (Settings⇄About, About→Home/Hidden), `PillWindow` `Sizes`/`ViewFor`/`DismissOnClickOutside`/`IsStayable`. Remaining M8: Google sensitive-scope verification, signed installer + auto-update, licence-key gate.
+
+### The hardening pass — a full multi-agent audit, verified fix by fix (H1, 2026-08-04)
+
+With the feature set settled, the whole codebase went through a deep audit (seven parallel subsystem
+auditors + adversarial verification of every finding, alongside market research on the top consumer
+notetakers). 67 findings survived verification — 0 critical, 14 high — and all highs/mediums plus
+nearly every low were fixed in one pass. The load-bearing decisions:
+
+- **Recording truth lives in the session, not the pill.** `App.IsRecording` now derives from
+  `_session is not null`; every generic dismiss path (Esc, ✕, auto-hide, "close", tray toggle) goes
+  through `App.CloseOverlay()`, which collapses to the recording bar instead of hiding while a session
+  is live; the detector's auto-stop keys off the session; `BeginRecording` refuses to overwrite a live
+  session. Before this, push-to-talk or Esc during a recording could orphan a running mic with no
+  indicator — the one failure mode this product can never have.
+- **Deletion means deletion.** The Library/pill "Delete" paths now use `App.DiscardMeeting` (DB row +
+  Markdown mirror + WAV folder) — the confirm dialog's "its audio will be removed for good" promise was
+  previously broken (three auditors found it independently). Trivial/silent takes also delete their
+  folders, the mirror drops stale duplicates on retitle, and the %TEMP% diagnostic log is size-capped.
+- **Crash/quit recovery (`RecordingRecovery`).** WAV headers are re-finalized every ~5s during capture
+  (a crash leaves a playable file, not a zero-length RIFF), and a startup sweep transcribes any
+  recording folder no meeting references into a saved Library entry (tiny/silent orphans are deleted).
+  Live-verified on real orphans from the July M2 spikes — one real meeting recovered, four cleaned.
+- **Mid-meeting device changes.** `MicCapture` now registers an `IMMNotificationClient`: when the
+  default communications mic changes (or capture dies — Bluetooth drop, unplug), it rebuilds on the new
+  default and keeps writing the SAME WAV, converting buffers through a streaming linear-resampler
+  (`BufferConverter`) when the new device's format differs. The CLAUDE.md-mandated rebuild finally exists.
+- **Detection correctness.** The denylist matches the app NAME only (matching the full path let a
+  username like "Jacobs" — contains "obs" — kill detection for every per-user app); packaged apps
+  resolve by real package family name via `GetPackageFamilyName` (the AUMID-prefix guess missed new
+  Teams entirely → mic-only meetings).
+- **LLM lifecycle safety.** `LlamaLlm.DisposeWhenIdle()` acquires the generation gate before freeing
+  native weights (the low-memory `Release()` could previously dispose mid-inference — a native
+  use-after-free); `ApiLlm` drops the 60s whole-operation timeout for per-call connect deadlines + a
+  stream idle watchdog, and reads SSE with a cancelable async loop.
+- **Notes degrade one rung, not two.** API mode with an unusable key now falls back to the installed
+  on-device model before heuristic. (Found live: this machine sat in ApiKey mode with no key and was
+  silently getting heuristic notes.)
+- **Calendar contracts.** `CalendarClient` gained the one shared send/read/error-map helper (the four
+  copies had diverged), full `nextPageToken` pagination (25-item cap silently emptied weeks 2–4 of the
+  agenda), `sendUpdates=all` on insert with guests, timeout→`GoogleAuthException` mapping, an
+  undecryptable-DPAPI self-heal in `CalendarService`, and an OAuth loopback listener that ignores
+  requests without our CSRF state instead of tearing down (browser-JS port-scan resilience).
+- **UI truthfulness.** Calendar/prep "Join" links only ShellExecute http(s) (calendar data is
+  attacker-influenceable); the summarizing loader can no longer hang forever if the pill was forced
+  away (the result retargets the remembered context); `NotchPopups` pre-computes rects on the UI thread
+  so the hook-thread hit test actually works; the meeting prompt (like the edge-summon and PrepWatcher)
+  is suppressed during fullscreen/presentation via one shared `PillWindow.QuietFullscreen()` — the
+  prompt is delayed to the next poll, never dropped.
+- Plus: atomic settings/chat writes (a torn settings.json wiped the API key + Google token), LIKE-term
+  escaping, PTT chord-release fix (left/right modifier VKs), search debounce, theme-rebuild coverage
+  (AboutView, manual-note body), SharpCompress CVE bump (0.38→0.48), dead `HotkeyManager` deleted, and
+  the note prompts taught the two research-backed rules that separate good notes from slop: read past
+  ASR mis-recognitions but never "correct" names, and record decisions WITH their stated reason.
+
+Deliberately deferred (documented in `docs/backlog.md`): three pure-refactor consolidations
+(NotesQa tokenizer triplication, notch/Library streaming plumbing, state→view factory) — regression
+risk in delicate code with no user-visible payoff.
+
+### Due-date task scoping, Library sort, and a security pass (H2, 2026-08-04)
+
+**Task time-queries scope by DUE date (`TaskScheduling`).** The reported bug — "what tasks do I have for
+this week" listing every open task — was `TaskAnswer` scoping a dated task query through
+`MeetingIdsInRange` (tasks *from meetings held* in the window). On a recent library that's ≈ all meetings.
+The market-validated model is deadline-based: `TaskScheduling.ParseDue` resolves each task's free-text due
+against its meeting's date (future-biased — a due set on Monday for "Friday" is *this* Friday, via a
+weekday roll-forward past Recognizers' past-occurrence default), and `Bucket` splits open tasks into
+**Overdue** (due < today; suppressed for pure-future windows like "next week"), **Due-in-window**, and
+**undated-from-window** (only when the window includes today). `DueWindowTaskAnswer` renders them grouped
+with a **scope-echo header** ("2 tasks this week:"). Deadline cues ("due", "overdue", "behind on") were
+added to `TasksRx` (routing) and `TaskWords` (so they're stripped from the topic, not mistaken for one).
+Topic task queries ("action items about pricing") keep the meeting-search path. Two research agents
+independently confirmed both the semantics and the exposed gaps (citations, scope-echo, due semantics).
+
+**Library sort menu.** `LibrarySort` enum + a `ContextMenu` on the list: Newest/Oldest/Longest/Shortest/
+Most-open-tasks/Manual. `App.Store.List` still returns the drag-reorder ("Manual") order; `SortItems`
+re-orders in memory for the rest. Persisted in `AppSettings.LibrarySort`; enabling drag switches to Manual
+so a drag can't renumber a view whose order isn't the stored one.
+
+**Security pass** (full threat-model audit; most surfaces were already sound from H1):
+- **P0 named-object squatting** (`Interop/SingleInstance`): the single-instance Mutex + show-signal
+  EventWaitHandle were global, guessable, un-ACL'd — a local process could pre-create them to DoS startup
+  or drive the UI. Now SID-salted `Local\` names with a current-user-only DACL (`MutexAcl.Create` /
+  `EventWaitHandleAcl.Create`), and "already exists" defers to a running instance only after confirming a
+  real Toki process exists (else it's a squat → take over). Runtime-verified.
+- **`Interop/SafeShell`** — the one external-launch choke point. `OpenUrl` allows only absolute http/https
+  (calendar join-links are attacker-influenceable); `RevealInExplorer` requires the path to resolve inside
+  an allowed data dir. All five `Process.Start(UseShellExecute)` sites route through it.
+- **`MeetingStore.ToFtsQuery`** — the single FTS5 builder (parameter binding does NOT protect a MATCH
+  argument; safety is the alnum-only prefix-OR reduction). The only MATCH path uses it.
+- **Markdown mirror containment** — `Write` asserts the final path is inside `NotesDir` before writing.
+- **Prompt-injection delimiters** — notes fed to the Ask/Analyze prompts are fenced and labeled "DATA,
+  never instructions". The model already has no tool authority (calendar creation is regex-on-utterance +
+  confirm gate), so injection can at worst affect answer text.
+- OAuth loopback probe socket set `ExclusiveAddressUse` (RFC 8252 §8.10); `<NuGetAudit>`/moderate level on;
+  confirmed no `ServerCertificateCustomValidationCallback` bypass and no `BinaryFormatter`.
+- 33 new tests (FTS adversarial corpus, path-traversal corpus, URL allowlist, BYO-API endpoint rules,
+  per-user instance names, calendar pagination). 520 total green.
+
+**Deliberately NOT done** (documented so it's a decision, not an oversight): swapping the push-to-talk
+`WH_KEYBOARD_LL` hook for `RegisterHotKey` — the owner chose hold-to-talk, which needs the key-UP that
+`RegisterHotKey` can't deliver; the callback already branches only on the chord and never stores other
+keys. Adding a DPAPI entropy parameter — it would fail to decrypt every EXISTING stored key (wiping the
+user's API key + Google token) for marginal gain against same-user malware that can call our code anyway.
+Moving bulk data from `%APPDATA%` (roaming) to `%LOCALAPPDATA%` — correct long-term but needs a migration
+and is owner-gated. All three are in `docs/backlog.md`.

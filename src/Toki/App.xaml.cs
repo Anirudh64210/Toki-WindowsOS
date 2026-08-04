@@ -31,6 +31,10 @@ public partial class App : Application
     /// <summary>Set on Stop: true when nothing audible was captured (→ friendly empty state).</summary>
     public static bool LastRecordingSilent { get; private set; }
 
+    /// <summary>Raised when a finished summarize couldn't surface because the pill was forced
+    /// elsewhere — the pill retargets its remembered context so the loader never re-appears dead.</summary>
+    public static event Action<PillState>? ResultMissed;
+
     /// <summary>
     /// True on a memory-constrained PC (&lt;8GB RAM). In this mode Toki keeps only ONE
     /// heavy model resident at a time (release the LLM before transcribing, release
@@ -150,8 +154,7 @@ public partial class App : Application
         return true;
     }
 
-    static System.Threading.Mutex? _singleInstance;
-    static System.Threading.EventWaitHandle? _showSignal;
+    static Interop.SingleInstance? _singleInstance;
     static MeetingDetector? _detector;
     static RecordingSession? _session;
 
@@ -236,25 +239,17 @@ public partial class App : Application
             return;
         }
 
-        // One Toki only. A second launch signals the running instance to show
-        // itself (so double-clicking a running Toki brings it up) and then exits.
-        _singleInstance = new System.Threading.Mutex(initiallyOwned: true, "Toki.SingleInstance", out var isFirst);
-        _showSignal = new System.Threading.EventWaitHandle(
-            false, System.Threading.EventResetMode.AutoReset, "Toki.ShowSignal");
-        if (!isFirst)
+        // One Toki only. A second launch signals the running instance to show itself (so
+        // double-clicking a running Toki brings it up) and then exits. Names are per-user and the
+        // objects are ACL'd to this user — a local squatter can neither DoS startup nor drive the UI.
+        _singleInstance = Interop.SingleInstance.Acquire();
+        if (!_singleInstance.IsPrimary)
         {
-            Log("another instance already running — signalling it to show, exiting");
-            _showSignal.Set();
+            Log("another instance already running — signalled it to show, exiting");
             Shutdown();
             return;
         }
-        // First instance: listen for future launches asking us to surface.
-        var signalThread = new System.Threading.Thread(() =>
-        {
-            while (_showSignal.WaitOne())
-                Dispatcher.BeginInvoke(() => State.ForceForDemo(PillState.Home)); // always surface
-        }) { IsBackground = true, Name = "Toki.ShowSignalWaiter" };
-        signalThread.Start();
+        _singleInstance.ListenForShow(() => Dispatcher.BeginInvoke(() => State.ForceForDemo(PillState.Home)));
 
         _pill = new PillWindow(State);
         // Ctrl+Alt+Space is PUSH-TO-TALK (hold to speak, release to answer) — see PushToTalkHook.
@@ -338,6 +333,19 @@ public partial class App : Application
             try { System.Threading.Thread.Sleep(3000); } catch { } // let the app finish appearing
             try { TranscriptionService.Instance.Warm(); }
             catch (Exception ex) { Log($"ASR warm (non-fatal): {ex.Message}"); }
+            // Housekeeping while we're on a quiet background thread: recover any recording a
+            // crash/quit orphaned (turns data loss into a saved meeting), and clear stale
+            // push-to-talk voice snippets a crash may have left in %TEMP%.
+            try { RecordingRecovery.Sweep(); } catch (Exception ex) { Log($"recovery sweep (non-fatal): {ex.Message}"); }
+            try
+            {
+                var voiceDir = Path.Combine(Path.GetTempPath(), "Toki", "voice");
+                if (Directory.Exists(voiceDir))
+                    foreach (var f in Directory.GetFiles(voiceDir, "*.wav")
+                                 .Where(f => DateTime.UtcNow - File.GetLastWriteTimeUtc(f) > TimeSpan.FromMinutes(10)))
+                        File.Delete(f);
+            }
+            catch (Exception ex) { Log($"voice temp cleanup (non-fatal): {ex.Message}"); }
             // On a small-RAM PC we do NOT preload the 2.5GB LLM — that's what made the
             // machine clunky on first launch and starved transcription. It loads on
             // demand (one model at a time) when a meeting actually ends.
@@ -358,8 +366,11 @@ public partial class App : Application
     {
         _detector = new MeetingDetector
         {
-            // Only interrupt when Toki is idle — never over notes or a recording.
-            CanPrompt = () => State.Current is PillState.Hidden or PillState.Collapsed,
+            // Only interrupt when Toki is idle — never over notes or a recording — and never
+            // over a fullscreen presentation/game (the prompt is DELAYED, not dropped: the
+            // detector re-offers the meeting on the next poll after fullscreen ends).
+            CanPrompt = () => State.Current is PillState.Hidden or PillState.Collapsed
+                              && !PillWindow.QuietFullscreen(),
         };
         _detector.MeetingDetected += app => Dispatcher.Invoke(() =>
         {
@@ -368,8 +379,10 @@ public partial class App : Application
         });
         _detector.MeetingEnded += () => Dispatcher.Invoke(() =>
         {
-            if (State.Current is PillState.RecordingBar or PillState.RecordingOpen)
-                StopRecording();
+            // Key off the SESSION, not the pill state: the auto-stop is one-shot, and if it
+            // fired while the notch was on Ask (or hidden via Esc) a state check dropped it —
+            // leaving the mic recording invisibly forever. The session can't lie.
+            if (_session is not null) StopRecording();
         });
         _detector.Start();
     }
@@ -398,6 +411,7 @@ public partial class App : Application
     /// <summary>Manual mic-only "quick note" from Home.</summary>
     public static void StartQuickNote()
     {
+        if (IsRecording) { State.ForceForDemo(PillState.RecordingBar); return; }
         CurrentApp = null;
         BeginRecording(null);
         State.TryGo(PillState.RecordingBar);
@@ -417,6 +431,7 @@ public partial class App : Application
     {
         var prep = CurrentPrep; CurrentPrep = null;
         if (prep?.Event.HasMeetLink == true) Views.CalendarRows.OpenUrl(prep.Event.MeetLink);
+        if (IsRecording) { State.ForceForDemo(PillState.RecordingBar); return; }
         CurrentApp = null;
         BeginRecording(null);
         State.TryGo(PillState.RecordingBar);
@@ -430,8 +445,20 @@ public partial class App : Application
         State.TryGo(PillState.Hidden);
     }
 
-    /// <summary>True while a recording is running (for the "start taking notes" command's guard).</summary>
-    public static bool IsRecording => State.Current is PillState.RecordingBar or PillState.RecordingOpen;
+    /// <summary>True while a recording is running. Derived from the SESSION, not the pill state —
+    /// the pill can be forced elsewhere (push-to-talk, Esc, Library) while the mic is still live,
+    /// and a state-derived answer then let a second session silently overwrite the first.</summary>
+    public static bool IsRecording => _session is not null;
+
+    /// <summary>Close the notch from any generic dismiss path (Esc, ✕, auto-hide, the "close"
+    /// command, tray toggle). A live recording never vanishes: with a session running the pill
+    /// returns to the recording bar instead of hiding — an invisibly-running mic is the one
+    /// thing this product must never do.</summary>
+    public static void CloseOverlay()
+    {
+        var target = IsRecording ? PillState.RecordingBar : PillState.Hidden;
+        if (State.Current != target) State.ForceForDemo(target);
+    }
 
     /// <summary>"Start taking notes" as an assistant command (voice or typed). Same manual-start path
     /// as the Home button — the user explicitly asked, so this IS the human in the loop (constraint #3).
@@ -553,6 +580,18 @@ public partial class App : Application
             var tooTrivial = transcript is { Count: > 0 } && (words < 12 || durationMs < 4000);
             if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) — accidental tap");
 
+            // A discarded recording must not leave its audio behind: a silent/trivial take has
+            // no Library entry, so its WAV folder would be invisible, unreachable, and retained
+            // forever. Only when the transcript RAN and said "nothing here" — a null transcript
+            // means the ASR model was missing or failed, and then the audio is the meeting's
+            // only artifact and must be kept (the startup recovery sweep picks it up later).
+            if (transcript is not null && (transcript.Count == 0 || tooTrivial) && folder.Length > 0)
+            {
+                try { Directory.Delete(folder, true); Log($"deleted empty/trivial recording folder {folder}"); }
+                catch (Exception ex) { Log($"folder cleanup: {ex.Message}"); }
+                folder = "";
+            }
+
             MeetingRecord? meeting = null;
             if (transcript is { Count: > 0 } && !tooTrivial)
             {
@@ -621,14 +660,33 @@ public partial class App : Application
                 LastTranscript = transcript;
                 CurrentMeeting = meeting;
                 // No saved meeting (silence, trivial tap, or no ASR model) → empty state.
-                if (meeting is null) State.TryGo(PillState.NoSpeech);
-                else State.TryGo(PillState.Notes);
+                var target = meeting is null ? PillState.NoSpeech : PillState.Notes;
+                if (!State.TryGo(target))
+                {
+                    // The user forced the pill away mid-summarize (Esc, notch, Library). Never
+                    // leave a dead Summarizing loader behind: retarget the remembered context so
+                    // an edge-summon shows the result, and reveal it now only from neutral states
+                    // — a page the user deliberately navigated to is not stomped.
+                    ResultMissed?.Invoke(target);
+                    if (State.Current is PillState.Hidden or PillState.Summarizing or PillState.Collapsed)
+                        State.ForceForDemo(target);
+                    else Log($"summarize result ready but pill busy ({State.Current}) — saved to Library");
+                }
             });
         });
     }
 
     static void BeginRecording(DetectedApp? app)
     {
+        // Defense in depth: no code path may ever overwrite a live session — the old
+        // reference would keep capturing until process exit with no way to stop it,
+        // and its meeting would be lost. Re-surface the existing recording instead.
+        if (_session is not null)
+        {
+            Log("begin recording refused — a session is already live");
+            State.ForceForDemo(PillState.RecordingBar);
+            return;
+        }
         try
         {
             // No explicit target (manual/hotkey/Home start) → find the meeting app
@@ -696,7 +754,7 @@ public partial class App : Application
         {
             // Release single-instance ownership first so the fresh process becomes
             // the owner instead of just signalling this dying one.
-            _singleInstance?.Dispose();
+            _singleInstance?.Release();
             _singleInstance = null;
             var exe = Environment.ProcessPath;
             if (exe is not null)
@@ -716,21 +774,33 @@ public partial class App : Application
         Exiting = true;
         _detector?.Stop();
         Calendar.PrepWatcher.Instance.Stop();
+        // Quit mid-recording: finalize the WAVs and LEAVE the folder — it has no Library entry
+        // yet, so the startup recovery sweep turns it into a saved meeting on next launch
+        // instead of the audio silently vanishing.
+        if (_session is not null) Log($"quit during recording — audio kept at {_session.FolderPath}; recovered on next launch");
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
         _ptt?.Dispose();
         _tray?.Dispose();
-        _showSignal?.Dispose();
         _singleInstance?.Dispose();
         base.OnExit(e);
     }
 
     /// <summary>Diagnostic log at %TEMP%\toki-m1.log — "it didn't show" is only diagnosable if we can see what happened.</summary>
+    static bool _logSizeChecked;
     public static void Log(string message)
     {
         try
         {
-            File.AppendAllText(Path.Combine(Path.GetTempPath(), "toki-m1.log"),
-                $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+            var path = Path.Combine(Path.GetTempPath(), "toki-m1.log");
+            // Bounded, once per session: the log names apps/meetings, so an unbounded file
+            // quietly accumulating months of personal metadata in %TEMP% is a privacy leak.
+            if (!_logSizeChecked)
+            {
+                _logSizeChecked = true;
+                try { var fi = new FileInfo(path); if (fi.Exists && fi.Length > 4_000_000) fi.Delete(); }
+                catch { }
+            }
+            File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
         }
         catch { /* logging must never take the app down */ }
     }
@@ -739,9 +809,10 @@ public partial class App : Application
     {
         // Ctrl+Alt+Space summons the small Toki peek (NOT the full welcome window) / tucks it back.
         // Toki-first, like the edge-summon: you get the character, then open a page from it.
-        // Force-applied so the user can never get stuck.
+        // Force-applied so the user can never get stuck. Tucking away never hides a live
+        // recording — that collapses to the recording bar instead (see CloseOverlay).
         if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
-        else State.ForceForDemo(PillState.Hidden);
+        else CloseOverlay();
     }
 
     // ── push-to-talk on the notch: hold Ctrl+Alt+Space → Toki drops down and listens; release →
@@ -749,6 +820,7 @@ public partial class App : Application
     bool _pttOn;
     Audio.MicCapture? _pttMic;
     string? _pttWav;
+    Task? _pttMicStart;   // the off-thread mic start — PttStop awaits it before stopping
     Llm.ConversationContext? _notchCtx;   // the notch's session memory (multi-turn until it closes)
     long? _notchScreenId;                 // meeting on screen when the notch opened (pill Notes view)
 
@@ -777,9 +849,25 @@ public partial class App : Application
             var dir = Path.Combine(Path.GetTempPath(), "Toki", "voice");
             Directory.CreateDirectory(dir);
             _pttWav = Path.Combine(dir, $"ptt-{Guid.NewGuid():N}.wav");
-            _pttMic = new Audio.MicCapture();
-            _pttMic.Start(_pttWav);
+            var mic = new Audio.MicCapture();
+            _pttMic = mic;
+            var wav = _pttWav;
             Views.AskView.Instance?.Listening();
+            // WASAPI device init takes ~100ms — off the UI thread (same reason BeginRecording
+            // does it). PttStop awaits this task so Stop can never race the still-starting mic.
+            _pttMicStart = Task.Run(() =>
+            {
+                try { mic.Start(wav); }
+                catch (Exception ex)
+                {
+                    Log($"ptt mic start failed: {ex.Message}");
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (ReferenceEquals(_pttMic, mic) || _pttMic is null)
+                            Views.AskView.Instance?.Failed("Couldn't reach the microphone — check Windows mic permissions.");
+                    });
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -794,13 +882,24 @@ public partial class App : Application
         _pttOn = false;
         var mic = _pttMic; _pttMic = null;
         var wav = _pttWav; _pttWav = null;
+        var starting = _pttMicStart; _pttMicStart = null;
+        try { if (starting is not null) await starting; } catch { }   // never stop a mic mid-start
         try { mic?.Stop(); } catch { }
         try { mic?.Dispose(); } catch { }
         if (wav is null || !File.Exists(wav)) return;   // e.g. model missing — the Failed hint already shows
 
         Views.AskView.Instance?.Thinking();
-        var text = await Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(wav));
-        try { File.Delete(wav); } catch { }
+        string? text;
+        try { text = await Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(wav)); }
+        catch (Exception ex)
+        {
+            // An unprotected throw here left the notch on "Thinking…" forever and the voice
+            // WAV on disk — fail visibly, clean up always.
+            Log($"ptt transcribe failed: {ex.Message}");
+            Views.AskView.Instance?.Failed("Couldn't transcribe that — try again.");
+            return;
+        }
+        finally { try { File.Delete(wav); } catch { } }
         if (string.IsNullOrWhiteSpace(text)) { Views.AskView.Instance?.Failed("Didn't catch that — hold and speak."); return; }
         await HandleNotchText(text!);
     }
@@ -881,7 +980,7 @@ public partial class App : Application
             case Llm.AppCommand.OpenTemplates: Views.AskView.Instance?.Command("Opening Templates."); LibraryWindow.OpenHubPage("templates"); break;
             case Llm.AppCommand.NewNote:       Views.AskView.Instance?.Command("New note — go ahead."); LibraryWindow.ShowNewNote(); break;
             case Llm.AppCommand.NewChat:       _notchCtx = new Llm.ConversationContext(); Views.AskView.Instance?.Command("Fresh start — ask away."); break;
-            case Llm.AppCommand.Close:         State.ForceForDemo(PillState.Hidden); break;
+            case Llm.AppCommand.Close:         CloseOverlay(); break;
             case Llm.AppCommand.Help:          Views.AskView.Instance?.Help(); break;
             case Llm.AppCommand.StartRecording:
                 if (IsRecording) { Views.AskView.Instance?.Command("Already recording — the bar's up top."); break; }

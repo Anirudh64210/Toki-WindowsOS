@@ -91,8 +91,10 @@ public sealed class LlmNoteWriter
     {
         var prompt =
             $"This is part {part} of {total} of a meeting transcript. In 2 to 5 short dash bullets, list ONLY the "
-            + "concrete things in THIS part: topics discussed, any decisions, any tasks/follow-ups (keeping the exact "
-            + "NAME of whoever the task was given to, and the due date, when stated), and important facts. Capture "
+            + "concrete things in THIS part: topics discussed, any decisions (with the stated reason, if one was given), "
+            + "any tasks/follow-ups (keeping the exact NAME of whoever the task was given to, and the due date, when "
+            + "stated), and important facts. The text is auto-transcribed speech — read past obvious mis-recognitions "
+            + "using context, but never invent or \"correct\" a name: keep names exactly as transcribed. Capture "
             + "real content even if the talk is informal, rambling, or in fragments. Cut filler, greetings, and "
             + "logistics. Do not editorialise.\n"
             + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk, or "
@@ -142,7 +144,10 @@ public sealed class LlmNoteWriter
             + "speaker took it on themselves, use owner: You. If no person is clearly named, DROP the owner field — never guess.\n"
             + "  - drop the due field when no time was stated.\n"
             + "  Include this section ONLY if real tasks were actually agreed.\n\n"
-            + "Hard rules: never invent points, tasks, or names that aren't clearly present. A short, honest note beats "
+            + "Hard rules: never invent points, tasks, or names that aren't clearly present. When you record a decision, "
+            + "pair it with the reason that was given for it (skip the reason if none was stated — never invent one). "
+            + "The text is auto-transcribed speech: read past obvious mis-recognitions using context, but keep names "
+            + "exactly as transcribed. A short, honest note beats "
             + $"a padded one — omit any section that doesn't apply. Reply with exactly {NothingMarker} ONLY if the ENTIRE "
             + "thing is greetings, small talk, or connection checks with no real topic at all.\n\n"
             + $"{(contentIsDigests ? "Notes" : "Transcript")}:\n{content}";
@@ -169,13 +174,19 @@ public sealed class LlmNoteWriter
         public List<ActionItem> Actions { get; set; } = [];
     }
 
-    static string? CleanTitle(string raw)
+    /// <summary>The ONE title sanitizer (first line, quote-strip, 8-word cap) — CleanTitle and
+    /// TitlePass both funnel here so a future validation tweak can never land in one and not
+    /// the other (the combined pass is primary and the fallback is rarely exercised, so a
+    /// divergence would look fixed in review while never running in production).</summary>
+    static string? SanitizeTitle(string raw)
     {
         var t = raw.Split('\n')[0].Trim().Trim('"', '\'', '.', ':', '-', ' ');
         if (t.Length < 3) return null;
         var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         return words.Length > 8 ? string.Join(' ', words.Take(8)) : t;
     }
+
+    static string? CleanTitle(string raw) => SanitizeTitle(raw);
 
     // An honest, minimal note for a meeting where nothing substantive happened — the opposite of
     // padding nothing into a serious-looking paragraph.
@@ -196,11 +207,7 @@ public sealed class LlmNoteWriter
             "Write a title for this meeting: 3 to 6 words, specific and concise, like a calendar event. "
             + "No quotes, no ending punctuation, no \"Meeting\" prefix.\n\nSummary: " + summary, 24, ct);
         if (raw is null) return null;
-        var t = raw.Split('\n')[0].Trim().Trim('"', '\'', '.', ':', '-', ' ');
-        if (t.Length < 3) return null;
-        var words = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length > 8) t = string.Join(' ', words.Take(8));
-        return t;
+        return SanitizeTitle(raw);
     }
 
     // ── chunking (split at segment boundaries, never mid-utterance) ──

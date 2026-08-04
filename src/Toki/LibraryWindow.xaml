@@ -148,9 +148,14 @@
                                          Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                          VerticalContentAlignment="Center" Height="36" FontSize="12.5" TextChanged="OnSearch"/>
                             </Border>
-                            <!-- Drag-to-reorder on/off — OFF by default so cards never move by accident. -->
-                            <Button Grid.Column="1" x:Name="DragToggle" Style="{StaticResource IconButton}"
-                                    Margin="6,0,0,0" Click="OnToggleDrag"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks/Manual. -->
+                                <Button x:Name="SortBtn" Style="{StaticResource IconButton}"
+                                        Margin="6,0,0,0" Content="&#xE8CB;" ToolTip="Sort &amp; filter" Click="OnSortMenu"/>
+                                <!-- Drag-to-reorder on/off — OFF by default so cards never move by accident. -->
+                                <Button x:Name="DragToggle" Style="{StaticResource IconButton}"
+                                        Margin="2,0,0,0" Click="OnToggleDrag"/>
+                            </StackPanel>
                         </Grid>
 
                         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">

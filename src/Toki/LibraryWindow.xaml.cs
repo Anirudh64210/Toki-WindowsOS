@@ -11,6 +11,9 @@ using Toki.Views;
 
 namespace Toki;
 
+/// <summary>How the Library list is ordered. Manual = the drag-reorder order stored in the DB.</summary>
+public enum LibrarySort { Newest, Oldest, Longest, Shortest, OpenTasks, Manual }
+
 /// <summary>
 /// Resizable window showing the whole Library (list) beside the selected note's
 /// full content — the "maximise" target and the Home/tray Library button. Manual
@@ -256,7 +259,12 @@ public partial class LibraryWindow : Window
         PlayClose(() =>
         {
             Hide();
-            App.State.ForceForDemo(PillState.Home);   // pill blooms back in (composited RevealDown)
+            // Restore from REALITY, not a hardcoded Home: a recording bar or a Summarizing
+            // loader on the pill must survive the Library closing — forcing Home over them
+            // hid a live mic (and orphaned the loader's pending result).
+            var cur = App.State.Current;
+            if (cur is PillState.RecordingBar or PillState.RecordingOpen or PillState.Summarizing) return;
+            App.State.ForceForDemo(App.IsRecording ? PillState.RecordingBar : PillState.Home);
         });
     }
 
@@ -304,12 +312,18 @@ public partial class LibraryWindow : Window
         // already call Reload() explicitly — a Loaded handler here made every open rebuild
         // the whole list+detail TWICE.
 
+        // Restore the saved list sort.
+        if (Enum.TryParse<LibrarySort>(Llm.AppSettings.Current.LibrarySort, out var savedSort)) _sort = savedSort;
+        UpdateSortButton();
+
         BuildHub();
         // Land on the Ask page by default (visibility only — the greeting types when actually opened).
         AskPage.Visibility = Visibility.Visible;
         LibraryPage.Visibility = Visibility.Collapsed;
         TemplatesPage.Visibility = Visibility.Collapsed;
     }
+
+    bool _wndProcHooked;
 
     void StyleChrome()
     {
@@ -328,7 +342,13 @@ public partial class LibraryWindow : Window
             // WPF's default maximise mis-sizes (jumps, or spills under the taskbar) — that was
             // the glitch. Handling WM_GETMINMAXINFO pins the maximised bounds to the current
             // monitor's WORK AREA, so maximise snaps to exactly the right rectangle.
-            HwndSource.FromHwnd(hwnd)?.AddHook(WndProc);
+            // Once only: StyleChrome re-runs on every theme swap, and AddHook does not
+            // de-duplicate — each toggle silently appended another copy of WndProc.
+            if (!_wndProcHooked)
+            {
+                _wndProcHooked = true;
+                HwndSource.FromHwnd(hwnd)?.AddHook(WndProc);
+            }
         }
         catch { }
     }
@@ -349,6 +369,7 @@ public partial class LibraryWindow : Window
     string _page = "ask";
     bool _dragEnabled;                       // drag-reorder is OFF by default (no accidental moves)
     bool _myNotesOnly;                       // book filter: show only hand-written (manual) notes
+    LibrarySort _sort = LibrarySort.Newest;  // list ordering (persisted)
     readonly Dictionary<string, Border> _navButtons = new();
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
@@ -829,10 +850,17 @@ public partial class LibraryWindow : Window
 
         ShowVoiceUi(listening: false);   // "Transcribing…" loader
         MicBtn.IsEnabled = false;
-        var text = await System.Threading.Tasks.Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(path));
-        MicBtn.IsEnabled = true;
-        HideVoiceUi();
-        try { System.IO.File.Delete(path); } catch { }
+        string? text;
+        try { text = await System.Threading.Tasks.Task.Run(() => Transcription.TranscriptionService.Instance.TranscribeFile(path)); }
+        catch (Exception ex) { App.Log($"ask-bar transcribe failed: {ex.Message}"); text = null; }
+        finally
+        {
+            // An ASR throw must never leave the mic button dead, the loader stuck, or the
+            // user's voice snippet sitting in %TEMP%.
+            MicBtn.IsEnabled = true;
+            HideVoiceUi();
+            try { System.IO.File.Delete(path); } catch { }
+        }
 
         if (text is null) { VoiceHint("Couldn't transcribe that — try again."); return; }
         if (text.Length == 0) { VoiceHint("Didn't catch that — try again."); return; }
@@ -1046,11 +1074,18 @@ public partial class LibraryWindow : Window
     }
 
     // ── drag-reorder on/off toggle ──
-    void OnToggleDrag(object sender, RoutedEventArgs e) { _dragEnabled = !_dragEnabled; UpdateDragToggle(); }
+    void OnToggleDrag(object sender, RoutedEventArgs e)
+    {
+        _dragEnabled = !_dragEnabled;
+        // Drag reorders the STORED manual order — switch the view to Manual when enabling it, else
+        // the cards you drag wouldn't be in the order the drag renumbers.
+        if (_dragEnabled && _sort != LibrarySort.Manual) SetSort(LibrarySort.Manual);
+        UpdateDragToggle();
+    }
 
     void UpdateDragToggle()
     {
-        DragToggle.Content = ((char)0xE8CB).ToString();   // Fluent: Sort / reorder lines
+        DragToggle.Content = ((char)0xE76F).ToString();   // Fluent: GripperBarHorizontal (drag handle)
         if (_dragEnabled) DragToggle.Foreground = (Brush)FindResource("Coral");
         else DragToggle.ClearValue(ForegroundProperty);
         DragToggle.ToolTip = _dragEnabled
@@ -1155,13 +1190,77 @@ public partial class LibraryWindow : Window
         catch (Exception ex) { App.Log($"library window load: {ex.Message}"); items = []; }
 
         if (_myNotesOnly) items = items.Where(m => m.Kind == MeetingKind.Manual).ToList();
+        items = SortItems(items);
 
         CountLabel.Text = _myNotesOnly ? $"{items.Count} · my notes" : $"{items.Count} · all on this PC";
         foreach (var m in items) Cards.Children.Add(Card(m));
         if (items.Count == 0)
             Cards.Children.Add(Placeholder(
                 _myNotesOnly ? "No hand-written notes yet — tap + to write one."
+                : _sort == LibrarySort.OpenTasks ? "No meetings with open tasks."
                 : string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches."));
+    }
+
+    // Sort the list per the chosen mode. Manual = the drag-reorder order (App.Store.List already
+    // returns it — sort_order ASC then newest), so it's a pass-through. OpenTasks filters to
+    // meetings that HAVE open tasks and ranks by how many.
+    IReadOnlyList<MeetingSummary> SortItems(IReadOnlyList<MeetingSummary> items) => _sort switch
+    {
+        LibrarySort.Newest => items.OrderByDescending(m => m.StartedAt).ToList(),
+        LibrarySort.Oldest => items.OrderBy(m => m.StartedAt).ToList(),
+        LibrarySort.Longest => items.OrderByDescending(m => m.DurationMs).ThenByDescending(m => m.StartedAt).ToList(),
+        LibrarySort.Shortest => items.OrderBy(m => m.DurationMs).ThenByDescending(m => m.StartedAt).ToList(),
+        LibrarySort.OpenTasks => items.Where(m => m.OpenActions > 0)
+            .OrderByDescending(m => m.OpenActions).ThenByDescending(m => m.StartedAt).ToList(),
+        _ => items,   // Manual — keep the store's drag-reorder order
+    };
+
+    void OnSortMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = SortBtn, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var (label, mode) in new[]
+        {
+            ("Newest first", LibrarySort.Newest),
+            ("Oldest first", LibrarySort.Oldest),
+            ("Longest first", LibrarySort.Longest),
+            ("Shortest first", LibrarySort.Shortest),
+            ("Most open tasks", LibrarySort.OpenTasks),
+            ("Manual (drag order)", LibrarySort.Manual),
+        })
+        {
+            var mi = new MenuItem { Header = label, IsCheckable = true, IsChecked = _sort == mode };
+            var captured = mode;
+            mi.Click += (_, _) => SetSort(captured);
+            menu.Items.Add(mi);
+        }
+        menu.IsOpen = true;
+    }
+
+    void SetSort(LibrarySort mode)
+    {
+        _sort = mode;
+        try { var s = Llm.AppSettings.Current; s.LibrarySort = mode.ToString(); s.Save(); } catch { }
+        // Drag-reorder only makes sense in Manual order — turn it off when another sort is active so
+        // a drag can't renumber a view whose order isn't the stored one.
+        if (mode != LibrarySort.Manual && _dragEnabled) { _dragEnabled = false; UpdateDragToggle(); }
+        UpdateSortButton();
+        LoadList();
+    }
+
+    void UpdateSortButton()
+    {
+        if (SortBtn is null) return;
+        if (_sort != LibrarySort.Newest) SortBtn.Foreground = (Brush)FindResource("Coral");
+        else SortBtn.ClearValue(ForegroundProperty);
+        SortBtn.ToolTip = "Sort & filter — " + _sort switch
+        {
+            LibrarySort.Newest => "newest first",
+            LibrarySort.Oldest => "oldest first",
+            LibrarySort.Longest => "longest first",
+            LibrarySort.Shortest => "shortest first",
+            LibrarySort.OpenTasks => "most open tasks",
+            _ => "manual order",
+        };
     }
 
     Border Card(MeetingSummary m)
@@ -1600,12 +1699,14 @@ public partial class LibraryWindow : Window
     }
 
     // Toki already mirrors every note to a Markdown file — surface it (file export the easy way).
+    // Reveal only inside the Notes dir (the path is app-generated, but the choke point makes that a
+    // guarantee, not an assumption).
     void RevealNoteFile(MeetingRecord m)
     {
         try
         {
             var path = Storage.MarkdownMirror.Write(m);
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            Interop.SafeShell.RevealInExplorer(path, Storage.MarkdownMirror.NotesDir);
         }
         catch (Exception ex) { App.Log($"reveal note failed: {ex.Message}"); }
     }
@@ -1615,7 +1716,11 @@ public partial class LibraryWindow : Window
         var m = App.Store.Get(id);
         if (!Views.ConfirmDialog.Show(this, "Delete this?",
                 $"“{m?.Title}” and its audio will be removed for good. This can't be undone.")) return;
-        App.Store.Delete(id);
+        // The dialog promises the AUDIO goes too — DiscardMeeting is the one true delete
+        // (DB row + Markdown mirror + recording folder). A bare Store.Delete left the WAVs
+        // and the full-transcript mirror on disk after the user was told they were gone.
+        if (m is not null) App.DiscardMeeting(m);
+        else App.Store.Delete(id);
         if (_selected == id) { _selected = null; _viewedRecord = null; _viewedByUser = false; }
         Reload();
     }
@@ -1665,14 +1770,7 @@ public partial class LibraryWindow : Window
         Text = text, Style = St("Dim"), FontSize = 12, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 24, 0, 0),
     };
 
-    static string Meta(MeetingRecord m)
-    {
-        var parts = new List<string>();
-        if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
-        parts.Add(m.StartedAt.ToString("dddd, MMM d · h:mm tt"));
-        if (!string.IsNullOrWhiteSpace(m.App)) parts.Add(m.App!);
-        return string.Join("  ·  ", parts);
-    }
+    static string Meta(MeetingRecord m) => Views.TimeText.FullMeta(m);
 
     // Pin maximise to the current monitor's work area (fixes the DPI maximise glitch).
     static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

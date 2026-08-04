@@ -105,6 +105,26 @@ public class CalendarTests
         Assert.Contains(e.Attendees, a => a.IsOrganizer && a.Label == "Ana");
     }
 
+    // The pagination fix: a page's nextPageToken must be surfaced so the client keeps fetching
+    // (the 25-item cap silently emptied weeks 2–4 of the agenda).
+    [Fact]
+    public void ParseEventsPage_SurfacesNextPageToken()
+    {
+        const string withMore = """
+        { "nextPageToken": "CONTINUE123", "items": [
+            { "id": "a", "summary": "One", "start": { "dateTime": "2026-08-05T10:00:00Z" }, "end": { "dateTime": "2026-08-05T10:30:00Z" } } ] }
+        """;
+        var (events, next) = CalendarClient.ParseEventsPage(withMore);
+        Assert.Single(events);
+        Assert.Equal("CONTINUE123", next);
+
+        const string lastPage = """
+        { "items": [ { "id": "b", "summary": "Two", "start": { "dateTime": "2026-08-06T10:00:00Z" }, "end": { "dateTime": "2026-08-06T10:30:00Z" } } ] }
+        """;
+        var (_, none) = CalendarClient.ParseEventsPage(lastPage);
+        Assert.Null(none);   // no token → the loop stops
+    }
+
     [Fact]
     public void ParseEvents_HandlesAllDayEvent()
     {

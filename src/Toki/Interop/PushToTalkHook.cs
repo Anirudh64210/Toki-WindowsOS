@@ -16,6 +16,7 @@ public sealed class PushToTalkHook : IDisposable
     const int WmKeyDown = 0x0100, WmKeyUp = 0x0101, WmSysKeyDown = 0x0104, WmSysKeyUp = 0x0105;
     const int WmQuit = 0x0012;
     const int VkSpace = 0x20, VkControl = 0x11, VkMenu = 0x12; // VK_MENU = Alt
+    const int VkLControl = 0xA2, VkRControl = 0xA3, VkLMenu = 0xA4, VkRMenu = 0xA5;
     const ushort KeyDownMask = 0x8000;
 
     readonly LowLevelProc _proc;   // kept alive against GC
@@ -60,9 +61,13 @@ public sealed class PushToTalkHook : IDisposable
                     _active = true;
                     _onStart();
                 }
-                else if (up && _active && vk is VkSpace or VkControl or VkMenu)
+                else if (up && _active && vk is VkSpace or VkControl or VkMenu
+                                             or VkLControl or VkRControl or VkLMenu or VkRMenu)
                 {
-                    // Releasing ANY part of the chord ends the utterance.
+                    // Releasing ANY part of the chord ends the utterance. The low-level hook
+                    // reports LEFT/RIGHT-specific modifier codes (VK_LCONTROL…), never the
+                    // generic VK_CONTROL/VK_MENU — matching only the generic codes meant
+                    // letting go of Ctrl or Alt kept the mic listening until Space went up.
                     _active = false;
                     _onStop();
                 }

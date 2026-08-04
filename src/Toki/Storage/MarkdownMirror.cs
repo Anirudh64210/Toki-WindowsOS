@@ -19,6 +19,22 @@ public static class MarkdownMirror
     {
         Directory.CreateDirectory(NotesDir);
         var path = Path.Combine(NotesDir, $"{Safe(m.Title)}-{m.Id}.md");
+        // Containment guard: Safe() already strips path separators and traversal, but a title is
+        // LLM/transcript-derived (attacker-influenceable), so assert the final path really is inside
+        // NotesDir before writing — a regression in Safe() becomes a caught error, not an arbitrary write.
+        var full = Path.GetFullPath(path);
+        var root = Path.GetFullPath(NotesDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"note path escaped the Notes directory: {full}");
+        // The filename embeds the TITLE, and the LLM retitles the meeting after the first
+        // mirror write — drop any older mirror of this id first, or every retitle leaves a
+        // stale duplicate .md (same id, old name) on disk forever.
+        try
+        {
+            foreach (var old in Directory.GetFiles(NotesDir, $"*-{m.Id}.md"))
+                if (!string.Equals(old, path, StringComparison.OrdinalIgnoreCase)) File.Delete(old);
+        }
+        catch { /* cleanup is best-effort; the fresh write below is what matters */ }
         File.WriteAllText(path, Render(m), Encoding.UTF8);
         return path;
     }

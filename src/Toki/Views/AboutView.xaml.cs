@@ -55,6 +55,13 @@ public partial class AboutView : UserControl
     {
         InitializeComponent();
         Build();
+        // Code-built rows capture FindResource brushes by value → rebuild on a theme swap
+        // (same pattern as LibraryView/NotesView), or the cached view keeps old-theme colours.
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() =>
+        {
+            Body.Children.Clear();
+            Build();
+        });
     }
 
     void Build()
@@ -143,11 +150,7 @@ public partial class AboutView : UserControl
         return row;
     }
 
-    static void Open(string url)
-    {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { /* no browser / blocked — a credits link is best-effort */ }
-    }
+    static void Open(string url) => Toki.Interop.SafeShell.OpenUrl(url);   // one shell choke point
 
     void OnBack(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Settings);
 }
