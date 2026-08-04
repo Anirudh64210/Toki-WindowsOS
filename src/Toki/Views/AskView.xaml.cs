@@ -134,8 +134,8 @@ public partial class AskView : UserControl
     }
 
     public void Help()
-        => TokiSay("Ask about your meetings — decisions, tasks, who said what. Or say “take me to the library”, "
-            + "“open settings”, “new note”, or “go home”.");
+        => TokiSay("Ask about your meetings — decisions, tasks, who said what. Or say “schedule a call with Ana "
+            + "tomorrow at 3”, “take me to the library”, “open settings”, “new note”, or “go home”.");
 
     // A standalone Toki line (no preceding user turn): commands, errors, help.
     void TokiSay(string message, bool dim = false)

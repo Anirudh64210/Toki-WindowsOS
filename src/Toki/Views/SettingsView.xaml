@@ -41,6 +41,20 @@
                             ToolTip="Sign out of Google and remove the stored token" Click="OnGoogleDisconnect"/>
                 </StackPanel>
 
+                <TextBlock Style="{StaticResource SettingTitle}" Text="Appearance"/>
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
+                        <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"/>
+                        <TextBlock Text="Let more of your screen show through the notch." Style="{StaticResource Caption}"
+                                   Margin="0,1,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <CheckBox x:Name="GlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}" Click="OnGlassToggle"/>
+                </Grid>
+
                 <TextBlock Style="{StaticResource SettingTitle}" Text="AI summaries"/>
                 <TextBlock Style="{StaticResource Dim}"
                            Text="On-device is free forever &amp; private. Or bring your own key and use ANY model, from any provider or router — you choose, you pay the model, not us."/>
@@ -52,17 +66,18 @@
                 <StackPanel x:Name="LocalOptions">
                     <!-- Grid, not a horizontal StackPanel: a StackPanel gives the label INFINITE width so it
                          never wraps and gets clipped at the notch edge. The star column constrains + wraps it. -->
-                    <Grid Margin="2,10,0,0">
+                    <Grid Margin="0,10,0,0">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <CheckBox x:Name="GpuToggle" VerticalAlignment="Center" Click="OnGpuToggle"/>
-                        <TextBlock Grid.Column="1" Text="Use graphics card when it helps (automatic, faster)"
-                                   Style="{StaticResource Body}" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
+                            <TextBlock Text="Use graphics card" Style="{StaticResource BodyStrong}"/>
+                            <TextBlock Text="Automatic, faster when it fits. Off = processor only, safe on any machine."
+                                       Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <CheckBox x:Name="GpuToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}" Click="OnGpuToggle"/>
                     </Grid>
-                    <TextBlock Style="{StaticResource Dim}" FontSize="9.5" Margin="2,3,0,0"
-                               Text="Off = runs on the processor (safe on any machine, a bit slower)."/>
                 </StackPanel>
 
                 <!-- BYO API key: pick a provider (sets the address), paste your key, pick a model.

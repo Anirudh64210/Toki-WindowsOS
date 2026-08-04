@@ -46,6 +46,13 @@ public partial class PillWindow : Window
     const double BottomMargin = 12;  // never grow past the bottom of the work area
     const double CornerRadius = 22;
 
+    // GLASS ONLY: DWM rounds ALL corners of an acrylic window (it can't round just the bottom), which
+    // curves the TOP corners that must be flush with the screen edge. So in glass mode the window is
+    // extended this many px ABOVE the screen top — the rounded top corners fall off-screen, leaving a
+    // straight flush top with the rounded bottom. The content is pushed down by the same amount.
+    const double GlassTopBleed = 8;
+    int _topBleedPx;   // physical-px version of the current bleed (0 unless glass panel)
+
     // Panels whose HEIGHT is sized to their actual content (measured), not a hardcoded number — so
     // every page is concise with no dead space below it. The Sizes width is still used; the Sizes
     // height is only a fallback. Scrollable/fixed pages (Notes, Library, ManualNote, Settings) and
@@ -95,9 +102,12 @@ public partial class PillWindow : Window
                 Dispatcher.Invoke(() => { PositionTopCenter(); CacheWindowRect(); });
         };
         LocationChanged += (_, _) => CacheWindowRect();
+        // A live theme swap must re-tint the frosted glass (dark frost ⇄ white frost) — the acrylic tint
+        // is set via P/Invoke, not a DynamicResource, so it won't recolour on its own.
+        Theme.ThemeManager.ThemeChanged += () => Dispatcher.Invoke(() => { if (_blurOn) { EnableAcrylic(); ApplyBlur(true); } });
         // Keep the pill anchored bottom-centre as it grows/shrinks — so an animated resize
         // (the smooth recording expand) stays put instead of drifting from its top-left.
-        SizeChanged += (_, _) => { if (IsVisible && _hwnd != IntPtr.Zero) PlaceTopCenter(); CacheWindowRect(); };
+        SizeChanged += (_, _) => { if (IsVisible && _hwnd != IntPtr.Zero) PlaceTopCenter(); CacheWindowRect(); if (_blurOn) ApplyRoundRegion(true); };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -166,7 +176,7 @@ public partial class PillWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
         int gap = (int)Math.Round(TopGap * dpi);
         int x = work.Left + ((work.Right - work.Left) - winW) / 2;
-        int y = work.Top + gap;   // top edge fixed → height grows downward
+        int y = work.Top + gap - _topBleedPx;   // top edge fixed → height grows downward (glass bleeds above)
         // Skip the move when nothing changed — SizeChanged fires this on every frame of a size
         // animation, but for a height-only morph x/y are constant, so the Win32 call is pure waste.
         if (x == _lastPlaceX && y == _lastPlaceY) return;
@@ -187,7 +197,7 @@ public partial class PillWindow : Window
         int ph = Math.Max(1, (int)Math.Round(dipH * dpi.DpiScaleY));
         int gap = (int)Math.Round(TopGap * dpi.DpiScaleY);
         int x = work.Left + ((work.Right - work.Left) - pw) / 2;
-        int y = work.Top + gap;
+        int y = work.Top + gap - _topBleedPx;   // glass panels bleed above the screen edge
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, pw, ph, SwpNoZOrder | SwpNoActivate);   // NOT SwpNoSize — set both
         _lastPlaceX = x; _lastPlaceY = y;
     }
@@ -302,7 +312,12 @@ public partial class PillWindow : Window
         // Never exceed the screen — tall panels clamp and scroll internally.
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
         var fullH = enterTucked ? SliverH : Math.Min(ContentHeight(next, w, h), availH);
-        var targetH = fullH;
+        // Glass panels extend above the screen edge (see GlassTopBleed): grow the window by the bleed and
+        // push the content down by it, so the off-screen top hides the DWM top-corner rounding.
+        var bleed = (Toki.Llm.AppSettings.Current.GlassyNotch && !peek && !enterTucked) ? GlassTopBleed : 0.0;
+        _topBleedPx = (int)Math.Round(bleed * dpi);
+        Host.Margin = new Thickness(0, bleed, 0, 0);
+        var targetH = fullH + bleed;
 
         // A hover pill expand/collapse (tiny Toki ⇄ Home, or ⇄ recording controls) is
         // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Other transitions stay instant.
@@ -342,6 +357,7 @@ public partial class PillWindow : Window
             PlaceExactTopCenter(w, targetH);
             Show(); ApplyGhost();          // re-apply WDA — hide/show can drop it
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
+            if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent — re-assert glass
             RevealDown(w, targetH, 280);   // animates the 0-height clip open while content settles in
         }
         else
@@ -398,15 +414,30 @@ public partial class PillWindow : Window
         {
             Root.Background = System.Windows.Media.Brushes.Transparent;
             Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
+            ApplyBlur(false); ApplyRoundRegion(false);   // a peek is just Toki floating — no glass
+        }
+        else if (Toki.Llm.AppSettings.Current.GlassyNotch)
+        {
+            // REAL frosted glass: an acrylic blur-behind (DWM) dissolves whatever's behind the notch,
+            // with a thin dark tint over it for legibility. The Border fill AND rim are transparent so the
+            // frost is seamless (a 25%-white rim outlined the glass and read as a floating panel). DWM
+            // rounds the corners; DWM's own auto-border is killed in ApplyRoundRegion.
+            Root.Background = System.Windows.Media.Brushes.Transparent;
+            Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
+            ApplyBlur(true); ApplyRoundRegion(true);
         }
         else
         {
-            // Re-bind to the themed resources (not a cached brush) so a live light/dark swap recolours.
+            // Opaque tinted-mirror notch (the shipped default). Re-bind to themed resources so a live
+            // light/dark swap recolours.
             Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Notch");
             Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "NotchBorder");
+            ApplyBlur(false); ApplyRoundRegion(false);
         }
-        Root.BorderThickness = peek ? default : new Thickness(1, 0, 1, 1);
+        // No rim in glass mode (seamless frost); the 1px rim only frames the opaque notch.
+        Root.BorderThickness = (peek || Toki.Llm.AppSettings.Current.GlassyNotch) ? default : new Thickness(1, 0, 1, 1);
         Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        // Corner radius is a SINGLE value for both modes so toggling glass never changes the size/shape.
     }
 
     /// <summary>Apply the peek surface after the collapse finishes, so the dark box shrinks away WITH
@@ -438,6 +469,78 @@ public partial class PillWindow : Window
     /// <summary>Re-apply the current ghost setting to the live window (called when the Settings
     /// "Show Toki in screen recordings" toggle changes) — takes effect immediately, no restart.</summary>
     public void RefreshGhost() => ApplyGhost();
+
+    /// <summary>Re-apply the notch surface for the current state (called when the "Glassy notch" toggle
+    /// changes) — live, no restart. Peeks stay transparent; only an open panel's surface swaps.</summary>
+    public void RefreshSurface()
+    {
+        var s = _state.Current;
+        if (s == PillState.Hidden) { _topBleedPx = 0; ApplyBlur(false); ApplyRoundRegion(false); return; }
+        var peek = s is PillState.Collapsed or PillState.RecordingBar;
+        SetSurface(peek);
+        // Live toggle: add/remove the flush-top bleed on the CURRENT panel (height + content + position)
+        // so turning glass on/off updates immediately without a restart.
+        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
+        var bleed = (Toki.Llm.AppSettings.Current.GlassyNotch && !peek) ? GlassTopBleed : 0.0;
+        var delta = bleed - Host.Margin.Top;
+        if (Math.Abs(delta) > 0.1)
+        {
+            Host.Margin = new Thickness(0, bleed, 0, 0);
+            _topBleedPx = (int)Math.Round(bleed * dpi);
+            Height = Math.Max(1, ActualHeight + delta);
+            PositionTopCenter();
+        }
+    }
+
+    // ── real frosted glass (DWM acrylic blur-behind) for the "Glassy notch" toggle ──
+    bool _blurOn;
+
+    /// <summary>Turn the acrylic blur-behind on/off on the live window. When on, whatever is behind the
+    /// notch is blurred and tinted into a frosted panel (back text dissolves). Never throws.</summary>
+    void ApplyBlur(bool on)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        _blurOn = on;
+        // Tint follows the theme: a DARK frost in dark mode, a WHITE frost in light mode (AABBGGRR).
+        var tint = Theme.ThemeManager.Current == Theme.AppTheme.Light ? 0x9CF6F6FAu : 0x8C141418u;
+        var accent = new AccentPolicy
+        {
+            AccentState = on ? 4 : 0,               // 4 = ACCENT_ENABLE_ACRYLICBLURBEHIND, 0 = disabled
+            AccentFlags = 2,
+            GradientColor = on ? tint : 0u,
+            AnimationId = 0,
+        };
+        var size = Marshal.SizeOf(accent);
+        var ptr = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(accent, ptr, false);
+            var data = new WindowCompositionAttributeData { Attribute = 19, Data = ptr, SizeOfData = size }; // WCA_ACCENT_POLICY
+            SetWindowCompositionAttribute(_hwnd, ref data);
+        }
+        catch (Exception ex) { App.Log($"blur apply failed (non-fatal): {ex.Message}"); }
+        finally { Marshal.FreeHGlobal(ptr); }
+    }
+
+    /// <summary>Round the acrylic window's corners. A window REGION can't do this — DWM draws the
+    /// acrylic backdrop across the full rectangle behind the window, ignoring the region — so we ask DWM
+    /// itself (DWMWA_WINDOW_CORNER_PREFERENCE, Win11) to round the corners, which DOES round the backdrop.
+    /// The notch top sits at the screen edge, so its rounding is off-screen; only the bottom reads.</summary>
+    void ApplyRoundRegion(bool rounded)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        try
+        {
+            SetWindowRgn(_hwnd, IntPtr.Zero, true);   // clear any region from the earlier (wrong) approach
+            int pref = rounded ? DwmwcpRound : DwmwcpDoNotRound;
+            DwmSetWindowAttribute(_hwnd, DwmwaWindowCornerPreference, ref pref, sizeof(int));
+            // DWM draws a thin border around a rounded window (all four edges) — kill it so the top edge
+            // stays flush with the screen (the notch reads as carved into the edge, not a floating pill).
+            int border = rounded ? DwmwaColorNone : DwmwaColorDefault;
+            DwmSetWindowAttribute(_hwnd, DwmwaBorderColor, ref border, sizeof(int));
+        }
+        catch (Exception ex) { App.Log($"corner rounding failed (non-fatal): {ex.Message}"); }
+    }
 
     /// <summary>
     /// Translucent glass surface. We do NOT use the DWM accent "acrylic" here: it fills
@@ -629,6 +732,10 @@ public partial class PillWindow : Window
                 _idle.Stop();
                 var cur = _state.Current;
                 if (!IsStayable(cur) || _tucked) return;
+                // Never tuck a page you're actively TYPING in — the cursor rests off the notch while you
+                // type in a field (the create composer, the API key box), and idle-tucking then would eat
+                // your input. Keep re-arming while a text field has focus.
+                if (PillHasFocusedInput()) { ArmIdle(); return; }
                 // Only tuck once you've stopped hovering — never yank a page away while you're
                 // reading it (hovering re-arms this timer in HoverTick).
                 if (!CursorOverPill()) TuckCurrent();
@@ -863,6 +970,12 @@ public partial class PillWindow : Window
         return p.X >= _rectL && p.X <= _rectR && p.Y >= _rectT && p.Y <= _rectB;
     }
 
+    // True while the user is typing in a field inside the notch (create composer, API key, …) — used to
+    // suppress the idle-tuck so a resting cursor off the notch can't close a page mid-input.
+    bool PillHasFocusedInput() =>
+        IsKeyboardFocusWithin
+        && Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox;
+
     // ---- interop ----
     const int GwlExStyle = -20;
     const int WsExToolWindow = 0x00000080;
@@ -892,5 +1005,20 @@ public partial class PillWindow : Window
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
 
     const int DwmwaUseImmersiveDarkMode = 20;
+    const int DwmwaWindowCornerPreference = 33;   // Win11: round the window (and its acrylic) corners
+    const int DwmwcpDoNotRound = 1, DwmwcpRound = 2;
+    const int DwmwaBorderColor = 34;              // colour of the auto-drawn window border
+    const int DwmwaColorNone = unchecked((int)0xFFFFFFFE);     // DWMWA_COLOR_NONE — no border
+    const int DwmwaColorDefault = unchecked((int)0xFFFFFFFF);  // DWMWA_COLOR_DEFAULT
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    // Acrylic blur-behind (undocumented but stable since Win10 1803, used by Files/many WPF apps).
+    [StructLayout(LayoutKind.Sequential)] struct AccentPolicy { public int AccentState; public int AccentFlags; public uint GradientColor; public int AnimationId; }
+    [StructLayout(LayoutKind.Sequential)] struct WindowCompositionAttributeData { public int Attribute; public IntPtr Data; public int SizeOfData; }
+    [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int x1, int y1, int x2, int y2);
+    [DllImport("gdi32.dll")] static extern int CombineRgn(IntPtr dest, IntPtr src1, IntPtr src2, int mode);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
 }

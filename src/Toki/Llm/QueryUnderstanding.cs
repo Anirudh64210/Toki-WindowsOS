@@ -55,6 +55,11 @@ public sealed class ConversationContext
     /// old pipeline never had — every turn was answered as if it were the first.</summary>
     public List<(string Role, string Text)> Turns = new();
 
+    /// <summary>A calendar event the user asked to create, awaiting their confirmation ("yes"/"no").
+    /// Non-null ONLY for the single turn after a confirm/"when?" prompt — cleared before any branch so a
+    /// stray later "yes" can never create an event, and a create never happens without confirmation.</summary>
+    public PendingCalendarCreate? PendingCreate;
+
     /// <summary>Facts the user stated THIS session ("Works at Contoso") — echoed into the general
     /// prompt so "I work at X" → "where do I work?" holds within the conversation. Durable facts
     /// also persist via <see cref="UserProfile"/>.</summary>

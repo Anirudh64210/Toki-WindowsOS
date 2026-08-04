@@ -122,6 +122,13 @@ public partial class App : Application
         (Current as App)?._pill?.RefreshGhost();
     }
 
+    /// <summary>Toggle the glassy (more see-through) notch surface, persisted + applied live.</summary>
+    public static void SetGlassyNotch(bool on)
+    {
+        var s = AppSettings.Current; s.GlassyNotch = on; s.Save();
+        (Current as App)?._pill?.RefreshSurface();
+    }
+
     /// <summary>The pill's current on-screen rect in DIPs (for the Library morph to grow from the
     /// notch), or null if the pill isn't up. Read it BEFORE hiding the pill.</summary>
     public static System.Windows.Rect? PillRect() => (Current as App)?._pill?.ScreenDipRect();
@@ -192,7 +199,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();

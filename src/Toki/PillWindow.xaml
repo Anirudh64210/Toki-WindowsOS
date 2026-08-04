@@ -18,11 +18,11 @@
     <!-- A VIRTUAL NOTCH, not a glass pill: PITCH BLACK and fully opaque, so it reads as a hole
          carved out of the top edge (like the macOS notch / Dynamic Island). No white sheen, no
          translucency — a clean black slab. Even a 13px tucked sliver is an unmistakable dark tab. -->
-    <Border x:Name="Root" CornerRadius="0,0,22,22" BorderThickness="1,0,1,1"
+    <Border x:Name="Root" CornerRadius="0,0,8,8" BorderThickness="1,0,1,1"
             Background="{DynamicResource Notch}" BorderBrush="{DynamicResource NotchBorder}">
         <Grid>
             <!-- Kept only so code can reference it; no white glare on a pitch-black notch. -->
-            <Border x:Name="Sheen" CornerRadius="0,0,22,22" IsHitTestVisible="False"
+            <Border x:Name="Sheen" CornerRadius="0,0,8,8" IsHitTestVisible="False"
                     Background="Transparent"/>
             <!-- Grid stretches its child view to fill the window exactly, so content
                  wraps/scrolls within bounds instead of overflowing and clipping. -->

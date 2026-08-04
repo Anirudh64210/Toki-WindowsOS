@@ -68,6 +68,7 @@ public partial class SettingsView : UserControl
         NotesModeSeg.Children.Add(SegButton("My API key", NotesMode.ApiKey, s.NotesMode));
 
         GpuToggle.IsChecked = s.GpuLayers >= 0; // on = auto (uses GPU when it fits safely)
+        GlassToggle.IsChecked = s.GlassyNotch;
 
         LocalOptions.Visibility = s.NotesMode == NotesMode.Local ? Visibility.Visible : Visibility.Collapsed;
         ApiOptions.Visibility = s.NotesMode == NotesMode.ApiKey ? Visibility.Visible : Visibility.Collapsed;
@@ -269,6 +270,12 @@ public partial class SettingsView : UserControl
         var dark = ThemeManager.Current == AppTheme.Dark;
         ThemeToggle.Content = dark ? "" : "";   // Fluent: Brightness (sun, go light) / QuietHours (moon, go dark)
         ThemeToggle.ToolTip = dark ? "Switch to light" : "Switch to dark";
+    }
+
+    void OnGlassToggle(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        App.SetGlassyNotch(GlassToggle.IsChecked == true);
     }
 
     void OnGpuToggle(object sender, RoutedEventArgs e)
