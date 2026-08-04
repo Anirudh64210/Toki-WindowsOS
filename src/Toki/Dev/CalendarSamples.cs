@@ -29,7 +29,8 @@ static class CalendarSamples
         {
             // Imminent (drives the amber "in N min" + Join treatment) — 9 min from now.
             Ev("s1", "Design review — PixelFlow", now.AddMinutes(9), 30, meet: true, allDay: false, null,
-                ("You", "sid@studiomaydit.com", true, true), ("Priya", "priya@x.com", false, false), ("Rounak", "rounak@x.com", false, false)),
+                ("You", "sid@studiomaydit.com", true, true), ("Priya", "priya@x.com", false, false), ("Rounak", "rounak@x.com", false, false))
+                with { Description = "- Confirm launch blockers & owners\n- Lock the ship date" },
             // Later today, with a Meet link.
             Ev("s2", "Weekly 1:1 — Rounak", startOfDay.AddHours(14), 30, meet: true, allDay: false, null,
                 ("You", "sid@studiomaydit.com", true, true), ("Rounak", "rounak@x.com", false, false)),

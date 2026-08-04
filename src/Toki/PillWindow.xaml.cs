@@ -39,6 +39,7 @@ public partial class PillWindow : Window
         [PillState.ManualNote]    = (392, 410),
         [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
         [PillState.Calendar]      = (392, 472),   // FIXED height + internal scroll — content varies (skeleton → many events)
+        [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short (design ④)
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
@@ -56,7 +57,7 @@ public partial class PillWindow : Window
     // came up short (scrollbar) and every later re-open (after one arrange) came up full-size (big
     // notch). A fixed height + the ScrollViewer already in SettingsView makes every open identical.
     static readonly HashSet<PillState> AutoHeight =
-        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask];
+        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask, PillState.PrepCard];
 
     // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
     // transient "nothing was said" toast). Everything with content you actually work
@@ -236,6 +237,7 @@ public partial class PillWindow : Window
             PillState.ManualNote    => new ManualNoteView(),
             PillState.Ask           => new AskView(),
             PillState.Calendar      => new CalendarView(),
+            PillState.PrepCard      => new PrepCardView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
@@ -271,6 +273,7 @@ public partial class PillWindow : Window
         // below — otherwise the reveal height is computed on stale text and longer text (a wrapped
         // app name in the meeting prompt) renders cut off by the clip (a real live bug).
         if (view is Views.MeetingPromptView mp) mp.Refresh();
+        if (view is Views.PrepCardView pc) pc.Refresh();   // paint from App.CurrentPrep BEFORE the height measure
         if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
 
         var hoverMorph = !fromHidden && IsHoverPair(old, next);

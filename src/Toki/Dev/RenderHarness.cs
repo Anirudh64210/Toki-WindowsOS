@@ -54,6 +54,13 @@ static class RenderHarness
         // The Calendar create composer, opened with sample text — proves the parse-preview line renders.
         var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
         Shot(dir, "Calendar-composer", composer, 392, 520);
+
+        // Prep cards: a matched card (last time + still-open + agenda) and a first-time card (honest empty).
+        App.CurrentPrep = PrepSamples.Matched();
+        Shot(dir, "PrepCard", new PrepCardView(), 356, 360);
+        App.CurrentPrep = PrepSamples.FirstTime();
+        Shot(dir, "PrepCard-firsttime", new PrepCardView(), 356, 360);
+        App.CurrentPrep = null;
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
         Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
     }
@@ -161,6 +168,7 @@ static class RenderHarness
         PillState.Settings      => new SettingsView(),
         PillState.Ask           => new AskView(),
         PillState.Calendar      => new CalendarView(),
+        PillState.PrepCard      => new PrepCardView(),
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 }

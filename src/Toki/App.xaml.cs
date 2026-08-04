@@ -192,7 +192,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -275,6 +275,10 @@ public partial class App : Application
                     var note = Store.List().FirstOrDefault(x => x.Kind == MeetingKind.Manual);
                     CurrentManualNote = note is not null ? Store.Get(note.Id) : null;
                 }
+                else if (s == PillState.PrepCard && CurrentPrep is null)
+                {
+                    CurrentPrep = Dev.PrepSamples.Matched();   // demo a seeded prep card
+                }
             }
             catch { /* no store yet */ }
             State.ForceForDemo(s);
@@ -300,6 +304,10 @@ public partial class App : Application
         }), System.Windows.Threading.DispatcherPriority.Background);
 
         StartMeetingDetection();
+
+        // Watch the calendar and surface a prep card ~5 min before a meeting (never headless — it reads
+        // the network via UpcomingCache).
+        if (!Headless) Calendar.PrepWatcher.Instance.Start();
 
         // Warm both engines ahead of the first meeting so a stop never waits on model
         // load (lesson 2) — but GENTLY. Toki must never make the rest of the PC feel
@@ -386,6 +394,33 @@ public partial class App : Application
         CurrentApp = null;
         BeginRecording(null);
         State.TryGo(PillState.RecordingBar);
+    }
+
+    // ---- Pre-meeting prep card ----
+
+    /// <summary>The content of the prep card currently being shown (set by PrepWatcher / demo before the
+    /// PrepCard state is entered). The analog of <see cref="CurrentApp"/> for MeetingPrompt.</summary>
+    public static Calendar.PrepContent? CurrentPrep { get; set; }
+
+    /// <summary>"Join and record": open the meeting link (if any) and start recording — the human-in-the-
+    /// loop moment (Hard Constraint #3). Same manual-start path as <see cref="StartQuickNote"/>. Note: the
+    /// browser may not have joined the call yet, so the target resolves like any manual start (mic first;
+    /// system loopback still captures "them" once the call is live).</summary>
+    public static void JoinAndRecord()
+    {
+        var prep = CurrentPrep; CurrentPrep = null;
+        if (prep?.Event.HasMeetLink == true) Views.CalendarRows.OpenUrl(prep.Event.MeetLink);
+        CurrentApp = null;
+        BeginRecording(null);
+        State.TryGo(PillState.RecordingBar);
+    }
+
+    /// <summary>"Later": dismiss the prep card and suppress it for this event this session.</summary>
+    public static void DismissPrepCard()
+    {
+        if (CurrentPrep is { } p) Calendar.PrepWatcher.Instance.Snooze(p.Event.Id);
+        CurrentPrep = null;
+        State.TryGo(PillState.Hidden);
     }
 
     /// <summary>True while a recording is running (for the "start taking notes" command's guard).</summary>
@@ -673,6 +708,7 @@ public partial class App : Application
     {
         Exiting = true;
         _detector?.Stop();
+        Calendar.PrepWatcher.Instance.Stop();
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
         _ptt?.Dispose();
         _tray?.Dispose();

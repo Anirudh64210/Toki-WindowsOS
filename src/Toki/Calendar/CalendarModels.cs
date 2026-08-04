@@ -19,7 +19,8 @@ public sealed record CalEvent(
     string? Location,
     string? MeetLink,
     string? HtmlLink,
-    IReadOnlyList<CalAttendee> Attendees)
+    IReadOnlyList<CalAttendee> Attendees,
+    string? Description = null)
 {
     public DateTimeOffset StartLocal => StartUtc.ToLocalTime();
     public DateTimeOffset EndLocal => EndUtc.ToLocalTime();

@@ -1,0 +1,59 @@
+<UserControl x:Class="Toki.Views.PrepCardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Margin="16,13,16,14">
+        <!-- Title + when, with a quiet calendar shortcut top-right -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="Title" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="WhenText" FontFamily="{StaticResource UiFont}" FontSize="10.5"
+                           FontWeight="SemiBold" Foreground="{DynamicResource Amber}" Margin="0,1,0,0"/>
+            </StackPanel>
+            <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE787;" FontSize="13"
+                    VerticalAlignment="Top" ToolTip="Open calendar" Click="OnCalendar"/>
+        </Grid>
+
+        <!-- LAST TIME -->
+        <StackPanel x:Name="RecapHost" Visibility="Collapsed">
+            <TextBlock x:Name="RecapHeader" Style="{StaticResource SectionHeader}" Foreground="{DynamicResource TextDim}"/>
+            <TextBlock x:Name="RecapText" Style="{StaticResource Body}" FontSize="11.5"
+                       Foreground="{DynamicResource TextSoft}" TextWrapping="Wrap" MaxHeight="52"
+                       TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+
+        <!-- STILL OPEN (rows built in code) -->
+        <StackPanel x:Name="OpenHost" Visibility="Collapsed">
+            <TextBlock Text="STILL OPEN" Style="{StaticResource SectionHeader}" Foreground="{DynamicResource TextDim}"/>
+            <StackPanel x:Name="OpenRows"/>
+        </StackPanel>
+
+        <!-- AGENDA (bullets built in code) -->
+        <StackPanel x:Name="AgendaHost" Visibility="Collapsed">
+            <TextBlock Text="AGENDA" Style="{StaticResource SectionHeader}" Foreground="{DynamicResource TextDim}"/>
+            <StackPanel x:Name="AgendaRows"/>
+        </StackPanel>
+
+        <!-- First-time / no-match honest line -->
+        <TextBlock x:Name="FirstTimeLine" Style="{StaticResource Dim}" FontSize="11.5" TextWrapping="Wrap"
+                   Margin="0,10,0,0" Visibility="Collapsed"
+                   Text="First time with this one — I’ll take notes if you record."/>
+
+        <!-- Actions -->
+        <Grid Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="JoinButton" Style="{StaticResource WhiteButton}" Padding="0,9"
+                    HorizontalContentAlignment="Center" Content="Join and record" Click="OnJoin"/>
+            <Button Grid.Column="1" Style="{StaticResource PillButton}" Background="Transparent"
+                    Foreground="{DynamicResource TextDim}" Padding="14,9" Margin="8,0,0,0"
+                    Content="Later" Click="OnLater"/>
+        </Grid>
+    </StackPanel>
+</UserControl>
