@@ -4,6 +4,13 @@ Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail
 
 ## Current state & roadmap (updated 2026-08-04)
 
+**H3 assistant-brain rework DONE (2026-08-04):** stress-test-driven rework of the Ask brain — 1,155-case
+deterministic prompt-test golden set (`tests/Toki.Tests/Brain/`, fixture + frozen clock + RouteOf), total
+1,636 tests green. Fixed: task provenance-vs-due-date (`TaskScheduling.ModeFor` — "what tasks did I have
+on Aug 2" no longer dumps overdue), accurate Persona privacy responder (was falling through to retrieval),
+general-knowledge routing override, wider phrasing coverage. Brain-only. See README H3, ARCHITECTURE
+"The assistant brain", `mansplain/31`, backlog H3 (deferred: content-word ASR/typo tolerance, fuzzy names).
+
 **H1 hardening pass DONE (2026-08-04):** full multi-agent audit (67 verified findings — all 14 high +
 21 medium fixed), recording-lifecycle integrity (a live mic can never be hidden; session is the truth),
 delete-removes-audio, crash/quit recovery (`RecordingRecovery` startup sweep + periodic WAV-header

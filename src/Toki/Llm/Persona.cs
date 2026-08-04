@@ -36,9 +36,37 @@ public static class Persona
         (Whole(@"how\s+do\s+(you|u)\s+work|how\s+smart\s+(are|r)\s+(you|u)|what\s+else\s+can\s+(you|u)\s+do|what\s+(do|can)\s+(you|u)\s+(know|remember)|how\s+do\s+(you|u)\s+know\s+(all\s+)?(this|that|things)"),
             "I listen to your meetings when you say yes, take the notes, and answer questions from them — all on this PC. Ask me about any meeting, task, or decision."),
 
-        // ── privacy / data ──
-        (Whole(@"(is|are)\s+(my\s+)?(data|notes?|meetings?|recordings?)\s+(private|safe|secure)|do\s+(you|u)\s+(send|upload|share|sell)\s+(my\s+)?(data|notes?|meetings?|recordings?)(\s+(anywhere|to\s+anyone|online|to\s+the\s+cloud))?|where\s+(is|are|do)\s+(my\s+)?(data|notes?|meetings?)\s*(stored|saved|kept|live|go)?|(is\s+this|are\s+you)\s+(all\s+)?(local|on.?device|offline)"),
-            "Everything stays on this PC — your meetings live in a local database and nothing is uploaded anywhere."),
+        // ── privacy / data handling — MUST be complete and accurate (a soft or wrong answer here is a
+        //    trust breach). Broad on purpose: any question about where data goes, cloud/upload, storage,
+        //    training, or "is this private/safe/local" gets the same honest, full answer. ──
+        (Whole(@".*(?:\b("
+            + @"send(ing)?|upload(ing|ed)?|shar(e|ing)|sell(ing)?|leak|leav(e|es|ing)\s+(my|this|the)|go(es|ing)?\s+(to|anywhere)|"
+            + @"stor(e|ing|ed|age)|sav(e|ing|ed)|keep(ing)?|kept|"
+            + @"cloud|server|online|internet|external|third.?part(y|ies)|"
+            + @"train(ing|ed)?\s+(on|your|my|the)|used?\s+(my|your|the)\s+data|"
+            + @"private|secure|safe|confidential|encrypt|"
+            + @"local(ly)?|on.?device|offline|"
+            + @"who\s+(can|could)\s+(see|access|read|view)|can\s+(my|anyone|someone|my\s+boss)\s+(see|access|read)"
+            + @")\b.*\b(data|notes?|meetings?|recordings?|audio|transcript?s?|conversations?|info|information|it|this|everything)\b"
+            + @"|\b(is|are)\s+(this|it|toki|my\s+(data|notes?|meetings?|recordings?|stuff|audio)|my\s+stuff|everything)\s+(private|secure|safe|local|on.?device|offline|encrypted|confidential)\b"
+            + @"|\bwhere\s+(is|are|does?|do)\s+(my\s+|the\s+|this\s+|all\s+(my|this)\s+)?(data|notes?|meetings?|recordings?|audio|stuff|everything|it)\b"
+            + @"|\b(train(ing|ed)?|used?)\b.*\b(my|your)\s+(data|meetings?|notes?|recordings?|audio)\b"
+            + @"|\b(my|your)\s+(data|meetings?|notes?|recordings?|audio)\b.*\b(train(ing|ed)?|uploaded?|sent|shared|sold)\b"
+            + @"|\bdo(es)?\s+(you|toki|this|it)\s+(phone\s+home|call\s+home)\b"
+            + @").*"),
+            "Everything stays on this PC. Your meetings, notes and audio live in a local database on this "
+            + "machine and nothing is ever uploaded — no cloud, no servers, no training on your data. The one "
+            + "exception is if YOU add your own API key in Settings; only then does the text you ask about go to "
+            + "that provider, and that's your choice."),
+
+        // ── always-listening / microphone — the other half of the privacy story, also must be accurate ──
+        (Whole(@"(?:.*\b(always|constantly|all\s+the\s+time|24.?7|secretly)\s+(listen|listening|record|recording|on)\b"
+            + @"|\b(are|r)\s+(you|u)\s+(always\s+)?(listen(ing)?|record(ing)?)\b"
+            + @"|\bdo\s+(you|u)\s+(always\s+)?(listen|record)\b"
+            + @"|\bis\s+(the\s+|my\s+)?(mic|microphone)\s+(always\s+)?(on|listening|recording|live)\b"
+            + @"|\bcan\s+(you|u)\s+hear\s+me\s+(all\s+the\s+time|always|right\s+now\s+even|when)\b).*"),
+            "No — there's no always-on listening and no wake word. The mic only runs while you're recording a "
+            + "meeting you chose to record, or while you hold the push-to-talk key. The rest of the time it's off."),
 
         // ── identity edge cases (SmallTalk owns "who are you"; these are the AI-flavoured ones) ──
         (Whole(@"are\s+(you|u)\s+(an?\s+)?(ai|robot|bot|human|real|person|chat\s*gpt|chatgpt|gpt|alexa|siri)( or .+)?|(are|r)\s+(you|u)\s+alive|do\s+(you|u)\s+have\s+feelings"),

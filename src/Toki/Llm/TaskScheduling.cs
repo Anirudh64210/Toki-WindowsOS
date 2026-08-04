@@ -84,6 +84,43 @@ public static class TaskScheduling
     public static readonly Regex OverdueRx = new(
         @"\b(over\s?due|past\s+due|late|behind\s+on|missed\s+deadline)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>A DEADLINE cue ("due", "deadline") — makes a dated task query scope by due date rather
+    /// than by which meetings happened in the window.</summary>
+    public static readonly Regex DueCueRx = new(
+        @"\bdue\b|\bdeadline\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Past-tense task recall ("what tasks DID I HAVE", "what WAS assigned", "what DID I commit to") —
+    // signals PROVENANCE (tasks from that time's meetings), not a live deadline view.
+    static readonly Regex PastTenseTaskRx = new(
+        @"\b(did\s+i\s+have|did\s+we\s+have|were\s+there|was\s+there|did\s+i\s+get|did\s+i\s+commit|"
+        + @"was\s+assigned|were\s+assigned|did\s+i\s+agree|came\s+out\s+of|did\s+we\s+decide|"
+        + @"did\s+i\s+take\s+on|had\s+to\s+do)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>How a task query with a time reference should be scoped. The subtle distinction the
+    /// taxonomy calls Rule T / the "August 2nd" fix.</summary>
+    public enum TimeMode { None, DueDate, Provenance }
+
+    /// <summary>
+    /// Decide whether a dated task query means DEADLINE ("what's due this week / Friday / overdue") or
+    /// PROVENANCE ("what tasks did I have on Aug 2 / last week"). Deadline wins on an explicit due/overdue
+    /// cue OR a present/future window; provenance wins on past-tense recall OR a purely-past window with
+    /// no deadline cue. Pure function for testing.
+    /// </summary>
+    public static TimeMode ModeFor(string original, DateTimeOffset? start, DateTimeOffset? end, DateTimeOffset now)
+    {
+        var overdue = OverdueRx.IsMatch(original ?? "");
+        var deadlineCue = overdue || DueCueRx.IsMatch(original ?? "");
+        var hasRange = start.HasValue && end.HasValue;
+        // A deadline cue with no parsed window ("what's due", "what's due by end of week") is still a
+        // deadline VIEW — DueWindowTaskAnswer shows overdue + upcoming.
+        if (!hasRange) return deadlineCue ? TimeMode.DueDate : TimeMode.None;
+        var pastRecall = PastTenseTaskRx.IsMatch(original ?? "");
+        var windowPast = end!.Value <= now;
+        if (!deadlineCue && (pastRecall || windowPast)) return TimeMode.Provenance;
+        return TimeMode.DueDate;
+    }
+
     public sealed record Buckets(
         List<OpenAction> Overdue, List<OpenAction> DueInWindow,
         List<OpenAction> UndatedFromWindow, int OtherOpenCount)

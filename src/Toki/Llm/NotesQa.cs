@@ -492,6 +492,7 @@ public static class NotesQa
     static readonly HashSet<string> AnalyticalVocab = new(StringComparer.OrdinalIgnoreCase)
     {
         "theme","themes","pattern","patterns","trend","trends","insight","insights","risk","risks",
+        "recurring","recur","recurrent","common","commonly","recurringly","frequent","frequently","keep","keeps",
         "blocker","blockers","concern","concerns","worried","worries","worry","worrying","focus","focused",
         "priority","priorities","prioritize","prioritise","prioritized","prioritised","progress","progressing",
         "progressed","compare","comparison","versus","difference","unresolved","undecided","biggest",
@@ -775,14 +776,25 @@ public static class NotesQa
         // DEADLINE questions ("what's due this week / Friday / overdue") scope by DUE DATE, not by
         // which meetings happened when — the market-validated semantics, and the fix for the bug where
         // "tasks for this week" dumped every open task because meeting-date scoping ≈ the whole (recent)
-        // library. Only when there's NO topic (a topic means "tasks about X", handled below).
+        // library. Two different questions share the "task + time" shape and must be told apart:
+        //   DEADLINE  ("what's due this week / Friday", "what's overdue")      → scope by DUE date.
+        //   PROVENANCE("what tasks did I have on Aug 2 / last week / Monday")  → tasks FROM meetings
+        //             held in that window (past-tense recall of that day's outcomes).
+        // Rule: a deadline cue ("due"/"overdue"/"deadline") OR a present/future window is DEADLINE; a
+        // past-tense recall OR a purely-past window with no deadline cue is PROVENANCE. This is the fix
+        // for "what tasks did I have on August 2nd" returning an overdue dump instead of that day's tasks.
+        var now = DateTimeOffset.Now;
         var overdueAsk = TaskScheduling.OverdueRx.IsMatch(plan.Original);
-        if (topic.Count == 0 && (plan.HasDateRange || overdueAsk))
+        var mode = TaskScheduling.ModeFor(plan.Original, plan.RangeStart, plan.RangeEnd, now);
+        var provenance = mode == TaskScheduling.TimeMode.Provenance;
+
+        if (topic.Count == 0 && mode == TaskScheduling.TimeMode.DueDate)
             return DueWindowTaskAnswer(plan, people, self, overdueAsk);
 
-        // Figure out the SCOPE of a TOPIC task question, from topic AND/OR date:
+        // Figure out the SCOPE of a TOPIC task question or a PROVENANCE (date-only) task question:
         //   topic only          → the meeting(s) matching that topic
         //   topic + date        → topic matches within that date window
+        //   date only (past)     → the tasks FROM meetings held in that window (provenance)
         List<MeetingRecord> scope = new();
         if (topic.Count > 0)
         {
@@ -795,6 +807,14 @@ public static class NotesQa
             // A named single meeting ("the postgres meeting") → the best match only; a topic within a
             // date window may legitimately span a few.
             scope = ids.Take(plan.HasDateRange ? 3 : 1).Select(store.Get).OfType<MeetingRecord>().ToList();
+        }
+        else if (provenance)
+        {
+            scope = store.MeetingIdsInRange(plan.RangeStart!.Value, plan.RangeEnd!.Value)
+                .Select(store.Get).OfType<MeetingRecord>().ToList();
+            // No meetings that day → honest miss (never fall through to the whole open list).
+            if (scope.Count == 0)
+                return new Answer($"You had no meetings {DescribeRange(plan)}, so there are no tasks from then.", [], true);
         }
 
         if (scope.Count > 0) return ScopedTaskAnswer(scope, plan, people, self);
@@ -862,6 +882,9 @@ public static class NotesQa
 
         DateTimeOffset? start = plan.HasDateRange ? plan.RangeStart : null;
         DateTimeOffset? end = plan.HasDateRange ? plan.RangeEnd : null;
+        // A bare "what's due" (deadline cue, no parsed window, not an "overdue" ask) means the upcoming
+        // deadlines — default to a two-week look-ahead so it shows more than just overdue.
+        if (!plan.HasDateRange && !overdueAsk) { start = now.Date; end = now.Date.AddDays(15); }
         var b = TaskScheduling.Bucket(open, start, end, now);
 
         var whoPrefix = self ? "you have " : people.Count > 0 ? $"{Names(people)} has " : "you have ";

@@ -44,6 +44,27 @@ public static class TurnRouter
     /// <summary>Does the wording itself place this turn in the user's meeting world?</summary>
     public static bool HasMeetingCue(string question) => MeetingCueRx.IsMatch(question ?? "");
 
+    // GENERAL-KNOWLEDGE SHAPE: definitional / how-to / creative / world-fact requests. These are
+    // parametric by nature ("what does OKR mean", "how do I write a PRD", "write me a haiku") and must
+    // NOT ground just because a content word incidentally prefix-matches a meeting ("...about mondays"
+    // hitting a "Monday standup"). "what is A/AN x" (a generic concept) is definitional; "what is THE x"
+    // is a specific thing and stays grounded, so the article is load-bearing.
+    static readonly Regex GeneralKnowledgeRx = new(
+        @"^\s*(what('s|\s+is|\s+are)\s+(a|an)\s+\w+"
+        + @"|what\s+(does|do)\s+.+\bmean\b|define\s+\w+|what\s+(does|do)\s+\w+\s+stand\s+for"
+        + @"|how\s+(do|can|would|should|to)\s+(i|you|one|we)\b"
+        + @"|(write|draft|compose|create|make)\s+(me\s+)?(a|an|some)\s+\w+"
+        + @"|give\s+me\s+(some\s+)?(tips|advice|ideas|examples|pointers)\b"
+        + @"|explain\s+(how|what|the\s+(concept|idea|difference))\b"
+        + @"|what('s|\s+is)\s+the\s+(capital|population|weather|time|date|meaning\s+of)\b"
+        + @"|how\s+(many|much)\s+.+\b(in|per)\b)"
+        + @"|\bdifference\s+between\b|\btips\s+for\s+(running|writing|doing|being|staying|getting|handling|managing|a\b|an\b)"
+        + @"|\bbest\s+(way|practice)s?\s+(to|for)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Public for the router + tests: a clearly definitional/how-to/creative/world-fact ask.</summary>
+    public static bool HasGeneralKnowledgeShape(string question) => GeneralKnowledgeRx.IsMatch(question ?? "");
+
     /// <summary>
     /// True when an LLM-bound turn (LookupFact / Analyze) should be answered as GENERAL conversation
     /// — from the model's own knowledge, with NO retrieval and NO citations. Grounding stays the
@@ -58,6 +79,11 @@ public static class TurnRouter
         if (plan.HasTemporal) return false;
         if (plan.PinnedMeetingIds is { Count: > 0 }) return false;
         if (HasMeetingCue(plan.Original)) return false;
+
+        // A clearly general-knowledge SHAPE (definition / how-to / creative / world fact) is parametric
+        // even when an incidental content word prefix-matches a meeting title — the probe below would
+        // otherwise wrongly ground "write me a haiku about mondays" on a "Monday standup".
+        if (HasGeneralKnowledgeShape(plan.Original)) return true;
 
         // Topical anchor terms (for Analyze: minus the analytical vocabulary, which describes the
         // analysis wanted, not note text).
