@@ -92,7 +92,7 @@ public static class CommandRouter
         // "add a new note (in the library)" — the optional "new" and the optional destination tail are
         // what the live run said; both must still be the NewNote command, never a notes search.
         (Anchor(@"(new|create|start|add|make|write)\s+(a\s+|another\s+)?(new\s+)?(manual\s+|custom\s+|quick\s+)?notes?(\s+(in|to|into)\s+(the\s+|my\s+)?library)?"), AppCommand.NewNote),
-        (Anchor(@"(new|start|clear|reset|fresh)\s+(the\s+)?(chat|conversation)|start\s+over"),                 AppCommand.NewChat),
+        (Anchor(@"(new|start|clear|reset|fresh)\s+(a\s+)?(new\s+)?(the\s+)?(chat|conversation|thread)|start\s+over|clear\s+(the\s+)?(chat|history)"), AppCommand.NewChat),
         (Anchor($@"(?:{V}|list)\s+(me\s+)?(my\s+|the\s+)?(tasks?|to-?dos?|action\s+items?)"),                  AppCommand.ShowTasks),
         (Anchor(@"(close|hide|dismiss|go\s+away|get\s+out)(\s+(this|it|the\s+\w+|toki))?|never\s+mind|nevermind|cancel"), AppCommand.Close),
     };

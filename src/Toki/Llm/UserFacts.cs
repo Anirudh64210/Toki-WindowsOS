@@ -22,7 +22,7 @@ public static class UserFacts
     // screenshot produced ("BUT YOU call me anirudh"). The captured value is 1–3 word-ish tokens.
     static readonly Regex NameRx = new(
         @"^(?:(?:but|and|no|hey|well|actually|so|btw|please|listen)[,\s]+)*" +
-        @"(?:(?:you\s+(?:(?:can|could|should|may|will|always)\s+)?)?call\s+me|my\s+name(?:'s|\s+is)|i\s*am\s+called|i'?m\s+called|the\s+name(?:'s|\s+is))\s+" +
+        @"(?:(?:you\s+(?:(?:can|could|should|may|will|always)\s+)?)?call\s+me|my\s+name(?:'s|\s+is)|i\s*am\s+called|i'?m\s+called|the\s+name(?:'s|\s+is)|i\s+go\s+by|i'?d\s+like\s+to\s+be\s+called|i\s+prefer\s+(?:to\s+be\s+called\s+)?)\s+" +
         @"([a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*){0,2})\s*[.!?]*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 

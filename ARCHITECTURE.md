@@ -702,3 +702,44 @@ keys. Adding a DPAPI entropy parameter — it would fail to decrypt every EXISTI
 user's API key + Google token) for marginal gain against same-user malware that can call our code anyway.
 Moving bulk data from `%APPDATA%` (roaming) to `%LOCALAPPDATA%` — correct long-term but needs a migration
 and is owner-gated. All three are in `docs/backlog.md`.
+
+### The assistant brain — a 1,155-case golden set + the reworks it drove (H3, 2026-08-04)
+
+A stress-test-driven rework of the Ask brain. Two research passes produced an exhaustive utterance
+taxonomy (15 category families, market-validated disambiguation rules, an ASR-homophone table); it
+became the spec for a large deterministic prompt-test suite.
+
+**Why the suite is deterministic + model-free.** The Ask pipeline is understand-first: turn-type routing
+(command / small-talk / persona / user-fact / voice-create / misheard / meeting-QA / general) and scope
+resolution (temporal parse → intent → person/topic/provenance) all run BEFORE any model, through pure or
+near-pure predicates. So ~90% of answer QUALITY is a property of that deterministic layer and is testable
+without Qwen. The suite (`tests/Toki.Tests/Brain/`) is built on: a **seeded 7-meeting fixture** with
+known participants/topics/action-items (owner × due × done combos) + planted negatives; a **frozen clock**
+(NOW = Wed 2026-08-05) so "this week"/"next Friday"/"on Aug 2" resolve identically forever; and a
+**`RouteOf` classifier** that runs the real predicates (`CommandRouter.TryMatch`, `SmallTalk.TryReply`,
+`Persona.TryReply`, `UserFacts`, `CalendarCommand.TryDetect`, `QueryUnderstanding.Parse`,
+`TurnRouter.IsGeneralTurn`) in the documented pipeline order and returns the turn-type label. 1,155 cases
+across turn-type routing, temporal windows, task provenance/due-date, end-to-end honesty (fake-LLM seam
+proving "an honest miss never reaches the model"), person/topic/counting/identity, follow-up memory,
+wake-name ASR variants, and a route-invariance perturbation overlay (§15).
+
+**Reworks the suite surfaced (all brain-only, all via the deterministic layer):**
+- **Task provenance vs due-date (`TaskScheduling.ModeFor`, the "August 2nd" fix).** A dated task query is
+  DEADLINE ("what's due this week/Friday", "overdue") when it carries a due cue or a present/future
+  window, and PROVENANCE ("what tasks did I have on Aug 2 / last week") on past-tense recall or a
+  purely-past window. Provenance scopes to the tasks FROM meetings held in that window; a past date with
+  no meetings is an honest miss. Pure function → unit-tested at every boundary.
+- **Accurate privacy responder (`Persona`).** Data-handling and always-listening questions were only
+  partially matched and fell through to retrieval — a wrong/fabricated privacy answer is a trust breach.
+  The pattern is now broad (cloud/upload/store/train/local/private/who-can-see, mic/always-on) with two
+  precise, honest canned answers (local-only + the BYO-key exception; no always-on mic).
+- **General-knowledge shape override (`TurnRouter.HasGeneralKnowledgeShape`).** A definitional/how-to/
+  creative/world-fact question ("what does OKR mean", "write me a haiku") is parametric even when a
+  content word incidentally prefix-matches a meeting title — it no longer wrongly grounds. "what is A/AN
+  x" (concept) is general; "what is THE x" (a specific thing) stays grounded — the article is load-bearing.
+- **Coverage widening:** Count intent now spans calls/syncs/notes/recordings (not just "meetings");
+  `TasksRx` gained on-my-plate/possessive-plate/owe/deadline cues; `NewChat` and name-setting phrasings
+  ("i go by X") broadened; the analytical vocabulary gained recurring/common/frequent so a bare
+  "what are the recurring themes" analyses the corpus instead of being treated as an absent topic.
+
+No non-brain code was touched; 1,636 tests green, self-tests pass, dist republished + smoke-verified.

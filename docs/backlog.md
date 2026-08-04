@@ -235,3 +235,26 @@ ARCHITECTURE. 520 tests green, dist republished.
 **Still open from H1's research list** (unchanged — owner picks): typed-notes augmentation, evidence-linked
 notes, per-app always-record, speaker names from calendar attendees, follow-up email draft, audio import,
 local MCP server, tray recording indicator, consent notice in onboarding.
+
+---
+
+## H3 — DONE (2026-08-04): assistant brain rework + 1,155-case prompt-test suite
+
+Stress-test-driven rework of the Ask brain — see README H3 / ARCHITECTURE. 1,636 tests green, dist
+republished. The golden set lives in `tests/Toki.Tests/Brain/` (fixture + frozen clock + RouteOf).
+
+**Known assistant limitations left as future work (surfaced by the taxonomy, deliberately not fixed):**
+- **General ASR/typo tolerance beyond the wake name.** Toki fuzzes "Toki"→Doki/Toky but does NOT
+  fuzzy-match content words: "acton items" won't hit "action items", "meating" won't hit "meeting",
+  "due"↔"do" isn't merged (too risky — "do" is ubiquitous). A phonetic/edit-distance normalization pass
+  before parsing would close this; it's a real feature with real false-positive risk. Homophone table is
+  in the research (scratchpad/taxonomy-spec.md §15.2).
+- **Fuzzy PERSON-name matching.** "Anna" vs "Ana", "Sean/Shawn" — the person filter matches known owner
+  names but doesn't yet do phonetic/edit-distance matching or a "did you mean?" clarify.
+- **Nested attribution** ("what did Ana say Bob should do") — parsed as a single person scope, not two roles.
+- **Multi-intent in one utterance** ("recap Monday and what's due Friday") — answers the first, doesn't split.
+- **"tips for running a standup"-style ambiguity** — a meeting word inside a general how-to grounds on the
+  corpus (defensible either way; left grounded).
+- **Speaker-attribution honesty** (who said what) is coarse until named diarisation ships (YOU/THEM only).
+- Deeper generation-side answer-quality (faithfulness scoring, citation-moment links) is a separate,
+  model-in-the-loop eval — the deterministic layer is what this suite locks down.

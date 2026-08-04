@@ -891,3 +891,39 @@ Manual (drag order). Persisted; drag-reorder auto-selects Manual so it never ren
 **Verified** — 520/520 unit tests; self-tests all pass (`--dbtest`, `--notestest`, `--querytest` 13/13,
 `--voicecreatetest`); single-instance guard runtime-verified (2 launches → 1 process); Library sort
 render-verified; `dist` republished (132 MB) and smoke-launched.
+
+## H3 (Assistant brain — 1000+ prompt tests + rework) — 2026-08-04
+
+Owner asked for a stress-test-driven rework of the smart assistant: research the full space of questions
+users ask, build a large prompt-test suite covering every category, and fix what it surfaces — LLM/brain
+only. Two deep-research passes produced an exhaustive question taxonomy (temporal, task, person, topic,
+analytical, counting, follow-ups, meeting-id, commands, small-talk/persona/privacy, general knowledge,
+ambiguous, adversarial — with market-validated disambiguation rules and an ASR-homophone table).
+
+**The suite: 1,155 deterministic prompt-test cases** (total project tests: 520 → **1,636**), CI-safe (no
+model/audio/GPU). Built on a seeded 7-meeting fixture + a frozen clock + a `RouteOf` classifier that runs
+the real routing predicates in pipeline order, so a question's turn-type, intent, scope, and honesty
+behavior are all asserted without loading the model. Categories: turn-type routing, temporal windows,
+task provenance-vs-due-date, end-to-end honesty behavior, person/topic/counting/identity, follow-up
+memory, wake-name ASR variants, and a route-invariance perturbation overlay (casing/punctuation/address).
+
+**Reworks the suite drove (brain only):**
+- **"What tasks did I have on August 2nd" no longer dumps every overdue task.** A specific past date (or
+  past-tense recall) now means PROVENANCE — the tasks that came out of that day's meetings — while
+  "due this week / Friday / overdue" stays a DEADLINE view. This is the market-validated split
+  (`TaskScheduling.ModeFor`), and it's the exact case the owner caught.
+- **Privacy questions are now answered accurately and never sent to retrieval.** "Are you sending my data
+  to the cloud?", "are you always listening?", "is this private?", "do you train on my data?" were
+  falling through to the notes search (which could give a wrong or fabricated answer) — a real trust bug.
+  They now get a precise, honest canned answer: everything's local, nothing's uploaded, no always-on mic,
+  and the BYO API key is the only opt-in path off-device.
+- **General-knowledge questions stop falsely grounding** on an incidental word match ("write me a haiku
+  about mondays" no longer latches onto a "Monday standup"): a definitional/how-to/creative shape is
+  answered parametrically.
+- **Broader, more natural phrasing coverage:** counting now includes calls/syncs/notes; "what's on my
+  plate", "what does Ana owe me", "on his plate", deadline words route to the task list; "start a new
+  chat", "i go by Sam" recognised; recurring/common analytical words no longer leak into retrieval.
+
+**Verified** — 1,636/1,636 tests green; self-tests all pass (`--querytest` 13/13, `--dbtest`, `--notestest`,
+`--voicecreatetest`); the exact reported bug proven fixed end-to-end; `dist` republished (132 MB) and
+smoke-launched. No non-brain code touched.

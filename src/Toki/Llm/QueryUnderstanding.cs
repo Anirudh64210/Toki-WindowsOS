@@ -253,6 +253,9 @@ public static class QueryUnderstanding
         // Deadline questions are task questions: "what's due Friday", "anything due tomorrow",
         // "what's overdue", "am I behind on anything". "due"/"overdue" strongly imply a deadline.
         + @"|\b(over\s?due|past\s+due)\b|\b(what|anything|something|whats?)\b[^?]*\bdue\b|\bdue\s+(today|tomorrow|this|next|by|on|before)\b|\bbehind\s+on\b"
+        // Ownership/plate phrasings without a task noun: "what's on my plate", "what does Ana owe me",
+        // "what do I still owe", "what am I on the hook for".
+        + @"|\bon\s+(my|his|her|their|\w+'s)\s+plate\b|\bowe[sd]?\b|\bon\s+the\s+hook\b"
         // Self-assignment shapes without a task noun ("did I get anything?", "was I assigned?",
         // "anything for me?", "did they mention me?") — these are task questions about the USER and
         // must reach the deterministic self-filtered task route, not the LLM (P9.1).
@@ -303,7 +306,7 @@ public static class QueryUnderstanding
 
     static QueryIntent Classify(string query, string residual, bool hasTemporal)
     {
-        if (CountRx.IsMatch(query) && Regex.IsMatch(query, @"\bmeetings?\b", RegexOptions.IgnoreCase))
+        if (CountRx.IsMatch(query) && Regex.IsMatch(query, @"\b(meetings?|calls?|syncs?|stand-?ups?|1[:.]1s?|notes?|recordings?|conversations?|chats?)\b", RegexOptions.IgnoreCase))
             return QueryIntent.Count;
         if (TasksRx.IsMatch(query)) return QueryIntent.ListTasks;
         // A list request must be ONLY list-chrome (+ an already-stripped date). Any topical word means
