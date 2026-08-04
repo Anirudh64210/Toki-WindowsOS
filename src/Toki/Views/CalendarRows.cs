@@ -77,9 +77,12 @@ static class CalendarRows
 
     // ── Calendar page agenda row ──
 
-    public static FrameworkElement AgendaRow(CalEvent e, Action<CalEvent, FrameworkElement> onMore)
+    /// <summary>Debug: render agenda rows in their hover-EXPANDED state (the harness can't hover).</summary>
+    internal static bool DebugExpand;
+
+    public static FrameworkElement AgendaRow(CalEvent e, Action onEdit, Action onDelete, bool canEdit)
     {
-        var grid = new Grid { MinHeight = 44 };
+        var grid = new Grid { MinHeight = 40 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -107,23 +110,86 @@ static class CalendarRows
         Grid.SetColumn(mid, 1);
         grid.Children.Add(mid);
 
-        // Right: Join (always visible if there's a link) + a hover-revealed "…" menu.
-        var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        if (e.HasMeetLink) right.Children.Add(JoinButton(e, Imminent(e)));
-        var more = new Button
+        // Join is always visible (joining must never require discovery).
+        if (e.HasMeetLink)
         {
-            Style = (Style)Application.Current.Resources["IconButton"], Content = More, FontSize = 15,
-            Width = 26, Height = 26, Opacity = 0, Margin = new Thickness(2, 0, 0, 0), ToolTip = "More",
-        };
-        more.Click += (_, ev) => { ev.Handled = true; onMore(e, more); };
-        right.Children.Add(more);
-        Grid.SetColumn(right, 2);
-        grid.Children.Add(right);
+            var join = JoinButton(e, Imminent(e));
+            join.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(join, 2);
+            grid.Children.Add(join);
+        }
 
-        var row = Clickable(grid, () => onMore(e, more));   // whole-row click opens the same menu
-        row.MouseEnter += (_, _) => Fade(more, 1);          // smooth reveal, not a snap
-        row.MouseLeave += (_, _) => Fade(more, 0);
-        return row;
+        // Hover reveals an inline action strip (Vercel/Wispr style) below the row.
+        var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
+        if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
+        strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
+        strip.Children.Add(ActionLink("Delete", true, onDelete));
+
+        return HoverRevealRow(grid, strip);
+    }
+
+    // ── the hover-expand "section pill": a row that smoothly grows on hover to reveal an action strip ──
+
+    static FrameworkElement HoverRevealRow(UIElement main, FrameworkElement strip)
+    {
+        strip.Opacity = DebugExpand ? 1 : 0;
+        var stripHost = new Border { Height = DebugExpand ? double.NaN : 0, ClipToBounds = true, Child = strip };
+        var col = new StackPanel();
+        col.Children.Add(main);
+        col.Children.Add(stripHost);
+        var wrap = new Border
+        {
+            CornerRadius = new CornerRadius(10), Background = DebugExpand ? Br("HoverOverlay") : Brushes.Transparent,
+            Padding = new Thickness(6, 3, 6, 3), Child = col, Cursor = System.Windows.Input.Cursors.Arrow,
+        };
+
+        System.Windows.Threading.DispatcherTimer? leave = null;
+        wrap.MouseEnter += (_, _) =>
+        {
+            leave?.Stop();
+            wrap.Background = Br("HoverOverlay");
+            AnimateHeight(stripHost, 26);
+            Fade(strip, 1);
+        };
+        wrap.MouseLeave += (_, _) =>
+        {
+            leave?.Stop();
+            leave = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };   // hysteresis
+            leave.Tick += (_, _) =>
+            {
+                leave!.Stop();
+                wrap.Background = Brushes.Transparent;
+                AnimateHeight(stripHost, 0);
+                Fade(strip, 0);
+            };
+            leave.Start();
+        };
+        return wrap;
+    }
+
+    static void AnimateHeight(FrameworkElement el, double to)
+    {
+        var from = el.ActualHeight;
+        var growing = to > from;
+        el.BeginAnimation(FrameworkElement.HeightProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(from, to, TimeSpan.FromMilliseconds(growing ? 150 : 130))
+            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = growing ? System.Windows.Media.Animation.EasingMode.EaseOut : System.Windows.Media.Animation.EasingMode.EaseIn } });
+    }
+
+    // A text-link action (brightens on hover) — the strip's buttons.
+    static FrameworkElement ActionLink(string label, bool danger, Action action)
+    {
+        var restKey = danger ? "Danger" : "TextDim";
+        var tb = new TextBlock
+        {
+            Text = label, FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Foreground = Br(restKey), Cursor = System.Windows.Input.Cursors.Hand,
+            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+        };
+        tb.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
+        tb.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
+        tb.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
+        return tb;
     }
 
     public static FrameworkElement SkeletonRow()

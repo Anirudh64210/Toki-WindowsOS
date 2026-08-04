@@ -29,7 +29,8 @@ static class RenderHarness
         (PillState.Library,       404, 440),
         (PillState.Settings,      380, 440),
         (PillState.Ask,           344, 340),
-        (PillState.Calendar,      392, 480),
+        (PillState.Calendar,      360, 430),
+        (PillState.About,         380, 430),
     ];
 
     public static void RenderAll(string dir)
@@ -53,7 +54,12 @@ static class RenderHarness
 
         // The Calendar create composer, opened with sample text — proves the parse-preview line renders.
         var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
-        Shot(dir, "Calendar-composer", composer, 392, 520);
+        Shot(dir, "Calendar-composer", composer, 360, 520);
+
+        // Agenda rows in their hover-EXPANDED state (inline Edit/Open/Delete strip).
+        CalendarRows.DebugExpand = true;
+        Shot(dir, "Calendar-hover", new CalendarView(), 360, 520);
+        CalendarRows.DebugExpand = false;
 
         // Prep cards: a matched card (last time + still-open + agenda) and a first-time card (honest empty).
         App.CurrentPrep = PrepSamples.Matched();
@@ -169,6 +175,7 @@ static class RenderHarness
         PillState.Ask           => new AskView(),
         PillState.Calendar      => new CalendarView(),
         PillState.PrepCard      => new PrepCardView(),
+        PillState.About         => new AboutView(),
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 }

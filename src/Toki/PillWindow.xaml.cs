@@ -38,8 +38,9 @@ public partial class PillWindow : Window
         [PillState.Settings]      = (380, 360),   // FIXED height + internal scroll (not auto) — see AutoHeight note
         [PillState.ManualNote]    = (392, 410),
         [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
-        [PillState.Calendar]      = (392, 472),   // FIXED height + internal scroll — content varies (skeleton → many events)
+        [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
         [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short (design ④)
+        [PillState.About]         = (380, 430),   // FIXED height + internal scroll (credits list) — mirrors Settings
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
@@ -75,7 +76,7 @@ public partial class PillWindow : Window
     // lives as a hover-able sliver. (Summarizing is excluded — it must stay to reach its
     // result; recording/prompt have their own lifecycles.)
     static readonly HashSet<PillState> DismissOnClickOutside =
-        [PillState.Home, PillState.Notes, PillState.NoSpeech, PillState.Settings, PillState.Calendar];
+        [PillState.Home, PillState.Notes, PillState.NoSpeech, PillState.Settings, PillState.Calendar, PillState.About];
 
     readonly AppState _state;
     readonly Dictionary<PillState, UserControl> _views = new();
@@ -108,6 +109,10 @@ public partial class PillWindow : Window
         // Keep the pill anchored bottom-centre as it grows/shrinks — so an animated resize
         // (the smooth recording expand) stays put instead of drifting from its top-left.
         SizeChanged += (_, _) => { if (IsVisible && _hwnd != IntPtr.Zero) PlaceTopCenter(); CacheWindowRect(); if (_blurOn) ApplyRoundRegion(true); };
+        // Fallback for a click that beats the 60ms hover tick: activate on press so the very first
+        // click on a button lands (and subsequent wheel/keys route here). Tunnels so it fires before
+        // the click reaches the button — activation happens, then the button gets its click.
+        PreviewMouseDown += (_, _) => { if (NeedsInput(_state.Current)) TryActivateNotch(); };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -131,11 +136,16 @@ public partial class PillWindow : Window
                 // Clicking into your real work TUCKS the page to a sliver (context kept) rather
                 // than resetting it — a tucked sliver just stays (its auto-hide takes it away).
                 if (!_tucked) TuckCurrent();
-            }));
+            }),
+            onWheel: OnHookWheel);
     }
 
+    // A few px of slack so a click on the very EDGE of the notch still reads as "inside" — otherwise a
+    // borderline click was judged outside and tucked the panel away, which felt like buttons needing a
+    // dead-centre hit. Same slack widens the wheel-capture zone harmlessly.
+    const int InsidePad = 6;
     bool PointInWindow(int x, int y) =>
-        (_rectR <= _rectL) || (x >= _rectL && x <= _rectR && y >= _rectT && y <= _rectB)
+        (_rectR <= _rectL) || (x >= _rectL - InsidePad && x <= _rectR + InsidePad && y >= _rectT - InsidePad && y <= _rectB + InsidePad)
         // A dropdown that dropped BELOW the notch is logically part of it — a click in the model/provider
         // list must never read as "outside" and tuck the panel away mid-selection.
         || Views.NotchPopups.ContainsScreenPoint(x, y);
@@ -144,6 +154,44 @@ public partial class PillWindow : Window
     {
         if (_hwnd != IntPtr.Zero && GetWindowRect(_hwnd, out var r))
             (_rectL, _rectT, _rectR, _rectB) = (r.Left, r.Top, r.Right, r.Bottom);
+    }
+
+    // Global mouse-hook wheel handler (runs on the hook thread). If the pointer is over an interactive
+    // notch page, we OWN the wheel: consume it (so the window behind never scrolls) and marshal a smooth
+    // scroll of the notch's own ScrollViewer to the UI thread. This is why scrolling works without the
+    // notch being the focused window. Returns true to consume.
+    bool OnHookWheel(int x, int y, int delta)
+    {
+        try
+        {
+            if (!NeedsInput(_state.Current) || !PointInWindow(x, y)) return false;
+            Dispatcher.BeginInvoke(() =>
+            {
+                var sv = CurrentScrollViewer();
+                if (sv is not null) Controls.SmoothScroll.Nudge(sv, delta);
+            }, System.Windows.Threading.DispatcherPriority.Input);
+            return true;   // the notch owns the wheel while you're on it — never scroll the app behind
+        }
+        catch { return false; }
+    }
+
+    // The ScrollViewer of the currently-hosted page (first one in its visual tree), or null.
+    ScrollViewer? CurrentScrollViewer()
+    {
+        if (!_views.TryGetValue(_state.Current, out var view) || view is null) return null;
+        return FindScrollViewer(view);
+    }
+
+    static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        if (root is ScrollViewer sv) return sv;
+        var n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < n; i++)
+        {
+            var hit = FindScrollViewer(System.Windows.Media.VisualTreeHelper.GetChild(root, i));
+            if (hit is not null) return hit;
+        }
+        return null;
     }
 
     /// <summary>The pill's current on-screen rectangle in WPF DIPs (for the Library morph).</summary>
@@ -248,6 +296,7 @@ public partial class PillWindow : Window
             PillState.Ask           => new AskView(),
             PillState.Calendar      => new CalendarView(),
             PillState.PrepCard      => new PrepCardView(),
+            PillState.About         => new AboutView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
@@ -720,7 +769,21 @@ public partial class PillWindow : Window
     bool _idleWired, _autoHideWired;
 
     static bool IsStayable(PillState s) =>
-        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar;
+        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar or PillState.About;
+
+    // Pages the user actually clicks/scrolls/types on — everything except the tiny passive peeks.
+    // These grab foreground focus on hover so the scroll wheel and clicks land on the notch, not the
+    // window behind it. The peeks stay passive (they must never steal focus from a live meeting app).
+    static bool NeedsInput(PillState s) =>
+        s is not (PillState.Hidden or PillState.Collapsed or PillState.RecordingBar);
+
+    // Bring the notch to the foreground so it receives wheel/keyboard/click input. Because the cursor is
+    // over our window we hold the "last input" right, so Activate() (SetForegroundWindow under the hood)
+    // is granted rather than merely flashing. Best-effort — never let a focus race throw.
+    void TryActivateNotch()
+    {
+        try { if (!IsActive) Activate(); } catch { /* foreground-lock race — harmless */ }
+    }
 
     void ArmIdle()
     {

@@ -131,8 +131,27 @@
                 <TextBlock x:Name="ModelStatusTitle" Style="{StaticResource SettingTitle}" Text="Model status"/>
                 <TextBlock x:Name="ModelStatus" Style="{StaticResource Dim}" FontSize="10.5"/>
 
-                <TextBlock Style="{StaticResource Dim}" FontSize="9" Margin="2,18,0,6" TextAlignment="Center"
-                           Text="Auto-record, keep-audio, and the Built-with credits arrive in a later update."/>
+                <!-- About / open-source attribution (the "Built with" credits screen). -->
+                <TextBlock Style="{StaticResource SettingTitle}" Text="About"/>
+                <Border x:Name="OpenSourceRow" Margin="-6,2,-6,0" Padding="6,9" CornerRadius="10"
+                        Background="Transparent" Cursor="Hand" MouseLeftButtonUp="OnOpenSource">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
+                            <TextBlock Text="Built with — open source &amp; licences" Style="{StaticResource BodyStrong}"/>
+                            <TextBlock Text="The open models and libraries that power Toki."
+                                       Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                                   FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <TextBlock Style="{StaticResource Dim}" FontSize="9" Margin="2,16,0,6" TextAlignment="Center"
+                           Text="Auto-record and keep-audio arrive in a later update."/>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

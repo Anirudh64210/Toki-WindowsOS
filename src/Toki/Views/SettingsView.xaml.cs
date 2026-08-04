@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
@@ -489,4 +490,6 @@ public partial class SettingsView : UserControl
     }
 
     void OnBack(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Home);
+
+    void OnOpenSource(object sender, MouseButtonEventArgs e) => App.State.TryGo(PillState.About);
 }

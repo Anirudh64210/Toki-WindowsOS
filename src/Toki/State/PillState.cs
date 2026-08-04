@@ -22,4 +22,5 @@ public enum PillState
     Ask,   // push-to-talk voice ask on the notch: listening → thinking → answer
     Calendar, // Google Calendar week view: upcoming meetings + create/edit/delete
     PrepCard, // pre-meeting prep: last time + still-open items + agenda, auto-surfaced before a meeting
+    About,    // "Built with" open-source attribution (licence obligation), reached from Settings
 }
