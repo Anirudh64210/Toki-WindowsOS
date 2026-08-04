@@ -9,6 +9,11 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\toki.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Supply-chain: audit every (transitive) package on restore and surface any moderate-or-worse
+         advisory as a build warning (NU1901-1904), so a vulnerable dependency can't ship unnoticed. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,11 +22,20 @@
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
     <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <!-- Override the vulnerable native SQLite (2.1.6, GHSA-2m69-gcr7-jv3q) that Microsoft.Data.Sqlite
+         8.0.11 pulls transitively — 2.1.12 is patched and stays on the compatible 2.1 line. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.Recognizers.Text.DateTime" Version="1.8.13" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-x64" Version="1.13.4" />
-    <PackageReference Include="SharpCompress" Version="0.38.0" />
+    <!-- 0.48.0 is the first version patched for GHSA-6c8g-7p36-r338 (the advisory the build warned about). -->
+    <PackageReference Include="SharpCompress" Version="0.48.0" />
+    <!-- NuGet.CommandLine 5.11.5 (GHSA-68w7-72jg-6qpp) is a BUILD-TOOL package Microsoft.Recognizers.Text
+         declares transitively; it is nuget.exe, never loaded or shipped in Toki's runtime, so the advisory
+         doesn't apply to what we distribute. Suppressed explicitly (not by lowering the audit level) so
+         every real runtime advisory still surfaces. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-68w7-72jg-6qpp" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 

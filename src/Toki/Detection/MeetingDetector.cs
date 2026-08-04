@@ -69,9 +69,17 @@ public sealed class MeetingDetector
     /// <summary>Suppress an app for the cooldown window (user dismissed its prompt).</summary>
     public void Snooze(DetectedApp app) => _cooldownUntil[app.Id] = _now() + Cooldown;
 
-    public static bool IsDenylisted(DetectedApp app) =>
-        Denylist.Any(d => app.DisplayName.Contains(d, StringComparison.OrdinalIgnoreCase)
-                       || app.Id.Contains(d, StringComparison.OrdinalIgnoreCase));
+    public static bool IsDenylisted(DetectedApp app)
+    {
+        // Match the app's own NAME only (exe filename, or packaged-app id) — never the full
+        // install path. Matching the path made the user's folders part of the decision: a
+        // Windows username like "Jacobs" (contains "obs") or a "C:\Code\" install dir would
+        // denylist every per-user app and silently kill meeting detection.
+        var name = app.DisplayName;
+        var packagedId = app.Packaged ? app.Id : "";
+        return Denylist.Any(d => name.Contains(d, StringComparison.OrdinalIgnoreCase)
+                              || packagedId.Contains(d, StringComparison.OrdinalIgnoreCase));
+    }
 
     void Poll()
     {

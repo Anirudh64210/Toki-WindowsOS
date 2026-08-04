@@ -60,7 +60,10 @@ public sealed class ChatStore
             var json = JsonSerializer.Serialize(
                 conversations.OrderByDescending(c => c.Updated).ToList(),
                 new JsonSerializerOptions { WriteIndented = false });
-            File.WriteAllText(_path, json);
+            // Atomic swap — a crash mid-write must not wipe every past conversation.
+            var tmp = _path + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, _path, overwrite: true);
         }
         catch { /* history is best-effort; never break the app over it */ }
     }

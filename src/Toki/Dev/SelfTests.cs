@@ -782,6 +782,9 @@ static class SelfTests
             ("what did we decide about the survey forms", Toki.Llm.QueryIntent.LookupFact),
             ("AI tool review and survey follow up", Toki.Llm.QueryIntent.LookupFact),   // NOT tasks — the bug
             ("what are my open tasks", Toki.Llm.QueryIntent.ListTasks),
+            ("what tasks do I have for this week", Toki.Llm.QueryIntent.ListTasks),
+            ("what's due on Friday", Toki.Llm.QueryIntent.ListTasks),
+            ("what are my tasks for next week", Toki.Llm.QueryIntent.ListTasks),
             ("action items in the postgres meeting", Toki.Llm.QueryIntent.ListTasks),
             ("what meetings did I have last week", Toki.Llm.QueryIntent.ListMeetings),
             ("how many meetings in March", Toki.Llm.QueryIntent.Count),

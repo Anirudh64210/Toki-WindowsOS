@@ -97,7 +97,7 @@ public sealed class ModelManager
     static void Extract(string archivePath, string destDir)
     {
         using var stream = File.OpenRead(archivePath);
-        using var reader = ReaderFactory.Open(stream); // auto-detects tar.bz2
+        using var reader = ReaderFactory.OpenReader(stream); // auto-detects tar.bz2 (renamed from Open in SharpCompress 0.48)
         while (reader.MoveToNextEntry())
         {
             if (reader.Entry.IsDirectory) continue;

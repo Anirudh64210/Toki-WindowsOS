@@ -29,14 +29,21 @@ public sealed class LlmService
         var s = AppSettings.Current;
         if (s.NotesMode == NotesMode.ApiKey)
         {
-            // Only hand back the API client when it can actually work; otherwise say
-            // why (never the key itself) and return null so notes stay heuristic.
+            // Only hand back the API client when it can actually work; otherwise say why
+            // (never the key itself) and degrade one rung, not two: API → LOCAL model when
+            // it's installed (the user chose AI notes; a missing key shouldn't silently
+            // drop them all the way to heuristic) → heuristic only when there's no model.
             var api = new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl);
             if (api.Ready) return api;
-            App.Log("API notes unavailable: " + (
-                string.IsNullOrWhiteSpace(s.ApiKey) ? "no API key set"
+            var why = string.IsNullOrWhiteSpace(s.ApiKey) ? "no API key set"
                 : ApiLlm.TryBuildEndpoint(s.ApiBaseUrl) is null ? "base URL is not a valid https:// (or http:// loopback) address"
-                : "no model name set") + " — keeping heuristic notes");
+                : "no model name set";
+            if (ModelManager.QwenInstalled)
+            {
+                App.Log($"API notes unavailable: {why} — falling back to the on-device model");
+                return EnsureLocal();
+            }
+            App.Log($"API notes unavailable: {why} — keeping heuristic notes");
             return null;
         }
         if (s.NotesMode == NotesMode.HeuristicOnly) return null;
@@ -90,13 +97,20 @@ public sealed class LlmService
     /// </summary>
     public void Release()
     {
+        // Detach first (under the gate), dispose OUTSIDE it: DisposeWhenIdle blocks until any
+        // in-flight generation finishes, and holding _gate through that wait would deadlock a
+        // concurrent EnsureLocal. New callers see _local == null immediately and reload fresh.
+        ILlm? doomed;
         lock (_gate)
         {
-            if (_local is IDisposable d) { try { d.Dispose(); } catch { } }
-            if (_local is not null) App.Log("LLM released (low-memory)");
+            doomed = _local;
             _local = null;
             _localFailed = false;
         }
+        if (doomed is null) return;
+        if (doomed is LlamaLlm llama) llama.DisposeWhenIdle();
+        else if (doomed is IDisposable d) { try { d.Dispose(); } catch { } }
+        App.Log("LLM released (low-memory)");
         GC.Collect();
         GC.WaitForPendingFinalizers();
     }
@@ -129,7 +143,8 @@ public sealed class LlmService
         return s.NotesMode switch
         {
             NotesMode.HeuristicOnly => false,
-            NotesMode.ApiKey => new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl).Ready,
+            // API mode can also write via the installed local model (the Active() fallback).
+            NotesMode.ApiKey => new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl).Ready || ModelManager.QwenInstalled,
             _ => ModelManager.QwenInstalled,   // local: installed = can write (loads on demand during the rewrite)
         };
     }

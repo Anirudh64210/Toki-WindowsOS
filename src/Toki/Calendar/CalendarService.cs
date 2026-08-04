@@ -13,8 +13,12 @@ public sealed class CalendarService
     public static CalendarService Instance { get; } = new();
 
     readonly SemaphoreSlim _tokenGate = new(1, 1);   // one refresh at a time
-    string? _accessToken;
-    DateTimeOffset _expiresUtc;
+
+    /// <summary>Token + expiry as ONE immutable value: reference assignment is atomic, so the
+    /// lock-free fast path in <see cref="AccessTokenAsync"/> can never pair a fresh token with a
+    /// stale expiry (which caused a spurious refresh/"sign in again" right after connecting).</summary>
+    sealed record TokenState(string Token, DateTimeOffset ExpiresUtc);
+    TokenState? _token;
 
     /// <summary>Raised when the connection state flips (connected, disconnected, or a dead grant was
     /// cleared) so the UI can re-render. May fire on a background thread — marshal to the UI thread.</summary>
@@ -35,8 +39,7 @@ public sealed class CalendarService
         if (!string.IsNullOrEmpty(tokens.RefreshToken)) s.GoogleRefreshToken = tokens.RefreshToken;
         if (!string.IsNullOrEmpty(tokens.Email)) s.GoogleAccountEmail = tokens.Email;
         s.Save();
-        _accessToken = tokens.AccessToken;
-        _expiresUtc = tokens.ExpiresUtc;
+        _token = new TokenState(tokens.AccessToken, tokens.ExpiresUtc);
         ConnectionChanged?.Invoke();
     }
 
@@ -45,13 +48,19 @@ public sealed class CalendarService
     {
         var s = AppSettings.Current;
         var rt = s.GoogleRefreshToken;
+        ClearDeadGrant(s);
+        if (!string.IsNullOrEmpty(rt)) await GoogleAuth.RevokeAsync(rt!).ConfigureAwait(false);
+    }
+
+    /// <summary>Wipe the stored grant + in-memory token and tell the UI — shared by disconnect,
+    /// a rejected refresh, and an undecryptable DPAPI blob. Always ends honestly disconnected.</summary>
+    void ClearDeadGrant(AppSettings s)
+    {
         s.GoogleRefreshToken = null;
         s.GoogleAccountEmail = null;
         s.Save();
-        _accessToken = null;
-        _expiresUtc = default;
+        _token = null;
         ConnectionChanged?.Invoke();
-        if (!string.IsNullOrEmpty(rt)) await GoogleAuth.RevokeAsync(rt!).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<CalEvent>> UpcomingAsync(int days = 7, CancellationToken ct = default)
@@ -75,36 +84,42 @@ public sealed class CalendarService
     /// token is cleared and the UI is notified, so a failure surfaces as "reconnect", never a crash.</summary>
     async Task<string> AccessTokenAsync(CancellationToken ct)
     {
-        if (_accessToken is not null && DateTimeOffset.UtcNow < _expiresUtc) return _accessToken;
+        if (_token is { } fast && DateTimeOffset.UtcNow < fast.ExpiresUtc) return fast.Token;
 
         await _tokenGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_accessToken is not null && DateTimeOffset.UtcNow < _expiresUtc) return _accessToken;   // won the race
+            if (_token is { } won && DateTimeOffset.UtcNow < won.ExpiresUtc) return won.Token;   // won the race
 
             var s = AppSettings.Current;
-            var rt = s.GoogleRefreshToken
-                ?? throw new GoogleAuthException("Toki isn't connected to Google Calendar.", needsReconnect: true);
+            var rt = s.GoogleRefreshToken;
+            if (rt is null)
+            {
+                // A stored blob that won't DECRYPT (Windows password force-reset, settings file
+                // moved to another account) previously kept IsConnected true forever while every
+                // fetch failed — a contradictory state that never healed. Clear it honestly.
+                if (!string.IsNullOrEmpty(s.GoogleRefreshTokenProtected))
+                {
+                    App.Log("google refresh token present but undecryptable — clearing the dead grant");
+                    ClearDeadGrant(s);
+                    throw new GoogleAuthException("Your Google connection couldn't be read — please connect again.", needsReconnect: true);
+                }
+                throw new GoogleAuthException("Toki isn't connected to Google Calendar.", needsReconnect: true);
+            }
             try
             {
                 var t = await GoogleAuth.RefreshAsync(rt, ct).ConfigureAwait(false);
-                _accessToken = t.AccessToken;
-                _expiresUtc = t.ExpiresUtc;
+                _token = new TokenState(t.AccessToken, t.ExpiresUtc);
                 if (!string.IsNullOrEmpty(t.RefreshToken) && t.RefreshToken != rt)   // rotation (rare) → store the new one
                 {
                     s.GoogleRefreshToken = t.RefreshToken;
                     s.Save();
                 }
-                return _accessToken;
+                return t.AccessToken;
             }
             catch (GoogleAuthException ex) when (ex.NeedsReconnect)
             {
-                s.GoogleRefreshToken = null;   // dead grant — clear it so the UI shows "connect again"
-                s.GoogleAccountEmail = null;
-                s.Save();
-                _accessToken = null;
-                _expiresUtc = default;
-                ConnectionChanged?.Invoke();
+                ClearDeadGrant(s);   // dead grant — clear it so the UI shows "connect again"
                 throw;
             }
         }

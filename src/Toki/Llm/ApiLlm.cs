@@ -22,7 +22,17 @@ public sealed class ApiLlm : ILlm
 {
     // ONE client for the process (per-call clients exhaust sockets). No default auth
     // header — the key can change between calls, so it rides on each request instead.
-    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
+    // No client-wide timeout: HttpClient.Timeout covers the WHOLE operation including
+    // reading the body, so a 60s cap silently killed long streamed answers and long
+    // completions — precisely on the supported slow backends (LM Studio/Ollama on CPU).
+    // Deadlines are per-call instead: ListModels/Test carry 12s CTSes, and Complete/
+    // Stream get a connect deadline + an idle watchdog below.
+    static readonly HttpClient Http = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+    /// <summary>How long we wait for the provider to ACCEPT a request (connect + headers).</summary>
+    static readonly TimeSpan ConnectDeadline = TimeSpan.FromSeconds(30);
+    /// <summary>Max quiet time between streamed chunks before the connection is declared dead.</summary>
+    static readonly TimeSpan StreamIdleDeadline = TimeSpan.FromSeconds(90);
 
     readonly string _apiKey;
     readonly string _model;
@@ -166,7 +176,11 @@ public sealed class ApiLlm : ILlm
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(body) };
             req.Headers.Authorization = new("Bearer", _apiKey);   // per-request, never on the shared client
-            resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
+            // Deadline only until the provider ACCEPTS the request — generation time is unbounded
+            // by us (slow local models are a supported configuration; callers carry their own CTS).
+            using var connect = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connect.CancelAfter(ConnectDeadline);
+            resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, connect.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { throw new HttpRequestException("Couldn't reach the provider (timed out)."); }
@@ -174,7 +188,16 @@ public sealed class ApiLlm : ILlm
 
         using (resp)
         {
-            var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            string raw;
+            try
+            {
+                // Safety-net watchdog so a dead connection can't park the caller forever.
+                using var read = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                read.CancelAfter(TimeSpan.FromMinutes(10));
+                raw = await resp.Content.ReadAsStringAsync(read.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) { throw new HttpRequestException("The provider stopped responding mid-answer."); }
             if (!resp.IsSuccessStatusCode) throw new HttpRequestException(ErrorFor(resp.StatusCode, raw));
             return ExtractContent(raw);
         }
@@ -207,7 +230,12 @@ public sealed class ApiLlm : ILlm
         using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(body) };
         req.Headers.Authorization = new("Bearer", _apiKey);
         HttpResponseMessage resp;
-        try { resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false); }
+        try
+        {
+            using var connect = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connect.CancelAfter(ConnectDeadline);
+            resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, connect.Token).ConfigureAwait(false);
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { throw new HttpRequestException("Couldn't reach the provider (timed out)."); }
         catch (HttpRequestException) { throw new HttpRequestException("Couldn't reach the provider (network error)."); }
@@ -221,10 +249,22 @@ public sealed class ApiLlm : ILlm
             }
             using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new System.IO.StreamReader(stream);
+            // Idle watchdog: unlimited TOTAL stream time (long answers are legitimate), but a
+            // dead connection — no bytes at all — must still terminate. Re-armed on every line.
+            using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            watchdog.CancelAfter(StreamIdleDeadline);
             // OpenAI-style Server-Sent Events: lines of "data: {json}", terminated by "data: [DONE]".
-            while (!reader.EndOfStream)
+            // ReadLineAsync(ct) (not EndOfStream, whose empty-buffer refill is a SYNCHRONOUS,
+            // uncancelable network read): honors cancellation promptly — the notch cancels this
+            // token routinely at the glance budget — and returns null cleanly at EOF.
+            while (true)
             {
-                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                string? line;
+                try { line = await reader.ReadLineAsync(watchdog.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (OperationCanceledException) { throw new HttpRequestException("The provider stopped sending (stream timed out)."); }
+                if (line is null) break;
+                watchdog.CancelAfter(StreamIdleDeadline);
                 if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
                 var payload = line[5..].Trim();
                 if (payload == "[DONE]") break;

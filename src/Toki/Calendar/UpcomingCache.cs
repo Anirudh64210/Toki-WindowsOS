@@ -43,15 +43,19 @@ public sealed class UpcomingCache
         {
             var fresh = _cache is not null && DateTimeOffset.UtcNow - _fetchedUtc < Ttl;
             if (fresh && !force) return Task.FromResult(_cache!);
-            return _inflight ??= FetchAsync(ct);
+            // The SHARED fetch never runs on one caller's token — a cancel-on-navigate from the
+            // first caller would fail every coalesced waiter. Each caller instead abandons its
+            // own WAIT via WaitAsync while the fetch runs to completion and still fills the cache.
+            _inflight ??= FetchAsync();
+            return _inflight.WaitAsync(ct);
         }
     }
 
-    async Task<IReadOnlyList<CalEvent>> FetchAsync(CancellationToken ct)
+    async Task<IReadOnlyList<CalEvent>> FetchAsync()
     {
         try
         {
-            var events = await CalendarService.Instance.UpcomingAsync(HorizonDays, ct).ConfigureAwait(false);
+            var events = await CalendarService.Instance.UpcomingAsync(HorizonDays).ConfigureAwait(false);
             lock (_gate) { _cache = events; _fetchedUtc = DateTimeOffset.UtcNow; }
             Changed?.Invoke();
             return events;

@@ -35,7 +35,8 @@ public static class SmallTalk
 
     static Regex Whole(string body) => new($@"^(?:{body})$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    static readonly Random Rng = new();
+    // Random.Shared: TryReply runs on the threadpool from BOTH ask surfaces (notch + Library)
+    // concurrently, and a shared System.Random instance corrupts under concurrent Next().
 
     /// <summary>A short canned reply for pure small-talk, or null to fall through to the notes Q&amp;A.</summary>
     public static string? TryReply(string? input)
@@ -53,7 +54,7 @@ public static class SmallTalk
             var c = cand.Trim('.', '!', '?', ',', ' ');
             if (c.Length == 0) return "I'm here — what do you need?";   // a bare "toki"
             foreach (var (rx, replies) in Table)
-                if (rx.IsMatch(c)) return replies[Rng.Next(replies.Length)];
+                if (rx.IsMatch(c)) return replies[Random.Shared.Next(replies.Length)];
         }
         return null;
     }

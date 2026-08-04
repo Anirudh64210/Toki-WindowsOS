@@ -158,3 +158,80 @@ Voice (Ask-bar mic + push-to-talk notch), mascot redesign + animation vocabulary
   the clipped-notch + friendly-app-names.
 - **P10** (`docs/ask-toki-brain.md`) — the **dialogue-brain rebuild**: turn-type routing, user
   profile/memory, RAG-vs-parametric, anti-fabrication rails. 428 tests green.
+
+---
+
+## 🛡️ Hardening pass — DONE (H1, 2026-08-04)
+
+The full-codebase audit + fix + verify pass (see README H1 / ARCHITECTURE "The hardening pass"). All
+14 high- and 21 medium-severity findings fixed, 472 tests green, dist republished & smoke-verified.
+
+**Deliberately deferred from that audit (refactor-only, no user-visible effect, regression risk in
+delicate code):**
+- NotesQa's three near-identical tokenize pipelines (TitleTerms / ContentQuery / ProbeTerms) — consolidate
+  only when next touching retrieval.
+- Token-patch streaming plumbing duplicated between the notch (App.HandleNotchText) and the Library Ask.
+- The state→view factory duplicated between PillWindow and RenderHarness.
+
+## 🧭 Research-derived opportunities (2026-08-04, competitor + UX research — owner picks)
+
+Full research in the session notes; ranked by leverage-per-effort, all within the hard constraints:
+
+1. **Typed-notes augmentation (the Granola model)** — a scratchpad in the recording view; at meeting
+   end the LLM merges your fragments (steering emphasis) with transcript-derived expansion. The single
+   most-praised note UX in the market; Fathom just copied it. Manual-notes plumbing is a head start.
+2. **Evidence-linked notes** — each note bullet carries a tap-to-transcript timestamp (and play-the-WAV).
+   Research says users forgive a small model's phrasing when they can check the source in one click —
+   the cheapest way to close the perceived-quality gap with cloud LLMs. Toki already keeps the WAVs
+   (competitors' top complaint is no way to verify).
+3. **"Open from last time" in notes for recurring meetings** — feed the prep card's STILL-OPEN query into
+   note generation. Circleback's stickiest feature, deterministic here.
+4. **Per-app "always record"** — surface the choice on the meeting prompt ("Always for Zoom"). Hard
+   Constraint #3 explicitly allows it; closes the market's known "missed meeting is gone" failure mode.
+   OWNER DECISION — it changes the consent posture per app.
+5. **Speaker names v1 without diarisation** — map "them" to calendar attendee names for 1:1s (Notion's
+   July-2026 approach). The #1 universal complaint category-wide; cheap first step before real diarisation.
+6. **Suggested follow-up questions in Ask** (2–3 tappable, Fireflies pattern) + **Topic Trackers**
+   (a saved FTS5 query with a badge) — both nearly free on the existing architecture.
+7. **Follow-up email draft** from a note (one local-LLM pass + copy button) — reviewers use it constantly.
+8. **Import/transcribe an audio file** — the whole-file ASR path exists; it's a UI affordance.
+9. **Consent-responsibility notice** — botless recorders shift disclosure onto the user; a first-run
+   note + optional "remind me to announce recording" line on the record prompt is the good-citizen
+   pattern (Granola/Otter are in litigation over exactly this). Belongs in M8 onboarding.
+10. **Tray recording indicator** — ghost mode hides the notch from capture, so the tray icon should
+    reflect recording state too.
+11. **Local(host)-only MCP server over the SQLite** — 2026's power-user tell (everyone shipped one);
+    zero upkeep, data stays local, lets Claude/ChatGPT desktop query your meetings.
+12. **Market the existing moats**: the Markdown mirror (Obsidian-ready files = loud unmet demand),
+    ghost mode ("invisible in screen shares"), and offline-forever notes.
+
+**Explicitly not worth copying** (research-confirmed): meeting bots, engagement/sentiment scoring,
+viral sharing mechanics, video recording, CRM stacks, voice agents, 24/7 ambient capture, 100+
+cloud languages, team sync.
+
+---
+
+## H2 — DONE (2026-08-04): task-scoping fix, Library sort, security pass
+
+Assistant due-date scoping, Library sort menu, and a full security threat-model pass — see README H2 /
+ARCHITECTURE. 520 tests green, dist republished.
+
+**Deliberately deferred from the security audit (documented decisions, not oversights):**
+- **RegisterHotKey instead of the WH_KEYBOARD_LL push-to-talk hook** — owner chose hold-to-talk, which
+  needs key-UP that RegisterHotKey can't give. The hook callback already branches only on the chord and
+  never stores other keys. Keep the hook; document it on the privacy/about screen when that copy is written.
+- **DPAPI optionalEntropy parameter** — would fail to decrypt every EXISTING stored secret (wiping the
+  user's API key + Google refresh token) for marginal gain (same-user malware can call our code path
+  regardless). Skip unless we add a migration.
+- **Move bulk data (DB/WAVs/Notes/log) from %APPDATA% (roaming) to %LOCALAPPDATA%** — stops meeting
+  content silently syncing across an org's roaming profiles, but needs a one-time migration of existing
+  users' data. Owner-gated.
+- **WER/crash-dump scrubbing** — a full-heap .dmp could contain the in-memory access token / decrypted
+  key. Low likelihood; revisit with the signed-installer/packaging work (M8).
+- **Assistant answer citations "jump to transcript moment"** and the full `--braintest` fixture-DB golden
+  harness — the targeted regression tests cover the fix; the big harness is a larger investment for when
+  the brain is next reworked.
+
+**Still open from H1's research list** (unchanged — owner picks): typed-notes augmentation, evidence-linked
+notes, per-app always-record, speaker names from calendar attendees, follow-up email draft, audio import,
+local MCP server, tray recording indicator, consent notice in onboarding.

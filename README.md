@@ -807,3 +807,87 @@ The licence-obligation screen — Toki cannot be sold without crediting the open
 
 472/472 tests pass. **Still to build (M8):** signed installer + auto-update, licence-key gate, onboarding
 download polish.
+
+## H1 (The hardening pass — audit, fix, verify) — 2026-08-04
+
+With the feature set settled, the whole app went through a production-readiness pass: a deep
+multi-agent audit of every subsystem (each finding adversarially re-verified against the code before
+it counted), plus market research across the top consumer notetakers to calibrate quality. 67 real
+issues confirmed; every high- and medium-severity one fixed, and all but three deliberate deferrals
+of the lows.
+
+**Built / fixed (highlights)**
+- **A recording can never run invisibly.** Recording truth now lives in the audio session itself, and
+  every way of dismissing the notch keeps a live recording's bar on screen. Push-to-talk or Esc during
+  a meeting previously could leave the mic running with no indicator and lose the meeting.
+- **Delete really deletes.** Removing a meeting from the Library now also removes its audio files and
+  Markdown mirror — which the confirm dialog had promised all along.
+- **Crash recovery.** WAVs stay playable through a crash (headers finalized every few seconds), and on
+  the next launch Toki finds any recording that never became a meeting and turns it into one. Verified
+  live: it recovered a real meeting from a 3-week-old orphaned folder on this PC.
+- **Unplugging your headset mid-meeting no longer kills the recording** — capture rebuilds on the new
+  default mic and keeps writing the same file, converting formats on the fly.
+- **Detection fixes:** the denylist no longer matches install paths (a Windows username containing
+  "obs" used to disable detection entirely), and new Teams now resolves to its real process, so its
+  meetings capture both sides.
+- **Stability:** the low-memory model-release race that could crash the app mid-answer; API streaming
+  no longer dies at 60 seconds on slow local models; calendar requests can't silently truncate the
+  agenda (real pagination) or vanish on timeouts; settings/chat files are written atomically (a crash
+  mid-write used to wipe the API key and Google connection).
+- **Security/privacy:** calendar "Join" links only open real web URLs; the OAuth listener shrugs off
+  bogus local requests; the SharpCompress CVE was patched; the diagnostic log is size-capped; orphaned
+  voice snippets are swept.
+- **Quality:** meeting prompts wait until you leave fullscreen/presentation mode; the notes prompts now
+  read past speech-recognition errors without inventing names and pair every decision with its stated
+  reason; if the API key is missing, notes fall back to the on-device model instead of plain heuristics.
+
+**Verified**
+- 472/472 unit tests green. Self-tests all pass on this PC: `--dbtest`, `--notestest`, `--querytest`
+  (10/10), `--themetest`, `--copytest`, `--caltest parse`, `--preptest`, `--voicecreatetest`,
+  `--detecttest`, and `--llmtest` — real notes from the real Qwen model through the new fallback path.
+- All 17 views rendered clean in both themes (`--render` / `--theme light`).
+- `dist` republished (132 MB, healthy), smoke-launched, warm-up + state machine verified in the log —
+  including watching the recovery sweep clean 4 dead folders and save 1 recovered meeting, live.
+
+## H2 (Assistant scoping fix, Library sort, security hardening) — 2026-08-04
+
+Owner-reported: asking "what tasks do I have for this week" listed every open task. Root-caused, fixed,
+and hardened alongside a Library sort menu and a security/testing pass — all research-validated.
+
+**Assistant answer quality**
+- **Task time-queries now scope by DUE DATE, not meeting date.** "What's due this week / Friday /
+  overdue" was scoping to *meetings held* in the window — which on a recent library is almost every
+  meeting, so it dumped everything. Now it resolves each task's free-text due ("Friday", "next week")
+  against its meeting's date and buckets open tasks into **Overdue / Due-this-window / undated-from-this-
+  window**, with the window echoed in the answer ("2 tasks this week:"). This is the market-validated
+  behavior (task managers scope by due date; the undated fallback is disclosed).
+- "What's due Friday", "what's overdue", "anything due tomorrow" now route to the task list (they used
+  to fall through to a generic lookup).
+- Bare weekday deadlines are future-biased ("due Friday" set on Monday means *this* Friday, not last).
+- 15 new tests (unit + end-to-end through the store seam) lock the behavior in.
+
+**Library sort/filter** — a menu on the list: Newest / Oldest / Longest / Shortest / Most open tasks /
+Manual (drag order). Persisted; drag-reorder auto-selects Manual so it never renumbers a sorted view.
+
+**Security & testing** (from a full threat-model audit)
+- **Single-instance guard hardened** against local named-object squatting: the Mutex/EventWaitHandle now
+  use per-user (SID-salted) names with a current-user-only ACL, and "already exists" is verified against
+  a real running Toki before deferring — a squatter can no longer DoS startup or drive the UI.
+- **One shell choke point** (`SafeShell`): every "open link / reveal file" goes through it; only http/https
+  URLs (and validated in-app paths) ever reach Windows — a poisoned calendar join-link can't launch
+  `file:`/UNC/`ms-msdt:`.
+- **One FTS query builder** (`ToFtsQuery`) so no search text can ever reach a MATCH clause un-sanitized.
+- **Path-containment guard** on the Markdown mirror (a title can never escape the Notes folder).
+- **Prompt-injection delimiters** around meeting notes fed to the model ("treat as data, not instructions").
+- OAuth loopback socket set `ExclusiveAddressUse`; confirmed no TLS-validation bypass and no
+  `BinaryFormatter` anywhere.
+- **NuGet vulnerability auditing turned on — and it immediately earned its keep:** it surfaced a
+  previously-invisible **high-severity advisory in the bundled native SQLite** (`SQLitePCLRaw` 2.1.6),
+  now patched to 2.1.12 (verified: the DB round-trip still passes). A critical advisory in
+  `NuGet.CommandLine` (a build tool pulled in by the date parser, never shipped in the app) is suppressed
+  with a documented reason so real runtime advisories still surface.
+- 33 new security/pagination tests.
+
+**Verified** — 520/520 unit tests; self-tests all pass (`--dbtest`, `--notestest`, `--querytest` 13/13,
+`--voicecreatetest`); single-instance guard runtime-verified (2 launches → 1 process); Library sort
+render-verified; `dist` republished (132 MB) and smoke-launched.

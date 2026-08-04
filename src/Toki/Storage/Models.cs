@@ -72,3 +72,8 @@ public sealed class MeetingRecord
 public sealed record MeetingSummary(
     long Id, MeetingKind Kind, string Title, string? App,
     DateTimeOffset StartedAt, int DurationMs, string Tldr, int OpenActions, int PeopleCount);
+
+/// <summary>An open action item with the source meeting's id, title and date — for due-date-aware
+/// task scoping (the meeting date is the reference for resolving a free-text due like "Friday").</summary>
+public sealed record OpenAction(
+    long MeetingId, string MeetingTitle, DateTimeOffset MeetingAt, string Text, string? Owner, string? Due);

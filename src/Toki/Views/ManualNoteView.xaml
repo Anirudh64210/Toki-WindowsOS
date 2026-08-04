@@ -21,7 +21,7 @@
         <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource SurfaceHi}" Margin="0,8,0,0"/>
 
         <TextBox x:Name="BodyBox" Background="Transparent" BorderThickness="0"
-                 Foreground="#D5D5D3" CaretBrush="{DynamicResource Text}"
+                 Foreground="{DynamicResource TextSoft}" CaretBrush="{DynamicResource Text}"
                  FontSize="12.5" FontFamily="{StaticResource UiFont}"
                  AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
                  VerticalScrollBarVisibility="Auto" Margin="0,10,0,0" TextChanged="OnChanged"/>

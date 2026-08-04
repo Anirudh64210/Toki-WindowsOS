@@ -308,11 +308,9 @@ static class CalendarRows
         return b;
     }
 
-    public static void OpenUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return;
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
-    }
+    // Web links ONLY — calendar data (a conferenceData join link on any invite) is
+    // attacker-influenceable, so every open goes through the one shell choke point.
+    public static void OpenUrl(string? url) => Toki.Interop.SafeShell.OpenUrl(url);
 
     // Smooth opacity fade (120ms ease-out) — for hover reveals so controls appear/vanish gently.
     static void Fade(UIElement el, double to) =>

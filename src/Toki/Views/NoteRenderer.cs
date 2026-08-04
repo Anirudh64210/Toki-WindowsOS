@@ -304,9 +304,24 @@ public static class NoteRenderer
                 doc.Blocks.Add(holder);
                 btn.Click += (_, _) =>
                 {
+                    // CHUNKED expansion (the panel path pioneered this; the FlowDocument path had
+                    // dropped it): a long meeting is thousands of paragraphs, and inserting them
+                    // all synchronously froze the UI for seconds. Insert in slices, yielding to
+                    // the dispatcher between them, so the document stays responsive while it fills.
+                    btn.IsEnabled = false;
+                    const int slice = 150;
+                    var i = preview;
                     Block after = holder;
-                    for (var i = preview; i < m.Transcript.Count; i++) { var p = DocTranscript(m.Transcript[i], fs); doc.Blocks.InsertAfter(after, p); after = p; }
-                    doc.Blocks.Remove(holder);
+                    void InsertSlice()
+                    {
+                        var end = Math.Min(i + slice, m.Transcript.Count);
+                        for (; i < end; i++) { var p = DocTranscript(m.Transcript[i], fs); doc.Blocks.InsertAfter(after, p); after = p; }
+                        if (i < m.Transcript.Count)
+                            btn.Dispatcher.BeginInvoke(InsertSlice, System.Windows.Threading.DispatcherPriority.Background);
+                        else
+                            doc.Blocks.Remove(holder);
+                    }
+                    InsertSlice();
                 };
             }
         }
@@ -342,14 +357,7 @@ public static class NoteRenderer
     }
 
     /// <summary>Duration · full date/time · app — the note's meta line, sitting under the title.</summary>
-    static string MeetingMeta(MeetingRecord m)
-    {
-        var parts = new List<string>();
-        if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
-        parts.Add(m.StartedAt.ToString("dddd, MMM d · h:mm tt"));
-        if (!string.IsNullOrWhiteSpace(m.App)) parts.Add(m.App!);
-        return string.Join("  ·  ", parts);
-    }
+    static string MeetingMeta(MeetingRecord m) => TimeText.FullMeta(m);
 
     static Paragraph DocHeader(string title, bool first = false) =>
         new(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontSize = 10.5 })

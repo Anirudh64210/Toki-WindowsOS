@@ -53,7 +53,18 @@ public partial class NotesView : UserControl
     {
         if (App.CurrentMeeting is { } m && m.Transcript.Count > 0)
         {
-            try { Clipboard.SetText(NoteRenderer.TranscriptText(m)); CopyBtn.Content = "✓"; } catch { }
+            try
+            {
+                Clipboard.SetText(NoteRenderer.TranscriptText(m));
+                // Feedback checkmark reverts after a moment — a permanent ✓ made the copy
+                // button look consumed and unpressable.
+                var prior = CopyBtn.Content;
+                CopyBtn.Content = "✓";
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+                t.Tick += (_, _) => { t.Stop(); CopyBtn.Content = prior; };
+                t.Start();
+            }
+            catch { }
         }
     }
 
@@ -65,24 +76,9 @@ public partial class NotesView : UserControl
         LibraryWindow.ShowLibrary(App.CurrentMeeting?.Id, fromRect: from);
     }
 
-    static string Meta(MeetingRecord m)
-    {
-        var parts = new List<string>();
-        if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
-        parts.Add(Ago(m.StartedAt));
-        if (!string.IsNullOrWhiteSpace(m.App)) parts.Add(m.App!);
-        return string.Join(" · ", parts);
-    }
+    static string Meta(MeetingRecord m) => TimeText.CompactMeta(m);
 
-    static string Ago(DateTimeOffset when)
-    {
-        var d = DateTimeOffset.Now - when;
-        if (d.TotalMinutes < 2) return "just now";
-        if (d.TotalHours < 1) return $"{(int)d.TotalMinutes} min ago";
-        if (d.TotalDays < 1) return $"{(int)d.TotalHours}h ago";
-        if (d.TotalDays < 2) return "yesterday";
-        return $"{(int)d.TotalDays} days ago";
-    }
+    static string Ago(DateTimeOffset when) => TimeText.Ago(when);
 
     TextBlock Dim(string text) => new()
     {

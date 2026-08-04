@@ -52,15 +52,17 @@ public sealed class RecordingSession
         if (LiveEnabled && TranscriptionService.ModelReady)
             _live = new LiveTranscriber(TranscriptionService.Instance);
 
-        // "You" — always.
+        // "You" — always. Prepare first, wire the live tap, THEN begin: wiring after the
+        // capture was already running could miss the first words of the meeting.
         try
         {
-            _mic.Start(YouWavPath);
+            _mic.Prepare(YouWavPath);
             if (_live is not null && _mic.Format is not null)
             {
                 _live.AddStream(Speaker.You, _mic.Format);
                 _mic.OnBuffer = (buf, n) => _live!.Feed(Speaker.You, buf, n);
             }
+            _mic.Begin();
         }
         catch (Exception ex) { App.Log($"mic start failed: {ex.Message}"); }
 

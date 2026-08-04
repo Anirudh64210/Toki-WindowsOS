@@ -56,7 +56,7 @@ public partial class SettingsView : UserControl
         UpdateRecordingIcon();
     }
 
-    void Load()
+    void Load(bool refreshModels = true)
     {
         _loading = true;
         var s = AppSettings.Current;
@@ -105,7 +105,9 @@ public partial class SettingsView : UserControl
         _loading = false;
 
         // Once the view is set up, load this provider's live model list if we have a key.
-        if (s.NotesMode == NotesMode.ApiKey) RefreshModels();
+        // (Skippable: the theme toggle re-runs Load only to recolour code-built bits, and a
+        // theme flip must never fire a network fetch — its own header comment's rule.)
+        if (refreshModels && s.NotesMode == NotesMode.ApiKey) RefreshModels();
     }
 
     // ── provider / model wheels ──
@@ -260,8 +262,8 @@ public partial class SettingsView : UserControl
         var s = AppSettings.Current;
         s.Theme = next == AppTheme.Light ? "light" : "dark";
         s.Save();
-        ThemeManager.Apply(next);   // recolours the whole app live (DynamicResource re-resolves)
-        Load();                     // rebuild this view's code-built bits (segmented control) in the new palette
+        ThemeManager.Apply(next);        // recolours the whole app live (DynamicResource re-resolves)
+        Load(refreshModels: false);      // rebuild code-built bits in the new palette — NO network fetch
         UpdateThemeIcon();
     }
 

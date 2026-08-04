@@ -76,6 +76,9 @@ public sealed class AppSettings
     /// be re-shaped by hand from its template picker.</summary>
     public string? DefaultTemplate { get; set; }
 
+    /// <summary>The Library list sort mode (a <see cref="Toki.LibrarySort"/> name). "Newest" default.</summary>
+    public string LibrarySort { get; set; } = "Newest";
+
     /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
     /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
     /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the
@@ -126,18 +129,35 @@ public sealed class AppSettings
             if (File.Exists(Path))
                 return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path)) ?? new AppSettings();
         }
-        catch { /* corrupt settings → defaults */ }
+        catch (Exception ex)
+        {
+            // Loud, not silent: a parse failure here means the API key, Google connection, and
+            // profile just reset to defaults — that must at least be diagnosable from the log.
+            App.Log($"SETTINGS UNREADABLE — starting with defaults (key/calendar/profile reset): {ex.Message}");
+        }
         return new AppSettings();
     }
 
+    static readonly object SaveLock = new();
+
     public void Save()
     {
-        try
+        // Serialized: background fact-captures ("call me Anirudh") and UI saves can fire
+        // together, and two writers interleaving on the same temp file corrupt both.
+        lock (SaveLock)
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            File.WriteAllText(Path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            try
+            {
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+                // Atomic: write to a temp file, then swap it in. A crash or power loss mid-write
+                // on the direct overwrite left a truncated settings.json — silently wiping the
+                // DPAPI-encrypted API key and Google refresh token, both unrecoverable.
+                var tmp = Path + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(tmp, Path, overwrite: true);
+            }
+            catch (Exception ex) { App.Log($"settings save failed: {ex.Message}"); }
         }
-        catch (Exception ex) { App.Log($"settings save failed: {ex.Message}"); }
     }
 
     static string? Protect(string? plain)

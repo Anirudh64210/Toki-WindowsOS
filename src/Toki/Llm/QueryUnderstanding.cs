@@ -250,6 +250,9 @@ public static class QueryUnderstanding
     // meeting titles and caused the false task-list trigger. Requires an actual task noun.
     static readonly Regex TasksRx = new(
         @"\b(action\s+items?|open\s+items?|to-?dos?|tasks?)\b|\bwhat\s+(do|did)\s+i\s+(need\s+to\s+do|have\s+to\s+do|commit|agree)\b|\bassigned\s+to\s+me\b|\bwhat\s+are\s+my\b.*\b(tasks?|to-?dos?|items?)\b"
+        // Deadline questions are task questions: "what's due Friday", "anything due tomorrow",
+        // "what's overdue", "am I behind on anything". "due"/"overdue" strongly imply a deadline.
+        + @"|\b(over\s?due|past\s+due)\b|\b(what|anything|something|whats?)\b[^?]*\bdue\b|\bdue\s+(today|tomorrow|this|next|by|on|before)\b|\bbehind\s+on\b"
         // Self-assignment shapes without a task noun ("did I get anything?", "was I assigned?",
         // "anything for me?", "did they mention me?") — these are task questions about the USER and
         // must reach the deterministic self-filtered task route, not the LLM (P9.1).

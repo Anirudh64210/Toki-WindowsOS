@@ -66,7 +66,13 @@ public sealed class ProcessLoopbackCapture
     public void Stop()
     {
         _stopRequested.Set();
-        _thread?.Join(TimeSpan.FromSeconds(3));
+        // The loop re-checks the stop flag at least every 200ms, so a healthy thread exits
+        // almost instantly — a long timeout only matters when a COM call wedged. If it DOES
+        // wedge, say so loudly: them.wav is still open and its header unfinalized, and the
+        // caller is about to transcribe it.
+        var t = _thread;
+        if (t is not null && !t.Join(TimeSpan.FromSeconds(10)))
+            App.Log("loopback stop: capture thread did not exit in 10s — them.wav may be incomplete");
         _thread = null;
         if (_threadError != null) { var e = _threadError; _threadError = null; throw e; }
     }
@@ -134,9 +140,18 @@ public sealed class ProcessLoopbackCapture
 
                 Marshal.ThrowExceptionForHR(audioClient.Start());
                 var frameBytes = Channels * (BitsPerSample / 8);
+                var lastHeaderFlush = Environment.TickCount64;
                 while (!_stopRequested.IsSet)
                 {
                     sampleReady.WaitOne(200);
+                    // Re-finalize the RIFF header every ~5s so a crash mid-meeting leaves a
+                    // playable (truncated) file, not a zero-length header (see MicCapture).
+                    var now = Environment.TickCount64;
+                    if (now - lastHeaderFlush > 5000)
+                    {
+                        lastHeaderFlush = now;
+                        try { writer.Flush(); } catch { /* best-effort */ }
+                    }
                     while (true)
                     {
                         Marshal.ThrowExceptionForHR(captureClient.GetNextPacketSize(out var packetFrames));

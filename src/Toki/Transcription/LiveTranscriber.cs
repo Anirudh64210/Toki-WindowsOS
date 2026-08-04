@@ -30,10 +30,11 @@ public sealed class LiveTranscriber
         int.TryParse(Environment.GetEnvironmentVariable(name), out var v) && v > 0 ? v : fallback;
 
     readonly TranscriptionService _service;
-    readonly List<StreamPipe> _pipes = new();
+    volatile StreamPipe[] _pipes = Array.Empty<StreamPipe>();   // copy-on-add: Feed iterates lock-free
     readonly List<TranscriptSegment> _you = new();
     readonly List<TranscriptSegment> _them = new();
     readonly object _lock = new();
+    readonly object _decodeGate = new();   // serializes worker windows vs Stop's final flush
     Thread? _worker;
     volatile bool _stop;
     bool _started;
@@ -43,8 +44,15 @@ public sealed class LiveTranscriber
 
     public LiveTranscriber(TranscriptionService service) => _service = service;
 
-    /// <summary>Register a stream to transcribe live, in its native capture format.</summary>
-    public void AddStream(Speaker speaker, WaveFormat nativeFormat) => _pipes.Add(new StreamPipe(speaker, nativeFormat));
+    /// <summary>Register a stream to transcribe live, in its native capture format. Copy-on-add so a
+    /// capture thread already inside <see cref="Feed"/> never sees a list mutating under it.</summary>
+    public void AddStream(Speaker speaker, WaveFormat nativeFormat)
+    {
+        var next = new StreamPipe[_pipes.Length + 1];
+        Array.Copy(_pipes, next, _pipes.Length);
+        next[^1] = new StreamPipe(speaker, nativeFormat);
+        _pipes = next;
+    }
 
     /// <summary>Feed raw capture bytes (native format) for a stream. Safe to call from the capture thread.</summary>
     public void Feed(Speaker speaker, byte[] buffer, int bytes)
@@ -54,7 +62,7 @@ public sealed class LiveTranscriber
 
     public void Start()
     {
-        if (_started || _pipes.Count == 0) return;
+        if (_started || _pipes.Length == 0) return;
         _started = true;
         _worker = new Thread(Work) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "toki-live-asr" };
         _worker.Start();
@@ -69,14 +77,21 @@ public sealed class LiveTranscriber
     {
         if (!_started) return null;
         _stop = true;
-        _worker?.Join(TimeSpan.FromSeconds(30));   // let any in-flight window decode finish
+        // Let any in-flight window decode finish. If the worker is STILL busy after this, the
+        // final flush below serializes behind it on the decode gate instead of mutating the
+        // same pipes the worker is reading (which corrupted the transcript tail).
+        if (_worker?.Join(TimeSpan.FromSeconds(30)) == false)
+            App.Log("live stop: worker busy past 30s — flush will wait on the decode gate");
         // Final flush: whatever audio is still buffered gets one last decode per stream.
         foreach (var pipe in _pipes)
         {
             try
             {
-                pipe.Drain();
-                if (pipe.Accum.Count > 0) DecodeWindow(pipe, finalFlush: true);
+                lock (_decodeGate)
+                {
+                    pipe.Drain();
+                    if (pipe.Accum.Count > 0) DecodeWindow(pipe, finalFlush: true);
+                }
             }
             catch (Exception ex) { App.Log($"live final flush {pipe.Speaker} failed: {ex.Message}"); }
         }
@@ -92,13 +107,23 @@ public sealed class LiveTranscriber
         while (!_stop)
         {
             var did = false;
-            foreach (var pipe in _pipes)
+            // Guarded: an escaping exception on a raw background thread would take down the
+            // whole PROCESS mid-meeting. Log, breathe, keep transcribing — the whole-file
+            // pass at stop still covers anything a bad window missed.
+            try
             {
-                pipe.Drain();
-                // Decode as many full windows as have piled up (with lookahead room for the quiet-cut search).
-                while (!_stop && pipe.Accum.Count >= (WinSec + 2 * SearchSec) * Rate)
-                    did |= DecodeWindow(pipe, finalFlush: false);
+                foreach (var pipe in _pipes)
+                {
+                    lock (_decodeGate)
+                    {
+                        pipe.Drain();
+                        // Decode as many full windows as have piled up (with lookahead room for the quiet-cut search).
+                        while (!_stop && pipe.Accum.Count >= (WinSec + 2 * SearchSec) * Rate)
+                            did |= DecodeWindow(pipe, finalFlush: false);
+                    }
+                }
             }
+            catch (Exception ex) { App.Log($"live worker error (recovered): {ex.Message}"); }
             if (!did) Thread.Sleep(PollMs);
         }
     }

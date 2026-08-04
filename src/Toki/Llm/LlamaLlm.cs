@@ -89,9 +89,21 @@ public sealed class LlamaLlm : ILlm, IDisposable
         finally { _gate.Release(); }
     }
 
-    public void Dispose()
+    /// <summary>Tear down only once no generation is running. Freeing the native weights under
+    /// an active InferAsync is a llama.cpp use-after-free — an uncatchable AccessViolation that
+    /// takes the whole app down. Acquire the generation gate first (bounded); on timeout keep
+    /// the model alive (a leak beats a crash), and dispose the semaphore LAST so a streamer's
+    /// finally-release can never hit a disposed gate.</summary>
+    public void DisposeWhenIdle()
     {
-        _gate.Dispose();
-        _model.Dispose();
+        if (!_gate.Wait(TimeSpan.FromSeconds(30)))
+        {
+            App.Log("LLM release skipped — a generation is still running");
+            return;
+        }
+        try { _model.Dispose(); }
+        finally { _gate.Dispose(); }
     }
+
+    public void Dispose() => DisposeWhenIdle();
 }
