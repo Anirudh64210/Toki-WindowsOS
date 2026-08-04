@@ -53,6 +53,7 @@ static class SelfTests
                 "--followuptest" => FollowUpTest(),
                 "--embedtest" => EmbedTest(),
                 "--caltest" => CalTest(args),
+                "--preptest" => PrepTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -962,6 +963,49 @@ static class SelfTests
             }
         }
         catch (Toki.Calendar.GoogleAuthException ex) { return Fail(ex.Message); }
+    }
+
+    // Verifies the deterministic prep-card matching + agenda parse against a temp store (no network/model).
+    static int PrepTest()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"toki-preptest-{Environment.ProcessId}.db");
+        try
+        {
+            var store = new MeetingStore(dbPath);
+            store.Save(new MeetingRecord
+            {
+                Title = "Design review — PixelFlow", Kind = MeetingKind.Meeting, StartedAt = DateTimeOffset.Now.AddDays(-2),
+                Notes = new NoteSet
+                {
+                    Tldr = "Blockers are brand tokens and the webhook. Ship moved to Thursday.",
+                    Actions = { new ActionItem { Text = "Confirm brand font + hex.", Owner = "Priya" },
+                                new ActionItem { Text = "Wire the webhook.", Owner = "Sid" } },
+                },
+            });
+
+            Toki.Calendar.CalEvent Ev(string title) => new("id1", title,
+                DateTimeOffset.UtcNow.AddMinutes(5), DateTimeOffset.UtcNow.AddMinutes(35), false, null,
+                "https://meet.google.com/x", "https://cal", new List<Toki.Calendar.CalAttendee> { new("a@x.com", "A", "accepted", false, false) });
+
+            var match = Toki.Calendar.PrepBuilder.Build(Ev("Design review — PixelFlow"), store);
+            var noMatch = Toki.Calendar.PrepBuilder.Build(Ev("Quarterly finance deep-dive"), store);
+            var agenda = Toki.Calendar.PrepBuilder.ParseAgenda("<ul><li>Confirm blockers</li><li>Lock the ship date</li></ul>");
+
+            Console.WriteLine($"  match  : last={(match.LastTime?.Title ?? "(none)")}  open={match.StillOpen.Count}");
+            Console.WriteLine($"  noMatch: last={(noMatch.LastTime?.Title ?? "(none)")}");
+            Console.WriteLine($"  agenda : {string.Join(" | ", agenda)}");
+
+            var ok = match.LastTime is not null && match.StillOpen.Count == 2
+                     && match.StillOpen.Any(a => a.Owner == "Priya")
+                     && noMatch.LastTime is null
+                     && agenda.Count == 2 && agenda[0] == "Confirm blockers";
+            Console.WriteLine(ok
+                ? "[--preptest] PASS — matched a prior meeting by title, pulled 2 open items, rejected the unrelated event, parsed the agenda."
+                : "FAIL: prep matching/agenda wrong");
+            return ok ? 0 : 1;
+        }
+        catch (Exception ex) { return Fail($"--preptest threw: {ex}"); }
+        finally { try { File.Delete(dbPath); } catch { } }
     }
 
     static int Seconds(string[] args, int fallback)

@@ -45,11 +45,14 @@ product's design language (dividers-not-boxes, calm). Small, self-contained, unb
   (one-box natural language via `QuickEventParser`), **edit** (`events.patch`), **delete** (undo for solo /
   confirm for guested). See `mansplain/25`, README M7.1, ARCHITECTURE "Google Calendar UI", the
   `calendar-foundation` memory.
-  **Still to build:** (1) **prep cards** — before a meeting: last decisions, open action items, who's
-  attending (356×306 design state, likely a new `PillState`/an assistant surface); (2) **voice create**
-  ("schedule a call with Ana tomorrow at 3" via the push-to-talk Ask path → `QuickEventParser`); (3) an
-  ambient **imminent-meeting auto-surface** on the notch (owner decision: auto-appear vs hover-only).
-  Outlook is post-v1 (UI is already provider-neutral — `CalendarService.ProviderName` is the seam).
+  **Prep cards DONE (M7.2, 2026-08-03, render + logic verified):** ~5-min-before auto-surfaced prep card
+  (LAST TIME recap + STILL OPEN items w/ owners + AGENDA), deterministic/no-LLM, honest first-time state,
+  restrained `PrepWatcher`; `--preptest`, `--state PrepCard`, `TOKI_PREP_LEAD`. See README M7.2,
+  ARCHITECTURE "Pre-meeting prep cards", `mansplain/26`.
+  **Still to build:** (1) **voice create** ("schedule a call with Ana tomorrow at 3" via the push-to-talk
+  Ask path → `QuickEventParser`); (2) **owner confirm** the prep-card **auto-surface vs hover-only** choice
+  (currently auto; one-line switch); (3) optionally let an imminent COMING-UP row on Home open its prep
+  card directly. Outlook is post-v1 (UI provider-neutral — `CalendarService.ProviderName` is the seam).
   Ship-side: Google sensitive-scope **verification** (privacy policy + demo video) before selling → M8.
 - **Speaker diarisation** — real named speakers in transcripts instead of just YOU/THEM. (Task
   name-tags already done; transcript-level diarisation is the remaining, bigger piece — pairs well with
@@ -87,6 +90,17 @@ Proposed enhancement — a genuinely graduated policy:
 Honest caveats: 4 GB *total* RAM is the heuristic-only floor regardless; the biggest speed lever stays
 **GPU/VRAM**, not RAM. (See the `dev-pc-specs` memory for the exact current thresholds. Dev box = 12 GB
 RAM / RTX 3050 4 GB → "normal mode", partial GPU 20 layers.)
+
+**⭐ TODO — automatic load-on-demand for the AI model (decided 2026-08-03).** Real finding on the owner's
+12 GB machine: Toki **prewarms the ~2.4 GB Qwen model at launch and keeps it resident**, which on a 12 GB
+box (≈11.3 GB usable, often only ~1–3 GB free with Chrome/Slack/etc.) leaves things tight and feels heavy
+at startup. Measured clean (no leak — closing Toki returned the full ~2.4 GB). **Decision: make model
+residency AUTOMATIC by RAM tier, not a manual toggle** — a modest-RAM machine (≈≤16 GB) uses **load-on-
+demand** (model loads only when notes/Ask need it, then can unload after idle; costs ~10 s on the first
+note per session), while a high-RAM machine (32 GB+) keeps today's **prewarm** for instant notes. Zero
+config, fits Toki's "just works" ethos. Keep an optional Settings override — "Keep AI model loaded:
+**Auto** / Always / On-demand" — defaulting to Auto, for power users only. This is the concrete first
+slice of the RAM-tiers work above; the prewarm switch lives near `App.LowMemoryMode`.
 
 ### 2. BYO-API key as the "sharp brain" lever — **partially exists; not surfaced**
 The P10 dialogue brain (`docs/ask-toki-brain.md`) routes turns and builds plain system+user prompts, so

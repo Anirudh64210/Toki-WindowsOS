@@ -183,9 +183,10 @@ public static class CalendarClient
             var htmlLink = Str(item, "htmlLink");
             var meet = ExtractMeetLink(item);
             var attendees = ParseAttendees(item);
+            var description = Str(item, "description");
 
             return new CalEvent(id, summary, start.Value.ToUniversalTime(), end2.ToUniversalTime(),
-                allDay, location, meet, htmlLink, attendees);
+                allDay, location, meet, htmlLink, attendees, description);
         }
         catch { return null; }
     }

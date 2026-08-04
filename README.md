@@ -692,3 +692,31 @@ The visible calendar, built on the foundation's `CalendarService` facade. Design
   create / **edit** / delete / parse run live against a real Google account (edit = insert→patch→verify→delete PASS).
 
 450/450 tests pass (+4 natural-language parser: title/time/email extraction, 30-min default, no-time, past-rolls-forward).
+
+## M7.2 (Pre-meeting prep cards) — 2026-08-03
+
+The calendar earns its keep: ~5 min before a real meeting, Toki auto-surfaces a prep card fusing the
+calendar (what's next) with the notes store (what happened last time + what's still open). Design matches
+`Toki-ProductDesign/④ Assistant — prep card`; story in [`mansplain/26-prep-cards.md`](mansplain/26-prep-cards.md).
+
+- **Content (100% deterministic — no LLM, instant, zero extra RAM):** title + amber "in N min", **LAST
+  TIME (N days ago)** recap (the matched meeting's TL;DR), **STILL OPEN** action items with amber owner
+  tags (tickable — writes through to the store), **AGENDA** parsed from the calendar invite's description.
+- **Matching is honest:** a `CalEvent` links to a prior meeting by **title/topic** (`TitleMatchIds` →
+  `SearchRelevant` + a shared-title confidence bar) — never by attendee (notes don't store emails). No
+  confident match → an honest **first-time card** ("First time with this one — I'll take notes if you
+  record"), never an invented recap.
+- **Trigger (`PrepWatcher`):** a 30 s calendar poll raises the card in a 5-min lead window
+  (`TOKI_PREP_LEAD` override), **restrained** — real meetings only (link or other guests), **once per
+  meeting-instance ever**, only while the notch is idle (Hidden/Collapsed), never during a fullscreen
+  app/presentation, "Later" suppresses it, and it auto-retires if you walk away. Never records on its own
+  — "Join and record" is the human click (Hard Constraint #3).
+- New: `Calendar/PrepBuilder` (deterministic assembly + matching + agenda parse), `Calendar/PrepWatcher`
+  (the trigger), `Views/PrepCardView`, `Dev/PrepSamples`; `CalEvent` gained `Description`;
+  `PillState.PrepCard` (auto-height 356×306). Self-test `--preptest`; demo `--state PrepCard`.
+- **Verified:** matched + first-time cards render-checked in light **and** dark (near-exact to design ④);
+  `--preptest` proves title-match / open-item pull / unrelated-event rejection / agenda parse; live
+  `--state PrepCard` runs without crashing (the ctor-grow recursion guard from the Home fix applied here too).
+
+450/450 tests pass. Owner to confirm live: the auto-surface-vs-hover choice, and the real T-5 pop-up +
+"Join and record" against a live meeting.

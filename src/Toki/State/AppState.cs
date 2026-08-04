@@ -10,8 +10,8 @@ public sealed class AppState
     {
         // The tiny Toki pill (Collapsed) is the resting state; hovering it reveals Home,
         // hovering out collapses Home back to it — so Collapsed ⇄ Home both ways.
-        [PillState.Hidden]        = [PillState.Home, PillState.MeetingPrompt, PillState.Collapsed],
-        [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden],
+        [PillState.Hidden]        = [PillState.Home, PillState.MeetingPrompt, PillState.Collapsed, PillState.PrepCard],
+        [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden, PillState.PrepCard],
         [PillState.MeetingPrompt] = [PillState.RecordingBar, PillState.Hidden],
         [PillState.RecordingBar]  = [PillState.RecordingOpen, PillState.Summarizing],
         [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing],
@@ -22,6 +22,7 @@ public sealed class AppState
         [PillState.Library]       = [PillState.Hidden, PillState.Home, PillState.Settings, PillState.Notes, PillState.ManualNote],
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library],
         [PillState.Calendar]      = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Settings],
+        [PillState.PrepCard]      = [PillState.RecordingBar, PillState.Hidden, PillState.Calendar],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
         // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
         // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.
