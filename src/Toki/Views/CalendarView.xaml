@@ -38,44 +38,41 @@
                     Content="&#xE76C;" Click="OnNextWeek"/>
         </Grid>
 
-        <!-- Quick-create composer (natural language). Collapsed until ＋ New. -->
-        <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,10,0,0"
-                Background="{DynamicResource SurfaceHi}" BorderBrush="{DynamicResource Hairline}"
-                BorderThickness="1" CornerRadius="12" Padding="11,10">
+        <!-- Quick-create composer (natural language). A flat SECTION under the header (a top hairline,
+             no enclosing card), so it reads like Fantastical/Cron's NL bar, not a nested widget. -->
+        <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,12,0,0"
+                BorderBrush="{DynamicResource Hairline}" BorderThickness="0,1,0,0" Padding="0,12,0,2">
             <StackPanel>
-                <Border Background="{DynamicResource Chip}" CornerRadius="9" Padding="10,0">
-                    <TextBox x:Name="QuickBox" Background="Transparent" BorderThickness="0" Height="32"
+                <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+                    <TextBox x:Name="QuickBox" Background="Transparent" BorderThickness="0" Height="36"
                              Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                             FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                             FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                              TextChanged="OnQuickText" PreviewKeyDown="OnQuickKey"/>
                 </Border>
-                <TextBlock x:Name="ComposerHint" Style="{StaticResource Dim}" FontSize="9" Margin="2,3,0,0"
-                           Text="Try &quot;Design sync tomorrow 2pm with ana@work.com&quot;"/>
-                <TextBlock x:Name="ParsePreview" FontSize="11" FontFamily="{StaticResource UiFont}"
-                           Foreground="{DynamicResource Green}" Margin="2,5,0,0" Visibility="Collapsed"/>
+                <TextBlock x:Name="ComposerHint" Style="{StaticResource Caption}" Margin="2,5,0,0"
+                           Text="Try “Design sync tomorrow 2pm with ana@work.com”"/>
+                <TextBlock x:Name="ParsePreview" Style="{StaticResource Secondary}" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Green}" Margin="2,6,0,0" Visibility="Collapsed"/>
 
                 <!-- Optional attendees, revealed by the People chip -->
                 <Border x:Name="PeopleRow" Visibility="Collapsed" Background="{DynamicResource Chip}"
-                        CornerRadius="9" Padding="10,0" Margin="0,7,0,0">
-                    <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="30"
+                        CornerRadius="10" Padding="12,0" Margin="0,8,0,0">
+                    <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="32"
                              Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                             FontSize="11.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"/>
+                             FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"/>
                 </Border>
 
-                <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
-                    <Button x:Name="DurationChip" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
-                            FontSize="10.5" Padding="10,5" Content="30 min" Click="OnCycleDuration"/>
-                    <Button x:Name="MeetChip" Style="{StaticResource PillButton}" FontSize="10.5" Padding="10,5"
-                            Margin="7,0,0,0" Click="OnToggleMeet"/>
-                    <Button x:Name="PeopleChip" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
-                            FontSize="10.5" Padding="10,5" Margin="7,0,0,0" Content="＋ People" Click="OnTogglePeople"/>
+                <StackPanel Orientation="Horizontal" Margin="0,11,0,0">
+                    <Button x:Name="DurationChip" Style="{StaticResource ChipButton}" Content="30 min" Click="OnCycleDuration"/>
+                    <Button x:Name="MeetChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Content="Google Meet" Click="OnToggleMeet"/>
+                    <Button x:Name="PeopleChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Content="Add people" Click="OnTogglePeople"/>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,9,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
                     <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"
-                            Foreground="{DynamicResource TextDim}" FontSize="11" Padding="10,5" Content="Cancel"
+                            Foreground="{DynamicResource TextDim}" FontSize="11.5" Padding="12,6" Content="Cancel"
                             Click="OnComposerCancel"/>
-                    <Button x:Name="ComposerCreate" Style="{StaticResource WhiteButton}" FontSize="11" Padding="14,5"
+                    <Button x:Name="ComposerCreate" Style="{StaticResource WhiteButton}" FontSize="11.5" Padding="18,6"
                             Margin="8,0,0,0" Content="Create" Click="OnComposerCreate"/>
                 </StackPanel>
             </StackPanel>

@@ -39,19 +39,20 @@ public enum AppCommand
 public static class CommandRouter
 {
     // Starts like a question → never a command. (ASR gives no '?', so this lead-word test is load-bearing.)
-    static readonly Regex QuestionLead = new(
+    // internal: shared with CalendarCommand so voice-create uses the SAME question veto + ASR fluff strip.
+    internal static readonly Regex QuestionLead = new(
         @"^(what|whats|what's|when|who|whos|who's|where|why|how|which|did|do|does|was|were|is|are|has|have|can\s+i|should|could\s+i|tell\s+me|give\s+me|show\s+me\s+(what|the\s+notes))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Politeness / address fluff stripped from the FRONT ("hey toki, please could you open…").
     // The address uses the FUZZY wake-name (WakeName.Pattern): push-to-talk ASR renders "Toki" as
     // Doki/Toky/Docie/Toku/Tokyo/… and a mis-heard name must never turn a command into a notes search.
-    static readonly Regex Fluff = new(
+    internal static readonly Regex Fluff = new(
         $@"^(hey\s+{WakeName.Pattern}\b[,!.]?|okay\s+{WakeName.Pattern}\b[,!.]?|ok\s+{WakeName.Pattern}\b[,!.]?|{WakeName.Pattern}\b[,!.]?|please\b|can\s+you\b|could\s+you\b|would\s+you\b|will\s+you\b|i\s+want\s+to\b|i\s+wanna\b|i'?d\s+like\s+to\b|i\s+need\s+to\b|let'?s\b|just\b|maybe\b|hey\b)\s*",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Politeness stripped from the END ("open the library please / for me / real quick / …, toki?").
-    static readonly Regex TrailFluff = new(
+    internal static readonly Regex TrailFluff = new(
         $@"(\s+(please|now|for\s+me|real\s+quick|quick|thanks|thank\s+you|already|then)|[\s,]+{WakeName.Pattern}\b)+\s*[.!?]?$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 

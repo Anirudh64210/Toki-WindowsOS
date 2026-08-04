@@ -49,11 +49,14 @@ product's design language (dividers-not-boxes, calm). Small, self-contained, unb
   (LAST TIME recap + STILL OPEN items w/ owners + AGENDA), deterministic/no-LLM, honest first-time state,
   restrained `PrepWatcher`; `--preptest`, `--state PrepCard`, `TOKI_PREP_LEAD`. See README M7.2,
   ARCHITECTURE "Pre-meeting prep cards", `mansplain/26`.
-  **Still to build:** (1) **voice create** ("schedule a call with Ana tomorrow at 3" via the push-to-talk
-  Ask path → `QuickEventParser`); (2) **owner confirm** the prep-card **auto-surface vs hover-only** choice
-  (currently auto; one-line switch); (3) optionally let an imminent COMING-UP row on Home open its prep
-  card directly. Outlook is post-v1 (UI provider-neutral — `CalendarService.ProviderName` is the seam).
-  Ship-side: Google sensitive-scope **verification** (privacy policy + demo video) before selling → M8.
+  **Voice-create DONE (M7.3, 2026-08-03):** "schedule a call with Ana tomorrow at 3" on push-to-talk →
+  confirm-gated create (`Llm/CalendarCommand.cs`, two tiers in `NotesQa.AskStreamAsync`,
+  `ConversationContext.PendingCreate`); `--voicecreatetest`, 472 tests. Also fixed the shared parser so a
+  bare "at 3" = 3 PM. See README M7.3, ARCHITECTURE, `mansplain/27`.
+  **Still to build:** (1) **owner confirm** the prep-card **auto-surface vs hover-only** choice (currently
+  auto; one-line switch); (2) optionally let an imminent COMING-UP row on Home open its prep card directly.
+  Outlook is post-v1 (UI provider-neutral — `CalendarService.ProviderName` is the seam). Ship-side: Google
+  sensitive-scope **verification** (privacy policy + demo video) before selling → M8.
 - **Speaker diarisation** — real named speakers in transcripts instead of just YOU/THEM. (Task
   name-tags already done; transcript-level diarisation is the remaining, bigger piece — pairs well with
   the on-device-embeddings unblock.)
@@ -64,8 +67,16 @@ product's design language (dividers-not-boxes, calm). Small, self-contained, unb
   toggle exists today.
 - **Manual/custom notes** — owner decision still pending: a separate left-panel section vs. a "Manual
   notes" filter in the sort menu above.
-- **Notch acrylic on/off toggle** + a blurrier white notch (white-theme background text can be hard to
-  read through the current acrylic). Acrylic exists but isn't user-toggleable.
+- ✅ **Notch glassy/blur toggle — DONE (M9.0, 2026-08-03).** Settings → Appearance → "Glassy notch": a real
+  DWM acrylic blur-behind (theme-aware frost, one size, flush top, rounded bottom, off by default). See the
+  `redesign-and-glass` memory + ARCHITECTURE "glassy-notch blur" for the full interop.
+
+- **⭐ Premium redesign — pass 2 (in flight).** Pass 1 shipped (type ramp, green `TokiCheck`, `TokiSwitch`,
+  `ChipButton`, colour-coded note headers, flattened composer, "Calendar" rename, one-accent icons, glass
+  notch). **Pass 2 to build:** the Wispr/Vercel **hover-expand "section pills"** (rows grow on hover →
+  reveal Join/Prep/Edit inline; Toki already has the hover engine in `PillWindow`), the type/spacing sweep
+  on Library + small states, and a motion-consistency pass. Full spec is in the Fable design audit;
+  summary in the `redesign-and-glass` memory.
 
 ---
 

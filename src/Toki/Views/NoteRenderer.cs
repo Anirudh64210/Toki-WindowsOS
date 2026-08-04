@@ -11,10 +11,10 @@ namespace Toki.Views;
 
 /// <summary>
 /// Builds a meeting's notes (Summary / Key points / Action items / Transcript) into a
-/// panel, shared by the pill Notes view and the Library window. Deliberately clean and
-/// MONOTONE — section labels are a quiet uppercase grey (no coloured headers, no icons),
-/// generous consistent spacing, so it reads calm and Apple-clean. Colour is reserved for
-/// content, never chrome.
+/// panel, shared by the pill Notes view and the Library window. Clean, generous, consistent
+/// spacing so it reads calm. Section labels are colour-CODED by meaning (decisions green,
+/// actions blue, questions/risks purple — one accent per meaning, per design ⑤); everything
+/// else is quiet grey. Text is left-aligned (justify makes rivers in a narrow column).
 /// </summary>
 public static class NoteRenderer
 {
@@ -60,7 +60,7 @@ public static class NoteRenderer
         {
             SectionHeader(body, "SUMMARY", spacious, first: true);
             // Justified like the bullets/actions below it, so the summary reads as a clean block, not ragged.
-            var s = Sel(m.Notes.Tldr, fs, B("TextSoft"), TextAlignment.Justify);
+            var s = Sel(m.Notes.Tldr, fs, B("TextSoft"));
             s.Margin = new Thickness(0, 0, 0, 2);
             body.Children.Add(s);
         }
@@ -117,13 +117,24 @@ public static class NoteRenderer
         foreach (var r in list) body.Children.Add(r);
     }
 
-    // Quiet, monotone section label — small uppercase grey, well spaced. No colour, no icon.
+    // Section label — small uppercase, well spaced, COLOR-CODED by meaning (design ⑤): decisions green,
+    // actions blue, questions/risks purple; everything else quiet grey. Weight = SemiBold, never heavy.
     static void SectionHeader(Panel body, string title, bool spacious, bool first = false) =>
         body.Children.Add(new TextBlock
         {
             Text = title, FontFamily = Ui, FontSize = spacious ? 10.5 : 9.5, FontWeight = FontWeights.SemiBold,
-            Foreground = B("TextDim"), Margin = new Thickness(0, first ? 0 : (spacious ? 22 : 17), 0, spacious ? 10 : 8),
+            Foreground = B(HeaderColorKey(title)), Margin = new Thickness(0, first ? 0 : (spacious ? 22 : 17), 0, spacious ? 10 : 8),
         });
+
+    // One meaning → one accent (green=decided, blue=action, purple=open question/risk), else quiet grey.
+    static string HeaderColorKey(string title)
+    {
+        var t = (title ?? "").ToUpperInvariant();
+        if (t.Contains("DECISION")) return "Green";
+        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO") || t.Contains("NEXT STEP")) return "Blue";
+        if (t.Contains("QUESTION") || t.Contains("OPEN") || t.Contains("RISK") || t.Contains("BLOCKER")) return "Purple";
+        return "TextDim";
+    }
 
     static FrameworkElement Bullet(string text, double fs, bool spacious)
     {
@@ -135,7 +146,7 @@ public static class NoteRenderer
             Width = 3.5, Height = 3.5, Fill = B("TextDim"),
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(2, fs / 2, 12, 0),
         };
-        var tb = Sel(text, fs, B("Text"), TextAlignment.Justify);
+        var tb = Sel(text, fs, B("Text"));
         Grid.SetColumn(tb, 1);
         row.Children.Add(dot);
         row.Children.Add(tb);
@@ -152,7 +163,7 @@ public static class NoteRenderer
         check.Checked += (_, _) => Toggle(a, true);
         check.Unchecked += (_, _) => Toggle(a, false);
 
-        var text = Sel(a.Text, fs, B("Text"), TextAlignment.Justify);
+        var text = Sel(a.Text, fs, B("Text"));
         if (a.Done) text.Opacity = 0.5;   // done = dimmed (a TextBox can't strike-through, and it stays selectable)
 
         var right = new StackPanel();
@@ -259,7 +270,7 @@ public static class NoteRenderer
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
             doc.Blocks.Add(DocHeader("SUMMARY", first: true));
-            doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr)) { Foreground = B("TextSoft"), LineHeight = fs + 9, TextAlignment = TextAlignment.Justify, Margin = new Thickness(0, 0, 0, 2) });
+            doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr)) { Foreground = B("TextSoft"), LineHeight = fs + 9, TextAlignment = TextAlignment.Left, Margin = new Thickness(0, 0, 0, 2) });
         }
         foreach (var sec in m.Notes.EffectiveSections())
         {

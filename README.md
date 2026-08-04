@@ -720,3 +720,56 @@ calendar (what's next) with the notes store (what happened last time + what's st
 
 450/450 tests pass. Owner to confirm live: the auto-surface-vs-hover choice, and the real T-5 pop-up +
 "Join and record" against a live meeting.
+
+## M7.3 (Voice-create a meeting) — 2026-08-03
+
+Say "schedule a call with Ana tomorrow at 3" on push-to-talk → Toki confirms, then creates it. Story in
+[`mansplain/27-voice-create.md`](mansplain/27-voice-create.md); routing detail in ARCHITECTURE.
+
+- **A new command-tier intent in the dialogue brain** (`Llm/CalendarCommand.cs`), slotted into
+  `NotesQa.AskStreamAsync` **before** retrieval/general-chat (a create is never answered from the notes)
+  and after the safety/identity tiers. Deterministic detection (no LLM): a tight scheduling-verb + event-
+  noun / "put … on my calendar" / "remind me to" shape, with the **question-shape veto reused from
+  `CommandRouter`** so "when is my call with Ana" / "what meetings do I have" stay READ turns.
+- **Confirm before booking (the point):** turn 1 never creates — it reads back "Create 'Call with Ana' —
+  tomorrow, 3:00–3:30 PM …?" and holds a single-shot `ConversationContext.PendingCreate`; "yes" creates
+  once, "no" cancels, and a **stray "yes" later can never create** (pending is cleared up front). No time
+  → asks "when?". Not connected → honest, books nothing. A mishearing costs one "no".
+- **Honest about people:** a spoken "with Ana" is a name, not an email — it goes in the title (+ a
+  description note), never a fabricated invite. Reuses the shared `QuickEventParser` + `CalendarService`.
+- **Parser fix (helps the typed composer too):** a bare hour like "at 3" now resolves to the **business-
+  hours reading (3 PM)**, not 3 AM; explicit "9am"/"8pm" are respected.
+- **No UI changes** — the confirm/result flow rides the existing Ask streaming path on both the notch and
+  the Library. Self-test `--voicecreatetest` (detection matrix + the confirm gate, no mic/model/network).
+
+472/472 tests pass (+22: detection positives/negatives, title/time/person extraction, and the full
+confirm-gate matrix incl. stray-yes and no-time). Owner to confirm live: hold-to-talk → speak → "yes" →
+event on the real calendar.
+
+## M9.0 (Premium redesign — pass 1 + glassy notch) — 2026-08-03
+
+First pass of a taste-driven redesign (owner: the UI read "AI-slop"), researched via Mobbin + premium
+references (Wispr Flow, Linear, Vercel, Cron…). Story in `mansplain/`, decisions in ARCHITECTURE.
+
+- **Design tokens** (`Theme.xaml`): a restrained type ramp (was 18 ad-hoc sizes → named `Title/BodyStrong/
+  Secondary/Caption/Micro`; section headers SemiBold not heavy Bold). Reused across the touched screens.
+- **Redesigned checkbox** (`TokiCheck`): 18px, correct 12px tick (no more stretch-distortion), **green** fill
+  when done (frees coral for record only), spring-pop on check. Plus **`TokiSwitch`** — a real toggle
+  replacing the bare Win32 checkbox in Settings.
+- **Notes**: colour-coded section headers (decisions green / actions blue / questions purple, per design ⑤)
+  and left-aligned text (justify made rivers in a narrow column).
+- **Calendar composer**: flattened (was box-in-box-in-box → a section under a hairline), clean outlined
+  **chip toggles** (`ChipButton`) — the "Google Meet ✓" text-slop is now a green-filling toggle.
+- **Home**: "Meeting" → **"Calendar"** (it opens the calendar, not starts a meeting); one-accent icons
+  (coral mic on Take Notes, monochrome calendar).
+- **Fixes**: typing in the create composer no longer auto-tucks the notch (idle-tuck now respects focused
+  input); a bare "at 3" resolves to 3 PM (business-hours reading) in the shared parser.
+- **Glassy notch toggle** (Settings → Appearance): a **real DWM acrylic blur-behind** that frosts whatever's
+  behind the notch (not a tint), theme-aware (dark/white frost, re-tints on live theme swap), one consistent
+  size (glass = opaque size, no growth), flush square top (window extends above the screen edge so DWM's
+  top-corner rounding hides off-screen), rounded bottom, no rim. Off by default. See ARCHITECTURE for the
+  full interop (why true blur can't coexist with a 22px corner, and every constraint solved).
+
+472/472 tests pass. **Still to build (redesign pass 2):** the Wispr/Vercel hover-expand "section pills"
+(rows growing on hover to reveal actions), the remaining type/spacing sweep (Library + small states), and
+the motion-consistency pass.

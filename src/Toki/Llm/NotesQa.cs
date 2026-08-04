@@ -144,6 +144,31 @@ public static class NotesQa
             return new Answer(text, [], true);
         }
 
+        // 0.4) PENDING CALENDAR CREATE: if we just asked the user to confirm a create (or asked "when?"),
+        //      THIS turn belongs to that — resolved before anything else so "yes"/"okay" can't be eaten by
+        //      small-talk. Single-shot: the pending is cleared up front, so a stray later "yes" never
+        //      creates, and a create never happens without an explicit confirmation.
+        if (ctx?.PendingCreate is { } pending)
+        {
+            ctx.PendingCreate = null;
+            if (pending.Start is null)
+            {
+                var t = Toki.Calendar.QuickEventParser.Parse(question, DateTimeOffset.Now);
+                if (t.Start is not null)
+                {
+                    var filled = pending with { Start = t.Start, End = t.End };
+                    ctx.PendingCreate = filled;
+                    return Canned(CalendarCommand.ConfirmPrompt(filled));
+                }
+                // no time given — the draft dies; fall through and answer this turn normally
+            }
+            else if (CalendarCommand.IsYes(question))
+                return Canned(await CalendarCommand.ExecuteAsync(pending, ct).ConfigureAwait(false));
+            else if (CalendarCommand.IsNo(question))
+                return Canned(CalendarCommand.Cancelled());
+            // anything else → pending already cleared, fall through to normal routing
+        }
+
         // 0.5) SMALL-TALK: greetings / thanks / "who are you" get a short canned reply — never a notes
         //      search (so "Good morning" can't return a rambling meeting summary).
         if (SmallTalk.TryReply(question) is string chit) return Canned(chit);
@@ -161,6 +186,18 @@ public static class NotesQa
         //      for the user's name and cited three meetings (real screenshot).
         if (UserFacts.TryCapture(question, ctx) is string ack) return Canned(ack);
         if (UserFacts.TryIdentity(question) is string who) return Canned(who);
+
+        // 0.75) VOICE CREATE: "schedule a call with Ana tomorrow at 3" is a command to CREATE an event.
+        //       Detected deterministically, then CONFIRMED before anything is booked (a mishearing must
+        //       never silently create an event). Before the misheard-command clarifier (so it owns its
+        //       scheduling verbs) and before any retrieval (a create is never "answered" from the notes).
+        if (ctx is not null && CalendarCommand.TryDetect(question, DateTimeOffset.Now) is { } draft)
+        {
+            if (!(CalendarCommand.ConnectedOverride ?? Toki.Calendar.CalendarService.Instance.IsConnected))
+                return Canned(CalendarCommand.NotConnected());
+            ctx.PendingCreate = draft;
+            return Canned(draft.Start is null ? CalendarCommand.WhenPrompt(draft) : CalendarCommand.ConfirmPrompt(draft));
+        }
 
         // 0.8) MISHEARD COMMAND: a command-shaped utterance that matched no real command ("switch to
         //      LIKE theme" — ASR for "light theme") degrades to a targeted clarification, never to

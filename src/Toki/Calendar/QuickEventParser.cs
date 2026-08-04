@@ -64,15 +64,23 @@ public static class QuickEventParser
     // passed today), roll a time-only reading forward a day so a create always lands ahead.
     static (DateTimeOffset s, DateTimeOffset e)? PickFuture(IList<Dictionary<string, string>> values, DateTimeOffset now)
     {
-        (DateTimeOffset s, DateTimeOffset e)? future = null, past = null;
+        var futures = new List<(DateTimeOffset s, DateTimeOffset e)>();
+        (DateTimeOffset s, DateTimeOffset e)? past = null;
         foreach (var v in values)
         {
             var r = ToRange(v);
             if (r is null) continue;
-            if (r.Value.s >= now) { if (future is null || r.Value.s < future.Value.s) future = r; }
+            if (r.Value.s >= now) futures.Add(r.Value);
             else if (past is null || r.Value.s > past.Value.s) past = r;
         }
-        if (future is not null) return future;
+        if (futures.Count > 0)
+        {
+            // Ambiguous bare hours ("at 3") resolve to BOTH 3 AM and 3 PM — prefer the business-hours
+            // reading (7am–8pm), since a meeting "at 3" means the afternoon; else the soonest future.
+            static bool Biz((DateTimeOffset s, DateTimeOffset e) x) => x.s.Hour is >= 7 and < 20;
+            var biz = futures.Where(Biz).OrderBy(x => x.s).ToList();
+            return biz.Count > 0 ? biz[0] : futures.OrderBy(x => x.s).First();
+        }
         if (past is not null)
         {
             // Bump a same-day-but-past reading to tomorrow so "lunch at 1pm" (when it's 3pm) means tomorrow.

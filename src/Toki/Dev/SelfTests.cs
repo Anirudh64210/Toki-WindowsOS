@@ -54,6 +54,7 @@ static class SelfTests
                 "--embedtest" => EmbedTest(),
                 "--caltest" => CalTest(args),
                 "--preptest" => PrepTest(),
+                "--voicecreatetest" => VoiceCreateTest(),
                 _ => Fail($"unknown self-test '{flag}'"),
             };
         }
@@ -1006,6 +1007,71 @@ static class SelfTests
         }
         catch (Exception ex) { return Fail($"--preptest threw: {ex}"); }
         finally { try { File.Delete(dbPath); } catch { } }
+    }
+
+    // Verifies voice-create end to end WITHOUT a mic/model/network: detection matrix + the confirm gate
+    // (turn 1 never creates; "yes" creates exactly once; "no" cancels; a stray "yes" can't create).
+    static int VoiceCreateTest()
+    {
+        var now = DateTimeOffset.Now;
+        var pass = true;
+
+        string[] positives =
+        {
+            "schedule a call with Ana tomorrow at 3", "hey doki, book a meeting with the design team friday at 10am",
+            "put lunch with sam on my calendar tomorrow at noon", "set up a sync monday 9am",
+            "remind me to send the deck tomorrow at 5", "can you schedule a call with ana tomorrow at 3",
+        };
+        string[] negatives =
+        {
+            "what meetings do I have tomorrow", "when is my call with Ana", "did we schedule the follow-up",
+            "summarize the planning meeting", "who set up the meeting yesterday", "should we schedule another sync",
+            "add a new note in the library", "we scheduled a call for friday",
+        };
+        foreach (var p in positives)
+            if (CalendarCommand.TryDetect(p, now) is null) { pass = false; Console.WriteLine($"  XX should DETECT: \"{p}\""); }
+        foreach (var n in negatives)
+            if (CalendarCommand.TryDetect(n, now) is not null) { pass = false; Console.WriteLine($"  XX should NOT detect: \"{n}\""); }
+        Console.WriteLine($"  detection: {positives.Length} positives + {negatives.Length} negatives checked");
+
+        var creates = 0;
+        CalendarCommand.ConnectedOverride = true;
+        CalendarCommand.CreateOverride = (ev, ct) =>
+        {
+            creates++;
+            return Task.FromResult(new Toki.Calendar.CalEvent("id", ev.Summary, ev.Start.ToUniversalTime(),
+                ev.End.ToUniversalTime(), false, null, null, "https://cal", Array.Empty<Toki.Calendar.CalAttendee>()));
+        };
+        try
+        {
+            var ctx = new ConversationContext();
+            var a1 = NotesQa.AskAsync("schedule a call with Ana tomorrow at 3", ctx).GetAwaiter().GetResult();
+            Console.WriteLine($"  turn1: {a1.Text}");
+            var gateOk = creates == 0 && ctx.PendingCreate is not null && a1.Text.Contains("yes");
+            var a2 = NotesQa.AskAsync("yes", ctx).GetAwaiter().GetResult();
+            Console.WriteLine($"  turn2: {a2.Text}");
+            var createdOk = creates == 1 && ctx.PendingCreate is null && a2.Text.StartsWith("Done", StringComparison.OrdinalIgnoreCase);
+
+            var before = creates;
+            var ctx2 = new ConversationContext();
+            NotesQa.AskAsync("book a meeting with sam tomorrow at 4", ctx2).GetAwaiter().GetResult();
+            NotesQa.AskAsync("no", ctx2).GetAwaiter().GetResult();
+            var cancelOk = creates == before && ctx2.PendingCreate is null;
+
+            // Stray-yes safety: an unrelated turn clears the pending (deterministic small-talk, no model),
+            // so a later "yes" has nothing to create.
+            var ctx3 = new ConversationContext();
+            NotesQa.AskAsync("set up a sync monday 9am", ctx3).GetAwaiter().GetResult();
+            NotesQa.AskAsync("thanks", ctx3).GetAwaiter().GetResult();
+            var strayOk = ctx3.PendingCreate is null;
+
+            Console.WriteLine($"  gate={gateOk}  created-once={createdOk}  cancel={cancelOk}  stray-safe={strayOk}");
+            pass &= gateOk && createdOk && cancelOk && strayOk;
+        }
+        finally { CalendarCommand.ConnectedOverride = null; CalendarCommand.CreateOverride = null; }
+
+        Console.WriteLine(pass ? "[--voicecreatetest] PASS — detection matrix + confirm gate all correct." : "FAIL");
+        return pass ? 0 : 1;
     }
 
     static int Seconds(string[] args, int fallback)

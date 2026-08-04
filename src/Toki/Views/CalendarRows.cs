@@ -121,8 +121,8 @@ static class CalendarRows
         grid.Children.Add(right);
 
         var row = Clickable(grid, () => onMore(e, more));   // whole-row click opens the same menu
-        row.MouseEnter += (_, _) => more.Opacity = 1;
-        row.MouseLeave += (_, _) => more.Opacity = 0;
+        row.MouseEnter += (_, _) => Fade(more, 1);          // smooth reveal, not a snap
+        row.MouseLeave += (_, _) => Fade(more, 0);
         return row;
     }
 
@@ -247,4 +247,10 @@ static class CalendarRows
         if (string.IsNullOrWhiteSpace(url)) return;
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
+
+    // Smooth opacity fade (120ms ease-out) — for hover reveals so controls appear/vanish gently.
+    static void Fade(UIElement el, double to) =>
+        el.BeginAnimation(UIElement.OpacityProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(to, TimeSpan.FromMilliseconds(120))
+            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut } });
 }

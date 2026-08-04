@@ -478,17 +478,22 @@ public partial class CalendarView : UserControl
 
     void OnToggleMeet(object s, RoutedEventArgs e) { _addMeet = !_addMeet; _lastAddMeet = _addMeet; UpdateMeetChip(); }
 
-    void UpdateMeetChip()
+    void UpdateMeetChip() => SetChipActive(MeetChip, _addMeet);
+
+    // A chip fills with a soft green when active, outlines when not — the fill IS the on/off (no "✓" text).
+    void SetChipActive(Button chip, bool on)
     {
-        MeetChip.Content = _addMeet ? "Google Meet ✓" : "Google Meet";
-        MeetChip.Background = (Brush)FindResource(_addMeet ? "WhiteBtn" : "Chip");
-        MeetChip.Foreground = (Brush)FindResource(_addMeet ? "CtaText" : "Text");
+        chip.Background = on ? (Brush)FindResource("GreenDark") : Brushes.Transparent;
+        chip.Foreground = on ? (Brush)FindResource("Green") : (Brush)FindResource("TextDim");
+        chip.BorderBrush = on ? Brushes.Transparent : (Brush)FindResource("Hairline");
     }
 
     void OnTogglePeople(object s, RoutedEventArgs e)
     {
-        PeopleRow.Visibility = PeopleRow.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-        if (PeopleRow.Visibility == Visibility.Visible) PeopleBox.Focus();
+        var open = PeopleRow.Visibility != Visibility.Visible;
+        PeopleRow.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        SetChipActive(PeopleChip, open);
+        if (open) PeopleBox.Focus();
     }
 
     void OnComposerCreate(object s, RoutedEventArgs e) => TryCreate();

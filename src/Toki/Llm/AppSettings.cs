@@ -67,6 +67,10 @@ public sealed class AppSettings
     /// stays human-readable and forward-compatible.</summary>
     public string Theme { get; set; } = "dark";
 
+    /// <summary>Glassy notch: swap the notch surface to a more see-through, frosted variant so the
+    /// desktop shows through more. Default false (the shipped opaque-ish tinted mirror). Applied live.</summary>
+    public bool GlassyNotch { get; set; }
+
     /// <summary>The note shape for NEW meetings: null = auto-detect (default); otherwise a fixed
     /// template name from <see cref="Toki.Llm.NoteTemplates"/> (e.g. "Standup"). Any note can still
     /// be re-shaped by hand from its template picker.</summary>

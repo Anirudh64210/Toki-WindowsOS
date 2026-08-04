@@ -40,6 +40,7 @@ public static class ThemeManager
         // bleed through slightly — a see-through slab, not a blur. Kept fairly opaque so text stays
         // readable and it never washes out to grey (the reason it went opaque before).
         ("Notch",            "#D9000000", "#E0FCFCFE"),  // ~85% black / ~88% white — desktop shows faintly through
+        ("NotchGlass",       "#BF0F0F13", "#D6F8F8FC"),  // glassy toggle: ~75% — more see-through, frosted look
         ("NotchBorder",      "#40FFFFFF", "#33000000"),  // a soft rim so the glassy edge reads
         ("WhiteBtn",         "#F2F2F2", "#1D1D1F"),  // primary CTA button fill (inverts to near-black)
         ("CtaText",          "#161618", "#FCFCFE"),  // text on the CTA
