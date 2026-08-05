@@ -223,9 +223,8 @@ public partial class CalendarView : UserControl
         el.RenderTransform = tt;
         el.Opacity = 0;
         var begin = TimeSpan.FromMilliseconds(delayMs);
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        el.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { BeginTime = begin });
-        tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(6, 0, TimeSpan.FromMilliseconds(180)) { BeginTime = begin, EasingFunction = ease });
+        el.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Enter)) { BeginTime = begin });
+        tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(6, 0, Theme.Motion.Dur(Theme.Motion.Enter)) { BeginTime = begin, EasingFunction = Theme.Motion.EaseOut });
     }
 
     // ── delete + undo/confirm ──
@@ -315,7 +314,7 @@ public partial class CalendarView : UserControl
         var tt = new TranslateTransform(0, 8);
         ActionBar.RenderTransform = tt;
         tt.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(160)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            new DoubleAnimation(8, 0, Theme.Motion.Dur(Theme.Motion.Enter)) { EasingFunction = Theme.Motion.EaseOut });
     }
 
     void Wire(Button b, (string label, bool danger, Action action)? spec)
@@ -416,11 +415,11 @@ public partial class CalendarView : UserControl
         if (away && TodayButton.Visibility != Visibility.Visible)
         {
             TodayButton.Visibility = Visibility.Visible;
-            TodayButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
+            TodayButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
         }
         else if (!away && TodayButton.Visibility == Visibility.Visible)
         {
-            var a = new DoubleAnimation(TodayButton.Opacity, 0, TimeSpan.FromMilliseconds(120));
+            var a = new DoubleAnimation(TodayButton.Opacity, 0, Theme.Motion.Dur(Theme.Motion.Exit)) { EasingFunction = Theme.Motion.EaseIn };
             a.Completed += (_, _) => { if (Scroller.VerticalOffset <= 24) TodayButton.Visibility = Visibility.Collapsed; };
             TodayButton.BeginAnimation(OpacityProperty, a);
         }

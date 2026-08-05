@@ -4,6 +4,17 @@ Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail
 
 ## Current state & roadmap (updated 2026-08-04)
 
+**v1-iter3 premium UI + settings-move DONE (2026-08-04):** 1,682 tests green, published. Task-count-per-
+date fix (count words leaked into task topic). Acknowledgements ("okay cool")→small-talk. AI/API settings
+moved to a reusable `AiSummariesSection` on the Library Settings page → **notch Settings is UI/visibility
+only**. Recording page compacted (~93×268). **Ghost mode re-asserted on every notch state** (acrylic/region
+re-composition was shedding WDA_EXCLUDEFROMCAPTURE). Luma-style Ask landing + assistant self-awareness in
+prompts + copy trim. Library sort menu → in-house themed popup; Library jump-pill. **Calendar/COMING-UP/
+PrepCard premium redesign** (accent bars, attendee avatars, amber countdowns, Join; PrepCard="Coming Up"
+card). **New mascot**: `TokiBlob` redrawn brighter+black-eyes; `--makeicon` renders it to `Assets/toki.ico`
+(app/taskbar/shortcut icon). Motion tokens (`Theme/Motion.cs`) drive it all. See README v1-iter3. Built
+largely via partitioned Fable agents (parent builds/tests/publishes/verifies).
+
 **v1-iter2 owner fix+feature+polish sweep DONE (2026-08-04):** long live-test session, 1,657 tests green,
 all owner-verified on the real PC. Notch: **stick-to-bottom scroll** (no more yank-down), **text cut-off +
 open/close stability** (14px bottom breathing pad + clip-generation guard; root-caused via new headless

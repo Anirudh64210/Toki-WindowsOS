@@ -18,6 +18,15 @@ public static class SmallTalk
             new[] { "Hey! What do you want to know from your meetings?", "Hi there — ask me anything about your meetings.", "Hey! Ask away." }),
         (Whole(@"thanks?(\s+(a\s+lot|so\s+much|very\s+much|a\s+ton|man|toki))?|thank\s+you(\s+(so\s+much|very\s+much|a\s+lot|a\s+ton))?|thx|ty|appreciate\s+(it|that|you)|cheers|nice|cool|great|awesome|perfect|good\s+job|well\s+done|got\s+it"),
             new[] { "Anytime.", "You got it.", "Happy to help." }),
+        // Acknowledgements — "okay", "ok cool", "alright cool thanks", "sounds good", "makes sense".
+        // Whole-utterance only. Without this they fell through to notes retrieval and dug up a random,
+        // unrelated meeting (real screenshot: "okay cool" → a Verify-Attendance meeting).
+        (Whole(@"(ok(ay)?|alright(y)?|k+|cool|nice|sweet|great|awesome|perfect|gotcha|right|sure|word|fair\s+enough|sounds\s+good|makes\s+sense|no\s+worries)(?:[\s,]+(ok(ay)?|cool|nice|sweet|great|awesome|perfect|thanks?|thank\s+you|then|man|got\s+it|makes\s+sense|no\s+worries|sounds\s+good|for\s+now))*"),
+            new[] { "Cool.", "Sounds good.", "Anytime.", "You got it." }),
+        // A dismissal that clarifies a prior throwaway ("no I just meant ok cool thanks") — ONLY when the
+        // tail is pure acknowledgement, never a meeting reference ("I meant the pricing meeting" is Q&A).
+        (Whole(@"(no,?\s+)?i\s+(just\s+)?(meant|mean|said)\s+(that\s+|to\s+say\s+)?(?:(ok(ay)?|cool|nice|sweet|great|thanks?|thank\s+you|good|nothing|no\s+worries|then|man)[\s,]*)+"),
+            new[] { "No worries!", "All good.", "Gotcha." }),
         (Whole(@"how\s+(are|r)\s+(you|u|ya)|how'?s\s+it\s+going|how\s+are\s+things|you\s+(good|okay|ok)|how\s+do\s+you\s+do|what'?s\s+good"),
             new[] { "Doing great — ready to dig through your meetings. What's up?", "All good! What do you need from your notes?" }),
         (Whole(@"(who|what)\s+are\s+you|what'?s\s+your\s+name|introduce\s+yourself|what\s+is\s+toki|tell\s+me\s+about\s+yourself"),

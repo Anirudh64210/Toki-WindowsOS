@@ -117,7 +117,7 @@ public sealed class CalendarCommandTests : IDisposable
         Assert.Null(ctx.PendingCreate);
         Assert.StartsWith("Done", a2.Text);
         Assert.Contains("Ana", _lastEvent!.Summary);
-        Assert.False(_lastEvent.AddMeet);
+        Assert.True(_lastEvent.AddMeet);   // voice-created calls default to a Meet link (matches the composer's MeetChip default)
         Assert.Empty(_lastEvent.AttendeeEmails ?? new List<string>());
     }
 

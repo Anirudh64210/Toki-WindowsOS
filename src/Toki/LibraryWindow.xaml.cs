@@ -300,12 +300,14 @@ public partial class LibraryWindow : Window
         BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
         // Stick-to-bottom for the chat thread (same rule as the notch AskView): auto-follow the newest
         // text only while you're already parked at the bottom, so a streaming answer never yanks you down
-        // while you've scrolled up to re-read. A user scroll (ExtentHeightChange == 0) updates the flag.
+        // while you've scrolled up to re-read. A user scroll (ExtentHeightChange == 0) updates the flag —
+        // ~120px threshold, matching AskView (8px was hair-trigger: sub-pixel extent wobble un-anchored
+        // the reader). The "↓ Latest" pill shows whenever you've drifted up and there's more below.
         ChatScroll.ScrollChanged += (_, e) =>
         {
-            if (e.ExtentHeightChange != 0) return;
-            if (e.VerticalChange == 0 && e.ViewportHeightChange == 0) return;
-            _chatStick = ChatScroll.VerticalOffset >= ChatScroll.ScrollableHeight - 8;
+            if (e.ExtentHeightChange == 0 && (e.VerticalChange != 0 || e.ViewportHeightChange != 0))
+                _chatStick = ChatScroll.VerticalOffset >= ChatScroll.ScrollableHeight - 120;
+            ShowChatJumpPill(!_chatStick && ChatScroll.ScrollableHeight > 12);
         };
         try { _chats = _chatStore.Load(); } catch { _chats = new(); }   // past Ask conversations
         SourceInitialized += (_, _) => StyleChrome();
@@ -315,7 +317,11 @@ public partial class LibraryWindow : Window
         // The list cards + note detail are built in code (FindResource brushes), so they don't
         // recolour on their own — rebuild them (and re-apply the title-bar theme) on a theme swap.
         // Code-built UI (list cards, note detail, nav, templates) captures brushes → rebuild on a theme swap.
-        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { StyleChrome(); BuildHub(); Reload(); });
+        Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() =>
+        {
+            StyleChrome(); BuildHub(); Reload();
+            if (_page == "settings") LoadLibrarySettings(refreshModels: false);   // recolour only — no network fetch on a theme flip
+        });
         _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
         // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
         // already call Reload() explicitly — a Loaded handler here made every open rebuild
@@ -480,7 +486,7 @@ public partial class LibraryWindow : Window
         UIElement page = key switch { "ask" => AskPage, "library" => LibraryPage, "templates" => TemplatesPage, _ => SettingsPage };
         if (animate && !App.Headless) FadePage(page);
         if (key == "ask") RefreshGreeting();
-        if (key == "settings") LoadNameSettings();
+        if (key == "settings") { LoadNameSettings(); LoadLibrarySettings(); }
         if (key == "library" && Cards.Children.Count == 0) LoadList();
     }
 
@@ -535,7 +541,107 @@ public partial class LibraryWindow : Window
         LoadNameSettings();   // revert to the stored value, hide the actions
     }
 
-    // ── Ask landing: a rotating greeting that types in, a search bar, quick suggestions ──
+    // ── Settings page: everything else (the notch-settings consolidation — DONE 2026-08-04) ──
+    //
+    // This page is THE home for preferences. All of it goes through the existing one-path
+    // App/service calls (no duplicated persistence): theme (App.SwitchTheme), glassy notch
+    // (App.SetGlassyNotch), ghost (App.SetGhostMode), Google Calendar (CalendarService.Instance),
+    // About (PillState.About), and the AI-summaries mode + BYO-API-key flow — moved WHOLE from the
+    // notch into the reusable Views.AiSummariesSection control hosted below. The notch Settings is
+    // now UI/visibility only (owner: "the notch should only have the visibility, UI settings").
+
+    bool _settingsLoading;
+    void LoadLibrarySettings(bool refreshModels = true)
+    {
+        _settingsLoading = true;
+        var s = Llm.AppSettings.Current;
+        LibThemeToggle.IsChecked = Toki.Theme.ThemeManager.Current == Toki.Theme.AppTheme.Dark;
+        LibGlassToggle.IsChecked = s.GlassyNotch;
+        LibGhostToggle.IsChecked = s.ShowInRecordings;
+        RefreshLibGoogle();
+        // The AI block rebuilds its code-built bits (segmented control) too; a theme swap passes
+        // refreshModels:false so recolouring never fires a network fetch.
+        AiSection.Refresh(refreshModels);
+        _settingsLoading = false;
+    }
+
+    void OnLibThemeToggle(object sender, RoutedEventArgs e)
+    {
+        if (_settingsLoading) return;
+        App.SwitchTheme(light: LibThemeToggle.IsChecked != true);   // persists + recolours everything live
+    }
+
+    void OnLibGlassToggle(object sender, RoutedEventArgs e)
+    {
+        if (_settingsLoading) return;
+        App.SetGlassyNotch(LibGlassToggle.IsChecked == true);       // persists + refreshes the notch surface
+    }
+
+    void OnLibGhostToggle(object sender, RoutedEventArgs e)
+    {
+        if (_settingsLoading) return;
+        // Checked = visible in recordings = ghost OFF. SetGhostMode persists + applies live.
+        App.SetGhostMode(on: LibGhostToggle.IsChecked != true);
+    }
+
+    void RefreshLibGoogle()
+    {
+        var svc = Toki.Calendar.CalendarService.Instance;
+        if (svc.IsConnected)
+        {
+            LibGoogleStatus.Text = svc.AccountEmail is { Length: > 0 } m
+                ? $"Connected as {m}." : "Connected to Google Calendar.";
+            LibGoogleConnectBtn.Content = "Reconnect";
+            LibGoogleConnectBtn.IsEnabled = true;
+            LibGoogleDisconnectBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            LibGoogleStatus.Text = svc.IsConfigured
+                ? "Not connected. Sign in to see upcoming meetings and let Toki prep you."
+                : "Google sign-in isn’t set up in this build yet.";
+            LibGoogleConnectBtn.Content = "Connect Google";
+            LibGoogleConnectBtn.IsEnabled = svc.IsConfigured;
+            LibGoogleDisconnectBtn.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    async void OnLibGoogleConnect(object sender, RoutedEventArgs e)
+    {
+        var svc = Toki.Calendar.CalendarService.Instance;
+        if (!svc.IsConfigured) { LibGoogleStatus.Text = "Google sign-in isn’t set up in this build yet."; return; }
+        LibGoogleConnectBtn.IsEnabled = false;
+        LibGoogleStatus.Text = "Opening your browser — sign in and click Allow…";
+        try
+        {
+            await svc.ConnectAsync();
+        }
+        catch (Toki.Calendar.GoogleAuthException ex) { LibGoogleStatus.Text = ex.Message; }
+        catch { LibGoogleStatus.Text = "Couldn’t connect to Google."; }
+        finally { LibGoogleConnectBtn.IsEnabled = true; RefreshLibGoogle(); }
+    }
+
+    async void OnLibGoogleDisconnect(object sender, RoutedEventArgs e)
+    {
+        LibGoogleDisconnectBtn.IsEnabled = false;
+        try { await Toki.Calendar.CalendarService.Instance.DisconnectAsync(); }
+        finally { LibGoogleDisconnectBtn.IsEnabled = true; RefreshLibGoogle(); }
+    }
+
+    // The "Built with" credits live on the notch's About screen (one canonical copy of the licence
+    // list) — this row summons it, same as the notch Settings row does.
+    void OnLibOpenSource(object sender, MouseButtonEventArgs e) => App.State.ForceForDemo(PillState.About);
+
+    void OnLibAboutHover(object sender, MouseEventArgs e)
+    { if (sender is Border b) b.SetResourceReference(Border.BackgroundProperty, "Chip"); }
+
+    void OnLibAboutUnhover(object sender, MouseEventArgs e)
+    { if (sender is Border b) b.Background = Brushes.Transparent; }
+
+    // ── Ask landing: hero mascot on a soft glow, a typed greeting, one identity line, chips ──
+
+    // One line that says what Toki IS — shown under the greeting, restored after voice hints.
+    const string LandingHint = "Your meeting assistant — decisions, tasks, who said what. All on this PC.";
 
     static readonly string[] Greetings =
     {
@@ -551,9 +657,36 @@ public partial class LibraryWindow : Window
         Messages.Visibility = Visibility.Collapsed;
         var name = Llm.AppSettings.Current.DisplayName;
         var full = string.Format(Greetings[_rng.Next(Greetings.Length)], string.IsNullOrEmpty(name) ? "there" : name);
-        AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
+        AskHint.Text = LandingHint;
         TypeText(Greeting, full);
+        AnimateLanding();
     }
+
+    // Calm, staggered arrival (Motion tokens): hero → identity line → chips, each a small fade-up.
+    void AnimateLanding()
+    {
+        if (App.Headless) return;
+        Rise(LandingHero, 0);
+        Rise(AskHint, 70);
+        var i = 0;
+        foreach (var c in Suggestions.Children.OfType<FrameworkElement>()) Rise(c, 140 + i++ * 60);
+    }
+
+    static void Rise(FrameworkElement el, int delayMs)
+    {
+        var slide = new TranslateTransform(0, Toki.Theme.Motion.EnterRise);
+        el.RenderTransform = slide;
+        el.Opacity = 0;
+        var delay = TimeSpan.FromMilliseconds(delayMs);
+        el.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Toki.Theme.Motion.Dur(Toki.Theme.Motion.Enter))
+        { BeginTime = delay, EasingFunction = Toki.Theme.Motion.EaseOut });
+        slide.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(Toki.Theme.Motion.EnterRise, 0, Toki.Theme.Motion.Dur(Toki.Theme.Motion.Enter))
+            { BeginTime = delay, EasingFunction = Toki.Theme.Motion.EaseOut });
+    }
+
+    // The landing hero mascot reacts to a poke, same as the sidebar one.
+    void OnLandingMascotClick(object sender, MouseButtonEventArgs e) => LandingToki.React();
 
     // Reveal the greeting one character at a time — slow and smooth, like it's being written.
     void TypeText(TextBlock tb, string full)
@@ -569,17 +702,27 @@ public partial class LibraryWindow : Window
 
     void BuildSuggestions()
     {
+        // Owner: the example-question pills read as ugly/uninviting — removed. The landing is just the
+        // mascot hero + one identity line; a clean prompt bar below invites the real question.
         Suggestions.Children.Clear();
-        foreach (var s in new[] { "What did I commit to this week?", "Summarize my last meeting", "Any open tasks?" })
-            Suggestions.Children.Add(SuggestionChip(s));
+        Suggestions.Visibility = Visibility.Collapsed;
     }
 
+    // Suggestion chips (Luma-style invitations): full-radius outlined pills that light on hover.
     Border SuggestionChip(string text)
     {
-        var t = new TextBlock { Text = text, FontSize = 11, FontFamily = (FontFamily)FindResource("UiFont") };
-        t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
-        var b = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(11, 7, 11, 7), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = t };
+        var t = new TextBlock { Text = text, FontSize = 11.5, FontFamily = (FontFamily)FindResource("UiFont") };
+        t.SetResourceReference(TextBlock.ForegroundProperty, "TextSoft");
+        var b = new Border
+        {
+            CornerRadius = new CornerRadius(999), Padding = new Thickness(14, 8, 14, 9),
+            Margin = new Thickness(4, 0, 4, 8), Cursor = Cursors.Hand,
+            BorderThickness = new Thickness(1), Child = t,
+        };
         b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        b.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        b.MouseEnter += (_, _) => b.SetResourceReference(Border.BackgroundProperty, "Chip");
+        b.MouseLeave += (_, _) => b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
         b.MouseLeftButtonUp += (_, _) => { AskBox.Text = text; OnAsk(this, new RoutedEventArgs()); };
         return b;
     }
@@ -595,7 +738,7 @@ public partial class LibraryWindow : Window
             case Llm.AppCommand.OpenLibrary:   ShowPage("library"); break;
             case Llm.AppCommand.OpenAsk:       ShowPage("ask"); break;
             case Llm.AppCommand.OpenTemplates: ShowPage("templates"); break;
-            case Llm.AppCommand.OpenSettings:  App.State.ForceForDemo(PillState.Settings); break;
+            case Llm.AppCommand.OpenSettings:  ShowPage("settings"); break;   // settings live HERE now
             case Llm.AppCommand.NewNote:       OnNewNote(this, new RoutedEventArgs()); break;
             case Llm.AppCommand.NewChat:       OnNewChat(this, new RoutedEventArgs()); break;
             case Llm.AppCommand.GoHome:
@@ -970,7 +1113,7 @@ public partial class LibraryWindow : Window
     void ClearVoiceHint()
     {
         if (Landing.Visibility == Visibility.Visible)
-            AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
+            AskHint.Text = LandingHint;
     }
 
     // Auto-follow the newest text only while pinned to the bottom (see the ScrollChanged wiring in the
@@ -983,7 +1126,28 @@ public partial class LibraryWindow : Window
     }
 
     // A new turn the user initiated (asking a question, restoring a chat) always jumps to the bottom.
-    void PinChatToEnd() { _chatStick = true; ScrollChatToEnd(); }
+    void PinChatToEnd() { _chatStick = true; ScrollChatToEnd(); ShowChatJumpPill(false); }
+
+    // ── the "↓ Latest" pill (same look/motion as the notch AskView's JumpPill) ──
+
+    bool _chatPillShown;
+    void ShowChatJumpPill(bool show)
+    {
+        if (show == _chatPillShown) return;
+        _chatPillShown = show;
+        if (App.Headless) { ChatJumpPill.Visibility = show ? Visibility.Visible : Visibility.Collapsed; ChatJumpPill.Opacity = show ? 1 : 0; return; }
+        if (show) ChatJumpPill.Visibility = Visibility.Visible;
+        var anim = new DoubleAnimation(show ? 1 : 0, Toki.Theme.Motion.Dur(Toki.Theme.Motion.Micro)) { EasingFunction = Toki.Theme.Motion.EaseOut };
+        if (!show) anim.Completed += (_, _) => { if (!_chatPillShown) ChatJumpPill.Visibility = Visibility.Collapsed; };
+        ChatJumpPill.BeginAnimation(OpacityProperty, anim);
+    }
+
+    void OnChatJumpToLatest(object sender, MouseButtonEventArgs e)
+    {
+        _chatStick = true;
+        ChatScroll.ScrollToEnd();   // SmoothScroll is enabled on ChatScroll, so this glides
+        ShowChatJumpPill(false);
+    }
 
     // Chat text is selectable + copyable (read-only transparent TextBox), like a normal chatbot.
     TextBox SelText(string text, double fs, string fgKey)
@@ -1168,7 +1332,7 @@ public partial class LibraryWindow : Window
         TemplatesList.Children.Add(new TextBlock { Text = "Templates", Style = St("Body"), FontSize = 22, FontWeight = FontWeights.Bold });
         TemplatesList.Children.Add(new TextBlock
         {
-            Text = "Toki picks the shape that fits each meeting automatically. Open any note to switch its template by hand.",
+            Text = "Toki picks the shape that fits each meeting. Open any note to switch it by hand.",
             Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 16),
         });
 
@@ -1185,7 +1349,6 @@ public partial class LibraryWindow : Window
             Llm.AppSettings.Current.Save();
         };
         defRow.Children.Add(defDrop);
-        defRow.Children.Add(new TextBlock { Text = "Auto-detect picks the best shape per meeting (recommended). Or force one shape for every new meeting.", Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 7, 0, 0) });
         TemplatesList.Children.Add(defRow);
 
         foreach (var t in Llm.NoteTemplates.All) TemplatesList.Children.Add(TemplateCard(t));
@@ -1283,25 +1446,24 @@ public partial class LibraryWindow : Window
         _ => items,   // Manual — keep the store's drag-reorder order
     };
 
+    static readonly (string Label, LibrarySort Mode)[] SortModes =
+    {
+        ("Newest first", LibrarySort.Newest),
+        ("Oldest first", LibrarySort.Oldest),
+        ("Longest first", LibrarySort.Longest),
+        ("Shortest first", LibrarySort.Shortest),
+        ("Most open tasks", LibrarySort.OpenTasks),
+        ("Manual (drag order)", LibrarySort.Manual),
+    };
+
+    // Toki's own themed popup (never the Win32 ContextMenu chrome) — same surface as the Copy menu,
+    // with a check on the active mode.
     void OnSortMenu(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu { PlacementTarget = SortBtn, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
-        foreach (var (label, mode) in new[]
-        {
-            ("Newest first", LibrarySort.Newest),
-            ("Oldest first", LibrarySort.Oldest),
-            ("Longest first", LibrarySort.Longest),
-            ("Shortest first", LibrarySort.Shortest),
-            ("Most open tasks", LibrarySort.OpenTasks),
-            ("Manual (drag order)", LibrarySort.Manual),
-        })
-        {
-            var mi = new MenuItem { Header = label, IsCheckable = true, IsChecked = _sort == mode };
-            var captured = mode;
-            mi.Click += (_, _) => SetSort(captured);
-            menu.Items.Add(mi);
-        }
-        menu.IsOpen = true;
+        var current = SortModes.First(m => m.Mode == _sort).Label;
+        var items = SortModes
+            .Select(m => (m.Label, (Action)(() => SetSort(m.Mode)))).ToList();
+        ShowMenu(SortBtn, items, selected: current);
     }
 
     void SetSort(LibrarySort mode)
@@ -1714,7 +1876,9 @@ public partial class LibraryWindow : Window
     }
 
     // A rounded, outlined, THEMED popup of hover-able rows — our own menu, matching the app.
-    void ShowMenu(FrameworkElement anchor, List<(string Label, Action Act)> items)
+    // With `selected`, rows carry a leading check column and the active row shows a pink tick
+    // (the sort/filter menu) — still dividers-not-boxes, never the Win32 menu chrome.
+    void ShowMenu(FrameworkElement anchor, List<(string Label, Action Act)> items, string? selected = null)
     {
         var stack = new StackPanel();
         var popup = new System.Windows.Controls.Primitives.Popup
@@ -1728,7 +1892,24 @@ public partial class LibraryWindow : Window
             // popup (the mouse-up-on-Border approach got swallowed when the popup closed → dead menu items).
             var t = new TextBlock { Text = label, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
             t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-            var row = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(11, 8, 22, 8), Background = Brushes.Transparent, Child = t };
+            FrameworkElement content = t;
+            if (selected is not null)
+            {
+                var isSel = label == selected;
+                if (isSel) t.FontWeight = FontWeights.SemiBold;
+                var tick = new TextBlock
+                {
+                    Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 10,
+                    Width = 16, VerticalAlignment = VerticalAlignment.Center,
+                    Opacity = isSel ? 1 : 0,   // reserve the column so labels align
+                };
+                tick.SetResourceReference(TextBlock.ForegroundProperty, "Pink");
+                var g = new StackPanel { Orientation = Orientation.Horizontal };
+                g.Children.Add(tick);
+                g.Children.Add(t);
+                content = g;
+            }
+            var row = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(11, 8, 22, 8), Background = Brushes.Transparent, Child = content };
             var btn = new Button { Content = row, Cursor = Cursors.Hand, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Focusable = false };
             btn.Template = TransparentButtonTemplate();
             btn.MouseEnter += (_, _) => row.SetResourceReference(Border.BackgroundProperty, "Chip");

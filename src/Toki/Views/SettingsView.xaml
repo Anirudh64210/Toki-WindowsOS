@@ -9,6 +9,9 @@
             <Setter Property="Margin" Value="0,16,0,2"/>
         </Style>
     </UserControl.Resources>
+    <!-- The notch Settings is UI/visibility ONLY (owner: "the notch should only have the visibility,
+         UI settings"). Everything else — AI summaries, calendar, name, about — lives on the Library's
+         Settings page; the row at the bottom takes you there. -->
     <DockPanel Margin="14,12,14,8">
         <Grid DockPanel.Dock="Top">
             <Grid.ColumnDefinitions>
@@ -19,10 +22,9 @@
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Settings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
-                <TextBlock Text="Toki 1.0 · one-time · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>
+                <TextBlock Text="Toki 1.0 · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
-            <!-- Global toggles, shown ONCE in the header (not repeated under each notes-mode page):
-                 screen-recording visibility (ghost) + light/dark. -->
+            <!-- Global toggles, shown ONCE in the header: screen-recording visibility (ghost) + light/dark. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button x:Name="RecordToggle" Style="{StaticResource IconButton}" Click="OnRecordingToggle"/>
                 <Button x:Name="ThemeToggle" Style="{StaticResource IconButton}" Click="OnThemeToggle"/>
@@ -31,18 +33,7 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
             <StackPanel>
-                <!-- Google Calendar: connect / disconnect. The sign-in itself happens in the browser.
-                     (Name-change lives in the Library window's Settings page — a calmer, passive home.) -->
-                <TextBlock Style="{StaticResource SettingTitle}" Text="Google Calendar" Margin="0,4,0,2"/>
-                <TextBlock x:Name="GoogleStatus" Style="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap"/>
-                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                    <Button x:Name="GoogleConnectBtn" Style="{StaticResource PillButton}" Click="OnGoogleConnect"/>
-                    <Button x:Name="GoogleDisconnectBtn" Style="{StaticResource PillButton}" Background="Transparent"
-                            Foreground="{StaticResource Coral}" Content="Disconnect" Margin="8,0,0,0"
-                            ToolTip="Sign out of Google and remove the stored token" Click="OnGoogleDisconnect"/>
-                </StackPanel>
-
-                <TextBlock Style="{StaticResource SettingTitle}" Text="Appearance"/>
+                <TextBlock Style="{StaticResource SettingTitle}" Text="Appearance" Margin="0,8,0,2"/>
                 <Grid Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -56,103 +47,25 @@
                     <CheckBox x:Name="GlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}" Click="OnGlassToggle"/>
                 </Grid>
 
-                <TextBlock Style="{StaticResource SettingTitle}" Text="AI summaries"/>
-                <TextBlock Style="{StaticResource Dim}"
-                           Text="On-device is free forever &amp; private. Or bring your own key and use ANY model, from any provider or router — you choose, you pay the model, not us."/>
-                <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="3" Margin="0,7,0,0">
-                    <UniformGrid x:Name="NotesModeSeg" Columns="3"/>
-                </Border>
-
-                <!-- On-device options -->
-                <StackPanel x:Name="LocalOptions">
-                    <!-- Grid, not a horizontal StackPanel: a StackPanel gives the label INFINITE width so it
-                         never wraps and gets clipped at the notch edge. The star column constrains + wraps it. -->
-                    <Grid Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                            <TextBlock Text="Use graphics card" Style="{StaticResource BodyStrong}"/>
-                            <TextBlock Text="Automatic, faster when it fits. Off = processor only, safe on any machine."
-                                       Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <CheckBox x:Name="GpuToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}" Click="OnGpuToggle"/>
-                    </Grid>
-                </StackPanel>
-
-                <!-- BYO API key: pick a provider (sets the address), paste your key, pick a model.
-                     Provider + model are iOS-style wheels built in code (ProviderHost / ModelHost). -->
-                <StackPanel x:Name="ApiOptions" Visibility="Collapsed">
-                    <TextBlock Style="{StaticResource SettingTitle}" Text="Provider" Margin="0,14,0,2"/>
-                    <ContentControl x:Name="ProviderHost" Margin="0,4,0,0"/>
-
-                    <!-- Only when Provider = Custom: the address is otherwise set for you. -->
-                    <StackPanel x:Name="CustomEndpointRow" Visibility="Collapsed">
-                        <TextBlock Style="{StaticResource SettingTitle}" Text="Address"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0"
-                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
-                            <TextBox x:Name="ApiBaseUrlBox" Background="Transparent" BorderThickness="0"
-                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                     Height="34" FontSize="11.5" FontFamily="{StaticResource UiFont}"
-                                     VerticalContentAlignment="Center" LostFocus="OnApiFieldCommitted"/>
-                        </Border>
-                        <TextBlock Style="{StaticResource Dim}" FontSize="9.5" LineHeight="14" Margin="2,4,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="The service's web address, ending in /v1 (for example https://api.together.xyz/v1)."/>
-                    </StackPanel>
-
-                    <TextBlock Style="{StaticResource SettingTitle}" Text="Your API key"/>
-                    <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0" Margin="0,4,0,0"
-                            BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
-                        <PasswordBox x:Name="ApiKeyBox" Background="Transparent" BorderThickness="0"
-                                     Foreground="{DynamicResource Text}" Height="34" FontSize="11.5"
-                                     FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                                     LostFocus="OnApiFieldCommitted"/>
-                    </Border>
-
-                    <TextBlock Style="{StaticResource SettingTitle}" Text="Model"/>
-                    <ContentControl x:Name="ModelHost" Margin="0,4,0,0"/>
-                    <TextBlock x:Name="ModelHint" Style="{StaticResource Dim}" FontSize="9.5" LineHeight="14"
-                               TextWrapping="Wrap" Margin="2,4,0,0"/>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                        <Button x:Name="TestApiButton" Style="{StaticResource PillButton}" Content="Test connection"
-                                Click="OnTestApi"/>
-                        <Button x:Name="RemoveKeyButton" Style="{StaticResource PillButton}" Background="Transparent"
-                                Foreground="{StaticResource Coral}" Content="Remove key" Margin="8,0,0,0"
-                                ToolTip="Delete your key and go back to the on-device model" Click="OnRemoveKey"/>
-                    </StackPanel>
-                    <TextBlock x:Name="ApiTestStatus" Style="{StaticResource Dim}" FontSize="10.5" LineHeight="15"
-                               TextWrapping="Wrap" Margin="0,7,0,0" Visibility="Collapsed"/>
-                </StackPanel>
-
-                <!-- Model status: informational, for On-device / Heuristic. Hidden in API-key mode,
-                     where the status dot + model dropdown already say everything (no redundant line). -->
-                <TextBlock x:Name="ModelStatusTitle" Style="{StaticResource SettingTitle}" Text="Model status"/>
-                <TextBlock x:Name="ModelStatus" Style="{StaticResource Dim}" FontSize="10.5"/>
-
-                <!-- About / open-source attribution (the "Built with" credits screen). -->
-                <TextBlock Style="{StaticResource SettingTitle}" Text="About"/>
-                <Border x:Name="OpenSourceRow" Margin="-6,2,-6,0" Padding="6,9" CornerRadius="10"
-                        Background="Transparent" Cursor="Hand" MouseLeftButtonUp="OnOpenSource">
+                <!-- Everything else → the Library's Settings page. -->
+                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,16,0,4"/>
+                <Border Margin="-6,2,-6,0" Padding="6,9" CornerRadius="10" Background="Transparent"
+                        Cursor="Hand" MouseEnter="OnMoreHover" MouseLeave="OnMoreUnhover"
+                        MouseLeftButtonUp="OnOpenLibrarySettings">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                            <TextBlock Text="Built with — open source &amp; licences" Style="{StaticResource BodyStrong}"/>
-                            <TextBlock Text="The open models and libraries that power Toki."
+                            <TextBlock Text="All other settings" Style="{StaticResource BodyStrong}"/>
+                            <TextBlock Text="AI summaries · calendar · your name · about"
                                        Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
                                    FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
-
-                <TextBlock Style="{StaticResource Dim}" FontSize="9" Margin="2,16,0,6" TextAlignment="Center"
-                           Text="Auto-record and keep-audio arrive in a later update."/>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

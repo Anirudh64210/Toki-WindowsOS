@@ -29,13 +29,13 @@ public partial class PillWindow : Window
         [PillState.Collapsed]     = (52, 42),    // launcher peek (Toki alone)
         [PillState.MeetingPrompt] = (288, 72),
         [PillState.RecordingBar]  = (34, 14),    // TINY upside-down eyes-peek — never in the way of browser tabs / snip toolbar
-        [PillState.RecordingOpen] = (288, 118),  // compact: timer + a live-transcript line + stop
+        [PillState.RecordingOpen] = (268, 76),   // Glass/Luma-tight: one header row (dot+timer · Stop) + live line
         [PillState.Summarizing]   = (232, 66),   // small, cute working loader (mostly lives as a sliver)
         [PillState.Notes]         = (360, 320),  // scrollable window into the notes
         [PillState.NoSpeech]      = (300, 92),
         [PillState.Home]          = (344, 190),   // widened 320→344 to fit the COMING UP list + Join pills (design ③)
         [PillState.Library]       = (404, 440),
-        [PillState.Settings]      = (380, 360),   // FIXED height + internal scroll (not auto) — see AutoHeight note
+        [PillState.Settings]      = (380, 208),   // FIXED height; UI/visibility-only now (AI/calendar/about moved to the Library Settings page)
         [PillState.ManualNote]    = (392, 410),
         [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
         [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
@@ -125,9 +125,11 @@ public partial class PillWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         try
         {
-            ApplyGhost(); // WDA_EXCLUDEFROMCAPTURE — works on this transparent window too
             SetWindowLong(_hwnd, GwlExStyle, GetWindowLong(_hwnd, GwlExStyle) | WsExToolWindow);
             EnableAcrylic(); // real blur-behind so the translucency reads as frosted glass
+            // Ghost LAST: WDA_EXCLUDEFROMCAPTURE must be asserted AFTER the ex-style + DWM attribute
+            // changes above — window-composition changes are exactly what can drop the affinity.
+            ApplyGhost(); // works on this transparent window too
         }
         catch (Exception ex) { App.Log($"window setup failed (non-fatal): {ex.Message}"); }
 
@@ -437,6 +439,12 @@ public partial class PillWindow : Window
             MorphContent();
         }
         CacheWindowRect();
+        // Re-assert ghost on EVERY state change, not just the hidden→shown reveal. The hover-morph and
+        // in-place-morph paths above never re-applied it, and the surface work for panel states
+        // (SetSurface → ApplyBlur/ApplyRoundRegion: WCA_ACCENT_POLICY + DWM corner/region changes) can
+        // drop WDA_EXCLUDEFROMCAPTURE — which is why ghost held on the recording peek but fell off the
+        // Ask/Calendar/Home panels. SetWindowDisplayAffinity is cheap and idempotent.
+        ApplyGhost();
 
         // Poll runs while tucked (Hidden — watch the top edge to summon) and on the peeks
         // (Collapsed launcher peek, recording peek ⇄ open). NOT on Home: Home is a deliberate
@@ -590,6 +598,12 @@ public partial class PillWindow : Window
         }
         catch (Exception ex) { App.Log($"blur apply failed (non-fatal): {ex.Message}"); }
         finally { Marshal.FreeHGlobal(ptr); }
+        // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) re-composites the window and can drop the
+        // capture-exclusion affinity. Every surface swap (state change, theme swap, glass toggle,
+        // deferred peek-bg) funnels through here, so re-asserting ghost HERE keeps every notch state —
+        // Ask, Calendar, Home, PrepCard, Onboarding, MeetingPrompt, Notes, Summarizing — invisible to
+        // screen capture. Idempotent; also correctly applies WDA_NONE when ghost is off.
+        ApplyGhost();
     }
 
     /// <summary>Round the acrylic window's corners. A window REGION can't do this — DWM draws the
@@ -610,6 +624,10 @@ public partial class PillWindow : Window
             DwmSetWindowAttribute(_hwnd, DwmwaBorderColor, ref border, sizeof(int));
         }
         catch (Exception ex) { App.Log($"corner rounding failed (non-fatal): {ex.Message}"); }
+        // SetWindowRgn + the DWM corner/border attribute changes above are further composition changes
+        // that can shed WDA_EXCLUDEFROMCAPTURE — and this runs AFTER ApplyBlur in every surface swap,
+        // so it must re-assert ghost too (last writer wins).
+        ApplyGhost();
     }
 
     /// <summary>

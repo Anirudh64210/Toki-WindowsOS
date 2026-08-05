@@ -33,6 +33,9 @@ public static class GeneralChat
         sb.Append("You can reason, explain, do quick math, and give a considered opinion. ")
           .Append("Be honest: if you're not sure, say so plainly — never invent specifics. ")
           .Append("You're an on-device assistant and everything stays on their PC. ")
+          .Append("If they ask who you are or what you do, say it plainly: you're Toki, their meeting assistant — ")
+          .Append("you take notes in the meetings they okay and answer questions from them, all on this PC, ")
+          .Append("and you're happy to chat about anything else. ")
           .Append("If they ask about their meetings or tasks, tell them to name the meeting, person, or topic and you'll check their notes.\n");
 
         var name = UserProfile.DisplayName;
