@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Toki.Llm;
 using Toki.Transcription;
 
@@ -212,22 +213,47 @@ public partial class AiSummariesSection : UserControl
 
     // ── segmented mode control ──
 
+    /// <summary>One segment of the mode selector. Sized for a window, not the notch: a real tap target
+    /// with side margins so the three never sit shoulder-to-shoulder, a hover fill on the inactive ones,
+    /// and the selected chip fading in (Motion.Micro) rather than snapping when the mode changes.</summary>
     Border SegButton(string label, NotesMode mode, NotesMode current)
     {
         var on = mode == current;
         var text = new TextBlock
         {
-            Text = label, HorizontalAlignment = HorizontalAlignment.Center, FontSize = 11.5,
+            Text = label, HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5,
             FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
             Foreground = (Brush)FindResource(on ? "Text" : "TextDim"),
             FontFamily = (FontFamily)FindResource("UiFont"),
+            TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var b = new Border
         {
             Background = on ? (Brush)FindResource("Chip") : Brushes.Transparent,
-            CornerRadius = new CornerRadius(8), Padding = new Thickness(0, 7, 0, 7),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(14, 11, 14, 11),   // was 0,7 — no side padding at all
+            Margin = new Thickness(2, 0, 2, 0),        // the gap that stops them touching
             Cursor = System.Windows.Input.Cursors.Hand, Child = text,
         };
+
+        // Hover only means anything on a segment you could switch TO.
+        if (!on)
+        {
+            b.MouseEnter += (_, _) => b.Background = (Brush)FindResource("Surface");
+            b.MouseLeave += (_, _) => b.Background = Brushes.Transparent;
+        }
+        else if (!App.Headless)
+        {
+            // The control is rebuilt on every mode change, so "fade the selected chip in" is just an
+            // opacity ramp on the new one — reads as the selection moving, not the panel redrawing.
+            b.Opacity = 0;
+            b.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Micro))
+            {
+                EasingFunction = Theme.Motion.EaseOut,
+            });
+        }
+
         b.MouseLeftButtonUp += (_, _) => SetMode(mode);
         return b;
     }

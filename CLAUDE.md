@@ -2,9 +2,9 @@
 
 Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail is needed). This file carries the same rules.
 
-## Current state & roadmap (updated 2026-08-04)
+## Current state & roadmap (updated 2026-08-05)
 
-**v1-iter3 premium UI + settings-move DONE (2026-08-04):** 1,682 tests green, published. Task-count-per-
+**v1-iter3 premium UI + settings-move DONE (2026-08-04/05):** 1,682 tests green, published. Task-count-per-
 date fix (count words leaked into task topic). Acknowledgements ("okay cool")→small-talk. AI/API settings
 moved to a reusable `AiSummariesSection` on the Library Settings page → **notch Settings is UI/visibility
 only**. Recording page compacted (~93×268). **Ghost mode re-asserted on every notch state** (acrylic/region
@@ -12,8 +12,11 @@ re-composition was shedding WDA_EXCLUDEFROMCAPTURE). Luma-style Ask landing + as
 prompts + copy trim. Library sort menu → in-house themed popup; Library jump-pill. **Calendar/COMING-UP/
 PrepCard premium redesign** (accent bars, attendee avatars, amber countdowns, Join; PrepCard="Coming Up"
 card). **New mascot**: `TokiBlob` redrawn brighter+black-eyes; `--makeicon` renders it to `Assets/toki.ico`
-(app/taskbar/shortcut icon). Motion tokens (`Theme/Motion.cs`) drive it all. See README v1-iter3. Built
-largely via partitioned Fable agents (parent builds/tests/publishes/verifies).
+as a **7-frame icon (16→256px)** — a single 256px frame downscales badly, which is why the taskbar/shortcut
+looked un-updated (Windows also caches those: unpin/re-pin or `ie4uinit.exe -show`). Ask landing example-
+question **chips removed** (owner: "never encourage"). Motion tokens (`Theme/Motion.cs`) drive it all. See
+README v1-iter3 + ARCHITECTURE "v1-iter3 decisions". Built largely via partitioned Fable agents (parent
+builds/tests/publishes/verifies).
 
 **v1-iter2 owner fix+feature+polish sweep DONE (2026-08-04):** long live-test session, 1,657 tests green,
 all owner-verified on the real PC. Notch: **stick-to-bottom scroll** (no more yank-down), **text cut-off +
@@ -58,13 +61,13 @@ pass", `mansplain/29`, and `docs/backlog.md` (research-derived opportunities + d
 2. ✅ **DONE — voice.** Ask-bar mic (click → speak → fills the box; auto-stop + loader) AND **push-to-talk on the notch**: `Ctrl+Alt+Space` = hold-to-talk (Wispr-Flow style) → notch drops down, listens (waveform), release → thinks → answer streams on the notch (`PushToTalkHook` + `AskView`). Mic runs ONLY while held.
 3. ~~"Hey Toki" wake word~~ — **DROPPED by owner (2026-08-02).** Owner chose **push-to-talk only, no always-listening**: the hotkey is hold-to-talk; there is **NO always-on mic and NO wake word**. Keeps Hard Constraint #3 fully intact. Do NOT rebuild the wake word unless the owner reverses this. (Polished conversational Q&A-on-the-notch is a future refinement of the P6 push-to-talk.)
 4. **Toki animation in the Library/hub** — ✅ mascot redesigned (soft gradient cloud, matches the product design) + a click-reaction vocabulary (squish/hop/wobble/wink/spin/big-eyes/nod) in `TokiBlob`. (Idle breathing/blink already existed.)
-5. **Library filter/sort menu** (Newest/Oldest/Longest/Manual-notes-only) — only a drag-reorder toggle exists today.
+5. ✅ **DONE — Library filter/sort menu** (Newest/Oldest/Longest/Manual-notes-only), shipped in H2 and restyled in v1-iter3 to the **in-house themed popup** (no native Windows menu; pink check on the active mode).
 6. **Manual/custom notes**: separate left-panel section vs a "Manual notes" filter — owner decision pending.
-7. **Notch acrylic on/off toggle** + blurrier white notch (background text unreadable). Acrylic exists but isn't user-toggleable.
+7. ✅ **DONE — notch glassy/acrylic toggle** (M9.0): Settings → Appearance → "Glassy notch", a real DWM acrylic blur-behind, theme-aware, off by default. See ARCHITECTURE "the glassy-notch blur".
 8. **Speaker diarisation** (named speakers, not just YOU/THEM) — task name-tags done; transcript diarisation not.
 9. **M7 Calendar** — ✅ **foundation + UI DONE (2026-08-03, live-verified):** OAuth (loopback+PKCE), DPAPI token, raw-HTTP `Calendar/` module, `CalendarService` facade; connected Home "COMING UP", `PillState.Calendar` agenda week view, natural-language create, edit (`events.patch`), delete (undo/confirm); **prep cards** (M7.2 — `PrepWatcher` auto-surfaces a deterministic before-meeting card: LAST TIME recap + STILL OPEN + AGENDA + Join-and-record). `--caltest …|parse`, `--preptest`, `--state PrepCard`, `docs/google-setup.md`, design = `Toki-ProductDesign/③ Home` + `④ prep card`. **voice-create** (M7.3 — "schedule a call with Ana tomorrow at 3" on push-to-talk, confirm-gated, `Llm/CalendarCommand.cs`, `--voicecreatetest`). **Still to build:** owner-confirm prep auto-vs-hover. Outlook post-v1 (UI provider-neutral); Google scope verification → M8. See `calendar-foundation` memory.
-10. **M8 Ship shape** — ✅ **Attribution/"Built with" screen DONE (2026-08-04):** `AboutView` (`PillState.About`), reached from **Settings → About → "Built with — open source & licences"**; scrollable credits list (MODELS + ENGINES & LIBRARIES), each row opens its upstream source; attribution-required licences (Parakeet **CC-BY-4.0** with an "int8 quantised" modification note, Qwen **Apache-2.0**, sherpa-onnx Apache-2.0) get amber chips, MIT stays neutral; Whisper deliberately **omitted** (stubbed fallback, not shipped); repo `THIRD-PARTY-NOTICES.md` holds the full attributions. **Still to build:** signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
-11. **M9** character & polish. (Live transcription preview is parked — owner deprioritized.)
+10. **M8 Ship shape** — ✅ **Attribution/"Built with" screen DONE (2026-08-04):** `AboutView` (`PillState.About`), reached from the **Library window's Settings page → "Built with — open source & licences"** (moved there in v1-iter3 with the rest of the settings); scrollable credits list (MODELS + ENGINES & LIBRARIES), each row opens its upstream source; attribution-required licences (Parakeet **CC-BY-4.0** with an "int8 quantised" modification note, Qwen **Apache-2.0**, sherpa-onnx Apache-2.0) get amber chips, MIT stays neutral; Whisper deliberately **omitted** (stubbed fallback, not shipped); repo `THIRD-PARTY-NOTICES.md` holds the full attributions. **Still to build:** signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
+11. **M9** character & polish — largely delivered across M9.0/M9.1 + v1-iter2/iter3 (premium redesign, motion tokens, mascot redraw, calendar/prep/recording/Ask redesigns). **Remaining #39 passes:** shared empty-state control, layout-stability/text-trim sweep, hover-expand "section pills". (Live transcription preview is parked — owner deprioritized.)
 12. **Graduated adaptive-resource scaling (RAM tiers)** — TODAY'S IDEA, not built. Resource adaptation is coarse: RAM = a single binary switch (`App.LowMemoryMode`, <8GB), VRAM = 3 GPU tiers (`LlmRuntime`), context follows VRAM not RAM, model always Qwen3-4B. Proposed: RAM tiers (16GB+ → bigger context/history; 6–8 → low-memory; <~6 → heuristic-only floor), maybe a 1–2B fallback model on tiny machines. See `docs/backlog.md`.
 13. **BYO-API "sharp brain" lever** — the P10 dialogue brain drives EITHER backend identically; on-device general chat is competent-but-modest (4-bit 4B ceiling), so the API key is the real sharpness upgrade. Not-yet-built: surface/encourage it better while keeping on-device the $0 default. See `docs/backlog.md`.
 
