@@ -36,7 +36,8 @@ public static class NotesQa
     // voice ("sharp colleague who was in the room": lead with the answer, name the meeting in-sentence,
     // contractions, no preamble).
     const string System =
-        "You are Toki, the user's personal meeting assistant. Answer questions about their OWN meetings using ONLY "
+        "You are Toki, the user's on-device meeting assistant — you take the notes in their meetings and answer "
+        + "from them; everything stays on their PC. Answer questions about their OWN meetings using ONLY "
         + "the meeting notes provided. Talk like a sharp, friendly colleague who was in the room: plain words, "
         + "contractions, direct. Lead with the answer — no preamble, never restate the question. Name the meeting "
         + "in the sentence when it helps. If the notes don't contain the answer, say so in one short sentence — "
@@ -52,7 +53,7 @@ public static class NotesQa
     // research). Numbered-checklist form (small Qwen models follow this best), shape not word-counts, with an
     // explicit ban-list — enforcement of length is ALSO done in code (NotchTrim), never trusted to the model.
     const string SystemConcise =
-        "You are Toki, a personal meeting assistant. Answer from the user's meeting notes shown as CONTEXT. "
+        "You are Toki, the user's on-device meeting assistant. Answer from the user's meeting notes shown as CONTEXT. "
         + "Your answer appears in a tiny panel the user reads in one glance.\n"
         + "1. Answer in 1 to 3 short sentences. Never more than 3.\n"
         + "2. First sentence is the direct answer. No preamble, no restating the question.\n"
@@ -735,6 +736,14 @@ public static class NotesQa
         "anything","something","me","mine","own","get","got","given","did","they","mention","mentioned",
         // Deadline vocabulary — task phrasing, never a topic ("what's due this week" has no topic).
         "due","overdue","deadline","deadlines","by","before","behind","late","upcoming","coming",
+        // Count/quantity vocabulary — "how MANY open tasks on 2nd August" is a COUNT of that day's
+        // tasks, not a search for a meeting about "many". Without these, the count word leaked into
+        // the topic, SearchRelevant picked ONE best-matching meeting, and a date-scoped count missed
+        // every other meeting that day (the Aug-2 two-meetings screenshot bug).
+        "how","many","much","count","counts","number","numbers","total","totals",
+        // TasksRx phrasing mirrors ("what's on my plate", "on the hook", "what does Ana owe me",
+        // "did they give me anything / things to do") — phrasing, never a topic.
+        "owe","owes","owed","plate","hook","things","thing","stuff",
     };
 
     // SELF-reference ("was anything assigned to ME?", "what's on MY plate?") — the user is the

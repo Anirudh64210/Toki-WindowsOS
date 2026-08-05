@@ -48,6 +48,7 @@ static class SelfTests
                 "--llmtest" => LlmTest(),
                 "--themetest" => ThemeTest(),
                 "--measuretest" => MeasureTest(),
+                "--makeicon" => MakeIcon(args),
                 "--copytest" => CopyTest(),
                 "--asktest" => AskTest(args),
                 "--querytest" => QueryTest(),
@@ -670,7 +671,7 @@ static class SelfTests
         var cases = new (string name, double w, Func<System.Windows.Controls.UserControl> build)[]
         {
             ("MeetingPrompt",         288, () => { var v = new Views.MeetingPromptView(); v.Refresh("Com.tinyspeck.slackdesktop"); return v; }),
-            ("RecordingOpen",         288, () => new Views.RecordingOpenView()),
+            ("RecordingOpen",         268, () => new Views.RecordingOpenView()),
             ("Ask",                   344, () => new Views.AskView()),
             ("NoSpeech",              300, () => new Views.NoSpeechView()),
             ("PrepCard",              356, () => { App.CurrentPrep = PrepSamples.FirstTime(); return new Views.PrepCardView(); }),
@@ -721,6 +722,47 @@ static class SelfTests
         Console.WriteLine(anyShort
             ? "RESULT: at least one page's out-of-tree measure under-reports the true height → reveal clips."
             : "RESULT: out-of-tree measure matches the true arranged height for every page.");
+        return 0;
+    }
+
+    // Render the (vector) Toki mascot to a transparent PNG and pack it into a Vista-style .ico (single
+    // 256px PNG frame). Run: Toki.exe --makeicon src\Toki\toki.ico
+    static int MakeIcon(string[] args)
+    {
+        var outPath = args.Length > 1 && !args[1].StartsWith("--") ? args[1]
+                    : System.IO.Path.Combine(Directory.GetCurrentDirectory(), "toki.ico");
+        int[] sizes = { 16, 24, 32, 48, 64, 128, 256 };
+        var pngs = new List<byte[]>();
+        foreach (var s in sizes)
+        {
+            var mascot = new Controls.TokiBlob { Width = s, Height = s };
+            var host = new System.Windows.Controls.Border { Width = s, Height = s, Background = System.Windows.Media.Brushes.Transparent, Child = mascot };
+            host.Measure(new System.Windows.Size(s, s));
+            host.Arrange(new System.Windows.Rect(0, 0, s, s));
+            host.UpdateLayout();
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(s, s, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(host);
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+            using var ms = new MemoryStream();
+            enc.Save(ms);
+            pngs.Add(ms.ToArray());
+        }
+        using var fs = File.Create(outPath);
+        using var w = new BinaryWriter(fs);
+        w.Write((short)0); w.Write((short)1); w.Write((short)sizes.Length);   // ICONDIR
+        var offset = 6 + 16 * sizes.Length;                                   // data starts after the directory
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            w.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));                  // width  (0 = 256)
+            w.Write((byte)(sizes[i] >= 256 ? 0 : sizes[i]));                  // height
+            w.Write((byte)0); w.Write((byte)0);                              // colours, reserved
+            w.Write((short)1); w.Write((short)32);                          // planes, bpp
+            w.Write(pngs[i].Length); w.Write(offset);
+            offset += pngs[i].Length;
+        }
+        foreach (var p in pngs) w.Write(p);
+        Console.WriteLine($"[--makeicon] wrote {outPath} ({new FileInfo(outPath).Length:N0} bytes, {sizes.Length} sizes)");
         return 0;
     }
 

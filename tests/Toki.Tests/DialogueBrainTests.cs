@@ -339,6 +339,28 @@ public sealed class DialogueBrainTests : IDisposable
     public void FuzzyWakeNameGreetings_AreSmallTalk_NotRetrieval(string q)
         => Assert.NotNull(SmallTalk.TryReply(q));
 
+    // Acknowledgements must be small-talk, never notes retrieval (real bug: "okay cool" dug up an
+    // unrelated meeting; "no i just meant okay cool thanks" got echoed back with citations).
+    [Theory]
+    [InlineData("okay cool")]
+    [InlineData("ok cool thanks")]
+    [InlineData("alright cool")]
+    [InlineData("okay")]
+    [InlineData("sounds good")]
+    [InlineData("makes sense")]
+    [InlineData("cool thanks")]
+    [InlineData("no i just meant okay cool thanks")]
+    public void Acknowledgements_AreSmallTalk_NotRetrieval(string q)
+        => Assert.NotNull(SmallTalk.TryReply(q));
+
+    // …but a real question or a meeting reference must still fall through to the Q&A.
+    [Theory]
+    [InlineData("what did we decide")]
+    [InlineData("i meant the pricing meeting")]
+    [InlineData("cool project ideas from the sync")]
+    public void RealQuestions_AreNotSwallowedByAck(string q)
+        => Assert.Null(SmallTalk.TryReply(q));
+
     // The exact artifact the owner saw ("Toki: Hey Anirudh! … 🚀") — a leading label + emoji — must be
     // stripped: the notch/answer voice is plain text, enforced in code, not just asked in the prompt.
     [Theory]

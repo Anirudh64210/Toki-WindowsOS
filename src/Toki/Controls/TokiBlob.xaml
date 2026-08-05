@@ -26,10 +26,10 @@
                     </Path.Effect>
                     <Path.Fill>
                         <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.42,1">
-                            <GradientStop Color="#FBC8DD" Offset="0.0"/>
-                            <GradientStop Color="#F79EBE" Offset="0.42"/>
-                            <GradientStop Color="#F07FAB" Offset="0.72"/>
-                            <GradientStop Color="#E75F9E" Offset="1.0"/>
+                            <GradientStop Color="#FFDCEC" Offset="0.0"/>
+                            <GradientStop Color="#FF9FCB" Offset="0.40"/>
+                            <GradientStop Color="#FB74AE" Offset="0.72"/>
+                            <GradientStop Color="#EE4F9B" Offset="1.0"/>
                         </LinearGradientBrush>
                     </Path.Fill>
                     <Path.Data>
@@ -65,20 +65,20 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
                             VerticalAlignment="Center" Margin="0,-4,0,0">
                     <Grid Margin="0,0,13,0">
-                        <Border x:Name="LeftEye" Width="15" Height="33" Background="White"
+                        <Border x:Name="LeftEye" Width="16" Height="30" Background="#1E1C22"
                                 CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform><ScaleTransform x:Name="LeftBlink"/></Border.RenderTransform>
                         </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#FFE9F1" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,7,0,0"/>
+                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
+                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
                     </Grid>
                     <Grid>
-                        <Border x:Name="RightEye" Width="15" Height="33" Background="White"
+                        <Border x:Name="RightEye" Width="16" Height="30" Background="#1E1C22"
                                 CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform><ScaleTransform x:Name="RightBlink"/></Border.RenderTransform>
                         </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#FFE9F1" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,7,0,0"/>
+                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
+                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
                     </Grid>
                 </StackPanel>
             </Grid>

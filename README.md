@@ -1001,3 +1001,16 @@ a full resume plan in the `asr-and-notch-reply-quality` memory.
 **Deferred to next passes of #39:** shared empty-state control, layout-stability/text-trim sweep, the
 hover-expand "section pills", and the jump-pill in the Library chat. **Still open:** the ASR quality pass
 and the M8 ship path (installer, auto-update, key gate).
+
+## v1-iter3 (Premium UI pass + settings move + fixes) — 2026-08-04
+
+Owner-driven, verified on the real PC. **1,682 tests green.** Done via parent + partitioned Fable agents.
+- **Task-count per date fixed** — "how many tasks on Aug 2" counted one meeting, not all; count/quantity words ("many/much/count/number/total" + phrasing words) leaked into the task *topic* → topic-scoped to one meeting. Stripped them; date-scoped counts span all meetings that day (14 new tests).
+- **Acknowledgements → small-talk** — "okay cool", "ok cool thanks", "no i just meant okay cool thanks" no longer retrieve a random meeting (SmallTalk broadened, tests added).
+- **Settings consolidated in the Library** — the AI-summaries + API-key block moved to a reusable `AiSummariesSection` UserControl on the Library Settings page; the **notch Settings is now UI/visibility only** (theme, glassy, ghost) + a row that opens the Library page. Notch Settings size 360→208.
+- **Recording page redesigned** — compact (~93×268 vs ~136×288): one tight row (Toki + dot + timer · Stop chip), hairline, live line. **Ghost mode fixed on every notch state** — acrylic/region re-composition was shedding `WDA_EXCLUDEFROMCAPTURE`; now re-asserted after every composition write + at the end of every state change.
+- **Ask landing** — Luma-style hero (mascot on a soft pink radial glow, typed greeting, one identity line, outlined suggestion pills, staggered Motion entrance). Assistant self-awareness sharpened (who/what-are-you in the prompts). Copy trimmed across Library/Settings/Templates.
+- **Library sort menu** restyled to the in-house themed popup (pink check on the active mode) — no more native Windows menu. Library **jump-to-latest pill** added (was notch-only).
+- **Calendar/COMING UP/prep premium redesign** — accent bars per event, overlapping attendee **avatar** stacks (initials, on-device), amber "in N min" countdown when imminent, Join affordances; PrepCard reshaped into the "Coming Up" card (title · amber relative time · invited/accepted avatars · Context inset · full-width Join). Deterministic, honest first-time.
+- **New mascot** — the `TokiBlob` vector redrawn brighter/glossier with black eyes to match the owner's redesign (stays crisp + animated + theme-aware everywhere); a 256px `.ico` rendered from it (`--makeicon`) replaces the old app/taskbar/shortcut icon.
+- Central **Motion tokens** (`Theme/Motion.cs`, ease-out) now drive the notch morph, message arrival, calendar/prep motion, jump-pill.

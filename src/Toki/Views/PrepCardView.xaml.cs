@@ -35,7 +35,8 @@ public partial class PrepCardView : UserControl
         if (prep is null) return;
 
         Title.Text = prep.Event.Summary;
-        WhenText.Text = CalendarRows.RelativeTime(prep.Event) is { Length: > 0 } r ? r : "starting now";
+        PaintWhen(prep.Event);
+        PaintPeople(prep.Event);
         JoinButton.Content = prep.Event.HasMeetLink ? "Join and record" : "Record";
 
         // LAST TIME
@@ -44,12 +45,12 @@ public partial class PrepCardView : UserControl
             RecapHeader.Text = $"LAST TIME ({PrepBuilder.AgoLabel(m.StartedAt)})";
             RecapText.Text = PrepBuilder.Recap(m);
             RecapHost.Visibility = Visibility.Visible;
-            FirstTimeLine.Visibility = Visibility.Collapsed;
+            FirstTimeHost.Visibility = Visibility.Collapsed;
         }
         else
         {
             RecapHost.Visibility = Visibility.Collapsed;
-            FirstTimeLine.Visibility = Visibility.Visible;
+            FirstTimeHost.Visibility = Visibility.Visible;
         }
 
         // STILL OPEN
@@ -71,6 +72,38 @@ public partial class PrepCardView : UserControl
         else AgendaHost.Visibility = Visibility.Collapsed;
 
         Grow();
+    }
+
+    // "9:41 – 10:11 AM  ·  in 9 min" — the time range reads soft, the countdown reads amber (the
+    // reference card's urgency accent). Runs use SetResourceReference so a live theme swap recolours.
+    void PaintWhen(CalEvent e)
+    {
+        WhenText.Inlines.Clear();
+        var range = new Run(CalendarRows.TimeRange(e));
+        range.SetResourceReference(TextElement.ForegroundProperty, "TextSoft");
+        WhenText.Inlines.Add(range);
+        // Amber only when it's genuinely urgent (≤15 min / started) — a card previewed further out
+        // keeps a quiet countdown, not a false alarm.
+        var urgent = CalendarRows.Imminent(e) || e.Until <= TimeSpan.Zero;
+        var rel = new Run("  ·  " + (CalendarRows.RelativeTime(e) is { Length: > 0 } r ? r : "now"))
+        { FontWeight = FontWeights.SemiBold };
+        rel.SetResourceReference(TextElement.ForegroundProperty, urgent ? "Amber" : "TextDim");
+        WhenText.Inlines.Add(rel);
+    }
+
+    // "5 invited · 3 accepted" + overlapping initials — only from the REAL invite list; a meeting with
+    // no guests shows nothing (never fabricated).
+    void PaintPeople(CalEvent e)
+    {
+        AvatarHost.Children.Clear();
+        var all = e.Attendees;
+        var others = all.Where(a => !a.IsSelf).ToList();
+        if (others.Count == 0) { PeopleHost.Visibility = Visibility.Collapsed; return; }
+
+        AvatarHost.Children.Add(CalendarRows.AvatarStack(others, 20, 3));
+        var accepted = all.Count(a => string.Equals(a.ResponseStatus, "accepted", StringComparison.OrdinalIgnoreCase));
+        PeopleText.Text = accepted > 0 ? $"{all.Count} invited · {accepted} accepted" : $"{all.Count} invited";
+        PeopleHost.Visibility = Visibility.Visible;
     }
 
     FrameworkElement OpenRow(ActionItem a)
@@ -116,7 +149,7 @@ public partial class PrepCardView : UserControl
         p.Children.Add(new TextBlock
         {
             Text = line, Foreground = (Brush)FindResource("TextDim"), FontSize = 11, TextWrapping = TextWrapping.Wrap,
-            FontFamily = (FontFamily)FindResource("UiFont"), MaxWidth = 300,
+            FontFamily = (FontFamily)FindResource("UiFont"), MaxWidth = 276,   // fits inside the inset box at the 356 card width
         });
         return p;
     }

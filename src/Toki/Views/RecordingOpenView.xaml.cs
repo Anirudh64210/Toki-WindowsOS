@@ -43,7 +43,10 @@ public partial class RecordingOpenView : UserControl
         var text = s.Text?.Trim();
         if (string.IsNullOrEmpty(text)) return;
         LiveLine.Text = text;
-        LiveLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0.35, 1.0, TimeSpan.FromMilliseconds(260)));
+        LiveLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0.35, 1.0, Theme.Motion.Dur(Theme.Motion.Enter))
+        {
+            EasingFunction = Theme.Motion.EaseOut,   // arriving content decelerates (central motion token)
+        });
     }
 
     // A lively spring-pop on Toki each time the pill expands on hover — Toki is alive and

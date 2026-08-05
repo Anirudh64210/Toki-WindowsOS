@@ -183,7 +183,11 @@ public static class CalendarCommand
         if (p.Start is not { } start) return WhenPrompt(p);
         if (!(ConnectedOverride ?? CalendarService.Instance.IsConnected)) return NotConnected();
 
-        var ev = new NewEvent(p.Title, start, p.End ?? start.AddMinutes(30), p.Emails, AddMeet: false,
+        // Voice-created MEETINGS get a Google Meet link by default — matching the composer's default
+        // (MeetChip starts on): a "call with Ana" without a link isn't joinable, and the link is what
+        // the calendar's "Copy Meet link" shares. Reminders are personal, not calls — no Meet room.
+        var addMeet = !p.Title.StartsWith("Reminder", StringComparison.Ordinal);
+        var ev = new NewEvent(p.Title, start, p.End ?? start.AddMinutes(30), p.Emails, AddMeet: addMeet,
             Description: p.PersonMentioned is { } who ? $"Mentioned: {who} (no email — invite them from Google Calendar)." : null);
         try
         {

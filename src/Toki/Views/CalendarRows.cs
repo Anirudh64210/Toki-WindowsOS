@@ -1,47 +1,88 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Toki.Calendar;
+using Toki.Theme;
 
 namespace Toki.Views;
 
 /// <summary>
 /// Shared, code-built pieces for the calendar surfaces (Home "COMING UP" glance + the Calendar page),
-/// so both read identically. Everything pulls colours/fonts from Theme.xaml by key, so a live theme
-/// swap recolours it. No provider-specific types here — only <see cref="CalEvent"/>.
+/// so both read identically. Premium agenda language (owner's reference designs): a coloured accent
+/// bar per event, title + "time · place", overlapping attendee initials, an amber relative-time hint
+/// when imminent, and an obvious Join. Everything pulls colours/fonts from Theme.xaml by key, so a
+/// live theme swap recolours it (rows are rebuilt on ThemeChanged). No provider-specific types here —
+/// only <see cref="CalEvent"/>.
 /// </summary>
 static class CalendarRows
 {
-    const string More = "";   // Segoe Fluent: More (ellipsis)
-
     static Brush Br(string key) => (Brush)Application.Current.Resources[key];
     static FontFamily Ui => (FontFamily)Application.Current.Resources["UiFont"];
     static FontFamily Icons => (FontFamily)Application.Current.Resources["IconFont"];
 
-    // ── date badge (stacked day number + month) ──
+    // ── per-event accent bar + per-person avatar colours ──
+    // Deterministic (string.GetHashCode is randomised per process — never use it for a stable colour).
+    // Coral is deliberately absent: it means record/destructive only. Amber on events would collide
+    // with the imminent treatment, so it's only in the person palette.
 
-    public static FrameworkElement DateBadge(CalEvent e, double width = 34)
+    static readonly string[] EventPalette = { "Pink", "Blue", "Green", "Purple" };
+    static readonly string[] PersonPalette = { "Pink", "Blue", "Green", "Purple", "Amber" };
+
+    static int StableHash(string s)
     {
-        var local = e.StartLocal;
-        var today = local.Date == DateTimeOffset.Now.Date;
-        var day = new TextBlock
-        {
-            Text = local.Day.ToString(), FontFamily = Ui, FontSize = 15, FontWeight = FontWeights.SemiBold,
-            Foreground = today ? Br("Amber") : Br("Text"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        var mon = new TextBlock
-        {
-            Text = local.ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant(),
-            FontFamily = Ui, FontSize = 8.5, FontWeight = FontWeights.Bold, Foreground = Br("TextDim"),
-            HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, -1, 0, 0),
-        };
-        return new StackPanel { Width = width, VerticalAlignment = VerticalAlignment.Center, Children = { day, mon } };
+        var h = 17;
+        foreach (var ch in s) h = (h * 31 + ch) & 0x7FFFFFFF;
+        return h;
     }
 
-    // ── Home "COMING UP" glance row ──
+    static Brush EventAccent(CalEvent e) => Br(EventPalette[StableHash(e.Id) % EventPalette.Length]);
+
+    static Border AccentBar(CalEvent e, Thickness margin) => new()
+    {
+        Width = 3, CornerRadius = new CornerRadius(1.5), Background = EventAccent(e), Margin = margin,
+    };
+
+    // ── attendee avatars: overlapping initial circles (no photos on-device — initials are honest) ──
+
+    /// <summary>Up to <paramref name="max"/> overlapping initial circles + a "+N" bubble for the rest.</summary>
+    public static FrameworkElement AvatarStack(IEnumerable<CalAttendee> people, double size = 16, int max = 3)
+    {
+        var list = people.ToList();
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var shown = list.Take(max).ToList();
+        for (var i = 0; i < shown.Count; i++)
+        {
+            var p = shown[i];
+            var accent = (SolidColorBrush)Br(PersonPalette[StableHash(p.Email ?? p.Label) % PersonPalette.Length]);
+            var c = accent.Color;
+            var tint = new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B));
+            var label = p.Label.TrimStart();
+            var initial = label.Length > 0 ? char.ToUpperInvariant(label[0]).ToString() : "?";
+            panel.Children.Add(Bubble(size, tint, initial, accent, overlap: i > 0));
+        }
+        if (list.Count > shown.Count)
+            panel.Children.Add(Bubble(size, Br("Chip"), $"+{list.Count - shown.Count}", Br("TextDim"), overlap: shown.Count > 0));
+        return panel;
+    }
+
+    static Border Bubble(double size, Brush bg, string text, Brush fg, bool overlap) => new()
+    {
+        Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Background = bg,
+        // The notch-coloured ring is what makes the overlap read as a stack, not a blob.
+        BorderBrush = Br("Notch"), BorderThickness = new Thickness(1.5),
+        Margin = new Thickness(overlap ? -(size * 0.30) : 0, 0, 0, 0),
+        VerticalAlignment = VerticalAlignment.Center,
+        Child = new TextBlock
+        {
+            Text = text, FontFamily = Ui, FontSize = Math.Max(7.5, Math.Round(size * 0.46)),
+            FontWeight = FontWeights.SemiBold, Foreground = fg,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, -0.5, 0, 0),
+        },
+    };
+
+    // ── Home "COMING UP" glance row: accent bar · title / avatars + "day · time · place" · Join ──
 
     public static FrameworkElement GlanceRow(CalEvent e, Action onOpen)
     {
@@ -50,21 +91,17 @@ static class CalendarRows
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var badge = DateBadge(e);
-        Grid.SetColumn(badge, 0);
-        grid.Children.Add(badge);
+        var bar = AccentBar(e, new Thickness(1, 4, 0, 4));
+        Grid.SetColumn(bar, 0);
+        grid.Children.Add(bar);
 
-        var mid = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var mid = new StackPanel { Margin = new Thickness(9, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
             Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
             Foreground = Br("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        mid.Children.Add(new TextBlock
-        {
-            Text = TimeRange(e), FontFamily = Ui, FontSize = 10, Foreground = Br("TextDim"),
-            Margin = new Thickness(0, 1, 0, 0),
-        });
+        mid.Children.Add(SubRow(e, GlanceSubtitle(e)));
         Grid.SetColumn(mid, 1);
         grid.Children.Add(mid);
 
@@ -73,6 +110,37 @@ static class CalendarRows
         grid.Children.Add(right);
 
         return Clickable(grid, onOpen);
+    }
+
+    // The subtitle line: meta text + the attendee stack beside it (reference: avatars under the title,
+    // so the right edge stays reserved for the Join affordance).
+    static FrameworkElement SubRow(CalEvent e, string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        row.Children.Add(new TextBlock
+        {
+            Text = text, FontFamily = Ui, FontSize = 10, Foreground = Br("TextDim"),
+            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
+        });
+        var others = e.Attendees.Where(a => !a.IsSelf).ToList();
+        if (others.Count > 0)
+        {
+            var stack = AvatarStack(others);
+            stack.Margin = new Thickness(7, 0, 0, 0);
+            row.Children.Add(stack);
+        }
+        return row;
+    }
+
+    static string GlanceSubtitle(CalEvent e)
+    {
+        var parts = new List<string>();
+        var day = e.StartLocal.Date; var today = DateTimeOffset.Now.Date;
+        if (day != today)
+            parts.Add(day == today.AddDays(1) ? "Tomorrow" : e.StartLocal.ToString("ddd d", CultureInfo.InvariantCulture));
+        parts.Add(TimeRange(e));
+        if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
+        return string.Join(" · ", parts);
     }
 
     // ── Calendar page agenda row ──
@@ -84,6 +152,7 @@ static class CalendarRows
     {
         var grid = new Grid { MinHeight = 40 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -97,34 +166,41 @@ static class CalendarRows
         Grid.SetColumn(time, 0);
         grid.Children.Add(time);
 
-        var mid = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var bar = AccentBar(e, new Thickness(8, 4, 0, 4));
+        Grid.SetColumn(bar, 1);
+        grid.Children.Add(bar);
+
+        var mid = new StackPanel { Margin = new Thickness(9, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
             Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
             Foreground = Br("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
         var sub = SubtitleText(e);
-        if (sub.Length > 0)
-            mid.Children.Add(new TextBlock { Text = sub, FontFamily = Ui, FontSize = 10, Foreground = Br("TextDim"),
-                TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
-        Grid.SetColumn(mid, 1);
+        var hasOthers = e.Attendees.Any(a => !a.IsSelf);
+        if (sub.Length > 0 || hasOthers) mid.Children.Add(SubRow(e, sub));
+        Grid.SetColumn(mid, 2);
         grid.Children.Add(mid);
 
-        // Join is always visible (joining must never require discovery).
+        // Join is always visible (joining must never require discovery); the copy glyph beside it makes
+        // SHARING the Meet link just as discoverable; the amber countdown gives it urgency when imminent.
+        var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (e.HasMeetLink)
         {
-            var join = JoinButton(e, Imminent(e));
-            join.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(join, 2);
-            grid.Children.Add(join);
+            if (e.MeetLink is { Length: > 0 } meet) right.Children.Add(CopyIcon(meet));
+            if (Imminent(e)) right.Children.Add(ImminentHint(e));
+            right.Children.Add(JoinButton(e, Imminent(e)));
         }
+        else if (Imminent(e)) right.Children.Add(ImminentHint(e, trailing: false));
+        Grid.SetColumn(right, 3);
+        grid.Children.Add(right);
 
-        // Hover reveals an inline action strip (Vercel/Wispr style) below the row.
+        // Hover reveals an inline action strip (Vercel/Wispr style) below the row. Indent 52 (the time
+        // gutter), NOT the title x — the full set of links must fit the page width.
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
         if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
         // Share: copy the JOINABLE Google Meet link — the only link worth sharing. (The calendar-page
         // link is pointless to send someone; "Open in Google" below already covers viewing the event.)
-        // So Copy Meet link only appears when the event actually has a Meet link.
         if (e.HasMeetLink && e.MeetLink is { Length: > 0 } meetUrl)
             strip.Children.Add(CopyLink(meetUrl));
         strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
@@ -132,6 +208,14 @@ static class CalendarRows
 
         return HoverRevealRow(grid, strip);
     }
+
+    /// <summary>The amber "in N min" countdown that flanks Join on an imminent row.</summary>
+    static TextBlock ImminentHint(CalEvent e, bool trailing = true) => new()
+    {
+        Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5, FontWeight = FontWeights.SemiBold,
+        Foreground = Br("Amber"), VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(0, 0, trailing ? 8 : 0, 0),
+    };
 
     // ── the hover-expand "section pill": a row that smoothly grows on hover to reveal an action strip ──
 
@@ -172,13 +256,14 @@ static class CalendarRows
         return wrap;
     }
 
+    // Motion tokens: expanding decelerates (EaseOut/Micro), collapsing accelerates away (EaseIn/Exit).
     static void AnimateHeight(FrameworkElement el, double to)
     {
         var from = el.ActualHeight;
         var growing = to > from;
         el.BeginAnimation(FrameworkElement.HeightProperty,
-            new System.Windows.Media.Animation.DoubleAnimation(from, to, TimeSpan.FromMilliseconds(growing ? 150 : 130))
-            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = growing ? System.Windows.Media.Animation.EasingMode.EaseOut : System.Windows.Media.Animation.EasingMode.EaseIn } });
+            new System.Windows.Media.Animation.DoubleAnimation(from, to, Motion.Dur(growing ? Motion.Micro : Motion.Exit))
+            { EasingFunction = growing ? Motion.EaseOut : Motion.EaseIn });
     }
 
     // A text-link action (brightens on hover) — the strip's buttons.
@@ -225,6 +310,37 @@ static class CalendarRows
         return tb;
     }
 
+    // The ALWAYS-VISIBLE share affordance: a small copy glyph beside Join on rows that have a Meet
+    // link. Click → link on the clipboard, glyph flips to a green ✓ for a beat. Quiet (TextDim at
+    // rest) so it doesn't compete with Join; the hover strip's "Copy Meet link" stays for wordy folks.
+    static FrameworkElement CopyIcon(string url)
+    {
+        var tb = new TextBlock
+        {
+            Text = "",   // Fluent: Copy
+            FontFamily = Icons, FontSize = 12, Foreground = Br("TextDim"),
+            Cursor = System.Windows.Input.Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0), Padding = new Thickness(3),
+            ToolTip = "Copy Meet link",
+        };
+        var copied = false;
+        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        tb.MouseLeftButtonUp += (_, ev) =>
+        {
+            ev.Handled = true;
+            var ok = false;
+            try { System.Windows.Clipboard.SetText(url); ok = true; } catch { }   // clipboard can be locked
+            if (!ok) return;
+            copied = true;
+            tb.Text = ""; tb.Foreground = Br("Green"); tb.ToolTip = "Copied";   // Fluent: CheckMark
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = ""; tb.Foreground = Br("TextDim"); tb.ToolTip = "Copy Meet link"; };
+            t.Start();
+        };
+        return tb;
+    }
+
     public static FrameworkElement SkeletonRow()
     {
         Border Bar(double w, double h) => new()
@@ -253,17 +369,15 @@ static class CalendarRows
             var imminent = Imminent(e);
             if (!imminent) return JoinButton(e, false);
             var wrap = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            wrap.Children.Add(new TextBlock
-            {
-                Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5, FontWeight = FontWeights.SemiBold,
-                Foreground = Br("Amber"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
-            });
+            wrap.Children.Add(ImminentHint(e));
             wrap.Children.Add(JoinButton(e, true));
             return wrap;
         }
         return new TextBlock
         {
-            Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5, Foreground = Br("TextDim"),
+            Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5,
+            Foreground = Imminent(e) ? Br("Amber") : Br("TextDim"),
+            FontWeight = Imminent(e) ? FontWeights.SemiBold : FontWeights.Normal,
             VerticalAlignment = VerticalAlignment.Center,
         };
     }
@@ -292,14 +406,13 @@ static class CalendarRows
         return $"{s.ToString(startFmt, CultureInfo.InvariantCulture)} – {en.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
     }
 
+    // Agenda sub-line: duration · place. (People are no longer words here — the avatar stack beside
+    // this text carries them; "Meet" as a venue would be redundant next to the Join button.)
     static string SubtitleText(CalEvent e)
     {
         var parts = new List<string>();
         if (!e.IsAllDay) parts.Add(DurationText(e));
-        var others = e.Attendees.Where(a => !a.IsSelf).ToList();
-        if (others.Count == 1) parts.Add(others[0].Label);
-        else if (others.Count > 1) parts.Add($"{others.Count + 1} people");
-        else if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
+        if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
         return string.Join("  ·  ", parts);
     }
 
@@ -345,9 +458,9 @@ static class CalendarRows
     // attacker-influenceable, so every open goes through the one shell choke point.
     public static void OpenUrl(string? url) => Toki.Interop.SafeShell.OpenUrl(url);
 
-    // Smooth opacity fade (120ms ease-out) — for hover reveals so controls appear/vanish gently.
+    // Smooth opacity fade (Motion.Micro, ease-out) — hover reveals appear/vanish gently.
     static void Fade(UIElement el, double to) =>
         el.BeginAnimation(UIElement.OpacityProperty,
-            new System.Windows.Media.Animation.DoubleAnimation(to, TimeSpan.FromMilliseconds(120))
-            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut } });
+            new System.Windows.Media.Animation.DoubleAnimation(to, Motion.Dur(Motion.Micro))
+            { EasingFunction = Motion.EaseOut });
 }
