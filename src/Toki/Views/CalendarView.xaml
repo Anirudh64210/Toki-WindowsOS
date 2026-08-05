@@ -31,14 +31,44 @@
         <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,12,0,0"
                 BorderBrush="{DynamicResource Hairline}" BorderThickness="0,1,0,0" Padding="0,12,0,2">
             <StackPanel>
+                <!-- Separate fields (owner: not everything crammed in one box): title, then day + time.
+                     Day/Time accept natural words ("tomorrow", "Friday", "2pm") — resolved live below. -->
+                <TextBlock Text="Title" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
                 <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
-                    <TextBox x:Name="QuickBox" Background="Transparent" BorderThickness="0" Height="36"
+                    <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="36"
                              Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                              FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                             TextChanged="OnQuickText" PreviewKeyDown="OnQuickKey"/>
+                             TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
                 </Border>
-                <TextBlock x:Name="ComposerHint" Style="{StaticResource Caption}" Margin="2,5,0,0"
-                           Text="Try “Design sync tomorrow 2pm with ana@work.com”"/>
+
+                <Grid Margin="0,9,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Day" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
+                        <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+                            <TextBox x:Name="DateBox" Background="Transparent" BorderThickness="0" Height="36"
+                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                     FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                     TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Time" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
+                        <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+                            <TextBox x:Name="TimeBox" Background="Transparent" BorderThickness="0" Height="36"
+                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                     FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                     TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock x:Name="ComposerHint" Style="{StaticResource Caption}" Margin="2,7,0,0"
+                           Text="e.g. Design sync · tomorrow · 2pm"/>
                 <TextBlock x:Name="ParsePreview" Style="{StaticResource Secondary}" FontWeight="SemiBold"
                            Foreground="{DynamicResource Green}" Margin="2,6,0,0" Visibility="Collapsed"/>
 

@@ -160,6 +160,53 @@ public sealed class CalendarCommandTests : IDisposable
         Assert.Equal(1, _creates);
     }
 
+    // ── multi-turn slot-fill (the owner's "actually make it 6 to 7pm tomorrow") ──
+
+    [Fact]
+    public async Task Correction_before_yes_updates_the_time_then_creates_the_new_one()
+    {
+        var ctx = new ConversationContext();
+        await NotesQa.AskAsync("schedule a call with Ana tomorrow at 3", ctx);   // confirm armed at 3pm
+        var a2 = await NotesQa.AskAsync("actually make it 6 to 7pm tomorrow", ctx);
+        Assert.Equal(0, _creates);                                    // NOT created — still confirming
+        Assert.NotNull(ctx.PendingCreate);
+        Assert.Contains("yes", a2.Text);                             // re-confirm, not lost
+        Assert.Equal(18, ctx.PendingCreate!.Start!.Value.ToLocalTime().Hour);
+        Assert.Equal(19, ctx.PendingCreate!.End!.Value.ToLocalTime().Hour);
+
+        await NotesQa.AskAsync("yes", ctx);
+        Assert.Equal(1, _creates);
+        Assert.Equal(18, _lastEvent!.Start.ToLocalTime().Hour);       // created with the CORRECTED time
+        Assert.Equal(19, _lastEvent!.End.ToLocalTime().Hour);
+    }
+
+    [Fact]
+    public async Task Title_correction_before_yes_renames_the_draft()
+    {
+        var ctx = new ConversationContext();
+        await NotesQa.AskAsync("schedule a meeting tomorrow at 3", ctx);
+        var a = await NotesQa.AskAsync("call it design sync", ctx);
+        Assert.Equal(0, _creates);
+        Assert.Contains("Design sync", a.Text);                      // re-confirm shows the new title
+        await NotesQa.AskAsync("yes", ctx);
+        Assert.Equal(1, _creates);
+        Assert.Contains("Design sync", _lastEvent!.Summary);
+    }
+
+    [Fact]
+    public async Task Yes_with_a_correction_is_a_change_not_a_create()
+    {
+        var ctx = new ConversationContext();
+        await NotesQa.AskAsync("schedule a call tomorrow at 3", ctx);
+        var a = await NotesQa.AskAsync("yes but make it 4pm tomorrow", ctx);
+        Assert.Equal(0, _creates);                                    // "yes but …" isn't a bare yes → a change
+        Assert.NotNull(ctx.PendingCreate);
+        Assert.Equal(16, ctx.PendingCreate!.Start!.Value.ToLocalTime().Hour);
+        await NotesQa.AskAsync("yes", ctx);
+        Assert.Equal(1, _creates);
+        Assert.Equal(16, _lastEvent!.Start.ToLocalTime().Hour);
+    }
+
     [Fact]
     public async Task Not_connected_is_honest_and_never_creates()
     {

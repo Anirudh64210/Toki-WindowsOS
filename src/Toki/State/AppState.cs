@@ -28,6 +28,9 @@ public sealed class AppState
         // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
         // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.
         [PillState.Ask]           = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.RecordingBar],
+        // First-run onboarding (forced in at startup). Finishing it lands in Home (the greeting then
+        // proves the name they just gave), or the user can dismiss to the resting peek.
+        [PillState.Onboarding]    = [PillState.Home, PillState.Collapsed, PillState.Hidden],
     };
 
     public PillState Current { get; private set; } = PillState.Hidden;

@@ -122,6 +122,11 @@ static class CalendarRows
         // Hover reveals an inline action strip (Vercel/Wispr style) below the row.
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
         if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
+        // Share: copy the JOINABLE Google Meet link — the only link worth sharing. (The calendar-page
+        // link is pointless to send someone; "Open in Google" below already covers viewing the event.)
+        // So Copy Meet link only appears when the event actually has a Meet link.
+        if (e.HasMeetLink && e.MeetLink is { Length: > 0 } meetUrl)
+            strip.Children.Add(CopyLink(meetUrl));
         strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
         strip.Children.Add(ActionLink("Delete", true, onDelete));
 
@@ -189,6 +194,34 @@ static class CalendarRows
         tb.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
         tb.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
         tb.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
+        return tb;
+    }
+
+    // "Copy link" → puts the meeting URL on the clipboard, then flips to "Copied ✓" (green) for a beat so
+    // the action is confirmed. Never throws (the clipboard can be momentarily locked by another app).
+    static FrameworkElement CopyLink(string url)
+    {
+        var tb = new TextBlock
+        {
+            Text = "Copy Meet link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Foreground = Br("TextDim"), Cursor = System.Windows.Input.Cursors.Hand,
+            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+        };
+        var copied = false;
+        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        tb.MouseLeftButtonUp += (_, ev) =>
+        {
+            ev.Handled = true;
+            var ok = false;
+            try { System.Windows.Clipboard.SetText(url); ok = true; } catch { }
+            if (!ok) return;
+            copied = true;
+            tb.Text = "Copied ✓"; tb.Foreground = Br("Green");
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = "Copy Meet link"; tb.Foreground = Br("TextDim"); };
+            t.Start();
+        };
         return tb;
     }
 

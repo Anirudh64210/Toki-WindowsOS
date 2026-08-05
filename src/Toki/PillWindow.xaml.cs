@@ -41,6 +41,7 @@ public partial class PillWindow : Window
         [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
         [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short (design ④)
         [PillState.About]         = (380, 430),   // FIXED height + internal scroll (credits list) — mirrors Settings
+        [PillState.Onboarding]    = (330, 250),   // auto-height: steps (name/privacy/done) differ in height
     };
 
     const double TopGap = 0;        // flush to the top edge — the notch hangs from the top
@@ -65,7 +66,7 @@ public partial class PillWindow : Window
     // came up short (scrollbar) and every later re-open (after one arrange) came up full-size (big
     // notch). A fixed height + the ScrollViewer already in SettingsView makes every open identical.
     static readonly HashSet<PillState> AutoHeight =
-        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask, PillState.PrepCard];
+        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask, PillState.PrepCard, PillState.Onboarding];
 
     // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
     // transient "nothing was said" toast). Everything with content you actually work
@@ -307,6 +308,7 @@ public partial class PillWindow : Window
             PillState.Calendar      => new CalendarView(),
             PillState.PrepCard      => new PrepCardView(),
             PillState.About         => new AboutView(),
+            PillState.Onboarding    => new OnboardingView(),
             _ => throw new ArgumentOutOfRangeException(nameof(s)),
         };
         _views[s] = v;
@@ -382,6 +384,9 @@ public partial class PillWindow : Window
         // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Other transitions stay instant.
         if (hoverMorph)
         {
+            // This path animates size only (no clip). Drop any clip a just-interrupted reveal/conceal
+            // left behind, or it would cap this content (a source of the "text cut off" after fast cycling).
+            Root.Clip = null; _clipGen++;
             // Collapsing (e.g. recording open → tiny peek) reads best as a smooth zoom-OUT: a slightly
             // longer, eased size retract with the content cross-fading, not a hard snap.
             const int collapseMs = 240;
@@ -421,6 +426,9 @@ public partial class PillWindow : Window
         }
         else
         {
+            // In-place morph (visible → visible), no clip on this path — drop any leftover clip from an
+            // interrupted reveal/conceal so it can't cap the new content.
+            Root.Clip = null; _clipGen++;
             BeginAnimation(WidthProperty, null);   // clear any in-flight resize animation
             BeginAnimation(HeightProperty, null);
             Width = w;
@@ -457,7 +465,10 @@ public partial class PillWindow : Window
     /// in-flight one can't get stuck holding the old target.</summary>
     void AnimateSize(double w, double h, int ms)
     {
-        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        // Ease-OUT, not ease-in-out: an expanding/morphing notch should decelerate into its new size
+        // (Glass's 1−(1−p)³; Material/Fluent agree arriving motion decelerates). Reads noticeably more
+        // premium than the old symmetric curve. Central motion token — see Theme/Motion.
+        var ease = Theme.Motion.EaseOut;
         var dur = new Duration(TimeSpan.FromMilliseconds(ms));
         var fromW = ActualWidth > 0 ? ActualWidth : w;
         var fromH = ActualHeight > 0 ? ActualHeight : h;
@@ -645,11 +656,14 @@ public partial class PillWindow : Window
     /// dark box flashes before the first frame.</summary>
     void RevealDown(double w, double h, int ms)
     {
+        var gen = ++_clipGen;
         var geo = new RectangleGeometry(new Rect(0, 0, w, 0));
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, 0), new Rect(0, 0, w, h),
             new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-        anim.Completed += (_, _) => { if (ReferenceEquals(Root.Clip, geo)) Root.Clip = null; };  // drop the clip so content isn't capped
+        // Drop the clip so content isn't capped — but ONLY if this reveal is still the latest clip op. A
+        // rapid re-open/close can supersede it; a late-firing Completed must not clobber the new clip.
+        anim.Completed += (_, _) => { if (gen == _clipGen) Root.Clip = null; };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
         MorphContent();   // content settles in with the soft pop + fade
     }
@@ -658,16 +672,25 @@ public partial class PillWindow : Window
     /// then run <paramref name="done"/> (Hide). No per-frame window resize.</summary>
     void ConcealUp(double w, int ms, Action done)
     {
+        var gen = ++_clipGen;
         var h = ActualHeight > 0 ? ActualHeight : Height;
         var geo = new RectangleGeometry(new Rect(0, 0, w, h));
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, h), new Rect(0, 0, w, 0),
             new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
-        anim.Completed += (_, _) => { Root.Clip = null; done(); };
+        // Only finish the hide if this conceal is STILL the latest clip op. If a re-open (RevealDown)
+        // superseded it, this late Completed must NOT null the new reveal's clip and must NOT Hide() the
+        // window we just brought back — that was the "reopen right after close → blank/clipped notch" bug.
+        anim.Completed += (_, _) => { if (gen != _clipGen) return; Root.Clip = null; done(); };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
         Host.BeginAnimation(OpacityProperty, null);
         Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(Math.Max(60, ms - 20)))));
     }
+
+    // Monotonic token: every clip animation (reveal / conceal) captures the current value; its Completed
+    // handler no-ops if a newer clip op has since bumped this. Prevents a stale animation that finishes
+    // late from clobbering the current clip (the corruption that built up across rapid open/close cycles).
+    int _clipGen;
 
     void OnKeyDown(object sender, KeyEventArgs e)
     {
@@ -882,10 +905,21 @@ public partial class PillWindow : Window
             var v = ViewFor(state);
             v.Measure(new Size(Math.Max(1, width - 2), double.PositiveInfinity));   // −2 for the L/R border
             var m = v.DesiredSize.Height;
-            return m > 8 ? Math.Ceiling(m) + 1 : fallback;   // +1 for the bottom border hairline
+            // The design height is a MINIMUM, never a cap (research §3d: measured content grows past it).
+            // The content MEASURES accurately (verified via --measuretest), but the notch was still
+            // rendering a hair short of it — DPI physical-pixel rounding + the surface chrome shave a few
+            // px off the bottom, clipping the last row (the account footer's email + Library button). So
+            // add a small, honest bottom breathing pad: enough that the final line always fits with a
+            // little air, cheap on pages that don't need it.
+            return m > 8 ? Math.Max(fallback, Math.Ceiling(m) + BottomBreath) : fallback;
         }
         catch { return fallback; }
     }
+
+    // Bottom breathing room added to every auto-height page's measured content (see ContentHeight). The
+    // content measures correctly; this covers the few px lost to DPI rounding + the notch's bottom chrome
+    // so the last line is never clipped and sits with a touch of air above the rounded bottom edge.
+    const double BottomBreath = 14;
 
     /// <summary>Re-measure the current AUTO-HEIGHT view and smoothly grow/shrink the notch to fit — for
     /// when a page's content changes size WITHOUT a state change (the Ask notch going from the short

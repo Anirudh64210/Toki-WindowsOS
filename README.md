@@ -927,3 +927,77 @@ memory, wake-name ASR variants, and a route-invariance perturbation overlay (cas
 **Verified** — 1,636/1,636 tests green; self-tests all pass (`--querytest` 13/13, `--dbtest`, `--notestest`,
 `--voicecreatetest`); the exact reported bug proven fixed end-to-end; `dist` republished (132 MB) and
 smoke-launched. No non-brain code touched.
+
+## v1-iter2 (Owner-driven fix + feature + polish sweep) — 2026-08-04
+
+A long live-testing session with the owner: fixing the bugs they hit as they used the app, adding the
+features they asked for, and starting the UI revamp. Each item built → `dotnet test` green → `dist`
+republished → owner verified on the real PC. **1,657 tests green** at the end.
+
+**UI / notch stability (the "ugly to use" regressions)**
+- **Scroll-up glitch fixed** — the Ask thread (notch + Library) force-scrolled to the bottom on every
+  streaming token, yanking you back down when you scrolled up. Rebuilt as **stick-to-bottom**: it
+  auto-follows only while you're already parked at the end; a new turn re-pins. Threshold widened to
+  ~120px (research §3a; 8px was hair-trigger).
+- **Text cut-off + open/close stability fixed** — root-caused with a new headless `--measuretest`
+  (measures each auto-height view's true arranged height, no RenderTargetBitmap so it runs in CI/sandbox
+  where the render harness hangs). The content measured fine; the last line just sat flush against the
+  rounded bottom with ~0px slack → looked clipped, and DPI rounding tipped it into a real clip. Fix: a
+  **14px bottom breathing pad** on auto-height pages + a **clip-generation guard** so a late-firing
+  reveal/conceal animation can't clobber the current clip or hide a just-reopened notch (the "open/close
+  a million times → corruption" bug).
+
+**Onboarding + name**
+- **First-run onboarding** (`PillState.Onboarding`, notch-native, 3 steps: name → privacy-as-pitch → all
+  set → Home). Gated on a new `OnboardingComplete` flag so it fires once for every install — which also
+  corrects a stale stored name. `AboutView`-style wiring.
+- **Name moved to a Library-window Settings page** (owner decision — it's passive, not something you
+  change often): a 4th "Settings" nav tab with a name field, **Confirm/Cancel**, a green **"✓ Saved"**
+  reinforcement, and **live propagation** (fixed the bug where the Home "Welcome back" greeting cached its
+  text at construction and never refreshed — it now re-reads the name every time Home is shown). Removed
+  the notch Settings name field.
+
+**Assistant / voice**
+- **Misheard command → clarify** — a command-shaped mis-hear ("start reporting" for "start recording")
+  now gets a short clarification instead of a bad Q&A answer (`CommandRouter.TryNearMiss` broadened to
+  recording verbs). An earlier auto-**re-listen** (a second mic) was tried and **removed** — it grabbed
+  the audio device and starved the next push-to-talk, so voice never answered (the endless "I didn't
+  catch that" loop). Clarify-only now; hold-to-retry.
+- **Multi-turn meeting creation** — the voice/text calendar create is now real slot-filling: the draft
+  PERSISTS across turns and absorbs corrections (`CalendarCommand.ApplyUpdate`: day, time, a range like
+  "6 to 7pm tomorrow", title, people) until a final "yes" creates it. "yes but make it 4pm" is a change,
+  not a create; chit-chat/questions release the draft.
+- **Reply hygiene** — fixed **blank notch answers** (a concise `"\n\n"` stop treated the model's leading
+  newline as end-of-output → empty stream; removed it) and the **"Toki: Hey Anirudh! … 🚀"** artifact
+  (`GeneralChat` ended its prompt with "Reply as Toki:" → the model prepended a label, parroted the date,
+  and never banned emojis). Now: prompt bans labels/emojis/date-echo, ends "Reply:", plus a code
+  `GeneralChat.Sanitize()` strips a leading label + emojis on every answer path.
+
+**Calendar**
+- **Structured create form** — split the one natural-language box into labeled **Title / Day / Time**
+  fields (Day/Time still parse "tomorrow"/"2pm" live), keeping the Duration/Meet/People chips.
+- **Copy Meet link** — the agenda row's copy action now copies the joinable **Google Meet** link (not the
+  pointless calendar-page link) and only appears when the event has one.
+- **"A meeting's on now — Join?"** — the record prompt is now "both smart": a calendar meeting with a Meet
+  link happening now shows **Join call** (opens the link + records) + Record; an ad-hoc detected call
+  shows **Join & take notes**. Dismissing re-surfaces once more after the 10-min snooze if the call is
+  still going.
+
+**UI revamp #39 (started)**
+- **Central motion tokens** (`Theme/Motion.cs`) — one place for durations + easings; the notch morph
+  switched to **ease-out** (arriving motion decelerates — Glass/Material/Fluent); new messages **fade-up**
+  in (standard "arrive" motion).
+- **"↓ Latest" jump pill** in the notch conversation (appears when you scroll up mid-stream) + a **3-dot
+  thinking indicator** replacing the sliding bar.
+- **Push-to-talk fix** — the mic now ends only when **Space** (the talk key) is released; relaxing Ctrl/Alt
+  while still holding Space no longer cuts you off mid-sentence (the "waveform disappears while listening"
+  bug).
+
+**Also:** the muted-mic diagnosis (the "voice returns nothing" root cause was the owner's Windows mic being
+muted/blocked — `--mictest` now dumps the Communications-vs-Console default device + all devices + peak so
+this is one command to diagnose). ASR model quality on short push-to-talk is **parked** (owner's call) with
+a full resume plan in the `asr-and-notch-reply-quality` memory.
+
+**Deferred to next passes of #39:** shared empty-state control, layout-stability/text-trim sweep, the
+hover-expand "section pills", and the jump-pill in the Library chat. **Still open:** the ASR quality pass
+and the M8 ship path (installer, auto-update, key gate).

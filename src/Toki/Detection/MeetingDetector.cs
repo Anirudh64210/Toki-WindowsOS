@@ -66,8 +66,15 @@ public sealed class MeetingDetector
 
     public void EndRecording() => _recordingTarget = null;
 
-    /// <summary>Suppress an app for the cooldown window (user dismissed its prompt).</summary>
-    public void Snooze(DetectedApp app) => _cooldownUntil[app.Id] = _now() + Cooldown;
+    /// <summary>Suppress an app for the cooldown window (user dismissed its prompt). Also clears the
+    /// "already offered" mark so that — if the call is STILL going when the cooldown expires — the
+    /// ongoing-meeting prompt re-surfaces once more (the owner's "even while the meeting is happening"),
+    /// rather than the app being silenced for the whole session after one dismiss.</summary>
+    public void Snooze(DetectedApp app)
+    {
+        _cooldownUntil[app.Id] = _now() + Cooldown;
+        _prompted.Remove(app.Id);
+    }
 
     public static bool IsDenylisted(DetectedApp app)
     {

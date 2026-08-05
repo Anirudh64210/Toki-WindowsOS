@@ -152,7 +152,8 @@ public sealed class DialogueBrainTests : IDisposable
         Assert.Equal("Paris.", ans.Text);
         Assert.Empty(ans.Sources);                                        // no citations on general chat
         Assert.NotNull(fake.User);                                        // the model DID answer
-        Assert.Contains("Reply as Toki", fake.User);                      // …with the GENERAL prompt
+        Assert.Contains("Today is", fake.User);                           // …with the GENERAL prompt (dated preamble)
+        Assert.EndsWith("Reply:", fake.User!.TrimEnd());                  // …ending in the label-free "Reply:" cue (not "Reply as Toki:")
         Assert.DoesNotContain("Relevant meeting notes", fake.User);       // …never the grounded prompt
         Assert.DoesNotContain("Weekly sync", fake.User);                  // …and no note content leaked in
     }
@@ -309,11 +310,44 @@ public sealed class DialogueBrainTests : IDisposable
     [InlineData("turn on the goat mode theme")]
     [InlineData("switch to ghost")]
     [InlineData("use the other model")]
+    [InlineData("start reporting")]              // the owner's real mis-hear for "start recording"
+    [InlineData("begin reporting")]
+    [InlineData("start recoding")]
     public void CommandShapedNearMisses_GetAClarification(string q)
     {
         Assert.Null(CommandRouter.TryMatch(q));                           // really is a near-miss
         Assert.NotNull(CommandRouter.TryNearMiss(q));
     }
+
+    [Theory]
+    [InlineData("start recording")]
+    [InlineData("take notes")]
+    [InlineData("start taking notes")]
+    [InlineData("record this meeting")]
+    public void RealRecordingCommands_MatchBeforeNearMiss(string q)
+        => Assert.Equal(AppCommand.StartRecording, CommandRouter.TryMatch(q));
+
+    // A greeting with a fuzzy ASR wake-name ("Hey Toky", "hey doki") must be small-talk — NEVER fall
+    // through to notes retrieval and return an unrelated meeting (the notch "leak" the owner hit).
+    [Theory]
+    [InlineData("Hey Toky.")]
+    [InlineData("hey doki")]
+    [InlineData("hi toki")]
+    [InlineData("hello tokyo")]
+    [InlineData("thanks toky")]
+    [InlineData("toky")]
+    public void FuzzyWakeNameGreetings_AreSmallTalk_NotRetrieval(string q)
+        => Assert.NotNull(SmallTalk.TryReply(q));
+
+    // The exact artifact the owner saw ("Toki: Hey Anirudh! … 🚀") — a leading label + emoji — must be
+    // stripped: the notch/answer voice is plain text, enforced in code, not just asked in the prompt.
+    [Theory]
+    [InlineData("Toki: Hey Anirudh! The day's off to a sharp start. 🚀", "Hey Anirudh! The day's off to a sharp start.")]
+    [InlineData("🚀 Let's go", "Let's go")]
+    [InlineData("Assistant: sure thing", "sure thing")]
+    [InlineData("A mutex is a lock. 👍", "A mutex is a lock.")]
+    public void GeneralChat_Sanitize_stripsLeadingLabelsAndEmojis(string input, string expected)
+        => Assert.Equal(expected, GeneralChat.Sanitize(input));
 
     [Theory]
     [InlineData("why is the theme white")]                 // question → Q&A, never a clarification

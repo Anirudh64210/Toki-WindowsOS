@@ -202,7 +202,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -284,6 +284,13 @@ public partial class App : Application
             }
             catch { /* no store yet */ }
             State.ForceForDemo(s);
+        }
+        else if (!AppSettings.Current.OnboardingComplete)
+        {
+            // First run (or any install from before onboarding existed): greet + capture the name once,
+            // land in Home. Gating on the flag — not on whether a name exists — is what corrects a stale
+            // stored name (a wrong "Sid") too: everyone sees onboarding exactly once.
+            State.ForceForDemo(PillState.Onboarding);
         }
         else
         {
@@ -408,6 +415,30 @@ public partial class App : Application
         State.TryGo(PillState.Hidden);
     }
 
+    /// <summary>A scheduled meeting with a Meet link that is happening RIGHT NOW (start ≤ now &lt; end),
+    /// or null. Lets the meeting prompt offer "Join call" when a calendar event matches the live call
+    /// (the "Both smart" behaviour); read from the cache only, never a fresh network hit on the UI thread.</summary>
+    public static Toki.Calendar.CalEvent? LiveCalendarMeeting()
+    {
+        try
+        {
+            var snap = Toki.Calendar.UpcomingCache.Instance.Snapshot;
+            if (snap is null) return null;
+            var now = DateTimeOffset.UtcNow;
+            return snap.FirstOrDefault(e => !e.IsAllDay && e.HasMeetLink && e.StartUtc <= now && e.EndUtc > now);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>"Join call" on the prompt: open the live meeting's Meet link in the browser AND start
+    /// recording it (so joining and taking notes are one tap). Falls back to a plain record if the link
+    /// vanished between showing the prompt and the tap.</summary>
+    public static void JoinFromPrompt()
+    {
+        if (LiveCalendarMeeting()?.MeetLink is { Length: > 0 } link) Views.CalendarRows.OpenUrl(link);
+        AcceptPrompt();   // arm auto-stop + start recording the detected call
+    }
+
     /// <summary>Manual mic-only "quick note" from Home.</summary>
     public static void StartQuickNote()
     {
@@ -524,6 +555,18 @@ public partial class App : Application
         SetShowInRecordings(wanted);
         return on ? "Ghost mode on — Toki is hidden from screen recordings and shares."
                   : "Ghost mode off — Toki will show up in recordings.";
+    }
+
+    /// <summary>Finish first-run onboarding: persist the chosen name (empty = keep the Windows-account
+    /// fallback) and the completed flag so it never runs again, then land in Home — where the greeting
+    /// immediately shows the name they just gave.</summary>
+    public static void CompleteOnboarding(string name)
+    {
+        var s = Llm.AppSettings.Current;
+        if (!string.IsNullOrWhiteSpace(name)) s.UserName = name.Trim();
+        s.OnboardingComplete = true;
+        s.Save();
+        State.TryGo(PillState.Home);
     }
 
     public static void StopRecording()
@@ -824,6 +867,7 @@ public partial class App : Application
     Llm.ConversationContext? _notchCtx;   // the notch's session memory (multi-turn until it closes)
     long? _notchScreenId;                 // meeting on screen when the notch opened (pill Notes view)
 
+
     /// <summary>Re-fit the notch to its current Ask content (listening → thinking → answer).</summary>
     public static void GrowNotch() => (Current as App)?._pill?.GrowToContent();
 
@@ -900,7 +944,15 @@ public partial class App : Application
             return;
         }
         finally { try { File.Delete(wav); } catch { } }
-        if (string.IsNullOrWhiteSpace(text)) { Views.AskView.Instance?.Failed("Didn't catch that — hold and speak."); return; }
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            // Empty capture (short/quiet speech) is COMMON — do NOT auto-reopen the mic here, or a run of
+            // empty captures becomes an endless "I didn't catch that" loop that never reaches an answer.
+            // A calm dead-end: say it once, the user holds to try again. (Auto re-listen is reserved for a
+            // genuine misheard COMMAND — see HandleNotchText — which is rare and high-signal.)
+            Views.AskView.Instance?.Failed("I didn't catch that — hold Ctrl + Alt + Space and try again.");
+            return;
+        }
         await HandleNotchText(text!);
     }
 
@@ -911,6 +963,13 @@ public partial class App : Application
     {
         var cmd = Llm.CommandRouter.TryMatch(text);
         if (cmd is Llm.AppCommand c && c != Llm.AppCommand.ShowTasks) { ExecuteNotchCommand(c); return; }
+
+        // A misheard COMMAND (the owner's "start reporting" for "start recording") shouldn't get a bad
+        // Q&A answer: show a short clarification of what Toki heard, and let the user hold the key and say
+        // it again. We deliberately do NOT auto-reopen the mic — a second capture was grabbing the audio
+        // device and starving the next push-to-talk, which read as "I didn't catch that" forever.
+        if (Llm.CommandRouter.TryNearMiss(text) is string hint)
+        { Views.AskView.Instance?.Failed(hint); return; }
 
         Views.AskView.Instance?.Answer(text);
 
@@ -957,7 +1016,7 @@ public partial class App : Application
         catch (Exception ex) { flusher.Stop(); Log($"notch answer failed: {ex.Message}"); Views.AskView.Instance?.Final("Something went wrong — try again."); }
     }
 
-    static string StripMore(string s) => s.Replace("[MORE]", "").TrimEnd();
+    static string StripMore(string s) => s.Replace("[MORE]", "").Trim();   // Trim (not just TrimEnd): a leading newline from the model must never show as a blank first line
 
     // A completed sentence past ~240 chars, or the model's [MORE] flag → stop the stream at a clean boundary.
     static bool NotchOverBudget(string acc)

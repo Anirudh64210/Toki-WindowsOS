@@ -17,18 +17,44 @@ public partial class MeetingPromptView : UserControl
         Loaded += (_, _) => { Refresh(); App.GrowNotch(); };
     }
 
-    /// <summary>Set the prompt text from the currently detected app. Called by PillWindow right
-    /// before it measures this view's height, so the measured height always reflects the REAL text.</summary>
-    public void Refresh() => Refresh(App.CurrentApp?.DisplayName);
-
-    /// <summary>Testable/render-harness seam: set the prompt for a specific raw app identity.</summary>
-    public void Refresh(string? rawAppName)
+    /// <summary>Set the prompt from live state. Called by PillWindow right before it measures this view's
+    /// height, so the measured height always reflects the REAL (possibly wrapped) text. "Both smart": if a
+    /// scheduled meeting with a Meet link is happening now, offer to Join the call + Record; otherwise
+    /// it's an ad-hoc detected call → Join &amp; take notes (record).</summary>
+    public void Refresh()
     {
-        // "Slack is in a call. Record it?" when we know the app; generic otherwise. The FRIENDLY name,
-        // never the raw process identity ("Com.tinyspeck.slackdesktop" leaking here was a live bug).
-        var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
-        Prompt.Text = string.IsNullOrWhiteSpace(name) ? "Record this meeting?" : $"{name} is in a call. Record it?";
+        var cal = App.LiveCalendarMeeting();
+        Configure(cal is not null, cal?.Summary, App.CurrentApp?.DisplayName);
     }
+
+    /// <summary>Testable/render-harness seam: force the ad-hoc prompt for a specific raw app identity.</summary>
+    public void Refresh(string? rawAppName) => Configure(calendarMatch: false, title: null, rawAppName);
+
+    void Configure(bool calendarMatch, string? title, string? rawAppName)
+    {
+        if (calendarMatch)
+        {
+            // A scheduled call is on right now — "Join call" opens the Meet link; "Record" is secondary.
+            Prompt.Text = string.IsNullOrWhiteSpace(title) ? "A meeting is on now — join?" : $"“{title}” is on now — join?";
+            JoinBtn.Visibility = Visibility.Visible;
+            RecordBtn.Content = "Record";
+            RecordBtn.Style = (Style)FindResource("WhiteButton");
+        }
+        else
+        {
+            // Ad-hoc detected call — the FRIENDLY app name, never the raw process id (a past live bug).
+            var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
+            Prompt.Text = string.IsNullOrWhiteSpace(name) ? "A meeting's in progress." : $"{name} is in a call.";
+            JoinBtn.Visibility = Visibility.Collapsed;
+            RecordBtn.Content = "Join & take notes";   // Toki "joins" by taking notes on the call
+            RecordBtn.Style = (Style)FindResource("CoralButton");
+        }
+    }
+
+    /// <summary>Dev/measuretest seam: force the calendar-match (3-button) layout to verify it fits.</summary>
+    public void DebugCalendarMatch(string title) => Configure(calendarMatch: true, title, null);
+
+    void OnJoin(object sender, RoutedEventArgs e) => App.JoinFromPrompt();
 
     void OnRecord(object sender, RoutedEventArgs e) => App.AcceptPrompt();
 

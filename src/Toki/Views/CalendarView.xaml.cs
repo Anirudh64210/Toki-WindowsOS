@@ -452,13 +452,13 @@ public partial class CalendarView : UserControl
         _addMeet = _lastAddMeet; UpdateMeetChip();
         Composer.Visibility = Visibility.Visible;
         PeopleRow.Visibility = Visibility.Collapsed; PeopleBox.Text = "";
-        QuickBox.Text = "";
-        ComposerHint.Text = "Try “Design sync tomorrow 2pm with ana@work.com”";
+        TitleBox.Text = ""; DateBox.Text = ""; TimeBox.Text = "";
+        ComposerHint.Text = "e.g. Design sync · tomorrow · 2pm";
         ComposerHint.Foreground = (Brush)FindResource("TextDim");
         ParsePreview.Visibility = Visibility.Collapsed;
         ComposerCreate.Content = "Create";
         _parsed = null; UpdateCreateEnabled();
-        QuickBox.Focus();
+        TitleBox.Focus();
     }
 
     void BeginEdit(CalEvent ev)
@@ -474,9 +474,12 @@ public partial class CalendarView : UserControl
         ComposerHint.Text = "Edit the title, or type a new day/time to move it.";
         ComposerHint.Foreground = (Brush)FindResource("TextDim");
         ComposerCreate.Content = "Save";
-        QuickBox.Text = ev.Summary;   // triggers ReparseComposer (keeps the event's time via the edit fallback)
-        QuickBox.Focus();
-        QuickBox.CaretIndex = QuickBox.Text.Length;
+        // Day/Time start EMPTY on edit: the fallback in ReparseComposer keeps the event's original time
+        // (shown in the preview), so leaving them blank means "keep the time"; typing a day/time moves it.
+        DateBox.Text = ""; TimeBox.Text = "";
+        TitleBox.Text = ev.Summary;   // triggers ReparseComposer (keeps the event's time via the edit fallback)
+        TitleBox.Focus();
+        TitleBox.CaretIndex = TitleBox.Text.Length;
     }
 
     /// <summary>Render-harness hook: open the composer with sample text so its state is verifiable in a PNG.</summary>
@@ -485,7 +488,7 @@ public partial class CalendarView : UserControl
         Composer.Visibility = Visibility.Visible;
         PeopleRow.Visibility = Visibility.Visible;
         PeopleBox.Text = "ana@work.com";
-        QuickBox.Text = text;
+        TitleBox.Text = "Design sync"; DateBox.Text = "tomorrow"; TimeBox.Text = "2pm";
         ReparseComposer();
     }
 
@@ -493,15 +496,15 @@ public partial class CalendarView : UserControl
     {
         Composer.Visibility = Visibility.Collapsed;
         PeopleRow.Visibility = Visibility.Collapsed;
-        QuickBox.Text = ""; PeopleBox.Text = "";
+        TitleBox.Text = ""; DateBox.Text = ""; TimeBox.Text = ""; PeopleBox.Text = "";
         _editing = null;
     }
 
     void OnComposerCancel(object s, RoutedEventArgs e) => CloseComposer();
 
-    void OnQuickText(object s, TextChangedEventArgs e) { _parseDebounce.Stop(); _parseDebounce.Start(); }
+    void OnComposerField(object s, TextChangedEventArgs e) { _parseDebounce.Stop(); _parseDebounce.Start(); }
 
-    void OnQuickKey(object s, System.Windows.Input.KeyEventArgs e)
+    void OnComposerKey(object s, System.Windows.Input.KeyEventArgs e)
     {
         // Keep Esc/Enter inside the composer — never let them bubble to the notch (Esc would hide it).
         if (e.Key == System.Windows.Input.Key.Escape) { e.Handled = true; CloseComposer(); }
@@ -510,24 +513,32 @@ public partial class CalendarView : UserControl
 
     void ReparseComposer()
     {
-        var text = QuickBox.Text?.Trim() ?? "";
-        var parsed = text.Length == 0 ? null : QuickEventParser.Parse(text, DateTimeOffset.Now);
-        // Editing with no new time typed → keep the event's original time; the text is just the title.
-        if (_editing is { } ed && parsed?.Start is null)
-            _parsed = new QuickEvent(text.Length > 0 ? text : ed.Summary, ed.StartLocal, ed.EndLocal, parsed?.Emails ?? Array.Empty<string>());
-        else
-            _parsed = parsed;
+        var title = TitleBox.Text?.Trim() ?? "";
+        // Day + Time are separate fields; parse them together so natural words still resolve
+        // ("tomorrow" + "2pm" → a real start). Either alone is fine (a bare time → today/next; a bare
+        // day → needs a time, flagged below).
+        var whenText = $"{DateBox.Text} {TimeBox.Text}".Trim();
+        var when = whenText.Length == 0 ? null : QuickEventParser.Parse(whenText, DateTimeOffset.Now);
 
-        if (_parsed?.Start is { } start)
+        var start = when?.Start;
+        // Editing with no new day/time typed → keep the event's original time.
+        if (start is null && _editing is { } ed) start = ed.StartLocal;
+
+        var emails = when?.Emails ?? Array.Empty<string>();
+        _parsed = (title.Length > 0 || whenText.Length > 0 || start is not null)
+            ? new QuickEvent(title, start, when?.End, emails)
+            : null;
+
+        if (start is { } s)
         {
-            var end = start.AddMinutes(_durationMin);
-            ParsePreview.Text = $"{DayLabel(start)} · {start:h:mm} – {end:h:mm tt}";
+            var end = s.AddMinutes(_durationMin);
+            ParsePreview.Text = $"{DayLabel(s)} · {s:h:mm} – {end:h:mm tt}";
             ParsePreview.Foreground = (Brush)FindResource("Green");
             ParsePreview.Visibility = Visibility.Visible;
         }
-        else if (text.Length > 0)
+        else if (whenText.Length > 0)
         {
-            ParsePreview.Text = "When? Add a day and time (e.g. “tomorrow 2pm”).";
+            ParsePreview.Text = "Add a day and a time (e.g. “tomorrow” · “2pm”).";
             ParsePreview.Foreground = (Brush)FindResource("TextDim");
             ParsePreview.Visibility = Visibility.Visible;
         }

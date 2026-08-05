@@ -182,6 +182,46 @@
                     <StackPanel x:Name="TemplatesList" MaxWidth="640" HorizontalAlignment="Center"/>
                 </ScrollViewer>
 
+                <!-- ── Settings (passive prefs: name, …) ── -->
+                <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
+                              Padding="40,34,40,34" controls:SmoothScroll.Enabled="True">
+                    <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+                        <TextBlock Text="Settings" Style="{StaticResource Body}" FontSize="22" FontWeight="SemiBold"/>
+                        <TextBlock Text="Preferences that don't change often." Style="{StaticResource Dim}"
+                                   FontSize="12.5" Margin="0,4,0,26"/>
+
+                        <TextBlock Text="What should Toki call you?" Style="{StaticResource Body}"
+                                   FontSize="14.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="Used in your greeting and in Ask." Style="{StaticResource Dim}"
+                                   FontSize="12" Margin="0,3,0,12"/>
+                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,0"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
+                                Width="340" HorizontalAlignment="Left">
+                            <TextBox x:Name="LibNameBox" Background="Transparent" BorderThickness="0"
+                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                     Height="46" FontSize="15" FontFamily="{StaticResource UiFont}"
+                                     VerticalContentAlignment="Center" MaxLength="40"
+                                     TextChanged="OnLibNameChanged" KeyDown="OnLibNameKey"/>
+                        </Border>
+
+                        <!-- Confirm / cancel only appear once there's an unsaved change. -->
+                        <StackPanel x:Name="LibNameActions" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
+                            <Button x:Name="LibNameSave" Style="{StaticResource WhiteButton}" Content="Save"
+                                    Padding="26,9" Click="OnLibNameSave"/>
+                            <Button x:Name="LibNameCancel" Style="{StaticResource PillButton}" Background="Transparent"
+                                    Content="Cancel" Padding="20,9" Margin="8,0,0,0" Click="OnLibNameCancel"/>
+                        </StackPanel>
+
+                        <!-- Positive reinforcement after a successful save. -->
+                        <StackPanel x:Name="LibNameSaved" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
+                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                       Foreground="{DynamicResource Green}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="LibNameSavedText" Style="{StaticResource Body}" FontSize="12.5"
+                                       Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
             </Grid>
         </Border>
     </Grid>

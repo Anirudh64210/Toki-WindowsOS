@@ -28,6 +28,11 @@ public sealed class AppSettings
     /// falls back to the Windows account name when empty.</summary>
     public string? UserName { get; set; }
 
+    /// <summary>True once the user has been through the first-run onboarding (name + privacy + done).
+    /// Defaults false so EVERY existing install sees it once — which is also how a stale/wrong stored
+    /// name gets corrected. Set true only when the user finishes (or skips) onboarding.</summary>
+    public bool OnboardingComplete { get; set; }
+
     /// <summary>Best available first name for the greeting: the configured <see cref="UserName"/>,
     /// else a cleaned Windows account name, else "" (caller shows a nameless greeting).</summary>
     [JsonIgnore]

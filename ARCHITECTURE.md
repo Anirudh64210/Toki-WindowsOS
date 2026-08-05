@@ -743,3 +743,49 @@ wake-name ASR variants, and a route-invariance perturbation overlay (§15).
   "what are the recurring themes" analyses the corpus instead of being treated as an absent topic.
 
 No non-brain code was touched; 1,636 tests green, self-tests pass, dist republished + smoke-verified.
+
+## v1-iter2 — decisions from the owner live-test sweep (2026-08-04)
+
+**Notch sizing — content measures right, it just needed air.** The "text cut off everywhere" was NOT an
+under-measure (a new headless `--measuretest` proved every auto-height view's out-of-tree measure equals
+its true arranged height — it renders a real off-screen `Window`, no `RenderTargetBitmap`, so it works in
+the sandbox where the PNG harness hangs). The last line just sat flush against the rounded bottom with ~0px
+slack; DPI rounding tipped it into a clip. Fix = a **14px `BottomBreath`** added to every auto-height page's
+height. Separately, rapid open/close corrupted the notch because a late-firing reveal/conceal clip
+animation nulled the *current* clip / hid a *reopened* window — fixed with a **`_clipGen` generation token**
+(a stale animation's `Completed` no-ops) + clearing the clip on every in-place/hover morph.
+
+**Push-to-talk ends on SPACE-up only.** The hook used to fire `onStop` on *any* chord key release, so
+relaxing Ctrl or Alt while still holding Space to talk cut the mic mid-sentence ("the waveform disappears
+while I'm listening"). Space is the talk key; once the chord engages, only Space-up ends the utterance.
+
+**Auto re-listen was a mistake; removed.** A "clarify + listen again" that opened a *second* `MicCapture`
+grabbed the audio device and starved the next push-to-talk → every capture came back silent → an endless "I
+didn't catch that". The real "no voice" cause was a **muted Windows mic** (`--mictest` now dumps the
+Communications-vs-Console default capture device + all devices + peak). Kept: text clarification for a
+misheard *command*, hold-to-retry.
+
+**Answer voice is plain text, enforced in code.** Small models slip in a leading speaker label and emojis
+("Toki: … 🚀") and parrot the date. `GeneralChat`'s prompt now bans labels/emojis/date-echo and ends
+"Reply:" (not "Reply as Toki:", which caused the label); `GeneralChat.Sanitize()` strips a leading label +
+emojis on every answer path (`GeneralAnswerAsync` + `NotchTrim`). The concise `"\n\n"` stop was removed —
+Qwen emits a leading newline the stop treated as end-of-output → **blank answers**.
+
+**Multi-turn calendar create is slot-filling, not one-shot.** `CalendarCommand.ApplyUpdate` merges a
+follow-up turn's corrections (day/time/range/title/people) into the pending draft; the draft persists until
+an explicit "yes" (create) or "no" (scrap), and releases if the user asks a real question / chit-chats.
+
+**Name lives in the Library window, greeting refreshes on show.** Owner decision: name-change is passive,
+so it moved out of the notch to a 4th Library "Settings" tab (Confirm/Cancel/✓Saved). `HomeView` now
+re-reads the name in `RefreshGreeting()` every time Home is shown (it used to cache the greeting text at
+construction and go stale). First-run onboarding is notch-native (`PillState.Onboarding`), gated on
+`AppSettings.OnboardingComplete` so it fires once per install and corrects a stale stored name.
+
+**Motion is one system.** `Theme/Motion.cs` centralizes durations + easings; arriving/expanding motion is
+ease-OUT (Glass's 1−(1−p)³; Material/Fluent agree). The notch morph, message "arrive" (fade + rise), the
+"↓ Latest" jump pill, and the 3-dot thinking indicator all draw from it. Start of the #39 revamp.
+
+**"Meeting on now — Join?" is both-smart.** `App.LiveCalendarMeeting()` finds a calendar event with a Meet
+link happening right now; the prompt then shows Join-call (opens the link + records) + Record, or, for an
+ad-hoc detected call, Join-&-take-notes. `MeetingDetector.Snooze` now also clears `_prompted` so a still-
+ongoing call re-offers once after the 10-min cooldown.

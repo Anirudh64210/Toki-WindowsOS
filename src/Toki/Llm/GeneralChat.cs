@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Toki.Llm;
 
@@ -40,7 +41,9 @@ public static class GeneralChat
         if (facts.Count > 0) sb.Append("About them: ").Append(string.Join("; ", facts)).Append(". ");
         sb.Append('\n');
 
-        sb.Append("Never write \"As an AI\", \"Great question\", or \"Based on\". Never ask more than one question back. Respond in English only.\n");
+        sb.Append("Plain text only — NO emojis, NO markdown, NO speaker labels. Do NOT prefix your reply with your name. ")
+          .Append("Do NOT state today's date unless they ask for it. ")
+          .Append("Never write \"As an AI\", \"Great question\", or \"Based on\". Never ask more than one question back. Respond in English only.\n");
         sb.Append("Example:\nQ: what's a good name for a puppy?\nA: Depends on the pup! For something classic go Biscuit or Luna; for chaos energy, Turbo.");
         return sb.ToString();
     }
@@ -64,10 +67,30 @@ public static class GeneralChat
             }
         }
         sb.AppendLine().Append("User: ").AppendLine(question.Trim());
-        sb.Append("Reply as Toki:");
+        sb.Append("Reply:");   // NOT "Reply as Toki:" — that made the model prepend a literal "Toki:" label
         return sb.ToString();
     }
 
     /// <summary>Token budget for a general turn: chat is short by design.</summary>
     public static int MaxTokens(bool concise) => concise ? 120 : 260;
+
+    // A leading speaker label the small model sometimes prepends ("Toki: …", "Assistant: …").
+    static readonly Regex LeadLabel = new(@"^\s*(toki|assistant|ai|bot|reply)\s*[:\-]\s*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // Emoji / pictographs: astral-plane surrogate pairs (🚀 etc.) + the common BMP symbol blocks + the
+    // variation selector and ZWJ used to compose them. The notch/answer voice is plain text (BuildSystem
+    // bans these; this enforces it in code, since a small model still slips one in — CLAUDE.md lesson 8).
+    static readonly Regex Emoji = new(
+        @"[\uD800-\uDBFF][\uDC00-\uDFFF]|[←-⇿⌀-➿☀-⛿⬀-⯿️‍]",
+        RegexOptions.Compiled);
+
+    /// <summary>Strip artifacts a small model slips into a reply — a leading speaker label ("Toki:") and
+    /// any emojis — so the plain-text voice is enforced in code, not just asked for in the prompt.</summary>
+    public static string Sanitize(string text)
+    {
+        var t = (text ?? "").Trim();
+        t = LeadLabel.Replace(t, "").Trim();
+        t = Emoji.Replace(t, "");
+        t = Regex.Replace(t, @"[ \t]{2,}", " ");   // tidy any double space a removed emoji left behind
+        return t.Trim();
+    }
 }

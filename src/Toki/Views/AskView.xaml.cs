@@ -23,12 +23,18 @@ public partial class AskView : UserControl
     static FontFamily Ui => (FontFamily)Application.Current.FindResource("UiFont");
 
     readonly List<ScaleTransform> _bars = new();
-    TranslateTransform? _loaderSlide;
+    readonly List<Border> _thinkDots = new();   // the 3 "thinking" dots
     DispatcherTimer? _autoHide;
     TextBox? _curAnswer;
     StackPanel? _curStack;
     StackPanel? _curMoreHost;
     string? _moreQuestion;
+
+    // Stick-to-bottom: the thread auto-follows the newest text ONLY while you're already parked at the
+    // bottom. The moment you scroll UP to read earlier turns, following stops — so a streaming answer (or
+    // a new token) can never yank you back down (the "scroll fights me" glitch). A new turn you initiate
+    // (asking a question, a command reply) re-pins to the bottom, because you want to see the new thing.
+    bool _stick = true;
 
     public AskView()
     {
@@ -36,13 +42,60 @@ public partial class AskView : UserControl
         Instance = this;
         BuildWave();
         BuildLoader();
+        ThreadScroll.ScrollChanged += OnThreadScroll;
     }
+
+    // Re-evaluate "am I pinned to the bottom?" ONLY on a user-driven scroll. Content growth (streaming
+    // tokens, an inserted scope line) changes ExtentHeight — we must ignore those, or every token would
+    // reset the flag and defeat the point. A user wheel/drag has ExtentHeightChange == 0.
+    void OnThreadScroll(object sender, ScrollChangedEventArgs e)
+    {
+        // Re-evaluate "pinned to bottom" only on a USER scroll (content growth changes ExtentHeight, which
+        // must NOT flip the flag). ~120px threshold (research §3a: 8px was hair-trigger — any sub-pixel
+        // extent wobble un-anchored the reader).
+        if (e.ExtentHeightChange == 0 && (e.VerticalChange != 0 || e.ViewportHeightChange != 0))
+            _stick = ThreadScroll.VerticalOffset >= ThreadScroll.ScrollableHeight - 120;
+        // The "↓ Latest" pill shows whenever you've drifted up from the bottom and there's more below.
+        ShowJumpPill(!_stick && ThreadScroll.ScrollableHeight > 12);
+    }
+
+    bool _pillShown;
+    void ShowJumpPill(bool show)
+    {
+        if (show == _pillShown) return;
+        _pillShown = show;
+        if (App.Headless) { JumpPill.Visibility = show ? Visibility.Visible : Visibility.Collapsed; JumpPill.Opacity = show ? 1 : 0; return; }
+        if (show) JumpPill.Visibility = Visibility.Visible;
+        var anim = new DoubleAnimation(show ? 1 : 0, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut };
+        if (!show) anim.Completed += (_, _) => { if (!_pillShown) JumpPill.Visibility = Visibility.Collapsed; };
+        JumpPill.BeginAnimation(OpacityProperty, anim);
+    }
+
+    void OnJumpToLatest(object sender, MouseButtonEventArgs e)
+    {
+        _stick = true;
+        ThreadScroll.ScrollToEnd();
+        ShowJumpPill(false);
+    }
+
+    // Follow the newest content only if the user is parked at the bottom (see _stick). Deferred to
+    // Background priority so it runs AFTER the just-appended text has been measured into the extent —
+    // otherwise ScrollToEnd targets the pre-append (too-short) extent and lands a line high.
+    void Follow()
+    {
+        if (!_stick) return;
+        Dispatcher.BeginInvoke(new Action(() => { if (_stick) ThreadScroll.ScrollToEnd(); }), DispatcherPriority.Background);
+    }
+
+    // A new turn the USER initiated (a question, a command/help reply) always jumps to the bottom.
+    void PinToEnd() { _stick = true; Follow(); }
 
     public void NewSession()
     {
         Thread.Children.Clear();
         _curAnswer = null; _curMoreHost = null; _moreQuestion = null;
         StatusText.Text = "";
+        _stick = true;
     }
 
     // ── phases ──
@@ -74,11 +127,11 @@ public partial class AskView : UserControl
     {
         StatusText.Text = "";
         HideStrip();
-        Thread.Children.Add(UserRow(question));
+        var userRow = UserRow(question); Thread.Children.Add(userRow); Arrive(userRow);
         var (row, answer, moreHost) = AnswerRow();
-        Thread.Children.Add(row);
+        Thread.Children.Add(row); Arrive(row);
         _curAnswer = answer; _curStack = row as StackPanel; _curMoreHost = moreHost; _moreQuestion = null;
-        ThreadScroll.ScrollToEnd();
+        PinToEnd();   // a new question → jump to the newest turn
         App.GrowNotch();
     }
 
@@ -96,16 +149,17 @@ public partial class AskView : UserControl
         };
         t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
         _curStack.Children.Insert(0, t);
+        Follow();
         App.GrowNotch();
     }
 
-    public void Token(string t) { if (_curAnswer is not null) { _curAnswer.AppendText(t); ThreadScroll.ScrollToEnd(); } }
+    public void Token(string t) { if (_curAnswer is not null) { _curAnswer.AppendText(t); Follow(); } }
 
     public void SetAnswerText(string full)
     {
         if (_curAnswer is null) return;
         _curAnswer.Text = full ?? "";
-        ThreadScroll.ScrollToEnd();
+        Follow();
         App.GrowNotch();
     }
 
@@ -118,7 +172,7 @@ public partial class AskView : UserControl
             _curMoreHost.Children.Clear();
             if (_moreQuestion is { Length: > 0 }) _curMoreHost.Children.Add(MoreLink());
         }
-        ThreadScroll.ScrollToEnd();
+        Follow();
         App.GrowNotch();
         ArmAutoHide();
     }
@@ -144,8 +198,8 @@ public partial class AskView : UserControl
         HideStrip();
         var (row, answer, _) = AnswerRow(dim);
         answer.Text = message;
-        Thread.Children.Add(row);
-        ThreadScroll.ScrollToEnd();
+        Thread.Children.Add(row); Arrive(row);
+        PinToEnd();   // a fresh Toki line (command / help / error) → jump to it
         App.GrowNotch();
     }
 
@@ -157,6 +211,18 @@ public partial class AskView : UserControl
     }
 
     // ── plain-text turns (no bubbles) ──
+
+    // The one standard "arrive" motion for new content: fade up a few px, ease-out (Motion tokens). Only
+    // NEW rows animate — existing history never moves. Render transform only, so layout is untouched.
+    static void Arrive(FrameworkElement el)
+    {
+        if (App.Headless) return;
+        var slide = new TranslateTransform(0, Theme.Motion.EnterRise);
+        el.RenderTransform = slide;
+        el.Opacity = 0;
+        el.BeginAnimation(OpacityProperty, new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Enter)) { EasingFunction = Theme.Motion.EaseOut });
+        slide.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, Theme.Motion.Dur(Theme.Motion.Enter)) { EasingFunction = Theme.Motion.EaseOut });
+    }
 
     FrameworkElement UserRow(string text)
     {
@@ -260,24 +326,31 @@ public partial class AskView : UserControl
 
     // ── thinking loader ──
 
+    // Three pulsing dots — the calm "thinking" indicator (Glass/ChatGPT pattern), staggered so the pulse
+    // travels across them. Replaces the old sliding bar.
     void BuildLoader()
     {
-        var track = new Grid { Width = 170, Height = 4, ClipToBounds = true, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 3) };
-        var bg = new Border { Height = 4, CornerRadius = new CornerRadius(2) };
-        bg.SetResourceReference(Border.BackgroundProperty, "Chip");
-        _loaderSlide = new TranslateTransform();
-        var dot = new Border { Width = 50, Height = 4, CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, Background = (Brush)FindResource("Pink"), RenderTransform = _loaderSlide };
-        track.Children.Add(bg);
-        track.Children.Add(dot);
-        LoaderHost.Child = track;
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(1, 8, 0, 3) };
+        _thinkDots.Clear();
+        for (var i = 0; i < 3; i++)
+        {
+            var dot = new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Margin = new Thickness(0, 0, 6, 0), Background = (Brush)FindResource("Pink"), Opacity = 0.3 };
+            _thinkDots.Add(dot);
+            row.Children.Add(dot);
+        }
+        LoaderHost.Child = row;
     }
 
     void StartLoader()
     {
-        if (App.Headless || _loaderSlide is null) return;
-        _loaderSlide.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, 170 - 50, TimeSpan.FromMilliseconds(820))
-        { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } });
+        if (App.Headless) return;
+        for (var i = 0; i < _thinkDots.Count; i++)
+            _thinkDots[i].BeginAnimation(OpacityProperty, new DoubleAnimation(0.3, 1.0, TimeSpan.FromMilliseconds(560))
+            {
+                AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever,
+                BeginTime = TimeSpan.FromMilliseconds(i * 170), EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+            });
     }
 
-    void StopLoader() => _loaderSlide?.BeginAnimation(TranslateTransform.XProperty, null);
+    void StopLoader() { foreach (var d in _thinkDots) { d.BeginAnimation(OpacityProperty, null); d.Opacity = 0.3; } }
 }
