@@ -29,10 +29,24 @@
                        FontSize="9.5" Margin="1,6,0,0"/>
         </StackPanel>
 
-        <!-- The conversation thread: plain text turns, grows to content, scrolls past a cap. -->
-        <ScrollViewer x:Name="ThreadScroll" VerticalScrollBarVisibility="Auto" MaxHeight="360"
-                      Margin="0,8,0,0" controls:SmoothScroll.Enabled="True">
-            <StackPanel x:Name="Thread"/>
-        </ScrollViewer>
+        <!-- The conversation thread: plain text turns, grows to content, scrolls past a cap. A floating
+             "↓ Latest" pill appears when you scroll UP away from the newest message (esp. mid-stream). -->
+        <Grid Margin="0,8,0,0">
+            <ScrollViewer x:Name="ThreadScroll" VerticalScrollBarVisibility="Auto" MaxHeight="360"
+                          controls:SmoothScroll.Enabled="True">
+                <StackPanel x:Name="Thread"/>
+            </ScrollViewer>
+            <Border x:Name="JumpPill" Visibility="Collapsed" Opacity="0"
+                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"
+                    Background="{DynamicResource Chip}" BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
+                    CornerRadius="13" Padding="11,5" Cursor="Hand" MouseLeftButtonUp="OnJumpToLatest">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9.5"
+                               Foreground="{DynamicResource Pink}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="Latest" FontFamily="{StaticResource UiFont}" FontSize="10.5" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSoft}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

@@ -73,6 +73,48 @@ public static class CalendarCommand
     internal static bool IsCreateShaped(string text) =>
         RemindLead.IsMatch(text) || CreateVerbNoun.IsMatch(text) || CalendarPhrase.IsMatch(text);
 
+    // Explicit title change on a follow-up ("call it design sync", "name it 1:1", "rename to weekly").
+    // Deliberately NOT "make it …" — that's ambiguous with a time change ("make it 4pm"), handled as time.
+    static readonly Regex TitleSet = new(
+        @"\b(?:call it|name it|title(?:\s+it|d)?|rename(?:\s+it)?\s+to|let'?s\s+call\s+it)\s+(?<t>.+)$", Ro);
+
+    /// <summary>
+    /// Multi-turn slot-fill: merge a follow-up turn's corrections into a pending draft — a new day/time
+    /// (incl. a range "6 to 7pm tomorrow"), an added person/email, or an explicit title change. Returns
+    /// the merged draft and whether anything actually changed (false → the turn wasn't a correction, so
+    /// the caller can re-prompt or release). Never books anything; pure + deterministic.
+    /// </summary>
+    public static (PendingCalendarCreate updated, bool changed) ApplyUpdate(
+        PendingCalendarCreate p, string turn, DateTimeOffset now)
+    {
+        var changed = false;
+        var start = p.Start; var end = p.End; var title = p.Title; var person = p.PersonMentioned;
+        var emails = p.Emails.ToList();
+
+        // Time/date: a new time on the turn WINS (that's what a correction is). A bare end ("till 5")
+        // adjusts only the end.
+        var parsed = QuickEventParser.Parse(turn, now);
+        if (parsed.Start is not null) { start = parsed.Start; end = parsed.End; changed = true; }
+        else if (parsed.End is not null && start is not null) { end = parsed.End; changed = true; }
+
+        // People: "with Bob" (a name → title mention, since we can't invite without an email) + any emails.
+        var pm = WithPerson.Match(turn);
+        if (pm.Success && !PersonStop.Contains(pm.Groups[1].Value)) { person = Cap(pm.Groups[1].Value); changed = true; }
+        foreach (var e in parsed.Emails)
+            if (!emails.Contains(e, StringComparer.OrdinalIgnoreCase)) { emails.Add(e); changed = true; }
+
+        // Explicit title change — but never treat a pure time/day phrase as a title ("call it" won't
+        // fire on "make it 4pm"; and if the captured title parses as a time, ignore it).
+        var tm = TitleSet.Match(turn);
+        if (tm.Success)
+        {
+            var nt = tm.Groups["t"].Value.Trim(' ', ',', '.', '-', '·');
+            if (nt.Length > 0 && QuickEventParser.Parse(nt, now).Start is null) { title = Cap(nt); changed = true; }
+        }
+
+        return (p with { Start = start, End = end, Title = title, Emails = emails, PersonMentioned = person }, changed);
+    }
+
     internal static (string Title, string? Person) ExtractTitle(string text, QuickEvent parsed)
     {
         string? person = null;
@@ -110,7 +152,8 @@ public static class CalendarCommand
             when = sameHalf ? $"{DayLabel(s)}, {s:h:mm}–{end:h:mm tt}"
                             : $"{DayLabel(s)}, {s:h:mm tt}–{end:h:mm tt}";
         }
-        var msg = $"Create “{p.Title}” — {when} on {Provider}? Say yes to create it, or no to skip.";
+        var msg = $"Create “{p.Title}” — {when} on {Provider}? Say yes to create it, tell me what to change "
+                + "(day, time, title, or who), or no to skip.";
         if (p.PersonMentioned is { } who) msg += $" {who}’s in the title — I can only invite people by email.";
         return msg;
     }

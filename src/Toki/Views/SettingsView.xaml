@@ -31,7 +31,8 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
             <StackPanel>
-                <!-- Google Calendar: connect / disconnect. The sign-in itself happens in the browser. -->
+                <!-- Google Calendar: connect / disconnect. The sign-in itself happens in the browser.
+                     (Name-change lives in the Library window's Settings page — a calmer, passive home.) -->
                 <TextBlock Style="{StaticResource SettingTitle}" Text="Google Calendar" Margin="0,4,0,2"/>
                 <TextBlock x:Name="GoogleStatus" Style="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Margin="0,7,0,0">

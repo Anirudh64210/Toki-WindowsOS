@@ -47,6 +47,7 @@ static class SelfTests
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
                 "--themetest" => ThemeTest(),
+                "--measuretest" => MeasureTest(),
                 "--copytest" => CopyTest(),
                 "--asktest" => AskTest(args),
                 "--querytest" => QueryTest(),
@@ -86,6 +87,26 @@ static class SelfTests
     static int MicTest(string outDir, int seconds)
     {
         var path = Path.Combine(outDir, "you.wav");
+        // Device diagnostics FIRST: Toki captures the "Communications" default (Role.Communications).
+        // If that differs from the general "Console" default the user sees metering, or is disabled/
+        // unplugged, the capture is silent even though "the mic works" in Windows.
+        try
+        {
+            var en = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            NAudio.CoreAudioApi.MMDevice? Def(NAudio.CoreAudioApi.Role r)
+            { try { return en.GetDefaultAudioEndpoint(NAudio.CoreAudioApi.DataFlow.Capture, r); } catch { return null; } }
+            var comm = Def(NAudio.CoreAudioApi.Role.Communications);
+            var cons = Def(NAudio.CoreAudioApi.Role.Console);
+            Console.WriteLine($"  DEFAULT (Communications — USED BY TOKI): {comm?.FriendlyName ?? "(none)"} [{comm?.State}]");
+            Console.WriteLine($"  DEFAULT (Console/Multimedia)           : {cons?.FriendlyName ?? "(none)"} [{cons?.State}]");
+            if (comm is not null && cons is not null && comm.ID != cons.ID)
+                Console.WriteLine("  ⚠ MISMATCH — Toki's mic differs from your general default. This is likely the cause.");
+            Console.WriteLine("  all capture devices:");
+            foreach (var d in en.EnumerateAudioEndPoints(NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.DeviceState.All))
+                Console.WriteLine($"    - {d.FriendlyName} [{d.State}]");
+        }
+        catch (Exception ex) { Console.WriteLine($"  device enum failed: {ex.Message}"); }
+
         Console.WriteLine($"[--mictest] recording the default microphone for {seconds}s...");
         using var mic = new MicCapture();
         mic.Start(path);
@@ -640,6 +661,69 @@ static class SelfTests
     // Prove the live light/dark swap recolours an ALREADY-RENDERED element. The old bug: WPF froze the
     // themed brushes so mutating .Color threw, and nothing repainted. Replace-based Apply must instead
     // make the DynamicResource re-resolve to the new brush. Black notch → white notch on swap = PASS.
+    // Diagnoses the notch auto-height cut-off headlessly (no RenderTargetBitmap, which hangs offscreen).
+    // For each auto-height page it prints TWO heights: (A) the out-of-tree Measure that PillWindow.
+    // ContentHeight uses today, and (B) the TRUE arranged height from a real offscreen window. If A < B,
+    // the reveal is sized short and the content's bottom clips — that's the bug.
+    static int MeasureTest()
+    {
+        var cases = new (string name, double w, Func<System.Windows.Controls.UserControl> build)[]
+        {
+            ("MeetingPrompt",         288, () => { var v = new Views.MeetingPromptView(); v.Refresh("Com.tinyspeck.slackdesktop"); return v; }),
+            ("RecordingOpen",         288, () => new Views.RecordingOpenView()),
+            ("Ask",                   344, () => new Views.AskView()),
+            ("NoSpeech",              300, () => new Views.NoSpeechView()),
+            ("PrepCard",              356, () => { App.CurrentPrep = PrepSamples.FirstTime(); return new Views.PrepCardView(); }),
+            ("Home-connect-cta",      344, () => new Views.HomeView()),
+            ("Home-connected-empty",  344, () => { var v = new Views.HomeView(); v.DebugConnected(false); return v; }),
+            ("Home-connected-events", 344, () => { var v = new Views.HomeView(); v.DebugConnected(true); return v; }),
+            ("Onboarding-name",       330, () => new Views.OnboardingView()),
+            ("Onboarding-privacy",    330, () => { var v = new Views.OnboardingView(); v.DebugShowStep(1); return v; }),
+            ("Onboarding-done",       330, () => { var v = new Views.OnboardingView(); v.DebugShowStep(2); return v; }),
+            ("MeetingPrompt-calmatch",288, () => { var v = new Views.MeetingPromptView(); v.DebugCalendarMatch("Design sync"); return v; }),
+        };
+        var anyShort = false;
+        foreach (var (name, w, build) in cases)
+        {
+            // (A) exactly what PillWindow.ContentHeight does: bare out-of-tree measure.
+            var a = build();
+            a.Measure(new System.Windows.Size(w - 2, double.PositiveInfinity));
+            var hA = a.DesiredSize.Height;
+
+            // (B) the true arranged height: host a fresh instance in a real (offscreen) window at the
+            // state width, let WPF do a full measure+arrange pass, then read what it actually needs.
+            var b = build();
+            var host = new System.Windows.Controls.Border { Width = w, VerticalAlignment = System.Windows.VerticalAlignment.Top, Child = b };
+            var win = new System.Windows.Window
+            {
+                Width = w, Height = 900, Left = -4000, Top = -4000,
+                WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+                Content = host,
+            };
+            win.Show();
+            win.UpdateLayout();
+            b.UpdateLayout();
+            var hB = b.DesiredSize.Height;
+            var actual = b.ActualHeight;
+            win.Close();
+
+            // Natural (unconstrained) width — if it exceeds the state width, a non-wrapping row (e.g. the
+            // prompt's button row) would overflow/clip at the notch edges.
+            b.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var natW = b.DesiredSize.Width;
+            var wideBy = natW - w;
+
+            var shortBy = hB - hA;
+            if (shortBy > 0.5) anyShort = true;
+            var flag = shortBy > 0.5 ? "  <-- CLIPS(H)" : wideBy > 0.5 ? "  <-- WIDE" : "";
+            Console.WriteLine($"{name,-24} measA={hA,7:F1}  trueB={hB,7:F1}  natW={natW,6:F1}/{w,0:F0}  A_short_by={shortBy,6:F1}{flag}");
+        }
+        Console.WriteLine(anyShort
+            ? "RESULT: at least one page's out-of-tree measure under-reports the true height → reveal clips."
+            : "RESULT: out-of-tree measure matches the true arranged height for every page.");
+        return 0;
+    }
+
     static int ThemeTest()
     {
         var border = new System.Windows.Controls.Border();

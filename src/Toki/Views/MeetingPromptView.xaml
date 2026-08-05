@@ -6,7 +6,10 @@
                    FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"
                    TextWrapping="Wrap" TextAlignment="Center"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,7,0,0">
-            <Button Style="{StaticResource CoralButton}" Content="Record" Padding="20,5"
+            <!-- Calendar match only: open the Meet link (and record). Hidden for an ad-hoc call. -->
+            <Button x:Name="JoinBtn" Style="{StaticResource CoralButton}" Content="Join call" Padding="15,5"
+                    Margin="0,0,8,0" Visibility="Collapsed" Click="OnJoin"/>
+            <Button x:Name="RecordBtn" Style="{StaticResource CoralButton}" Content="Record" Padding="18,5"
                     Margin="0,0,8,0" Click="OnRecord"/>
             <Button Style="{StaticResource PillButton}" Content="Not now" Padding="14,5"
                     Foreground="{DynamicResource TextDim}" Click="OnDismiss"/>

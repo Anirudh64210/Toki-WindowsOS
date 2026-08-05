@@ -4,6 +4,26 @@ Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail
 
 ## Current state & roadmap (updated 2026-08-04)
 
+**v1-iter2 owner fix+feature+polish sweep DONE (2026-08-04):** long live-test session, 1,657 tests green,
+all owner-verified on the real PC. Notch: **stick-to-bottom scroll** (no more yank-down), **text cut-off +
+open/close stability** (14px bottom breathing pad + clip-generation guard; root-caused via new headless
+`--measuretest` that measures true arranged height without RenderTargetBitmap). **First-run onboarding**
+(`PillState.Onboarding`, gated on `AppSettings.OnboardingComplete`) + **name moved to a Library-window
+Settings page** (4th nav tab, Confirm/Cancel/✓Saved, live greeting refresh — HomeView.RefreshGreeting on
+show). Voice: **misheard→clarify** (auto-re-listen REMOVED — a 2nd mic starved push-to-talk; the endless
+"I didn't catch that" was that + a MUTED Windows mic, not a Toki bug), **multi-turn meeting create**
+(`CalendarCommand.ApplyUpdate` slot-fill), **reply hygiene** (blank-answer `"\n\n"` stop removed;
+`GeneralChat.Sanitize()` strips leading "Toki:" label + emojis; prompt bans labels/emojis/date-echo, ends
+"Reply:"). Calendar: **structured Title/Day/Time create form**, **Copy Meet link** (joinable link only),
+**"meeting on now — Join?"** both-smart prompt (calendar Join-call + Record, or ad-hoc Join&take-notes;
+re-surfaces after snooze — `MeetingDetector.Snooze` clears `_prompted`). **PTT hook:** ends on SPACE-up
+only (relaxing Ctrl/Alt no longer cuts the mic — the "waveform disappears while listening" bug). **UI
+revamp #39 STARTED:** central motion tokens (`Theme/Motion.cs`, ease-OUT morph), message fade-up, notch
+**"↓ Latest" jump pill** + **3-dot thinking indicator**. See README v1-iter2, `docs/backlog.md`, and the
+`asr-and-notch-reply-quality` memory. **PARKED (owner): ASR model quality** on short push-to-talk (resume
+plan in memory). **#39 next passes:** empty-state control, layout-stability sweep, hover-expand section
+pills, Library jump-pill.
+
 **H3 assistant-brain rework DONE (2026-08-04):** stress-test-driven rework of the Ask brain — 1,155-case
 deterministic prompt-test golden set (`tests/Toki.Tests/Brain/`, fixture + frozen clock + RouteOf), total
 1,636 tests green. Fixed: task provenance-vs-due-date (`TaskScheduling.ModeFor` — "what tasks did I have

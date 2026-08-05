@@ -62,6 +62,30 @@ public class MeetingDetectorTests
         Assert.Equal(1, count);
     }
 
+    // The ongoing-meeting re-surface: after a real prompt is dismissed (→ Snooze), if the call is STILL
+    // going when the cooldown expires, the prompt re-appears ONCE more — it isn't silenced for the whole
+    // mic-session after a single "Not now".
+    [Fact]
+    public void PromptedThenDismissed_ReSurfacesAfterCooldown_IfStillOnMic()
+    {
+        var now = new DateTime(2026, 7, 15, 12, 0, 0, DateTimeKind.Utc);
+        var d = new MeetingDetector(() => now);
+        var count = 0;
+        d.MeetingDetected += _ => count++;
+
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);   // debounced → the first prompt
+        Assert.Equal(1, count);
+        d.Snooze(Chrome);                              // user dismissed (App.DismissPrompt → Snooze)
+
+        now = now.AddMinutes(2);                        // still cooling, meeting still on the mic
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);
+        Assert.Equal(1, count);                         // no nag during cooldown
+
+        now = now.AddMinutes(11);                       // cooldown expired, call STILL going
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);
+        Assert.Equal(2, count);                         // re-surfaces once more
+    }
+
     [Fact]
     public void DoesNotPromptWhenCanPromptIsFalse()
     {

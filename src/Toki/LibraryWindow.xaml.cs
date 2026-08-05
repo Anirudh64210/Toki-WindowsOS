@@ -298,6 +298,15 @@ public partial class LibraryWindow : Window
     {
         InitializeComponent();
         BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
+        // Stick-to-bottom for the chat thread (same rule as the notch AskView): auto-follow the newest
+        // text only while you're already parked at the bottom, so a streaming answer never yanks you down
+        // while you've scrolled up to re-read. A user scroll (ExtentHeightChange == 0) updates the flag.
+        ChatScroll.ScrollChanged += (_, e) =>
+        {
+            if (e.ExtentHeightChange != 0) return;
+            if (e.VerticalChange == 0 && e.ViewportHeightChange == 0) return;
+            _chatStick = ChatScroll.VerticalOffset >= ChatScroll.ScrollableHeight - 8;
+        };
         try { _chats = _chatStore.Load(); } catch { _chats = new(); }   // past Ask conversations
         SourceInitialized += (_, _) => StyleChrome();
         // Soften the maximise/restore snap (the "min-to-max sizer" clunk): ease the content into
@@ -399,6 +408,7 @@ public partial class LibraryWindow : Window
         Nav.Children.Add(NavItem("ask", (char)0xE8BD, "Ask"));       // chat bubble
         Nav.Children.Add(NavItem("library", (char)0xE8F1, "Library"));// stacked books
         Nav.Children.Add(NavItem("templates", (char)0xE8A5, "Templates")); // document
+        Nav.Children.Add(NavItem("settings", (char)0xE713, "Settings"));   // gear
     }
 
     Border NavItem(string key, char glyph, string label)
@@ -465,16 +475,64 @@ public partial class LibraryWindow : Window
         AskPage.Visibility = key == "ask" ? Visibility.Visible : Visibility.Collapsed;
         LibraryPage.Visibility = key == "library" ? Visibility.Visible : Visibility.Collapsed;
         TemplatesPage.Visibility = key == "templates" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = key == "settings" ? Visibility.Visible : Visibility.Collapsed;
         HighlightNav();
-        UIElement page = key == "ask" ? AskPage : key == "library" ? LibraryPage : TemplatesPage;
+        UIElement page = key switch { "ask" => AskPage, "library" => LibraryPage, "templates" => TemplatesPage, _ => SettingsPage };
         if (animate && !App.Headless) FadePage(page);
         if (key == "ask") RefreshGreeting();
+        if (key == "settings") LoadNameSettings();
         if (key == "library" && Cards.Children.Count == 0) LoadList();
     }
 
     static void FadePage(UIElement e)
     {
         e.BeginAnimation(OpacityProperty, new DoubleAnimation(0.0, 1, TimeSpan.FromMilliseconds(200)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    }
+
+    // ── Settings page: name (the passive place to change it — confirm/cancel, success, live everywhere) ──
+
+    bool _nameLoading;
+    void LoadNameSettings()
+    {
+        _nameLoading = true;
+        LibNameBox.Text = Llm.AppSettings.Current.UserName ?? "";
+        LibNameActions.Visibility = Visibility.Collapsed;
+        LibNameSaved.Visibility = Visibility.Collapsed;
+        _nameLoading = false;
+    }
+
+    // Confirm/Cancel appear only when there's an unsaved change (and the "saved" note clears on edit).
+    void OnLibNameChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_nameLoading) return;
+        var changed = (LibNameBox.Text?.Trim() ?? "") != (Llm.AppSettings.Current.UserName ?? "");
+        LibNameActions.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+        if (changed) LibNameSaved.Visibility = Visibility.Collapsed;
+    }
+
+    void OnLibNameKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && LibNameActions.Visibility == Visibility.Visible) { e.Handled = true; OnLibNameSave(sender, e); }
+        else if (e.Key == Key.Escape) { e.Handled = true; OnLibNameCancel(sender, e); }
+    }
+
+    void OnLibNameSave(object sender, RoutedEventArgs e)
+    {
+        var name = LibNameBox.Text?.Trim() ?? "";
+        Llm.UserProfile.SetName(name);              // persists through the one settings path
+        LibNameActions.Visibility = Visibility.Collapsed;
+        var shown = Llm.AppSettings.Current.DisplayName;   // resolved (falls back to the account name if cleared)
+        LibNameSavedText.Text = shown.Length > 0 ? $"Saved — I'll call you {shown}." : "Saved.";
+        LibNameSaved.Visibility = Visibility.Visible;
+        if (!App.Headless)
+            LibNameSaved.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)));
+        RefreshGreeting();   // the Library Ask greeting updates immediately; the notch Home greeting
+                             // re-reads the name every time it's shown (HomeView.RefreshGreeting).
+    }
+
+    void OnLibNameCancel(object sender, RoutedEventArgs e)
+    {
+        LoadNameSettings();   // revert to the stored value, hide the actions
     }
 
     // ── Ask landing: a rotating greeting that types in, a search bar, quick suggestions ──
@@ -570,7 +628,7 @@ public partial class LibraryWindow : Window
         Landing.Visibility = Visibility.Collapsed; Messages.Visibility = Visibility.Visible;
         Messages.Children.Add(UserBubble(q));
         Messages.Children.Add(TokiBubble(message, dim: true));
-        ScrollChatToEnd();
+        PinChatToEnd();
     }
 
     bool _asking;
@@ -607,7 +665,7 @@ public partial class LibraryWindow : Window
 
         var stream = NewStreamBubble();
         Messages.Children.Add(stream.Root);
-        ScrollChatToEnd();
+        PinChatToEnd();   // a new question → jump to the newest turn, then stream follows only if pinned
 
         _asking = true; AskBtn.IsEnabled = false; MicBtn.IsEnabled = false;
         // Patch streaming: buffer tokens and flush in ~70ms chunks so words render up in patches, not char-by-char.
@@ -697,7 +755,7 @@ public partial class LibraryWindow : Window
         Landing.Visibility = Visibility.Collapsed;
         Messages.Visibility = Visibility.Visible;
         ChatTitle.Text = c.Title;
-        ScrollChatToEnd();
+        PinChatToEnd();   // reopening a thread → land at the most recent turn
     }
 
     // Themed history popup: each past chat (title + when), click to reopen, × to delete. Never the Win32 menu.
@@ -915,7 +973,17 @@ public partial class LibraryWindow : Window
             AskHint.Text = "Ask about your meetings — decisions, tasks, who said what.";
     }
 
-    void ScrollChatToEnd() => Dispatcher.BeginInvoke(new Action(() => ChatScroll.ScrollToEnd()), System.Windows.Threading.DispatcherPriority.Background);
+    // Auto-follow the newest text only while pinned to the bottom (see the ScrollChanged wiring in the
+    // ctor). Streaming callbacks and generic appends use this; a NEW user turn calls PinChatToEnd first.
+    bool _chatStick = true;
+    void ScrollChatToEnd()
+    {
+        if (!_chatStick) return;
+        Dispatcher.BeginInvoke(new Action(() => { if (_chatStick) ChatScroll.ScrollToEnd(); }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    // A new turn the user initiated (asking a question, restoring a chat) always jumps to the bottom.
+    void PinChatToEnd() { _chatStick = true; ScrollChatToEnd(); }
 
     // Chat text is selectable + copyable (read-only transparent TextBox), like a normal chatbot.
     TextBox SelText(string text, double fs, string fgKey)

@@ -138,6 +138,15 @@ public static class CommandRouter
     static readonly Regex GhostWordRx = new(@"\bghost\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex ModelWordRx = new(@"\b(model|engine)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Recording near-miss: an imperative that starts like "start/begin/take/record …" and mentions a
+    // record-ish word the ASR garbled — the owner's real case, "start reporting" heard for "start
+    // recording". (A clean "start recording"/"take notes" already matches TryMatch, so only mis-hears
+    // reach here.) "reporting/report/recoding/note-taking" are the common Parakeet confusions for it.
+    static readonly Regex RecordVerbLead = new(@"^(start|begin|take|record|do)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex RecordWordRx = new(
+        @"\brecord(ing|in)?\b|\breport(ing|s)?\b|\brecoding\b|\bnote[\s-]?taking\b|\btaking\s+notes?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
     /// A short command-SHAPED utterance (imperative switch-verb lead, command domain word) that
     /// didn't match any real command → a clarification reply, so a misheard command degrades to a
@@ -154,11 +163,18 @@ public static class CommandRouter
         var q = t.TrimEnd('?', '.', '!', ' ');
         if (q.Length == 0 || QuestionLead.IsMatch(q)) return null;
         if (q.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > 8) return null;
-        if (!SwitchVerbLead.IsMatch(q)) return null;
         // Content about the meetings ("go over the model discussion from yesterday") is Q&A, not a
-        // garbled command — the meeting-domain words veto the clarification.
+        // garbled command — the meeting-domain words veto the clarification. (Checked before every
+        // branch below.)
         if (Regex.IsMatch(q, @"\b(meetings?|calls?|syncs?|stand-?ups?|discussions?|discussed|yesterday|review)\b", RegexOptions.IgnoreCase))
             return null;
+
+        // Recording mis-hear ("start reporting" for "start recording") — a distinct verb lead from the
+        // switch-verb commands, so it's checked on its own before the switch-verb gate below.
+        if (RecordVerbLead.IsMatch(q) && RecordWordRx.IsMatch(q))
+            return "Did you mean start recording? Say “start recording” or “take notes” and I'll begin.";
+
+        if (!SwitchVerbLead.IsMatch(q)) return null;
 
         if (ThemeWordRx.IsMatch(q))
             return "Sounds like a theme switch — say “switch to light theme” or “switch to dark theme” and I'll do it.";

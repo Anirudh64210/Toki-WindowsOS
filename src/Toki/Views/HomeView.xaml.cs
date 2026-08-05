@@ -18,9 +18,7 @@ public partial class HomeView : UserControl
     public HomeView()
     {
         InitializeComponent();
-        // Adaptive greeting — the actual user, not a hardcoded name.
-        var name = Toki.Llm.AppSettings.Current.DisplayName;
-        Greeting.Text = string.IsNullOrEmpty(name) ? "Welcome back!" : $"Welcome back, {name}!";
+        RefreshGreeting();   // adaptive greeting — the actual user, not a hardcoded name
         RefreshGoogle();
         // Keep the card in step if the connection or the events change elsewhere.
         // Subscribe on LOADED (not the ctor): this view is a cached singleton, and a
@@ -45,12 +43,32 @@ public partial class HomeView : UserControl
             TokiPop.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, a);
             TokiPop.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, a);
             TokiChar.BlinkNow();
+            RefreshGreeting();                    // pick up a name changed in the Library settings
             if (!App.Headless) RefreshGoogle();   // refresh events each time Home is shown
         };
         _ready = true;   // construction finished — the notch may now be safely re-grown
     }
 
+    // The greeting is a CACHED view's text; it must be re-read whenever Home is shown, or a name change
+    // (Library → Settings) never appears here (the bug the owner hit). Cheap; no layout churn if unchanged.
+    void RefreshGreeting()
+    {
+        var name = Toki.Llm.AppSettings.Current.DisplayName;
+        Greeting.Text = string.IsNullOrEmpty(name) ? "Welcome back!" : $"Welcome back, {name}!";
+    }
+
     void OnCalendarChanged() => Dispatcher.Invoke(RefreshGoogle);
+
+    /// <summary>Dev-only: force the CONNECTED layout (account footer + COMING UP) without a real Google
+    /// connection, so the measurement diagnostic (--measuretest) can reproduce the account-footer clip
+    /// headlessly. <paramref name="withEvents"/> paints sample upcoming rows; otherwise the empty state.</summary>
+    public void DebugConnected(bool withEvents)
+    {
+        ConnectedHost.Visibility = Visibility.Visible;
+        ConnectHost.Visibility = Visibility.Collapsed;
+        AccountEmail.Text = "saianirudh1111@gmail.com";
+        PaintComingUp(withEvents ? Dev.CalendarSamples.Events() : System.Array.Empty<CalEvent>());
+    }
 
     // ── Google state + COMING UP ──
 

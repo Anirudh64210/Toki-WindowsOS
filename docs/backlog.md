@@ -6,9 +6,30 @@ top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*
 
 ---
 
-## ⭐ Next up (decided 2026-08-03)
+## ⭐ Next up (updated 2026-08-04, after the v1-iter2 sweep)
 
-### Attribution / "Built with" screen — **ship-critical, small, do this first**
+**In flight — UI revamp #39** (see README v1-iter2 / `docs/ui-revamp-research.md`). Pass ① done (motion
+tokens + ease-out morph + message fade-up; notch jump-pill + 3-dot thinking indicator). **Remaining
+passes:** ② shared **empty-state** control (mascot + line + one action) across Library/Ask/Calendar-
+disconnected/no-speech; ③ **layout-stability / text-trim sweep** (`TextTrimming` on single-line, `MinHeight`
+reservations, `UseLayoutRounding`); ④ **hover-expand "section pills"** (rows grow on hover → inline
+actions — the revamp's signature); ⑤ the jump-pill in the **Library** chat too.
+
+**Parked (owner, 2026-08-04) — ASR model quality** on short push-to-talk. Full resume plan lives in the
+`asr-and-notch-reply-quality` memory: clipped-start fix, VAD/padding, phonetic post-correction for domain
+words, a relevance floor so a garbled input can't retrieve a random meeting, or a stronger ASR model. The
+"voice returns nothing" root cause this session was a MUTED Windows mic, not a bug (`--mictest` now
+diagnoses device/peak in one command).
+
+**Attribution screen — DONE 2026-08-04** (was "next" below; shipped as M8.0, see README). The M8 SHIP PATH
+(installer / auto-update / key gate / onboarding download / Google scope verification) is still the road to
+actually selling.
+
+---
+
+## Attribution / "Built with" screen — DONE (kept for the reasoning)
+
+### The licence obligation that unblocked charging money
 A real credits screen (in Settings/About) listing the on-device models and their licences. This is a
 **legal obligation, not a nicety** — the app cannot be sold until it ships:
 

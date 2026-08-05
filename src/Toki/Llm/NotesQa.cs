@@ -107,7 +107,7 @@ public static class NotesQa
     /// a chopped one reads broken — so we cut on a sentence boundary, not mid-word.</summary>
     public static (string Text, bool TooLong) NotchTrim(string answer)
     {
-        var t = (answer ?? "").Trim();
+        var t = GeneralChat.Sanitize(answer ?? "");   // notch voice is plain text — strip stray labels/emojis on ANY path
         var more = t.Contains("[MORE]");
         t = t.Replace("[MORE]", "").Trim();
         if (!more && t.Length <= 300) return (t, false);
@@ -147,29 +147,40 @@ public static class NotesQa
             return new Answer(text, [], true);
         }
 
-        // 0.4) PENDING CALENDAR CREATE: if we just asked the user to confirm a create (or asked "when?"),
-        //      THIS turn belongs to that — resolved before anything else so "yes"/"okay" can't be eaten by
-        //      small-talk. Single-shot: the pending is cleared up front, so a stray later "yes" never
-        //      creates, and a create never happens without an explicit confirmation.
+        // 0.4) PENDING CALENDAR CREATE (multi-turn slot-fill): while a create is being assembled, THIS
+        //      turn belongs to it — resolved before anything else so a "yes" or a correction can't be
+        //      eaten by small-talk. The draft PERSISTS across turns, absorbing corrections (day, time,
+        //      range, title, who), until the user says yes (→ create) or no (→ scrap). A create never
+        //      happens without an explicit "yes", and only when a time is set.
         if (ctx?.PendingCreate is { } pending)
         {
-            ctx.PendingCreate = null;
-            if (pending.Start is null)
+            // Explicit cancel ends it now.
+            if (CalendarCommand.IsNo(question)) { ctx.PendingCreate = null; return Canned(CalendarCommand.Cancelled()); }
+            // Explicit yes creates — but only with a time; otherwise keep the draft and ask when.
+            if (CalendarCommand.IsYes(question))
             {
-                var t = Toki.Calendar.QuickEventParser.Parse(question, DateTimeOffset.Now);
-                if (t.Start is not null)
-                {
-                    var filled = pending with { Start = t.Start, End = t.End };
-                    ctx.PendingCreate = filled;
-                    return Canned(CalendarCommand.ConfirmPrompt(filled));
-                }
-                // no time given — the draft dies; fall through and answer this turn normally
-            }
-            else if (CalendarCommand.IsYes(question))
+                if (pending.Start is null) return Canned(CalendarCommand.WhenPrompt(pending));
+                ctx.PendingCreate = null;
                 return Canned(await CalendarCommand.ExecuteAsync(pending, ct).ConfigureAwait(false));
-            else if (CalendarCommand.IsNo(question))
-                return Canned(CalendarCommand.Cancelled());
-            // anything else → pending already cleared, fall through to normal routing
+            }
+            // Otherwise absorb any correction / slot-fill (a new day/time/range, a person, a title) and
+            // re-confirm — this is what lets "actually make it 6 to 7pm tomorrow" work mid-flow.
+            var (updated, changed) = CalendarCommand.ApplyUpdate(pending, question, DateTimeOffset.Now);
+            if (changed)
+            {
+                ctx.PendingCreate = updated;
+                return Canned(updated.Start is null ? CalendarCommand.WhenPrompt(updated) : CalendarCommand.ConfirmPrompt(updated));
+            }
+            // No recognizable change and not yes/no. If the user moved on — chit-chat ("thanks"), a real
+            // question, or another command — release the draft and let that be handled (so a later stray
+            // "yes" can't create a stale draft). Otherwise keep gathering: re-ask for what's missing.
+            var q0 = (question ?? "").TrimStart();
+            var movedOn = SmallTalk.TryReply(question) is not null
+                       || CommandRouter.QuestionLead.IsMatch(q0)
+                       || CommandRouter.TryMatch(question) is not null;
+            if (!movedOn)
+                return Canned(pending.Start is null ? CalendarCommand.WhenPrompt(pending) : CalendarCommand.ConfirmPrompt(pending));
+            ctx.PendingCreate = null;   // moved on → fall through to normal routing
         }
 
         // 0.5) SMALL-TALK: greetings / thanks / "who are you" get a short canned reply — never a notes
@@ -307,10 +318,11 @@ public static class NotesQa
             QueryIntent.Analyze => concise ? 220 : 420,
             _ => concise ? 85 : 170,
         };
-        // A one-glance notch LOOKUP stops cleanly at the first blank line ("\n\n") instead of running
-        // past the budget and being trimmed — the model ends where the answer ends. Summaries and
-        // analyses may legitimately contain a blank line before their bullets, so they don't get the stop.
-        var stops = concise && plan.Intent == QueryIntent.LookupFact ? new[] { "\n\n" } : null;
+        // NB: no "\n\n" stop sequence. Small instruct models (Qwen3-4B) often emit a LEADING newline,
+        // which a blank-line stop treats as end-of-output → an empty stream → a BLANK notch answer (a
+        // real, reported bug). Length is already bounded by the per-intent token budget + NotchTrim, so
+        // the stop bought nothing and cost the whole answer. Let it generate; we trim for the glance.
+        string[]? stops = null;
         var sb = new StringBuilder();
         try
         {
@@ -389,7 +401,7 @@ public static class NotesQa
         onSources([]);   // never citations on a general turn
         var sys = GeneralChat.BuildSystem(concise);
         var user = GeneralChat.BuildUser(question, ctx);
-        var stops = concise ? new[] { "\n\n" } : null;
+        string[]? stops = null;   // no "\n\n" stop — a leading newline from the model would blank the answer (see the notes route)
         var sb = new StringBuilder();
         try
         {
@@ -405,7 +417,7 @@ public static class NotesQa
             App.Log($"general chat failed: {ex.Message}");
             return new Answer(sb.Length > 0 ? sb.ToString().Trim() : "Something went wrong answering that — try again.", [], false);
         }
-        var raw = sb.ToString().Trim();
+        var raw = GeneralChat.Sanitize(sb.ToString());   // strip a leading "Toki:" label + any emojis
         if (raw.Length == 0 || TextValidator.IsDegenerate(raw))
             return new Answer("I couldn't produce a clean answer — try rephrasing that.", [], true);
         ctx?.RecordTurn(question, raw);

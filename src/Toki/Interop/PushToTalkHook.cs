@@ -61,13 +61,12 @@ public sealed class PushToTalkHook : IDisposable
                     _active = true;
                     _onStart();
                 }
-                else if (up && _active && vk is VkSpace or VkControl or VkMenu
-                                             or VkLControl or VkRControl or VkLMenu or VkRMenu)
+                else if (up && _active && vk == VkSpace)
                 {
-                    // Releasing ANY part of the chord ends the utterance. The low-level hook
-                    // reports LEFT/RIGHT-specific modifier codes (VK_LCONTROL…), never the
-                    // generic VK_CONTROL/VK_MENU — matching only the generic codes meant
-                    // letting go of Ctrl or Alt kept the mic listening until Space went up.
+                    // End the utterance only when the TALK key (Space) is released. Once the chord has
+                    // engaged, SPACE is what you hold to talk — you can relax Ctrl/Alt without cutting the
+                    // mic. (The old "any chord key ends it" cut recording the instant a finger drifted off
+                    // Ctrl or Alt mid-sentence — the "waveform disappears while I'm still listening" bug.)
                     _active = false;
                     _onStop();
                 }
