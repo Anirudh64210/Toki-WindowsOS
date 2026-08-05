@@ -7,8 +7,11 @@
     <StackPanel>
         <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"
                    Text="On-device is free and private. Or bring your own API key — any provider, you pay them, not us."/>
-        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="3" Margin="0,12,0,0"
-                MaxWidth="400" HorizontalAlignment="Left">
+        <!-- Mode selector. This lives in a WINDOW, not the notch, so it gets window-sized breathing room
+             (owner 2026-08-05: "tight and ugly and close to each other"). The track is padded and the
+             three segments carry their own side margins, so they never touch each other. -->
+        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="5" Margin="0,14,0,0"
+                MaxWidth="520" HorizontalAlignment="Left">
             <UniformGrid x:Name="NotesModeSeg" Columns="3"/>
         </Border>
 

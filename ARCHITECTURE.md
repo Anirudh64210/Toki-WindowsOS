@@ -443,7 +443,7 @@ Open/close previously animated the transparent layered window's `Width`/`Height`
 
 ### Library becomes the hub (P1)
 
-The Library window was restructured into a **sidebar + main-pane hub** with three pages — **Ask / Library / Templates** — switched by `ShowPage` (visibility + a fade). The existing list+detail became the *Library* page (`Cards`/`Detail`/`SearchBox` names preserved, so `LoadList`/`Select`/`RenderMeeting` are unchanged). Nav buttons, suggestion chips, template cards, and the per-note picker are code-built with `SetResourceReference` and rebuilt on `ThemeChanged`, so they recolour on a theme swap. The **greeting** types in via a `DispatcherTimer` (skipped under `App.Headless`). **Drag-reorder is opt-in** (`_dragEnabled`, default off): `OnCardMove` early-returns when off, so a plain click still selects a card. The **per-note template override** calls `App.RewriteNotesAsync`, which runs the LLM inside **`Task.Run`** — the local model loads synchronously, so it must be off the UI thread; `LlmService.CanWrite` checks availability WITHOUT loading. The hub renders to PNGs via **`--libshot`** (the Library is an ordinary window, not part of the pill render harness). Phase 1 = the shell; the Ask query currently routes into Library search, with retrieval-over-notes answering + voice as Phase 2.
+The Library window was restructured into a **sidebar + main-pane hub** with three pages — **Ask / Library / Templates** — switched by `ShowPage` (visibility + a fade). The existing list+detail became the *Library* page (`Cards`/`Detail`/`SearchBox` names preserved, so `LoadList`/`Select`/`RenderMeeting` are unchanged). Nav buttons, suggestion chips, template cards, and the per-note picker are code-built with `SetResourceReference` and rebuilt on `ThemeChanged`, so they recolour on a theme swap. The **greeting** types in via a `DispatcherTimer` (skipped under `App.Headless`). **Drag-reorder is opt-in** (`_dragEnabled`, default off): `OnCardMove` early-returns when off, so a plain click still selects a card. The **per-note template override** calls `App.RewriteNotesAsync`, which runs the LLM inside **`Task.Run`** — the local model loads synchronously, so it must be off the UI thread; `LlmService.CanWrite` checks availability WITHOUT loading. The hub renders to PNGs via **`--libshot`** (the Library is an ordinary window, not part of the pill render harness). Phase 1 = the shell; the Ask query currently routes into Library search, with retrieval-over-notes answering + voice as Phase 2. *(Superseded in v1-iter3: the Ask landing is now the Luma-style hero and the **suggestion chips were removed** — `BuildSuggestions()` collapses the panel. See "v1-iter3 decisions".)*
 
 ### Ask chatbot — streaming + FTS retrieval (P2)
 
@@ -596,7 +596,7 @@ A light `PreviewMouseDown` → `Activate()` remains so keyboard focus (Esc, typi
 
 ### Attribution — the "Built with" screen (M8.0)
 
-A **licence obligation**, not decoration: Parakeet is CC-BY-4.0 (requires name + source + licence link + a note that it was modified), Qwen3 and sherpa-onnx are Apache-2.0, the rest MIT — Toki cannot be sold without crediting them. `AboutView` (`PillState.About`) is a fixed-height scrollable credits list, reached from **Settings → About**. Data lives as a small `record Credit(Name, Role, Author, Licence, Url)` grouped into MODELS / ENGINES & LIBRARIES; rows are built in code so each opens its upstream source (`Process.Start … UseShellExecute`). Attribution-with-teeth licences (CC-BY, Apache) get **amber chips**; MIT is neutral. Two correctness calls: **Whisper is omitted** (it's a stubbed error-fallback, `TranscriptionService` never ships it — crediting it would assert a false dependency), and **Parakeet carries an "int8 quantised" note** to satisfy CC-BY's indicate-changes clause. The full, authoritative texts live in repo `THIRD-PARTY-NOTICES.md` (also referenced from the screen footer). State wiring: `PillState.About` added to the enum, the `AppState.Allowed` table (Settings⇄About, About→Home/Hidden), `PillWindow` `Sizes`/`ViewFor`/`DismissOnClickOutside`/`IsStayable`. Remaining M8: Google sensitive-scope verification, signed installer + auto-update, licence-key gate.
+A **licence obligation**, not decoration: Parakeet is CC-BY-4.0 (requires name + source + licence link + a note that it was modified), Qwen3 and sherpa-onnx are Apache-2.0, the rest MIT — Toki cannot be sold without crediting them. `AboutView` (`PillState.About`) is a fixed-height scrollable credits list. *(Entry point moved in v1-iter3: it's now reached from the **Library window's Settings page → "Built with — open source & licences"** (`OnLibOpenSource`), since the notch Settings became UI/visibility only. The screen itself is unchanged — one canonical copy of the licence text.)* Data lives as a small `record Credit(Name, Role, Author, Licence, Url)` grouped into MODELS / ENGINES & LIBRARIES; rows are built in code so each opens its upstream source (`Process.Start … UseShellExecute`). Attribution-with-teeth licences (CC-BY, Apache) get **amber chips**; MIT is neutral. Two correctness calls: **Whisper is omitted** (it's a stubbed error-fallback, `TranscriptionService` never ships it — crediting it would assert a false dependency), and **Parakeet carries an "int8 quantised" note** to satisfy CC-BY's indicate-changes clause. The full, authoritative texts live in repo `THIRD-PARTY-NOTICES.md` (also referenced from the screen footer). State wiring: `PillState.About` added to the enum, the `AppState.Allowed` table (Settings⇄About, About→Home/Hidden), `PillWindow` `Sizes`/`ViewFor`/`DismissOnClickOutside`/`IsStayable`. Remaining M8: Google sensitive-scope verification, signed installer + auto-update, licence-key gate.
 
 ### The hardening pass — a full multi-agent audit, verified fix by fix (H1, 2026-08-04)
 
@@ -789,3 +789,55 @@ ease-OUT (Glass's 1−(1−p)³; Material/Fluent agree). The notch morph, messag
 link happening right now; the prompt then shows Join-call (opens the link + records) + Record, or, for an
 ad-hoc detected call, Join-&-take-notes. `MeetingDetector.Snooze` now also clears `_prompted` so a still-
 ongoing call re-offers once after the 10-min cooldown.
+
+## v1-iter3 — decisions from the premium-UI pass (2026-08-04/05)
+
+**Settings has one home, and the notch isn't it.** Owner decision: *"the notch should only have the
+visibility, UI settings."* So the notch `SettingsView` keeps exactly three things — light/dark, ghost
+(screen-recording visibility), glassy-notch — plus one row that opens the Library window's Settings page.
+Everything with weight (AI summaries + BYO API key, calendar connect, your name, About/attribution) lives
+there. The moved block is a **reusable `Views/AiSummariesSection` UserControl**, not a copy: one control,
+one code path, hosted by the Library page — which is why the notch state shrank 360 → 208px high with no
+feature lost. The rule going forward: *if a setting needs reading, it belongs in the Library window; the
+notch only holds what you toggle at a glance.*
+
+**Ghost mode must be re-asserted, not set once.** `WDA_EXCLUDEFROMCAPTURE` is a property of the HWND that
+Windows silently drops when the window's composition is rewritten — and Toki rewrites it constantly
+(`SetWindowCompositionAttribute` for acrylic, `SetWindowRgn` for the rounded bottom, `Show()` after a
+hide). That's why ghost held on some states and fell off others: the states that re-composited lost it.
+Fix = `ApplyGhost()` is idempotent and now runs **last** in every path that touches composition —
+end of `ApplyBlur`, end of `ApplyRoundRegion`, after `Show()`, and at the end of every state change. Ghost
+is a post-condition of "the window changed", not a one-time init.
+
+**A date-scoped count is a count of the day, not of a meeting.** "How many tasks on Aug 2" was answering
+"5" when two meetings that day had five each. Root cause was upstream of the SQL: the count/quantity
+vocabulary ("many", "much", "count", "number", "total"…) survived into the extracted task **topic**, so
+`SearchRelevant("many")` picked a single best-matching meeting and scoped the answer to it. Stripping
+those words from the topic (`NotesQa.TaskWords`) makes the query fall through to the date scope, which
+already spanned every meeting on the date. The lesson is the H3 lesson again: **when an answer is scoped
+wrong, suspect the parse, not the query.** Covered by `tests/Toki.Tests/Brain/TaskCountScopeTests.cs`.
+
+**Acknowledgements are small-talk, not questions.** "okay cool", "ok cool thanks" carried no retrievable
+content, so retrieval returned *something* — a random meeting. `SmallTalk` now owns the acknowledgement
+tier (and an "I just meant X" dismissal tier) before retrieval ever runs. Same shape as the anti-
+fabrication rails: **the honest answer to a non-question is a non-answer.**
+
+**Attendee avatars are derived, never fetched.** The calendar/COMING-UP/prep redesign shows overlapping
+avatar stacks, but they're initials rendered from the attendee string with a deterministic colour hash —
+no Gravatar, no Google profile-photo call, no network. Hard Constraint #2 holds: a prettier row must not
+become a request that leaves the laptop.
+
+**The app icon needs every size, not the biggest one.** The first `--makeicon` wrote a single 256px frame.
+Windows will accept that, then downscale it itself for the 16/24/32px taskbar, title-bar and shortcut
+slots — badly — which is why the owner kept seeing "the old ugly picture" after the mascot was already
+redrawn. `Dev/SelfTests.MakeIcon` now renders `TokiBlob` at **seven sizes (16/24/32/48/64/128/256)** and
+writes a proper multi-entry `ICONDIR`/`ICONDIRENTRY` table (0 = 256 in the byte field). Two Windows facts
+that cost time and are worth keeping: the icon inside the exe and the icon Windows *shows* are different
+things (Explorer/taskbar caches aggressively — unpin/re-pin or `ie4uinit.exe -show`), and the mascot is a
+WPF vector, so the `.ico` is **generated from the live control** rather than maintained as a second asset
+that can drift.
+
+**No suggestion chips on the Ask landing.** The Luma-style landing shipped with three example-question
+pills; the owner removed them outright (*"flat out ugly and never encourage"*). `BuildSuggestions()` now
+clears the panel and collapses it — kept as a seam rather than deleted, so the decision is visible and
+reversible. Design rule reinforced: **an empty state should invite, not instruct.**

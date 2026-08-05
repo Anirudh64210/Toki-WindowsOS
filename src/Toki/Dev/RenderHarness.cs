@@ -69,6 +69,16 @@ static class RenderHarness
         App.CurrentPrep = null;
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
         Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
+
+        // First-run onboarding, all three steps. These are the only screens a user sees exactly once,
+        // so they're the hardest to capture by hand — and the first thing a design review wants.
+        string[] steps = ["1-name", "2-privacy", "3-allset"];
+        for (var i = 0; i < steps.Length; i++)
+        {
+            var ob = new OnboardingView();
+            ob.DebugShowStep(i);
+            Shot(dir, $"Onboarding-{steps[i]}", ob, 330, 400);
+        }
     }
 
     /// <summary>Render one view into a pill PNG at its MEASURED content height (mirrors the runtime's

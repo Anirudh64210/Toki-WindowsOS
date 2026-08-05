@@ -1,19 +1,29 @@
 # Toki — backlog & "what's next" (living doc)
 
 *Plain-language capture of everything decided or discussed but **not yet built**, so any of it can be
-picked up later without re-deriving it. Updated 2026-08-03. The canonical short roadmap lives at the
+picked up later without re-deriving it. Updated 2026-08-05. The canonical short roadmap lives at the
 top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*
 
 ---
 
-## ⭐ Next up (updated 2026-08-04, after the v1-iter2 sweep)
+## ⭐ Next up (updated 2026-08-05, after the v1-iter3 premium-UI pass)
 
-**In flight — UI revamp #39** (see README v1-iter2 / `docs/ui-revamp-research.md`). Pass ① done (motion
-tokens + ease-out morph + message fade-up; notch jump-pill + 3-dot thinking indicator). **Remaining
-passes:** ② shared **empty-state** control (mascot + line + one action) across Library/Ask/Calendar-
-disconnected/no-speech; ③ **layout-stability / text-trim sweep** (`TextTrimming` on single-line, `MinHeight`
-reservations, `UseLayoutRounding`); ④ **hover-expand "section pills"** (rows grow on hover → inline
-actions — the revamp's signature); ⑤ the jump-pill in the **Library** chat too.
+**UI revamp #39 — passes ①, ⑤ and the premium redesigns are DONE.** ① motion tokens + ease-out morph +
+message fade-up + notch jump-pill + 3-dot thinking indicator (v1-iter2); ⑤ the jump-pill in the **Library**
+chat (v1-iter3). Also shipped in v1-iter3: settings consolidation (notch = UI/visibility only), the
+compact recording page, the Luma-style Ask landing (**without** the example-question chips — owner removed
+them), the in-house themed sort popup, the calendar/COMING-UP/PrepCard premium redesign, the new mascot +
+7-size app icon, and ghost mode re-asserted on every notch state.
+
+**Remaining #39 passes:** ② shared **empty-state** control (mascot + line + one action) across
+Library/Ask/Calendar-disconnected/no-speech; ③ **layout-stability / text-trim sweep** (`TextTrimming` on
+single-line, `MinHeight` reservations, `UseLayoutRounding`); ④ **hover-expand "section pills"** (rows grow
+on hover → inline actions — the revamp's signature). None of these are blockers; they're the last coat of
+polish.
+
+**The real next milestone is the M8 SHIP PATH** (below): signed installer, Velopack auto-update, licence-
+key gate, onboarding download polish, Google sensitive-scope verification. Everything else on this list is
+optional; that list is what stands between Toki and being sold.
 
 **Parked (owner, 2026-08-04) — ASR model quality** on short push-to-talk. Full resume plan lives in the
 `asr-and-notch-reply-quality` memory: clipped-start fix, VAD/padding, phonetic post-correction for domain
@@ -84,20 +94,23 @@ product's design language (dividers-not-boxes, calm). Small, self-contained, unb
 
 ## 🎛 Polish / UX
 
-- **Library filter/sort menu** — Newest / Oldest / Longest / Manual-notes-only. Only a drag-to-reorder
-  toggle exists today.
+- ✅ **Library filter/sort menu — DONE.** Newest / Oldest / Longest / Manual-notes-only shipped in H2;
+  v1-iter3 replaced the native Windows `ContextMenu` with the **in-house themed popup** (Toki surface,
+  hairlines, pink check on the active mode) so it stops looking like a system control.
 - **Manual/custom notes** — owner decision still pending: a separate left-panel section vs. a "Manual
   notes" filter in the sort menu above.
 - ✅ **Notch glassy/blur toggle — DONE (M9.0, 2026-08-03).** Settings → Appearance → "Glassy notch": a real
   DWM acrylic blur-behind (theme-aware frost, one size, flush top, rounded bottom, off by default). See the
   `redesign-and-glass` memory + ARCHITECTURE "glassy-notch blur" for the full interop.
 
-- **⭐ Premium redesign — pass 2 (in flight).** Pass 1 shipped (type ramp, green `TokiCheck`, `TokiSwitch`,
-  `ChipButton`, colour-coded note headers, flattened composer, "Calendar" rename, one-accent icons, glass
-  notch). **Pass 2 to build:** the Wispr/Vercel **hover-expand "section pills"** (rows grow on hover →
-  reveal Join/Prep/Edit inline; Toki already has the hover engine in `PillWindow`), the type/spacing sweep
-  on Library + small states, and a motion-consistency pass. Full spec is in the Fable design audit;
-  summary in the `redesign-and-glass` memory.
+- **⭐ Premium redesign — pass 2 (mostly done; one piece left).** Pass 1 shipped (type ramp, green
+  `TokiCheck`, `TokiSwitch`, `ChipButton`, colour-coded note headers, flattened composer, "Calendar"
+  rename, one-accent icons, glass notch). Pass 2 **shipped in v1-iter3**: the calendar/COMING-UP/PrepCard
+  redesign (accent bars, derived attendee avatars, amber countdowns, Join), the compact recording page,
+  the Luma-style Ask landing, the themed sort popup, the type/spacing sweep, and the motion-consistency
+  pass (everything now draws from `Theme/Motion.cs`). **Still to build:** the Wispr/Vercel **hover-expand
+  "section pills"** (rows grow on hover → reveal Join/Prep/Edit inline; Toki already has the hover engine
+  in `PillWindow`). Full spec is in the Fable design audit; summary in the `redesign-and-glass` memory.
 
 ---
 

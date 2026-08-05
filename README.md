@@ -797,6 +797,8 @@ The licence-obligation screen — Toki cannot be sold without crediting the open
 
 - **`AboutView`** (`PillState.About`), reached from **Settings → About → "Built with — open source &
   licences"**. Scrollable credits list, design-system native (type ramp, dividers, amber/neutral chips).
+  *(v1-iter3 moved the entry point to the **Library window's Settings page** when the notch Settings became
+  UI/visibility only — the screen itself is unchanged.)*
 - **MODELS**: Parakeet TDT 0.6b v2 (NVIDIA · **CC-BY-4.0**, with an "int8 quantised" note to satisfy the
   modification clause), Qwen3-4B-Instruct-2507 (Alibaba · **Apache-2.0**), bge-small-en-v1.5 (BAAI · MIT).
 - **ENGINES & LIBRARIES**: sherpa-onnx (Apache-2.0), ONNX Runtime, LLamaSharp · llama.cpp, NAudio, SQLite,
@@ -1009,8 +1011,35 @@ Owner-driven, verified on the real PC. **1,682 tests green.** Done via parent + 
 - **Acknowledgements → small-talk** — "okay cool", "ok cool thanks", "no i just meant okay cool thanks" no longer retrieve a random meeting (SmallTalk broadened, tests added).
 - **Settings consolidated in the Library** — the AI-summaries + API-key block moved to a reusable `AiSummariesSection` UserControl on the Library Settings page; the **notch Settings is now UI/visibility only** (theme, glassy, ghost) + a row that opens the Library page. Notch Settings size 360→208.
 - **Recording page redesigned** — compact (~93×268 vs ~136×288): one tight row (Toki + dot + timer · Stop chip), hairline, live line. **Ghost mode fixed on every notch state** — acrylic/region re-composition was shedding `WDA_EXCLUDEFROMCAPTURE`; now re-asserted after every composition write + at the end of every state change.
-- **Ask landing** — Luma-style hero (mascot on a soft pink radial glow, typed greeting, one identity line, outlined suggestion pills, staggered Motion entrance). Assistant self-awareness sharpened (who/what-are-you in the prompts). Copy trimmed across Library/Settings/Templates.
+- **Ask landing** — Luma-style hero (mascot on a soft pink radial glow, typed greeting, one identity line, staggered Motion entrance). The example-question pills that shipped mid-pass were **removed** at the owner's call ("flat out ugly and never encourage") — the landing is now hero + one line + the prompt bar, nothing else. Assistant self-awareness sharpened (who/what-are-you in the prompts). Copy trimmed across Library/Settings/Templates.
 - **Library sort menu** restyled to the in-house themed popup (pink check on the active mode) — no more native Windows menu. Library **jump-to-latest pill** added (was notch-only).
 - **Calendar/COMING UP/prep premium redesign** — accent bars per event, overlapping attendee **avatar** stacks (initials, on-device), amber "in N min" countdown when imminent, Join affordances; PrepCard reshaped into the "Coming Up" card (title · amber relative time · invited/accepted avatars · Context inset · full-width Join). Deterministic, honest first-time.
-- **New mascot** — the `TokiBlob` vector redrawn brighter/glossier with black eyes to match the owner's redesign (stays crisp + animated + theme-aware everywhere); a 256px `.ico` rendered from it (`--makeicon`) replaces the old app/taskbar/shortcut icon.
+- **New mascot** — the `TokiBlob` vector redrawn brighter/glossier with black eyes to match the owner's redesign (stays crisp + animated + theme-aware everywhere). `--makeicon` renders it to `Assets/toki.ico` as a **7-frame icon (16/24/32/48/64/128/256 px)**, replacing the old app/taskbar/shortcut picture. The first cut shipped a single 256px frame — Windows downscales that badly at 16–32px, so the taskbar/shortcut still looked wrong; a real multi-size ICONDIR fixed it. (Windows caches shortcut/taskbar icons: unpin & re-pin, or `ie4uinit.exe -show`, to see the change.)
 - Central **Motion tokens** (`Theme/Motion.cs`, ease-out) now drive the notch morph, message arrival, calendar/prep motion, jump-pill.
+
+**Follow-ups (2026-08-05).**
+- **AI-summaries mode selector made roomy** — the On-device / Heuristic / My API key segmented control was
+  still wearing notch dimensions after the move into the Library window (owner: *"tight and ugly and close
+  to each other"*). Track padding 3→5 and radius 10→14, segments gained real side padding (14,11 vs 0,7)
+  and a 2px gap so they no longer touch, type 11.5→12.5, a hover fill on the inactive options, and the
+  selected chip now fades in on `Motion.Micro` instead of snapping.
+- **"Replay first-run setup" in the tray menu** — right-click Toki in the hidden-icons tray to walk the
+  onboarding pages (name → privacy → all set) again. Non-destructive: finishing only re-saves the name if
+  the box isn't blank, so it doubles as a way to change your name.
+- **Shortcut icon** — the icon *inside* the exe was already correct (verified by extracting the 32px frame
+  from `dist/Toki.exe`); the stale picture was Windows' icon cache. Cleared via `ie4uinit.exe -show` + a
+  re-stamp of both shortcuts' `IconLocation`. If a pinned taskbar icon is still stale, unpin/re-pin.
+- **`design-handoff/` — every screen, exported for the design team.** `--render` gained the three
+  first-run **Onboarding** frames and `--libshot` gained the Library **Settings** page, so the harnesses
+  now cover the whole product; the 24 resulting PNGs are laid out in flow order under
+  `design-handoff/ui-screens/` with `design-handoff/README.md` as the index (what each screen is, what
+  the frames can't show, and a **privacy warning** — they render with real meeting data). Generated, not
+  curated: re-run both flags after any UI change.
+
+**State at the end of v1-iter3 (2026-08-05).** Built, tested (`dotnet test` → **1,682 / 1,682 green**),
+published to `dist/Toki.exe` (self-contained single file) and owner-verified on the real PC. **Still open:**
+the ASR quality pass (parked by the owner — resume plan in the `asr-and-notch-reply-quality` memory), the
+remaining #39 passes (shared empty-state control, layout-stability/text-trim sweep, hover-expand section
+pills), and the **M8 ship path** — signed installer, Velopack auto-update, licence-key gate, onboarding
+download polish, Google sensitive-scope verification. Nothing in the product is blocked on those; they are
+the road to actually distributing it. Full reasoning: `docs/backlog.md`.

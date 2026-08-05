@@ -84,7 +84,9 @@ public partial class LibraryWindow : Window
         var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
         w.Show();
         w.Reload(App.CurrentMeeting?.Id);
-        foreach (var page in new[] { "ask", "library", "templates" })
+        // "settings" joined the hub in v1-iter2/iter3 (name, AI summaries + API key, calendar, about) —
+        // it renders like any other page, and a design review needs it as much as the rest.
+        foreach (var page in new[] { "ask", "library", "templates", "settings" })
         {
             w.ShowPage(page, animate: false);
             w.UpdateLayout();

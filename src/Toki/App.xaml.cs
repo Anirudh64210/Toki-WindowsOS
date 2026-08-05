@@ -1067,6 +1067,10 @@ public partial class App : Application
         var menu = new ContextMenu();
         menu.Items.Add(Item("Open Toki", () => State.ForceForDemo(PillState.Home)));
         menu.Items.Add(new Separator());
+        // Replays the first-run flow (name → privacy → all set) on demand. Non-destructive: finishing
+        // only re-saves the name if the box isn't blank (see CompleteOnboarding), so it doubles as a
+        // "show me the setup pages again" and as a way to redo the name.
+        menu.Items.Add(Item("Replay first-run setup", () => State.ForceForDemo(PillState.Onboarding)));
         menu.Items.Add(Item("Demo: meeting detected", () => State.ForceForDemo(PillState.MeetingPrompt)));
         menu.Items.Add(Item("Demo: summarizing", () => State.ForceForDemo(PillState.Summarizing)));
         menu.Items.Add(Item("Demo: notes ready", () => State.ForceForDemo(PillState.Notes)));
