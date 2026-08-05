@@ -1043,3 +1043,53 @@ remaining #39 passes (shared empty-state control, layout-stability/text-trim swe
 pills), and the **M8 ship path** — signed installer, Velopack auto-update, licence-key gate, onboarding
 download polish, Google sensitive-scope verification. Nothing in the product is blocked on those; they are
 the road to actually distributing it. Full reasoning: `docs/backlog.md`.
+
+## N1–N7 (Notes you can actually write in) — 2026-08-05
+
+The owner reviewed the entire pending list and picked one theme: **hand-written notes should be as
+capable as AI-written ones, and what you type should shape what Toki writes.** Seven milestones, each
+built, tested and owner-verified before the next. **1,738 tests green** (56 new).
+
+- **N1 — the note editor** (`Views/NoteEditor`). ONE editable surface, reused by the Library's manual
+  notes, the prep card and the in-meeting scratchpad. Three text sizes, tickable to-do boxes, bullet
+  and numbered lists, blank-line spacing, and one-tap insertion of any of the 8 note templates.
+  **Deliberately no font family and no colour** (owner: *"nothing outside normal text… just size,
+  templates, spacing, freedom"*). Bullets/numbers use WPF's native `List`, so Enter-makes-the-next-item
+  and Tab-indent come from the same machinery Word uses; a to-do repeats itself on Enter and ends on an
+  empty one. A **`Compact` toolbar** (glyphs, sizes behind one "Aa") exists because the full labelled
+  bar wraps to two rows at the notch's 356px and eats the card.
+- **N2 — the Library's manual notes use it.** They were a bare `TextBox` until now. Autosave and the
+  "Saved" flash kept; ticking a box counts as an edit.
+- **N3 — the prep card became writable.** Not a blank sheet beside it: **Edit turns the card itself into
+  the note**, with the recap as text, the still-open items as real tick boxes and the agenda as bullets
+  (`PrepBuilder.ToMarkdown`). Once edited it stays your version — your words outrank Toki's.
+- **N4 — the prep card stopped ambushing you.** `PrepWatcher` now only **arms** a card; it never seizes
+  the notch. You reach it by hovering the peek before the meeting, or via a **"Prep card" button on the
+  recording page** during it (stays open while hovered, ‹ Back returns to recording). Also fixed:
+  `JoinAndRecord` was *discarding* the card on join, so during the very meeting it had been prepared for
+  there was no card at all.
+- **N5 — save-or-discard, on the note list itself.** When a recording stops, anything typed on that
+  meeting's card is offered at the top of the Library as **Keep / Discard** — never a modal, never saved
+  behind your back. Discard is two-step ("Sure?") because it's text typed by hand.
+- **N6 — typed-notes augmentation** (the Granola model). What you typed goes into the note-writing prompt
+  *ahead of* the transcript, as a constraint: cover every point, expand with transcript detail, lead with
+  them, never contradict. Tick state survives as `[task]` / `[done]` so "still outstanding" reaches
+  ACTION ITEMS. **Your notes survive every failure path** — no model, model failure, or a
+  "nothing substantive was discussed" verdict all still emit a "Your notes" section, with your unticked
+  boxes as action items owned by You. The typed block is capped so it can never be what overruns context.
+- **N7 — evidence-linked notes.** Every traceable bullet carries a small **↳** that jumps to the
+  transcript line it came from and highlights it (`Storage/Evidence.cs`, deterministic word overlap, no
+  model). A bullet that can't be traced gets **nothing** — a link to the wrong line is worse than no
+  link. Computed at render time, so it works on notes written before the feature existed and costs
+  nothing on disk. Clicking a link past the preview fills the lazy transcript in first, then scrolls.
+
+**Storage decisions.** Hand-written notes are **Markdown** (`Storage/NoteMarkdown.cs`) — the same format
+as the existing `%APPDATA%\Toki\Notes` mirror, so they stay openable in Obsidian or Notepad instead of
+becoming a proprietary blob; 23 round-trip tests guard ticks, spacing and list renumbering. The prep
+scratchpad lives **outside** the meeting database (`Storage/PrepScratch.cs`, atomic writes) because it
+exists *before* the meeting record does and must survive a crash mid-meeting.
+
+**Still open, deliberately:** the prep card's auto-surface is gone by owner decision and logged for
+revisit (it doubled as the "a meeting is starting" nudge); prep notes for meetings that were never
+recorded remain invisible; and re-writing a note with a different template loses the typed steering,
+because a meeting record doesn't store which calendar event it came from. All three are tracked.

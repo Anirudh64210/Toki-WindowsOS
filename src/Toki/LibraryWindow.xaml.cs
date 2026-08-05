@@ -81,6 +81,11 @@ public partial class LibraryWindow : Window
             if (latest is not null) App.CurrentMeeting = App.Store.Get(latest.Id);
         }
         catch { }
+        // Plant a Keep/Discard card so the render shows it (in memory only — never written to disk).
+        PrepScratch.SeedForRender("render-demo", new ScratchNote(
+            "- [x] send the deck\n- [ ] confirm pricing with Ana\nthey want the pilot to run four weeks",
+            "Design review — PixelFlow", DateTimeOffset.UtcNow, Awaiting: true));
+
         var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
         w.Show();
         w.Reload(App.CurrentMeeting?.Id);
@@ -1426,6 +1431,15 @@ public partial class LibraryWindow : Window
         items = SortItems(items);
 
         CountLabel.Text = _myNotesOnly ? $"{items.Count} · my notes" : $"{items.Count} · all on this PC";
+
+        // Notes you wrote on a prep card during a meeting that's now finished, waiting on a decision.
+        // They sit at the TOP and are offered right here on the list — never as a modal, and never
+        // saved behind your back. Hidden while searching: they aren't in the index yet, so a card
+        // that ignores the search box would just look broken.
+        if (string.IsNullOrWhiteSpace(SearchBox.Text))
+            foreach (var (eventId, note) in Storage.PrepScratch.Awaiting())
+                Cards.Children.Add(PendingNoteCard(eventId, note));
+
         foreach (var m in items) Cards.Children.Add(Card(m));
         if (items.Count == 0)
             Cards.Children.Add(Placeholder(
@@ -1493,6 +1507,76 @@ public partial class LibraryWindow : Window
             LibrarySort.OpenTasks => "most open tasks",
             _ => "manual order",
         };
+    }
+
+    /// <summary>A set of prep-card notes whose meeting has ended, offered for Keep or Discard right on
+    /// the list. Deliberately NOT already in the store: an entry the user never asked for is a hollow
+    /// entry, and hollow entries are what make a library feel like junk (the same rule that stops a
+    /// silent meeting from being saved).</summary>
+    Border PendingNoteCard(string eventId, Storage.ScratchNote note)
+    {
+        var title = string.IsNullOrWhiteSpace(note.Title) ? "Meeting notes" : note.Title;
+
+        var content = new StackPanel();
+        content.Children.Add(new TextBlock
+        {
+            Text = "YOU WROTE THIS DURING", Style = St("SectionHeader"), Margin = new Thickness(0, 0, 0, 3),
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = title, Style = St("Body"), FontSize = 13, FontWeight = FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = Preview(note.Text), Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
+            MaxHeight = 44, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0),
+        });
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 9, 0, 0) };
+        var discard = SmallButton("Discard", () => { }, danger: true);   // replaced below (needs itself)
+        buttons.Children.Add(SmallButton("Keep", () =>
+        {
+            try
+            {
+                var id = App.Store.CreateManualNote(title, note.Text);
+                Storage.PrepScratch.Clear(eventId);
+                Reload(id);                       // land on the note you just kept
+            }
+            catch (Exception ex) { App.Log($"keep prep notes failed: {ex.Message}"); }
+        }));
+        buttons.Children.Add(discard);
+        content.Children.Add(buttons);
+
+        // Two-step discard: this is text the user typed by hand, so one stray click must not lose it.
+        var armed = false;
+        if (discard is Button db)
+            db.Click += (_, _) =>
+            {
+                if (!armed) { armed = true; db.Content = "Sure?"; return; }
+                Storage.PrepScratch.Clear(eventId);
+                LoadList();
+            };
+
+        var card = new Border
+        {
+            // An amber hairline, not a filled box: it needs attention, but it isn't an error.
+            BorderBrush = (Brush)FindResource("Amber"), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(13, 11, 13, 12),
+            Margin = new Thickness(0, 0, 0, 8), Child = content,
+        };
+        return card;
+    }
+
+    /// <summary>First couple of lines of a note, with the Markdown marks stripped — a preview should
+    /// read like the note, not like its source.</summary>
+    static string Preview(string markdown)
+    {
+        var lines = Storage.NoteMarkdown.Parse(markdown)
+            .Where(b => b.Kind != Storage.NoteBlockKind.Blank && b.Text.Length > 0)
+            .Select(b => b.Kind == Storage.NoteBlockKind.Todo ? (b.Done ? "✓ " : "○ ") + b.Text : b.Text)
+            .Take(3);
+        return string.Join(" · ", lines);
     }
 
     Border Card(MeetingSummary m)
@@ -1774,14 +1858,10 @@ public partial class LibraryWindow : Window
         panel.Children.Add(titleBox);
         panel.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("SurfaceHi"), Margin = new Thickness(0, 8, 0, 0) });
 
-        var bodyBox = new TextBox
-        {
-            Text = m.Body ?? "", Background = Brushes.Transparent, BorderThickness = new Thickness(0),
-            Foreground = (Brush)FindResource("TextSoft"), CaretBrush = (Brush)FindResource("Text"),
-            FontSize = 13, FontFamily = (FontFamily)FindResource("UiFont"), AcceptsReturn = true, AcceptsTab = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 320, Margin = new Thickness(0, 12, 0, 0),
-            VerticalContentAlignment = VerticalAlignment.Top,
-        };
+        // The real editor (N1): sizes, tickable to-dos, lists, spacing, template insertion. Replaces
+        // the plain TextBox this used to be — a hand-written note should be as capable as an AI one.
+        var bodyBox = new Views.NoteEditor { MinHeight = 340, Margin = new Thickness(0, 12, 0, 0) };
+        bodyBox.Markdown = m.Body ?? "";
         panel.Children.Add(bodyBox);
 
         var status = new TextBlock { Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), Opacity = 0, Text = "Saved" };
@@ -1796,13 +1876,13 @@ public partial class LibraryWindow : Window
         _manualFlush = () =>
         {
             var title = string.IsNullOrWhiteSpace(titleBox.Text) ? "Untitled note" : titleBox.Text.Trim();
-            try { App.Store.UpdateTitleAndBody(m.Id, title, bodyBox.Text); MarkDirty(); }
+            try { App.Store.UpdateTitleAndBody(m.Id, title, bodyBox.Markdown); MarkDirty(); }
             catch (Exception ex) { App.Log($"manual note save failed: {ex.Message}"); }
             status.Text = "Saved"; FlashStatus(status);
         };
         void Schedule() { status.Text = "Saving…"; status.Opacity = 0.75; status.BeginAnimation(OpacityProperty, null); _manualDebounce.Stop(); _manualDebounce.Start(); }
         titleBox.TextChanged += (_, _) => Schedule();
-        bodyBox.TextChanged += (_, _) => Schedule();
+        bodyBox.Changed += (_, _) => Schedule();   // covers typing AND ticking a box
     }
 
     // Show a status word, then let it fade out — "saved" should reassure, not linger as chrome.

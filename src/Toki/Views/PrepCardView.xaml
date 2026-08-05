@@ -8,13 +8,24 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock x:Name="Title" Style="{StaticResource Body}" FontSize="14" FontWeight="SemiBold"
-                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                <TextBlock x:Name="WhenText" FontFamily="{StaticResource UiFont}" FontSize="11" Margin="0,2,0,0"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Back to the recording page — only while a recording is running (owner flow). -->
+                <Button x:Name="BackButton" Style="{StaticResource IconButton}" Content="&#xE76B;" FontSize="13"
+                        Margin="0,0,4,0" Visibility="Collapsed" ToolTip="Back to recording" Click="OnBack"/>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="Title" Style="{StaticResource Body}" FontSize="14" FontWeight="SemiBold"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="WhenText" FontFamily="{StaticResource UiFont}" FontSize="11" Margin="0,2,0,0"/>
+                </StackPanel>
             </StackPanel>
-            <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE787;" FontSize="13"
-                    VerticalAlignment="Top" ToolTip="Open calendar" Click="OnCalendar"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                <!-- Edit turns THIS CARD into a note you carry on writing in — the recap, open items and
+                     agenda arrive as real text, tick boxes and bullets (owner, 2026-08-05). -->
+                <Button x:Name="EditButton" Style="{StaticResource IconButton}" Content="&#xE70F;" FontSize="13"
+                        ToolTip="Edit these notes" Click="OnEdit"/>
+                <Button x:Name="CalendarButton" Style="{StaticResource IconButton}" Content="&#xE787;" FontSize="13"
+                        ToolTip="Open calendar" Click="OnCalendar"/>
+            </StackPanel>
         </Grid>
 
         <!-- Invited/accepted: overlapping initial avatars + "5 invited · 3 accepted" (real invite data only) -->
@@ -24,8 +35,10 @@
                        VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- The prep context: one subtle inset box (the single deliberate box on this card) -->
-        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="12,11,12,12" Margin="0,12,0,0">
+        <!-- The prep context: one subtle inset box (the single deliberate box on this card).
+             Replaced in place by the editor once you press Edit — same card, now writable. -->
+        <Border x:Name="ContextBox" Background="{DynamicResource SurfaceHi}" CornerRadius="12"
+                Padding="12,11,12,12" Margin="0,12,0,0">
             <StackPanel>
                 <!-- LAST TIME -->
                 <StackPanel x:Name="RecapHost" Visibility="Collapsed">
@@ -62,10 +75,16 @@
             </StackPanel>
         </Border>
 
+        <!-- Edit mode: the same card, writable. Sits exactly where the context box was. -->
+        <Border x:Name="ScratchHost" Visibility="Collapsed" Background="{DynamicResource SurfaceHi}"
+                CornerRadius="12" Padding="12,10,12,12" Margin="0,12,0,0">
+            <ContentControl x:Name="ScratchSlot"/>
+        </Border>
+
         <!-- Full-width Join, with a quiet Later beneath -->
         <Button x:Name="JoinButton" Style="{StaticResource WhiteButton}" Padding="0,10" Margin="0,12,0,0"
                 HorizontalContentAlignment="Center" Content="Join and record" Click="OnJoin"/>
-        <Button Style="{StaticResource PillButton}" Background="Transparent"
+        <Button x:Name="LaterButton" Style="{StaticResource PillButton}" Background="Transparent"
                 Foreground="{DynamicResource TextDim}" FontSize="11" Padding="14,5" Margin="0,5,0,0"
                 HorizontalAlignment="Center" Content="Later" Click="OnLater"/>
     </StackPanel>

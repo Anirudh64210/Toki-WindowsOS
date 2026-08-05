@@ -819,8 +819,11 @@ public partial class PillWindow : Window
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(AutoHideMs) };
     bool _idleWired, _autoHideWired;
 
+    // PrepCard is stayable as of 2026-08-05: it stopped being a prompt that pops at you and became a
+    // page you open and write on, so it must stay put while you're on it (owner: "while hovering it
+    // stays open").
     static bool IsStayable(PillState s) =>
-        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar or PillState.About;
+        s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar or PillState.About or PillState.PrepCard;
 
     // Pages the user actually clicks/scrolls/types on — everything except the tiny passive peeks.
     // These grab foreground focus on hover so the scroll wheel and clicks land on the notch, not the
@@ -997,7 +1000,13 @@ public partial class PillWindow : Window
             if (_overMs >= dwell)
             {
                 _overMs = 0;
-                if (cur == PillState.Collapsed) _state.ForceForDemo(_context); else _state.TryGo(expand);
+                // Hovering the resting peek opens your remembered page — UNLESS a prep card is armed
+                // for a meeting that's about to start, in which case that's obviously what you came
+                // for. This IS the "hover only" surfacing: the card never takes the screen by itself
+                // any more (owner, 2026-08-05), so hover is the only way it appears before a meeting.
+                if (cur == PillState.Collapsed)
+                    _state.ForceForDemo(Calendar.PrepWatcher.Armed ? PillState.PrepCard : _context);
+                else _state.TryGo(expand);
                 return;
             }
 

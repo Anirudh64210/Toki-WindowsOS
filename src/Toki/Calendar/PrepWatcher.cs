@@ -24,9 +24,10 @@ public sealed class PrepWatcher
     readonly HashSet<string> _shown = new();   // event-instance ids already surfaced or snoozed
     bool _wired;
 
-    /// <summary>Guard: only raise a card while the notch is idle. Overridable for tests.</summary>
-    public Func<bool> CanPrompt { get; set; } =
-        () => App.State.Current is PillState.Hidden or PillState.Collapsed;
+    /// <summary>Is a prep card currently available to open? The notch asks this to decide whether
+    /// hovering the peek should show the card, and the recording page asks it to decide whether to
+    /// offer its "Prep card" button.</summary>
+    public static bool Armed => App.CurrentPrep is not null;
 
     public void Start()
     {
@@ -52,17 +53,22 @@ public sealed class PrepWatcher
         if (!CalendarService.Instance.IsConnected) return;
         WarmCache();                     // keep UpcomingCache fresh (coalesced by its 60s TTL)
 
-        // Auto-retire a card the user walked away from — a prompt must not squat through the meeting.
-        if (App.State.Current == PillState.PrepCard && App.CurrentPrep is { } cp
-            && cp.Event.StartUtc < DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2))
-            App.State.TryGo(PillState.Hidden);
+        // Disarm a card whose meeting is behind us — otherwise hovering the peek would keep opening a
+        // stale prep card instead of Home. Never while recording: the card (and its scratchpad) has to
+        // stay reachable from the recording page for the whole meeting, which is the point of N4.
+        // Note this does NOT touch PrepScratch — what the user typed outlives the card, and N5 decides
+        // whether to keep it.
+        if (!App.IsRecording && App.State.Current != PillState.PrepCard
+            && App.CurrentPrep is { } cp && cp.Event.EndUtc < DateTimeOffset.UtcNow)
+            App.CurrentPrep = null;
 
         TryRaise();
     }
 
     void TryRaise()
     {
-        if (!CanPrompt() || Suppressed()) return;
+        // No idle/fullscreen guard any more: arming shows nothing, so there is nothing to interrupt.
+        // (Those guards existed only because this used to seize the notch.)
         var events = UpcomingCache.Instance.Snapshot;
         if (events is null) return;
 
@@ -74,12 +80,13 @@ public sealed class PrepWatcher
             .FirstOrDefault();
         if (cand is null) return;
 
+        // ARM, never pop (owner decision, 2026-08-05: "prep card should be active as a hover only").
+        // The card used to take the screen on its own ~5 min out; now it just becomes AVAILABLE, and
+        // the user reaches it by hovering the peek, or from the Prep card button while recording.
+        // Restraint is the design — appear only when asked.
         App.CurrentPrep = PrepBuilder.Build(cand, App.Store);
-        if (App.State.TryGo(PillState.PrepCard))
-        {
-            _shown.Add(cand.Id);
-            App.Log($"prep: surfaced card for '{cand.Summary}' ({(int)(cand.StartUtc - now).TotalMinutes} min out)");
-        }
+        _shown.Add(cand.Id);
+        App.Log($"prep: armed card for '{cand.Summary}' ({(int)(cand.StartUtc - now).TotalMinutes} min out) — hover to open");
         // Prune ids no longer upcoming so the set can't grow forever.
         _shown.RemoveWhere(id => events.All(e => e.Id != id));
     }
@@ -92,11 +99,4 @@ public sealed class PrepWatcher
         try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline — the next tick retries */ }
     }
 
-    // Don't interrupt a fullscreen app / game / presentation — the one shared quiet check
-    // (edge-summon, meeting prompt, and this watcher all consult PillWindow.QuietFullscreen).
-    static bool Suppressed()
-    {
-        try { return PillWindow.QuietFullscreen(); }
-        catch { return false; }
-    }
 }

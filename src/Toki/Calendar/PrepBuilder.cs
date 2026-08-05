@@ -99,6 +99,43 @@ public static class PrepBuilder
         };
     }
 
+    /// <summary>
+    /// The prep card AS AN EDITABLE NOTE. Pressing Edit on the card doesn't open a blank sheet beside
+    /// it — it hands you the card's own content as text you can carry on writing in (owner, 2026-08-05),
+    /// so the still-open items arrive as real tick boxes and the agenda as real bullets.
+    /// Deterministic, same as everything else on this card: no model, no network.
+    /// </summary>
+    public static string ToMarkdown(PrepContent prep)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        if (prep.LastTime is { } m && Recap(m) is { Length: > 0 } recap)
+            sb.Append("## Last time\n").Append(recap).Append("\n\n");
+
+        if (prep.StillOpen.Count > 0)
+        {
+            sb.Append("## Still open\n");
+            foreach (var a in prep.StillOpen)
+            {
+                var owner = string.IsNullOrWhiteSpace(a.Owner) ? "" : a.Owner + " — ";
+                sb.Append(a.Done ? "- [x] " : "- [ ] ").Append(owner).Append(a.Text).Append('\n');
+            }
+            sb.Append('\n');
+        }
+
+        if (prep.Agenda.Count > 0)
+        {
+            sb.Append("## Agenda\n");
+            foreach (var line in prep.Agenda) sb.Append("- ").Append(line).Append('\n');
+            sb.Append('\n');
+        }
+
+        // Always end with somewhere to type — an editor that opens with the caret in a heading you
+        // didn't write is an editor you have to tidy before you can use it.
+        sb.Append("## My notes\n");
+        return sb.ToString();
+    }
+
     /// <summary>Turn a calendar event's description into up to 4 agenda bullets. Strips HTML, decodes
     /// entities, removes list markers, drops empty / URL-only lines. Empty result → no agenda section.</summary>
     public static IReadOnlyList<string> ParseAgenda(string? description)

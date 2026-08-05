@@ -23,15 +23,22 @@
                 <TextBlock x:Name="Timer" Text="0:00" Style="{StaticResource Body}"
                            FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
-            <Button HorizontalAlignment="Right" VerticalAlignment="Center"
-                    Style="{StaticResource CoralButton}" FontSize="11" Padding="11,5"
-                    Click="OnStop" ToolTip="Stop recording">
-                <StackPanel Orientation="Horizontal">
-                    <Rectangle Width="7" Height="7" RadiusX="1.5" RadiusY="1.5" Fill="White"
-                               Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Stop"/>
-                </StackPanel>
-            </Button>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <!-- Mid-meeting door to the prep card + its scratchpad. Only shown when there IS a
+                     card for this meeting; a Back button there returns here. (Owner flow, 2026-08-05.) -->
+                <Button x:Name="PrepButton" Style="{StaticResource PillButton}" FontSize="11"
+                        Padding="10,5" Margin="0,0,6,0" Visibility="Collapsed"
+                        Content="Prep card" Click="OnPrep"
+                        ToolTip="Your prep notes for this meeting — jot things down while you talk"/>
+                <Button Style="{StaticResource CoralButton}" FontSize="11" Padding="11,5"
+                        Click="OnStop" ToolTip="Stop recording">
+                    <StackPanel Orientation="Horizontal">
+                        <Rectangle Width="7" Height="7" RadiusX="1.5" RadiusY="1.5" Fill="White"
+                                   Margin="0,0,6,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Stop"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
 
         <!-- Divider, not a box (design rule) — separates the controls from the live transcript. -->

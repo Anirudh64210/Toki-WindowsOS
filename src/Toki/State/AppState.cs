@@ -14,7 +14,9 @@ public sealed class AppState
         [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden, PillState.PrepCard],
         [PillState.MeetingPrompt] = [PillState.RecordingBar, PillState.Hidden],
         [PillState.RecordingBar]  = [PillState.RecordingOpen, PillState.Summarizing],
-        [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing],
+        // RecordingOpen ⇄ PrepCard: mid-meeting you can pull up the prep card (and its scratchpad)
+        // from the recording page and come straight back — owner flow, 2026-08-05.
+        [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing, PillState.PrepCard],
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
         [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Library],
         [PillState.NoSpeech]      = [PillState.Hidden, PillState.Home, PillState.Collapsed],
@@ -23,7 +25,7 @@ public sealed class AppState
         [PillState.Settings]      = [PillState.Hidden, PillState.Home, PillState.Library, PillState.About],
         [PillState.About]         = [PillState.Hidden, PillState.Home, PillState.Settings],
         [PillState.Calendar]      = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Settings],
-        [PillState.PrepCard]      = [PillState.RecordingBar, PillState.Hidden, PillState.Calendar],
+        [PillState.PrepCard]      = [PillState.RecordingBar, PillState.RecordingOpen, PillState.Hidden, PillState.Calendar, PillState.Home, PillState.Collapsed, PillState.Summarizing],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
         // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
         // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.

@@ -1,0 +1,27 @@
+<UserControl x:Class="Toki.Views.NoteEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Toki.Controls">
+    <!-- The one editable note surface, reused by the Library's hand-written notes, the prep card and
+         the in-meeting scratchpad. Deliberately small: sizes, to-dos, lists, spacing, templates.
+         NO font family and NO colour — owner, 2026-08-05.
+
+         The toolbar WRAPS, because this same control has to work at 356px inside the notch and at
+         full width in the Library window. -->
+    <DockPanel>
+        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Hairline}" BorderThickness="0,0,0,1"
+                Padding="0,0,0,7" Margin="0,0,0,9">
+            <WrapPanel x:Name="Toolbar" Orientation="Horizontal"/>
+        </Border>
+
+        <RichTextBox x:Name="Editor"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                     SelectionBrush="{DynamicResource Pink}" SelectionOpacity="0.3"
+                     FontFamily="{StaticResource UiFont}" FontSize="13"
+                     AcceptsReturn="True" AcceptsTab="True"
+                     VerticalScrollBarVisibility="Auto"
+                     controls:SmoothScroll.Enabled="True"
+                     SpellCheck.IsEnabled="True"/>
+    </DockPanel>
+</UserControl>

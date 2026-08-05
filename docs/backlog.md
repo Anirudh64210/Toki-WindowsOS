@@ -6,6 +6,53 @@ top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*
 
 ---
 
+## ✅ N1–N7 "notes you can actually write in" — BUILT 2026-08-05 (awaiting real-meeting bug-testing)
+
+All seven shipped and published; **1,738 tests green**. The owner is holding the git push until they've
+bug-tested with real meetings. Detail: README "N1–N7", ARCHITECTURE "N1–N7 decisions".
+
+**What came out of it that ISN'T finished:**
+1. **Prep card no longer appears on its own** (task #58) — deliberate, but it was also the de-facto "your
+   meeting is starting" nudge. Watch whether meetings get missed; the likely answer is something quieter
+   (an amber peek, a one-line strip) rather than restoring the whole card.
+2. **Prep notes for meetings that were never recorded stay invisible** (task #59) — they sit in
+   `prep-scratch.json` with no Library entry, no search, no Markdown mirror, and the file never prunes.
+   Probable fix: promote to a real manual note as soon as anything is typed, demoting PrepScratch to a
+   draft buffer.
+3. **Re-writing a note with a different template loses the typed steering** — a meeting record doesn't
+   store which calendar event it came from, so there's nothing to look the typed notes up by. Folds into
+   #59's linking work.
+4. **Audio playback for evidence links** — N7 shipped the text jump only, by owner choice. A player
+   (seek/scrub/waveform) is its own milestone.
+
+---
+
+## 🎯 THE BUILD AS SPECIFIED (owner regroup, 2026-08-05) — kept for the reasoning
+
+The owner reviewed the whole pending list and picked. **Built in this order (N1→N7):**
+
+| # | What | Why it's here |
+|---|---|---|
+| **N1** | **The note editor** — one reusable editable surface: text, 3 sizes, to-do checkboxes, lists, spacing, template insertion. **No font family, no colour** (owner: "nothing outside normal text… just size, templates, spacing, freedom"). Markdown-backed. | Everything below is this one component in a different frame. Build it once. |
+| **N2** | **Manual notes in the Library** use N1 — templates, to-dos, action items, all insertable by hand. Plus a "Custom note" entry point. | Today a manual note is a bare `TextBox`. |
+| **N3** | **The prep card becomes editable** — keeps its generated content, but the user can add to-dos and free text on top. "Like a blank Notion page, our version." | This *is* the "manual/custom notes as a separate section" answer — resolved, see below. |
+| **N4** | **Prep card surfacing: auto-surface OFF → hover-only** + a **"Prep card" button in the recording state**: hover the peeking Toki → recording page drops → Prep card → stays open while hovered → Back returns to recording. | OWNER DECISION. Resolves the long-pending auto-vs-hover question. |
+| **N5** | **Save-or-discard the scratchpad** into the Library after the meeting, classified as manually created, chosen **on the preview card in the note list itself**. | No hollow entries; the user decides. |
+| **N6** | **Typed-notes augmentation** (was research item C#14) — the LLM merges what you typed during the meeting with the transcript, so your fragments steer the emphasis. | The highest-leverage note-quality item in the research. |
+| **N7** | **Evidence-linked notes** (was C#15) — every bullet jumps to the transcript line that produced it, highlighted. **Text jump only**; the audio player is deliberately deferred to its own milestone. | Cheapest way to close the perceived-quality gap with cloud LLMs. |
+
+**Owner decisions this settles (removing them from "pending"):**
+- **Manual/custom notes — section vs filter: ANSWERED.** Neither, as originally framed. The editable
+  prep card / sticky note covers the need, *plus* a dedicated custom-note button. The "Manual notes"
+  filter already shipped in H2 and stays.
+- **Prep card auto vs hover: ANSWERED — hover-only**, with the in-recording button as the second door.
+
+**Everything else stays parked**, explicitly: the whole **M8 ship path** (revisit "once we get closer to
+the actual complete and confident build"), the rest of section B's owner decisions, the remaining
+research features, the #39 UI passes, the assistant-brain limits, and the infra work below.
+
+---
+
 ## ⭐ Next up (updated 2026-08-05, after the v1-iter3 premium-UI pass)
 
 **UI revamp #39 — passes ①, ⑤ and the premium redesigns are DONE.** ① motion tokens + ease-out morph +

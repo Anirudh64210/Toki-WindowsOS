@@ -19,11 +19,18 @@ public partial class PrepCardView : UserControl
     bool _ready;
     void Grow() { if (_ready && !App.Headless) App.GrowNotch(); }
 
+    NoteEditor? _scratch;
+    readonly System.Windows.Threading.DispatcherTimer _scratchSave =
+        new(System.Windows.Threading.DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(700) };
+
     public PrepCardView()
     {
         InitializeComponent();
+        _scratchSave.Tick += (_, _) => { _scratchSave.Stop(); FlushScratch(); };
         Refresh();
         Loaded += (_, _) => { Refresh(); Grow(); };
+        // Leaving the card (back to recording, Join, dismissal) must not cost the user a sentence.
+        Unloaded += (_, _) => { _scratchSave.Stop(); FlushScratch(); };
         _ready = true;
     }
 
@@ -71,8 +78,84 @@ public partial class PrepCardView : UserControl
         }
         else AgendaHost.Visibility = Visibility.Collapsed;
 
+        PaintScratch(prep.Event.Id);
+        PaintChrome();
         Grow();
     }
+
+    // ── edit mode (N3) ──
+
+    /// <summary>Once you've edited a card it STAYS edited — reopening shows your version, not the
+    /// generated one, because your words outrank Toki's.</summary>
+    void PaintScratch(string eventId)
+    {
+        var mine = PrepScratch.Get(eventId);
+        if (mine.Length > 0) EnterEdit(mine);
+        else ShowReadOnly();
+    }
+
+    void ShowReadOnly()
+    {
+        ContextBox.Visibility = Visibility.Visible;
+        ScratchHost.Visibility = Visibility.Collapsed;
+        EditButton.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Turn the card into the note. The generated content comes along as real text — open
+    /// items as tick boxes, agenda as bullets — so you carry on writing rather than starting over.</summary>
+    void EnterEdit(string markdown)
+    {
+        if (_scratch is null)
+        {
+            _scratch = new NoteEditor { MinHeight = 110, MaxHeight = 260, Compact = true };
+            _scratch.Changed += (_, _) => { _scratchSave.Stop(); _scratchSave.Start(); };
+            ScratchSlot.Content = _scratch;
+        }
+        _scratch.Markdown = markdown;
+        ContextBox.Visibility = Visibility.Collapsed;
+        ScratchHost.Visibility = Visibility.Visible;
+        EditButton.Visibility = Visibility.Collapsed;   // you're already in it
+    }
+
+    void FlushScratch()
+    {
+        if (_scratch is null || ScratchHost.Visibility != Visibility.Visible) return;
+        if (App.CurrentPrep is not { } prep || App.Headless) return;
+        PrepScratch.Set(prep.Event.Id, _scratch.Markdown);
+    }
+
+    void OnEdit(object sender, RoutedEventArgs e)
+    {
+        if (App.CurrentPrep is not { } prep) return;
+        var mine = PrepScratch.Get(prep.Event.Id);
+        EnterEdit(mine.Length > 0 ? mine : PrepBuilder.ToMarkdown(prep));
+        Grow();
+        _scratch?.FocusEditor();
+    }
+
+    // ── recording-aware chrome (N4) ──
+
+    /// <summary>Mid-recording the card is a side-trip: drop the Join/Later pair — you're already in the
+    /// meeting, so "Join and record" would be nonsense. Back is ALWAYS shown, because while a card is
+    /// armed hovering the peek opens this card, and without a way out you could never reach Home.</summary>
+    void PaintChrome()
+    {
+        var recording = App.IsRecording;
+        BackButton.ToolTip = recording ? "Back to recording" : "Back";
+        JoinButton.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
+        LaterButton.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
+        BackButton.Visibility = Visibility.Visible;
+    }
+
+    void OnBack(object sender, RoutedEventArgs e)
+    {
+        FlushScratch();
+        App.State.TryGo(App.IsRecording ? PillState.RecordingOpen : PillState.Home);
+    }
+
+    /// <summary>Dev/render only: show edit mode with planted text, without touching the real
+    /// scratch file.</summary>
+    public void DebugOpenScratch(string markdown) { EnterEdit(markdown); Grow(); }
 
     // "9:41 – 10:11 AM  ·  in 9 min" — the time range reads soft, the countdown reads amber (the
     // reference card's urgency accent). Runs use SetResourceReference so a live theme swap recolours.

@@ -841,3 +841,68 @@ that can drift.
 pills; the owner removed them outright (*"flat out ugly and never encourage"*). `BuildSuggestions()` now
 clears the panel and collapses it — kept as a seam rather than deleted, so the decision is visible and
 reversible. Design rule reinforced: **an empty state should invite, not instruct.**
+
+## N1–N7 — decisions from the hand-written-notes batch (2026-08-05)
+
+**Markdown is the storage format for hand-written notes, and that's a product decision, not a technical
+one.** Toki already mirrors every note as a real `.md` file in `%APPDATA%\Toki\Notes\`. If the editor had
+invented its own representation for tick boxes and headings, hand-written notes would have become the one
+kind of note you can only read inside Toki — quietly breaking "all data local, and yours." Markdown also
+happens to give exactly the feature set the owner asked for and no more: `#`/`##` sizes, `- [ ]` tick
+boxes, lists, blank-line spacing. There is deliberately **no syntax for font family or colour**, because
+those aren't offered. `Storage/NoteMarkdown.cs` is pure (no WPF) so the round-trip is unit-testable; the
+editor turns blocks into a `FlowDocument` and back.
+
+**Bullets and numbers use WPF's native `List`; to-dos don't.** Native lists give Enter-makes-the-next-item
+and Tab-indent for free — it behaves like Word because it *is* the same machinery. A to-do can't be a
+native list item (it needs a real interactive `CheckBox`), so it's a tagged `Paragraph` whose first inline
+is an `InlineUIContainer`. `Focusable = false` on the box keeps typing and arrow keys flowing past it. The
+"Enter on a to-do makes another to-do, Enter on an empty one ends the list" behaviour is hand-written,
+because that's the one list convention users expect and WPF doesn't supply.
+
+**A blank line is a beat, not an empty row.** The document sets `LineHeight`, which beats `FontSize` — so
+shrinking a blank paragraph's font did nothing and sections sat in chasms. Blank paragraphs override
+`LineHeight` directly. The user's spacing is still preserved verbatim on save; only its rendered height
+changes.
+
+**The prep card is a page now, not a prompt — so it stops appearing on its own.** `PrepWatcher` used to
+call `TryGo(PillState.PrepCard)` ~5 min before a meeting, guarded by idle-only and fullscreen checks. The
+owner found that intrusive, so it now only **arms** `App.CurrentPrep`; the guards went with it, because
+arming shows nothing and there is nothing left to interrupt. Two doors replace the ambush: hovering the
+resting peek opens the card when one is armed, and the recording page carries a **Prep card** button.
+`PrepCard` became *stayable* (it's a page you write on, so it must not retract while you're on it) and
+gained a Back button that is **always** visible — without it, an armed card made the peek unable to reach
+Home at all. Logged for revisit: the auto-surface was also the de-facto "your meeting is starting" nudge.
+
+**`JoinAndRecord` was discarding the thing it had just prepared.** `var prep = CurrentPrep; CurrentPrep =
+null;` made sense when the card was a one-shot prompt that had to get out of the way. Once the card became
+a page you return to mid-meeting, that line meant the card vanished during the exact meeting it was built
+for. The armed card now survives the whole recording, and `PrepWatcher` only disarms it once the meeting
+has ended AND nothing is recording.
+
+**The scratchpad lives outside the meeting database.** `Storage/PrepScratch.cs` is a small atomically
+written JSON file keyed by calendar event id. Two reasons it isn't a table: the text exists *before* a
+meeting record does (you type while waiting for people to join), and losing something the user typed by
+hand is categorically worse than losing a summary, which can always be regenerated. Nothing is ever
+promoted into the Library automatically — a meeting that ends flags the entry `Awaiting`, and the Library
+offers Keep / Discard **on the note list itself**. An entry the user never asked for is a hollow entry,
+which is the same rule that stops a silent meeting from being saved.
+
+**Typed notes steer the note; they never merely decorate it.** The scratchpad text is injected into the
+final note-writing prompt *before* the transcript and phrased as a hard constraint ("Cover EVERY point
+they wrote"), because a 4-bit 4B model treats soft suggestions as optional. Tick state is preserved into
+the prompt as `[task]` / `[done]` — "still outstanding" versus "already handled" is exactly the signal
+that should reach ACTION ITEMS rather than being flattened into prose. Crucially, the typed text is also
+re-attached on **every** failure path (no model, model error, low-substance verdict) as a "Your notes"
+section with unticked boxes as action items: the model is allowed to fail, but a sentence the user typed
+is not allowed to disappear. The block is length-capped so the user's own notes can never be what
+overruns the context window.
+
+**Evidence links are computed at render time and stay silent when unsure.** `Storage/Evidence.cs` scores
+word overlap between a bullet and windows of up to 3 consecutive transcript lines, with a floor (≥2 shared
+content words and ≥34% coverage). Below the floor it returns null and no link is drawn. That asymmetry is
+the whole design: **a link to the wrong line is worse than no link**, because it makes the note look like
+it's citing something it isn't — the same anti-fabrication rule the assistant follows. Computing at render
+time rather than storing means it applies retroactively to every note ever written and adds nothing to the
+database. Clicking a link whose line is past the lazy-loaded preview expands the transcript first and
+scrolls on completion.

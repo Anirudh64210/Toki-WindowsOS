@@ -33,6 +33,10 @@ public partial class RecordingOpenView : UserControl
             LiveLine.Text = "Listening…";
             LiveLine.Opacity = 1;
             App.LivePreview += OnLiveSegment;
+            // Offer the prep card only when this meeting actually has one — an ad-hoc call Toki merely
+            // detected has no calendar event behind it, and a button that opens nothing is worse than
+            // no button.
+            PrepButton.Visibility = Calendar.PrepWatcher.Armed ? Visibility.Visible : Visibility.Collapsed;
         };
         Unloaded += (_, _) => { App.LivePreview -= OnLiveSegment; };
     }
@@ -62,4 +66,8 @@ public partial class RecordingOpenView : UserControl
     void OnCollapse(object sender, MouseButtonEventArgs e) => App.State.TryGo(PillState.RecordingBar);
 
     void OnStop(object sender, RoutedEventArgs e) => App.StopRecording();
+
+    // Open the prep card mid-meeting. Recording is untouched — the mic keeps running behind it, and
+    // the card's Back button brings this page straight back.
+    void OnPrep(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.PrepCard);
 }

@@ -267,6 +267,51 @@ public static class NoteRenderer
         if (!string.IsNullOrEmpty(meta))
             doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, spacious ? 20 : 15) });
 
+        // ── N7: evidence links ──
+        // Every bullet that can be traced to a transcript line gets a small "↳" that jumps there and
+        // highlights it. Bullets that CAN'T be traced get nothing — a link to the wrong line would make
+        // the note look like it's citing something it isn't. Computed here at render time rather than
+        // stored, so it works on notes written before this existed and costs nothing on disk.
+        RichTextBox? host = null;
+        var transcriptParas = new Dictionary<int, Paragraph>();
+        Action<Action?>? expandTranscript = null;
+
+        void JumpTo(int index)
+        {
+            void Go()
+            {
+                if (host is null || !transcriptParas.TryGetValue(index, out var target)) return;
+                var rect = target.ContentStart.GetCharacterRect(LogicalDirection.Forward);
+                host.ScrollToVerticalOffset(Math.Max(0, host.VerticalOffset + rect.Top - 70));
+
+                // A brief tint, then back — enough to find the line with your eye, not a permanent mark.
+                target.Background = B("Chip");
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
+                t.Tick += (_, _) => { t.Stop(); target.Background = Brushes.Transparent; };
+                t.Start();
+            }
+
+            // The transcript renders lazily; if the line we want hasn't been built yet, fill it in first.
+            if (transcriptParas.ContainsKey(index) || expandTranscript is null) Go();
+            else expandTranscript(Go);
+        }
+
+        Paragraph WithEvidence(string text, double lineHeight, Thickness margin)
+        {
+            var p = new Paragraph(new Run(text)) { LineHeight = lineHeight, Margin = margin };
+            if (Evidence.BestSegment(text, m.Transcript) is not { } idx) return p;
+
+            var glyph = new Run(" ↳") { FontSize = fs - 1.5 };
+            var link = new Hyperlink(glyph)
+            {
+                Foreground = B("TextDim"), TextDecorations = null, Cursor = Cursors.Hand,
+                ToolTip = "Show where this came from in the transcript",
+            };
+            link.Click += (_, _) => JumpTo(idx);
+            p.Inlines.Add(link);
+            return p;
+        }
+
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
             doc.Blocks.Add(DocHeader("SUMMARY", first: true));
@@ -278,7 +323,7 @@ public static class NoteRenderer
             doc.Blocks.Add(DocHeader(sec.Heading.ToUpperInvariant()));
             var list = new List { MarkerStyle = TextMarkerStyle.Disc, Padding = new Thickness(15, 0, 0, 0), Margin = new Thickness(0, 0, 0, 2) };
             foreach (var b in sec.Bullets)
-                list.ListItems.Add(new ListItem(new Paragraph(new Run(b)) { LineHeight = fs + 7, Margin = new Thickness(0, 0, 0, 7) }));
+                list.ListItems.Add(new ListItem(WithEvidence(b, fs + 7, new Thickness(0, 0, 0, 7))));
             doc.Blocks.Add(list);
         }
         if (m.Notes.Actions.Count > 0)
@@ -290,7 +335,12 @@ public static class NoteRenderer
         {
             doc.Blocks.Add(DocHeader("TRANSCRIPT"));
             var preview = Math.Min(3, m.Transcript.Count);
-            for (var i = 0; i < preview; i++) doc.Blocks.Add(DocTranscript(m.Transcript[i], fs));
+            for (var i = 0; i < preview; i++)
+            {
+                var p = DocTranscript(m.Transcript[i], fs);
+                transcriptParas[i] = p;     // so an evidence link can find and highlight it
+                doc.Blocks.Add(p);
+            }
             if (m.Transcript.Count > preview)
             {
                 var more = m.Transcript.Count - preview;
@@ -302,8 +352,15 @@ public static class NoteRenderer
                 };
                 var holder = new BlockUIContainer(btn) { Margin = new Thickness(0, 3, 0, 0) };
                 doc.Blocks.Add(holder);
-                btn.Click += (_, _) =>
+
+                var expanding = false;
+                // Shared by the button and by any evidence link that points past the preview — a link
+                // has to be able to fill the transcript in before it can scroll to its line.
+                void Expand(Action? done)
                 {
+                    if (expanding) return;
+                    expanding = true;
+
                     // CHUNKED expansion (the panel path pioneered this; the FlowDocument path had
                     // dropped it): a long meeting is thousands of paragraphs, and inserting them
                     // all synchronously froze the UI for seconds. Insert in slices, yielding to
@@ -315,14 +372,28 @@ public static class NoteRenderer
                     void InsertSlice()
                     {
                         var end = Math.Min(i + slice, m.Transcript.Count);
-                        for (; i < end; i++) { var p = DocTranscript(m.Transcript[i], fs); doc.Blocks.InsertAfter(after, p); after = p; }
+                        for (; i < end; i++)
+                        {
+                            var p = DocTranscript(m.Transcript[i], fs);
+                            transcriptParas[i] = p;
+                            doc.Blocks.InsertAfter(after, p);
+                            after = p;
+                        }
                         if (i < m.Transcript.Count)
                             btn.Dispatcher.BeginInvoke(InsertSlice, System.Windows.Threading.DispatcherPriority.Background);
                         else
+                        {
                             doc.Blocks.Remove(holder);
+                            // Let the layout settle before anyone measures a paragraph's position.
+                            if (done is not null)
+                                btn.Dispatcher.BeginInvoke(done, System.Windows.Threading.DispatcherPriority.Loaded);
+                        }
                     }
                     InsertSlice();
-                };
+                }
+
+                expandTranscript = Expand;
+                btn.Click += (_, _) => Expand(null);
             }
         }
 
@@ -342,6 +413,7 @@ public static class NoteRenderer
         };
         // Never the Win32 right-click menu — we don't ship Windows chrome. Ctrl+C / the Copy button do the copying.
         rtb.ContextMenuOpening += (_, e) => e.Handled = true;
+        host = rtb;   // evidence links scroll THIS box (closed over above, assigned once it exists)
         return rtb;
     }
 

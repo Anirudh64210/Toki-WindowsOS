@@ -17,6 +17,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Test-only seams (e.g. PrepScratch.PathOverride) stay `internal` rather than becoming public
+         API just to be testable. Without the override, a test run would read and WRITE the user's
+         real notes file. -->
+    <InternalsVisibleTo Include="Toki.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
     <PackageReference Include="LLamaSharp" Version="0.27.0" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />

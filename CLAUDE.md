@@ -4,6 +4,24 @@ Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail
 
 ## Current state & roadmap (updated 2026-08-05)
 
+**N1–N7 "notes you can actually write in" DONE (2026-08-05):** 1,738 tests green, published, NOT yet
+owner-bug-tested with real meetings (owner is holding the git push until they do). N1 **`Views/NoteEditor`**
+— one Markdown-backed editable surface (3 sizes, tickable to-dos, lists, spacing, template insertion;
+**no font family, no colour**; `Compact` glyph toolbar for the 356px notch) → N2 **Library manual notes**
+use it (were a bare TextBox) → N3 **Edit turns the prep card ITSELF into the note** (`PrepBuilder.ToMarkdown`
+— recap as text, open items as tick boxes, agenda as bullets) → N4 **prep card never auto-surfaces**;
+`PrepWatcher` only ARMS it, reached by hovering the peek or the **"Prep card" button on the recording
+page** (PrepCard is now stayable + always has Back) → N5 **Keep/Discard on the Library note list** when a
+recording stops (`Storage/PrepScratch.cs`, atomic JSON outside the DB — nothing auto-saved) → N6 **typed
+notes STEER the summary** (injected before the transcript as a hard constraint; tick state as
+`[task]`/`[done]`; re-attached as a "Your notes" section on EVERY failure path) → N7 **evidence links**
+(`Storage/Evidence.cs` — ↳ jumps to the transcript line; silent when below the match floor, because a
+wrong link is worse than none; computed at render time so it works retroactively).
+**Bug fixed en route:** `JoinAndRecord` was discarding `CurrentPrep`, so the card vanished during the very
+meeting it was built for. **Open by design:** prep auto-surface removal is logged for revisit (task #58);
+prep notes for un-recorded meetings stay invisible (#59); re-writing a note with another template loses
+the typed steering. See README "N1–N7", ARCHITECTURE "N1–N7 decisions", `docs/backlog.md`.
+
 **v1-iter3 premium UI + settings-move DONE (2026-08-04/05):** 1,682 tests green, published. Task-count-per-
 date fix (count words leaked into task topic). Acknowledgements ("okay cool")→small-talk. AI/API settings
 moved to a reusable `AiSummariesSection` on the Library Settings page → **notch Settings is UI/visibility

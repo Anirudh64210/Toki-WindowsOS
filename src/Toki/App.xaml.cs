@@ -460,7 +460,10 @@ public partial class App : Application
     /// system loopback still captures "them" once the call is live).</summary>
     public static void JoinAndRecord()
     {
-        var prep = CurrentPrep; CurrentPrep = null;
+        // KEEP the prep card armed through the meeting. It used to be cleared here, back when the card
+        // was a one-shot prompt — which meant that during the very meeting it had been prepared for,
+        // the recording page had no "Prep card" button and the notes you'd written were unreachable.
+        var prep = CurrentPrep;
         if (prep?.Event.HasMeetLink == true) Views.CalendarRows.OpenUrl(prep.Event.MeetLink);
         if (IsRecording) { State.ForceForDemo(PillState.RecordingBar); return; }
         CurrentApp = null;
@@ -574,6 +577,12 @@ public partial class App : Application
         var session = _session;
         _session = null;
         _detector?.EndRecording();
+
+        // The meeting's over: if anything was typed on its prep card, put it up for a Keep / Discard
+        // decision in the Library. Nothing is written to the store here — the user decides (N5).
+        // The same text also STEERS the AI notes below (N6), so grab it before anything can clear it.
+        var typedNotes = CurrentPrep is { } endedPrep ? Storage.PrepScratch.Get(endedPrep.Event.Id) : null;
+        if (CurrentPrep is { } p2) Storage.PrepScratch.MarkAwaiting(p2.Event.Id, p2.Event.Summary);
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
         LastTranscript = null;
         CurrentMeeting = null;
@@ -674,7 +683,11 @@ public partial class App : Application
                     // Map-reduce makes several short LLM calls for a long meeting; give it room.
                     // (Still bounded so a stuck generation can never hang the pill.)
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
-                    var llmNotes = LlmService.Instance.WriteNotesAsync(transcript, cts.Token).GetAwaiter().GetResult();
+                    // typedNotes steers the summary: what the user bothered to write by hand is the
+                    // best signal of what actually mattered (N6).
+                    var llmNotes = LlmService.Instance
+                        .WriteNotesAsync(transcript, cts.Token, null, typedNotes)
+                        .GetAwaiter().GetResult();
                     if (llmNotes is not null)
                     {
                         Store.ReplaceNotes(meeting.Id, llmNotes);
@@ -1075,6 +1088,15 @@ public partial class App : Application
         menu.Items.Add(Item("Demo: summarizing", () => State.ForceForDemo(PillState.Summarizing)));
         menu.Items.Add(Item("Demo: notes ready", () => State.ForceForDemo(PillState.Notes)));
         menu.Items.Add(Item("Demo: nothing was said", () => State.ForceForDemo(PillState.NoSpeech)));
+        // Arms a sample prep card WITHOUT a calendar event, so the hover-to-open and the in-recording
+        // "Prep card" button can be exercised any time. The card no longer surfaces itself, so without
+        // this there'd be no way to see it unless a real meeting were minutes away.
+        menu.Items.Add(Item("Demo: arm a prep card", () =>
+        {
+            CurrentPrep = Dev.PrepSamples.Matched();
+            State.ForceForDemo(PillState.Collapsed);   // land on the peek — hover it to open the card
+            Log("prep: demo card armed — hover the peek, or start recording and use the Prep card button");
+        }));
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Library", () => LibraryWindow.ShowLibrary()));
         menu.Items.Add(Item("New note", () => LibraryWindow.ShowNewNote()));

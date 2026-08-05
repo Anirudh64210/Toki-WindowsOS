@@ -66,9 +66,38 @@ static class RenderHarness
         Shot(dir, "PrepCard", new PrepCardView(), 356, 360);
         App.CurrentPrep = PrepSamples.FirstTime();
         Shot(dir, "PrepCard-firsttime", new PrepCardView(), 356, 360);
+
+        // The prep card WITH the scratchpad open (N3) — the "your notes" half of the card, which is
+        // otherwise a one-line prompt until you click it.
+        App.CurrentPrep = PrepSamples.Matched();
+        var scratched = new PrepCardView();
+        scratched.DebugOpenScratch(Toki.Calendar.PrepBuilder.ToMarkdown(App.CurrentPrep!)
+                                   + "ask about the pilot timeline\n- [ ] send pricing before Friday");
+        Shot(dir, "PrepCard-scratch", scratched, 356, 620);
         App.CurrentPrep = null;
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
         Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
+
+        // The hand-written note editor (N1) showing its whole vocabulary at once — both text sizes,
+        // a ticked and an unticked to-do, a bulleted list and a numbered one. Built standalone with
+        // sample text on purpose: this must never touch the real note store to render.
+        var editor = new NoteEditor { MinHeight = 380 };
+        editor.Markdown =
+            "# Pricing sync\n" +
+            "\n" +
+            "## Summary\n" +
+            "Held the price; revisit after the pilot.\n" +
+            "\n" +
+            "## Action items\n" +
+            "- [x] send the deck\n" +
+            "- [ ] confirm with Ana\n" +
+            "\n" +
+            "## Notes\n" +
+            "- pilot runs four weeks\n" +
+            "- two more logos before we raise\n" +
+            "1. draft the pricing page\n" +
+            "2. review with the team";
+        Shot(dir, "NoteEditor", editor, 520, 560);
 
         // First-run onboarding, all three steps. These are the only screens a user sees exactly once,
         // so they're the hardest to capture by hand — and the first thing a design review wants.

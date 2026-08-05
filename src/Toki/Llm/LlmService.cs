@@ -117,13 +117,15 @@ public sealed class LlmService
 
     /// <summary>Write notes with the active model, or null to keep the heuristic notes. Pass
     /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).</summary>
+    /// <param name="typed">What the user typed on this meeting's prep card while it happened — it
+    /// steers the note (see <see cref="LlmNoteWriter.WriteAsync"/>).</param>
     public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
-        CancellationToken ct = default, NoteTemplate? force = null)
+        CancellationToken ct = default, NoteTemplate? force = null, string? typed = null)
     {
         var llm = Active();
         if (llm is null || !llm.Ready) return null;
         force ??= DefaultForced();   // honour the user's "always use X" default when no explicit override
-        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force); }
+        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force, typed); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }
     }
 
