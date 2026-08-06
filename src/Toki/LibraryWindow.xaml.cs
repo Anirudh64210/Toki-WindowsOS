@@ -28,6 +28,11 @@ public partial class LibraryWindow : Window
     readonly System.Windows.Threading.DispatcherTimer _manualDebounce = new() { Interval = TimeSpan.FromMilliseconds(600) };
     Action? _manualFlush; // saves the currently-open manual note; null when a meeting is shown
 
+    // The sticky-note panel inside the meeting note currently on screen. Held so it can be flushed
+    // before the note is swapped away or the window closes — the same rule as _manualFlush: text the
+    // user typed is never allowed to die in a debounce timer.
+    Views.MeetingStickyView? _sticky;
+
     // The list/detail is only rebuilt when the data actually changed. Between opens the
     // window is kept alive (Hidden), fully rendered — so a plain re-open is just Show(),
     // which is instant (like WisprFlow keeping its window warm). MarkDirty() is called when
@@ -81,11 +86,6 @@ public partial class LibraryWindow : Window
             if (latest is not null) App.CurrentMeeting = App.Store.Get(latest.Id);
         }
         catch { }
-        // Plant a Keep/Discard card so the render shows it (in memory only — never written to disk).
-        PrepScratch.SeedForRender("render-demo", new ScratchNote(
-            "- [x] send the deck\n- [ ] confirm pricing with Ana\nthey want the pilot to run four weeks",
-            "Design review — PixelFlow", DateTimeOffset.UtcNow, Awaiting: true));
-
         var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
         w.Show();
         w.Reload(App.CurrentMeeting?.Id);
@@ -97,6 +97,19 @@ public partial class LibraryWindow : Window
             w.UpdateLayout();
             Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, $"hub-{page}.png"));
         }
+
+        // The sticky note open inside a meeting note. Planted in the VIEW only — no row is created, so
+        // a screenshot can never leave anything behind in the user's real notes.
+        w.ShowPage("library", animate: false);
+        w._sticky?.DebugSeed(
+            "## Before we start\n- [ ] ask what changed on the pricing page\n- [x] read last week's recap\n\n" +
+            "they seemed unsure about the four-week pilot — push for six\n\n" +
+            "## To raise\n- the renewal date\n- who owns onboarding now\n\n" +
+            "1. open with the numbers\n2. then the pilot\n3. leave time for questions");
+        w.UpdateLayout();
+        w._sticky?.BringIntoView();     // it sits below the notes — scroll to it so the shot shows it
+        w.UpdateLayout();
+        Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-library-sticky.png"));
 
         // Button-centering calibration: the real buttons on a dark surface, big, so vertical
         // centering of the label (and the Back chevron) can be judged precisely.
@@ -1432,14 +1445,9 @@ public partial class LibraryWindow : Window
 
         CountLabel.Text = _myNotesOnly ? $"{items.Count} · my notes" : $"{items.Count} · all on this PC";
 
-        // Notes you wrote on a prep card during a meeting that's now finished, waiting on a decision.
-        // They sit at the TOP and are offered right here on the list — never as a modal, and never
-        // saved behind your back. Hidden while searching: they aren't in the index yet, so a card
-        // that ignores the search box would just look broken.
-        if (string.IsNullOrWhiteSpace(SearchBox.Text))
-            foreach (var (eventId, note) in Storage.PrepScratch.Awaiting())
-                Cards.Children.Add(PendingNoteCard(eventId, note));
-
+        // (A sticky note used to appear here as its own Keep/Discard card. The owner's verdict was that
+        // a row you can't open, sitting among meetings it isn't one of, is just confusing — so a sticky
+        // note now lives INSIDE its meeting's note, behind the "Sticky note" button. See RenderMeeting.)
         foreach (var m in items) Cards.Children.Add(Card(m));
         if (items.Count == 0)
             Cards.Children.Add(Placeholder(
@@ -1507,76 +1515,6 @@ public partial class LibraryWindow : Window
             LibrarySort.OpenTasks => "most open tasks",
             _ => "manual order",
         };
-    }
-
-    /// <summary>A set of prep-card notes whose meeting has ended, offered for Keep or Discard right on
-    /// the list. Deliberately NOT already in the store: an entry the user never asked for is a hollow
-    /// entry, and hollow entries are what make a library feel like junk (the same rule that stops a
-    /// silent meeting from being saved).</summary>
-    Border PendingNoteCard(string eventId, Storage.ScratchNote note)
-    {
-        var title = string.IsNullOrWhiteSpace(note.Title) ? "Meeting notes" : note.Title;
-
-        var content = new StackPanel();
-        content.Children.Add(new TextBlock
-        {
-            Text = "YOU WROTE THIS DURING", Style = St("SectionHeader"), Margin = new Thickness(0, 0, 0, 3),
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = title, Style = St("Body"), FontSize = 13, FontWeight = FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = Preview(note.Text), Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
-            MaxHeight = 44, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0),
-        });
-
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 9, 0, 0) };
-        var discard = SmallButton("Discard", () => { }, danger: true);   // replaced below (needs itself)
-        buttons.Children.Add(SmallButton("Keep", () =>
-        {
-            try
-            {
-                var id = App.Store.CreateManualNote(title, note.Text);
-                Storage.PrepScratch.Clear(eventId);
-                Reload(id);                       // land on the note you just kept
-            }
-            catch (Exception ex) { App.Log($"keep prep notes failed: {ex.Message}"); }
-        }));
-        buttons.Children.Add(discard);
-        content.Children.Add(buttons);
-
-        // Two-step discard: this is text the user typed by hand, so one stray click must not lose it.
-        var armed = false;
-        if (discard is Button db)
-            db.Click += (_, _) =>
-            {
-                if (!armed) { armed = true; db.Content = "Sure?"; return; }
-                Storage.PrepScratch.Clear(eventId);
-                LoadList();
-            };
-
-        var card = new Border
-        {
-            // An amber hairline, not a filled box: it needs attention, but it isn't an error.
-            BorderBrush = (Brush)FindResource("Amber"), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12), Padding = new Thickness(13, 11, 13, 12),
-            Margin = new Thickness(0, 0, 0, 8), Child = content,
-        };
-        return card;
-    }
-
-    /// <summary>First couple of lines of a note, with the Markdown marks stripped — a preview should
-    /// read like the note, not like its source.</summary>
-    static string Preview(string markdown)
-    {
-        var lines = Storage.NoteMarkdown.Parse(markdown)
-            .Where(b => b.Kind != Storage.NoteBlockKind.Blank && b.Text.Length > 0)
-            .Select(b => b.Kind == Storage.NoteBlockKind.Todo ? (b.Done ? "✓ " : "○ ") + b.Text : b.Text)
-            .Take(3);
-        return string.Join(" · ", lines);
     }
 
     Border Card(MeetingSummary m)
@@ -1826,6 +1764,10 @@ public partial class LibraryWindow : Window
         // so the whole note — toolbar, title, body — is one scroll from the very top of the pane.
         var toolbar = new StackPanel();
         var row = new DockPanel { LastChildFill = false };
+        // The sticky note lives inside this note (owner, 2026-08-06). Built BEFORE the document, which
+        // places its button under the title and the note itself before the transcript.
+        _sticky = new Views.MeetingStickyView(m.Id, App.Store.StickyForMeeting(m.Id));
+
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         right.Children.Add(CopyButton(m));
         right.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
@@ -1842,7 +1784,7 @@ public partial class LibraryWindow : Window
         toolbar.Children.Add(row);
         toolbar.Children.Add(status);
 
-        var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar);
+        var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar, sticky: _sticky);
         DetailBody.Content = body;
         // Start at the very TOP once laid out (a fresh RichTextBox occasionally came up scrolled down).
         if (body is RichTextBox rtb)
@@ -1893,9 +1835,13 @@ public partial class LibraryWindow : Window
         e.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(1200)) { BeginTime = TimeSpan.FromMilliseconds(700) });
     }
 
-    // Save any pending manual-note edit immediately (on switching notes or closing the window).
+    // Save any pending manual-note or sticky-note edit immediately (on switching notes or closing the
+    // window). Both are text the user typed by hand; neither may be left sitting in a debounce timer.
     void FlushManual()
     {
+        try { _sticky?.Flush(); } catch (Exception ex) { App.Log($"sticky flush: {ex.Message}"); }
+        _sticky = null;
+
         if (_manualFlush is null) return;
         _manualDebounce.Stop();
         var f = _manualFlush; _manualFlush = null;

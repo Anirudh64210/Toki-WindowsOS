@@ -6,6 +6,16 @@ changelog. The build log is in README "N1–N7"; the reasoning is in ARCHITECTUR
 
 Ordered by how much I'd expect each to actually bite. **P1 = likely to be noticed and to hurt.**
 
+> **Status update, 2026-08-06 (after the S1–S7 rework).** The owner's first real test found the one thing
+> this document missed entirely — see "What this critique got wrong" at the bottom. Since then:
+> **#1 (action items have no evidence links) — FIXED** (S7). **#2 (editing a prep card breaks its live
+> tasks) — still open**, and now *less* harmful than described, because the sticky note is explicitly the
+> user's own page rather than a live view of Toki's data; the STILL OPEN checkboxes in read mode still
+> write through, and the copies inside the note are plainly a copy. **N1's nested-list data loss —
+> resolved by removal**: Tab no longer nests, because the whole native-`List` structure is gone.
+> **N6 (typed notes steer the summary) — REMOVED by the owner**, so every critique point about steering
+> quality, prompt dilution and the 4B model ignoring the constraint is now moot.
+
 ---
 
 ## The two things I'd fix first
@@ -124,3 +134,30 @@ the feature quietly downgrades something that used to work.
 - **The scratch file still grows forever** and isn't in the Markdown mirror, so hand-typed notes are the
   one kind of note that *isn't* portable — the exact promise the Markdown decision was made to protect.
   This is the sharpest inconsistency in the batch (#59).
+
+---
+
+## What this critique got wrong (added 2026-08-06)
+
+Worth recording, because the miss is more instructive than the hits.
+
+**I reviewed the text format and never drove the control.** This document lists eleven things about the
+note editor and does not contain the bug the owner hit within a day of using it: typing `- ` at the start
+of a line saved a marker *on top of* the one the block kind already implies, so bullets multiplied on every
+save/reload. Twenty-three round-trip tests over `NoteMarkdown` were all green throughout, because the fault
+was never in the format — it was in the document structure, where a paragraph inside a WPF `ListItem`
+wasn't a child of `Document.Blocks` and the list's marker lived outside the text model entirely.
+
+Two lessons, both already in the project's own rules and both skipped here:
+
+- *"A self-test that never produced its real artifact is not a test."* The real artifact for an editor is
+  what comes out after somebody types. `--notetest` now does exactly that, and found three defects in its
+  first run.
+- I critiqued the layer I had just written tests for, which is the layer I already understood. The
+  untested layer is where the bugs were. **Critique should start at whatever has no test, not at whatever
+  is easiest to reason about.**
+
+**I also over-weighted N6.** Several paragraphs here worry about how well a 4B model would honour the
+typed-notes constraint — tuning questions for a feature the owner removed outright, because a summary
+that reshapes itself around your private notes can't be checked against the room. The product question
+("should this exist?") outranked every implementation question I raised about it, and I never asked it.

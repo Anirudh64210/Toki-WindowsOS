@@ -67,8 +67,6 @@ public sealed class PrepWatcher
 
     void TryRaise()
     {
-        // No idle/fullscreen guard any more: arming shows nothing, so there is nothing to interrupt.
-        // (Those guards existed only because this used to seize the notch.)
         var events = UpcomingCache.Instance.Snapshot;
         if (events is null) return;
 
@@ -80,16 +78,36 @@ public sealed class PrepWatcher
             .FirstOrDefault();
         if (cand is null) return;
 
-        // ARM, never pop (owner decision, 2026-08-05: "prep card should be active as a hover only").
-        // The card used to take the screen on its own ~5 min out; now it just becomes AVAILABLE, and
-        // the user reaches it by hovering the peek, or from the Prep card button while recording.
-        // Restraint is the design — appear only when asked.
+        // ARM: the card becomes available, so hovering the peek opens it and the recording page can
+        // offer its "Prep card" button.
         App.CurrentPrep = PrepBuilder.Build(cand, App.Store);
         _shown.Add(cand.Id);
-        App.Log($"prep: armed card for '{cand.Summary}' ({(int)(cand.StartUtc - now).TotalMinutes} min out) — hover to open");
+        var mins = (int)(cand.StartUtc - now).TotalMinutes;
+
+        // …and SURFACE it once, quietly (owner, 2026-08-06: "meeting is about to start, user gets auto
+        // prompted to take a look at his notes"). This was removed a day earlier when the card was made
+        // hover-only, and removing it took the "your meeting is starting" nudge with it — notes you have
+        // to remember to go and look at are notes you don't look at.
+        //
+        // Restraint is still the design, so it opens ONLY when opening it costs nothing: the notch must
+        // be idle (never interrupt a recording, an answer, or a page the user navigated to), and never
+        // over a fullscreen app. If the moment isn't right the card simply stays armed, one hover away.
+        if (Surfaceable())
+        {
+            App.State.TryGo(PillState.PrepCard);
+            App.Log($"prep: surfaced card for '{cand.Summary}' ({mins} min out)");
+        }
+        else App.Log($"prep: armed card for '{cand.Summary}' ({mins} min out) — notch busy, hover to open");
+
         // Prune ids no longer upcoming so the set can't grow forever.
         _shown.RemoveWhere(id => events.All(e => e.Id != id));
     }
+
+    /// <summary>Is now a moment when taking the notch would be welcome rather than rude?</summary>
+    static bool Surfaceable() =>
+        !App.IsRecording
+        && App.State.Current is PillState.Hidden or PillState.Collapsed
+        && !PillWindow.QuietFullscreen();
 
     // A real meeting worth prepping: not all-day, and either a video link or at least one other guest.
     static bool Worthy(CalEvent e) => !e.IsAllDay && (e.HasMeetLink || e.Attendees.Any(a => !a.IsSelf));

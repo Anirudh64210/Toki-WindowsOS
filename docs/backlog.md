@@ -1,29 +1,40 @@
 # Toki — backlog & "what's next" (living doc)
 
 *Plain-language capture of everything decided or discussed but **not yet built**, so any of it can be
-picked up later without re-deriving it. Updated 2026-08-05. The canonical short roadmap lives at the
+picked up later without re-deriving it. Updated 2026-08-06. The canonical short roadmap lives at the
 top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*
 
 ---
 
-## ✅ N1–N7 "notes you can actually write in" — BUILT 2026-08-05 (awaiting real-meeting bug-testing)
+## ✅ S1–S7 "sticky notes, done properly" — BUILT 2026-08-06 (awaiting real-meeting bug-testing)
 
-All seven shipped and published; **1,738 tests green**. The owner is holding the git push until they've
-bug-tested with real meetings. Detail: README "N1–N7", ARCHITECTURE "N1–N7 decisions".
+**1,759 tests green**, published to `dist`. This batch came straight out of the owner's first test of
+N1–N7. Detail: README "S1–S7", ARCHITECTURE "S1–S7 decisions".
+
+**Closed by this batch:** #58 (the pre-meeting nudge is back, but only surfaces when the notch is idle
+and nothing is fullscreen), #59 (sticky notes are real database rows now, not a JSON file that never
+pruned), #61 (action items carry ↳ evidence links).
 
 **What came out of it that ISN'T finished:**
-1. **Prep card no longer appears on its own** (task #58) — deliberate, but it was also the de-facto "your
-   meeting is starting" nudge. Watch whether meetings get missed; the likely answer is something quieter
-   (an amber peek, a one-line strip) rather than restoring the whole card.
-2. **Prep notes for meetings that were never recorded stay invisible** (task #59) — they sit in
-   `prep-scratch.json` with no Library entry, no search, no Markdown mirror, and the file never prunes.
-   Probable fix: promote to a real manual note as soon as anything is typed, demoting PrepScratch to a
-   draft buffer.
-3. **Re-writing a note with a different template loses the typed steering** — a meeting record doesn't
-   store which calendar event it came from, so there's nothing to look the typed notes up by. Folds into
-   #59's linking work.
-4. **Audio playback for evidence links** — N7 shipped the text jump only, by owner choice. A player
-   (seek/scrub/waveform) is its own milestone.
+1. **Sticky notes aren't in the Markdown mirror** — every other note is readable in Obsidian/Notepad from
+   `%APPDATA%\Toki\Notes`; sticky notes live only in `toki.db`. That was a deliberate call (a second
+   write path is a second thing to drift), but it does mean one class of hand-written text isn't
+   plain-text-readable. Options: mirror them under `Notes/Sticky/`, or fold them into the meeting's own
+   `.md` under a heading. Needs an owner decision about which.
+2. **Sticky notes are unreachable except through their meeting.** If you write one for a meeting you
+   never record, the only way back to it is the prep card's picker. There is no "all my sticky notes"
+   view. Probably fine; worth watching whether notes get lost.
+3. **The ↳ silence is still ambiguous** — a line with no arrow could mean "no confident match" or
+   "nothing to match against". The floor is doing its job (a wrong link is worse than none), but the user
+   asked about this directly, and a one-line explanation somewhere near the TRANSCRIPT header would
+   answer it cheaply.
+4. **Audio playback for evidence links** (task #60) — still text-jump only. A player (seek/scrub/waveform)
+   is its own milestone.
+5. **Re-writing a note with a different template** is now safe (the summary never depended on typed
+   notes), so the old N6-era caveat is gone.
+6. **`LibraryWindow.ShowMenu` and `Views/NotePicker` are two implementations of the same themed
+   dropdown.** The notch pair was unified; the Library one wasn't, to keep this change's blast radius
+   small. Worth merging next time either is touched.
 
 ---
 

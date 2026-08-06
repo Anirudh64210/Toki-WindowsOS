@@ -2,7 +2,31 @@
 
 Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief — read it when detail is needed). This file carries the same rules.
 
-## Current state & roadmap (updated 2026-08-05)
+## Current state & roadmap (updated 2026-08-06)
+
+**S1–S7 "sticky notes, done properly" DONE (2026-08-06):** 1,759 tests green, published, NOT yet
+owner-bug-tested with real meetings. Fixes the first owner test of N1–N7.
+**S1 — the "bullets create themselves" bug, root-caused.** WPF's native `List`/`ListItem` was the cause,
+three ways: a paragraph inside a `ListItem` isn't a child of `Document.Blocks` (Enter threw; the Body
+button couldn't leave a list), the list marker was invisible to the text model so a **typed** "- " was
+saved *on top of* the kind's own marker (`- - two`, +1 dash per save), and a blank line restarted
+numbering. Rewritten to **flat paragraphs**, marker in a non-text `InlineUIContainer`, positional
+renumbering, typed markers auto-promoted and eaten. `NoteMarkdown.TryMarker` is now the ONE definition of
+a marker (parser / writer / editor). New **`--notetest`** drives the real control (types, Enter, toolbar,
+ticks) — 13 checks incl. ten save/reload cycles. **S2 — typed notes no longer steer the summary** (N6
+reverted by owner: a summary you can't check against the room is worse than a plain one). **S3 — sticky
+notes are real rows** (`sticky_notes` + `sticky_event` + `sticky_meeting` in `toki.db`); `prep-scratch.json`
+migrated once then renamed, `Storage/PrepScratch.cs` deleted. **S4 — which note a meeting uses is the
+USER'S CHOICE, by id, never by title match** (picker on the prep card; one note can run across many
+meetings). **S5 — the pre-meeting nudge is back**, but surfaces only when the notch is idle and nothing is
+fullscreen. **S6 — the sticky note lives INSIDE the meeting note** ("My sticky note" button under the
+title; opens between the notes and the transcript; edit/auto-save/two-step-delete). The separate Library
+Keep/Discard card is **gone** (owner: "does not even open, confusing as f"). **S7 — action items get ↳
+evidence links too.** Deliberate non-goals, each test-guarded: sticky notes are NOT in the meetings table,
+NOT in FTS/Ask, NOT an input to the note writer. Also fixed: the note editor's dropdown rows were
+`Border`+`MouseLeftButtonUp` inside a `StaysOpen=false` popup — silently dead; both notch pickers now share
+`Views/NotePicker.cs`. See README "S1–S7", ARCHITECTURE "S1–S7 decisions", `docs/backlog.md`.
+
 
 **N1–N7 "notes you can actually write in" DONE (2026-08-05):** 1,738 tests green, published, NOT yet
 owner-bug-tested with real meetings (owner is holding the git push until they do). N1 **`Views/NoteEditor`**

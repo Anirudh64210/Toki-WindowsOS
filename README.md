@@ -1093,3 +1093,87 @@ exists *before* the meeting record does and must survive a crash mid-meeting.
 revisit (it doubled as the "a meeting is starting" nudge); prep notes for meetings that were never
 recorded remain invisible; and re-writing a note with a different template loses the typed steering,
 because a meeting record doesn't store which calendar event it came from. All three are tracked.
+
+## S1–S7 (Sticky notes, and a real fix for the note editor) — 2026-08-06
+
+The first owner test of N1–N7 found one bug and one wrong idea. Both are fixed here, and the sticky note
+is rebuilt on storage that can actually carry it.
+
+**The bug: "bullets are created by themselves."** Real, reproducible, and a genuine feedback loop. The
+owner's note is the proof — this is what was actually on disk after seven opens:
+
+```
+- •	•	•	•	•	•	•	Confirm launch blockers & owners
+```
+
+**Root cause:** the editor built bullets from WPF's native `List`, and read a line's text back with
+`TextRange.Text` — which, for a paragraph inside a list, *includes the list's own marker*, serialised as
+`"•\t"`. So reading gave back `"•\tConfirm launch blockers"`, which was saved as
+`"- •\tConfirm launch blockers"`, re-read as `"•\t•\tConfirm…"`, and so on. **One more bullet on every
+single save.** It hit bullets and numbered items only — everything in a native `List` — which is exactly
+why the to-dos in that note are clean and the agenda is not.
+
+Two further defects from the same `List` structure, found by the same test run:
+
+- A paragraph inside a `ListItem` is not a child of `Document.Blocks`, so inserting the next line after it
+  threw, and the **Body** button could never lift a line back *out* of a list.
+- A marker the user *typed* (`- `) stayed in the text and was written on top of the kind's own marker
+  (`- - two`), and a blank line silently split one list in two and restarted the numbering.
+
+Fixed by construction, not by patching: **every line is now a flat paragraph** carrying its
+`NoteBlockKind`, with bullet/number/tick markers held in an `InlineUIContainer` that is *not* part of the
+text. Every line is addressable, every kind change is a local edit, a marker can never leak into the text,
+and numbering is recomputed from position on every change. Typing `- `, `1. `, `# ` or `[] ` now promotes
+the line and **eats the characters**, the way every notes app does — which is also what stops the marker
+surviving into storage. Enter, Backspace-at-line-start and the toolbar toggles are all ours and uniform.
+`NoteMarkdown.TryMarker` is now the single definition of "this text starts with a marker", shared by the
+parser, the writer (which strips exactly one, the precise inverse) and the editor.
+
+Verified by a new **`--notetest`** that drives the real control the way fingers do — types markers, presses
+Enter, clicks toolbar buttons, ticks boxes — and reads the Markdown back. 16 checks, including *ten*
+save/reload cycles that must change nothing and an explicit assertion that **no marker glyph or tab ever
+reaches the saved text**. A pure round-trip test could never have caught this: the leak was in WPF's
+`TextRange`, not in the text format, and 23 green format tests stayed green throughout.
+
+**Notes already damaged by it heal on open.** `NoteMarkdown.Heal` strips leaked marker glyphs from a
+line's text. The tab is what makes that safe: it's how WPF serialises a marker and not something a person
+types at the start of a line, so `"•\t"` is stripped and a hand-typed `"• "` is left alone. Added
+**`--dumpnote <text>`**, a read-only dump of what a note *actually* contains — "what's on screen" and
+"what's saved" are different questions, and guessing at the second one is what cost the time here.
+
+**The wrong idea: typed notes steering the summary (N6, removed).** Owner's call, and the reasoning is
+worth keeping: the summary's job is to say what was said in the meeting. A summary that reshapes itself
+around your private jottings is one you can no longer check the room against. `LlmNoteWriter` now takes
+the transcript and nothing else.
+
+**Sticky notes, rebuilt.** They were a JSON file keyed by calendar event id; that file never pruned, and a
+note could only ever belong to the one event it was born on. They are now real rows in `toki.db`
+(`sticky_notes` + two link tables), with the old file migrated once and renamed rather than deleted.
+
+- **Linking is explicit, never by title.** Meeting titles change, and "Weekly sync" is every meeting
+  anybody has. Toki never guesses; the prep card has a picker ("Start a new note", or any recent note with
+  when it was last touched) and the choice is remembered by id. One note can run across many meetings — a
+  weekly 1:1 keeps one page.
+- **It lives inside the meeting's note, not beside it.** The separate Keep/Discard card in the Library
+  list is gone (owner: a row you can't open, sitting among meetings it isn't one of). A **"My sticky note"**
+  button sits under the meeting title; the note opens after everything Toki wrote and **before** the
+  transcript, fully editable in place, auto-saving, with a two-step Delete.
+- **It touches nothing else.** Not in the meetings table (so it can't appear as a Library row), not in the
+  FTS index (so Ask can't surface it), not an input to the note writer. Deleting a meeting drops the
+  *link* and keeps the writing — you may still want it next week.
+- **The pre-meeting nudge is back** (S5): the prep card surfaces itself once, ~5 min out, but **only** when
+  the notch is idle and nothing is fullscreen. Otherwise it stays armed, one hover away. Removing it a day
+  earlier had also removed the only "your meeting is starting" signal.
+
+**Action items are tagged too** (S7): the ↳ evidence link now appears on to-dos, not just section bullets —
+a task is the line you most want to check the source of. One `Link()` builder serves both, so they cannot
+drift apart.
+
+Also fixed en route: the note editor's own dropdown used `Border` + `MouseLeftButtonUp` rows, which are
+silently swallowed in a `StaysOpen=false` popup — every item was dead. Both notch pickers now share
+`Views/NotePicker.cs`, built on real `Button`s.
+
+**Verified:** 1,759 tests green (18 new sticky-note tests covering same-title collisions, renames, delete
+cascades, migration, and the "can't leak into search or the list" guarantees); `--notetest` 13/13;
+`--dbtest`, `--preptest`, `--measuretest` all pass; Library and notch renders checked by eye; run against
+the packaged `dist/Toki.exe`, not just the debug build.

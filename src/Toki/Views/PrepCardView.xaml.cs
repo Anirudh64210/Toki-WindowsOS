@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using Toki.Calendar;
 using Toki.State;
@@ -12,6 +13,12 @@ namespace Toki.Views;
 /// Pre-meeting prep card: title + when, a one-line recap of last time, still-open action items, and the
 /// agenda — plus Join-and-record / Later. Content is assembled deterministically by <see cref="PrepBuilder"/>
 /// and handed in via <see cref="App.CurrentPrep"/>; this view only renders it (no network, no model).
+///
+/// It is also where a meeting's STICKY NOTE is written. Pressing Edit turns the card itself into the
+/// note — the recap, open items and agenda arrive as real text you carry on writing in. The note is a
+/// row in the database from that moment, saved on every pause in typing, and which note this meeting
+/// uses is always the user's explicit choice (see <see cref="ShowNotePicker"/>): Toki never matches
+/// notes to meetings by title, because titles change and two meetings are often called the same thing.
 /// </summary>
 public partial class PrepCardView : UserControl
 {
@@ -20,6 +27,7 @@ public partial class PrepCardView : UserControl
     void Grow() { if (_ready && !App.Headless) App.GrowNotch(); }
 
     NoteEditor? _scratch;
+    long? _stickyId;                 // the note this card is currently editing
     readonly System.Windows.Threading.DispatcherTimer _scratchSave =
         new(System.Windows.Threading.DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(700) };
 
@@ -83,14 +91,18 @@ public partial class PrepCardView : UserControl
         Grow();
     }
 
-    // ── edit mode (N3) ──
+    // ── the sticky note ──
 
-    /// <summary>Once you've edited a card it STAYS edited — reopening shows your version, not the
-    /// generated one, because your words outrank Toki's.</summary>
+    /// <summary>Open whichever note this meeting is linked to. Once you've written on a card it STAYS
+    /// written — reopening shows your version, not the generated one, because your words outrank
+    /// Toki's. A meeting with no note yet shows the generated card, and Edit starts one.</summary>
     void PaintScratch(string eventId)
     {
-        var mine = PrepScratch.Get(eventId);
-        if (mine.Length > 0) EnterEdit(mine);
+        if (App.Headless) { ShowReadOnly(); return; }
+
+        _stickyId = App.Store.StickyForEvent(eventId);
+        var body = _stickyId is { } id ? App.Store.GetSticky(id)?.Body ?? "" : "";
+        if (_stickyId is not null && body.Length > 0) EnterEdit(body);
         else ShowReadOnly();
     }
 
@@ -120,15 +132,73 @@ public partial class PrepCardView : UserControl
     void FlushScratch()
     {
         if (_scratch is null || ScratchHost.Visibility != Visibility.Visible) return;
-        if (App.CurrentPrep is not { } prep || App.Headless) return;
-        PrepScratch.Set(prep.Event.Id, _scratch.Markdown);
+        if (App.Headless || _stickyId is not { } id) return;
+        try { App.Store.UpdateSticky(id, _scratch.Markdown); }
+        catch (Exception ex) { App.Log($"sticky save failed: {ex.Message}"); }
     }
 
+    /// <summary>Start writing. If this meeting has no note yet, one is created NOW — a row on disk from
+    /// the first keystroke, so a crash mid-sentence can't cost anything — seeded with the card's own
+    /// content and linked to this event.</summary>
     void OnEdit(object sender, RoutedEventArgs e)
     {
         if (App.CurrentPrep is not { } prep) return;
-        var mine = PrepScratch.Get(prep.Event.Id);
-        EnterEdit(mine.Length > 0 ? mine : PrepBuilder.ToMarkdown(prep));
+
+        if (_stickyId is null && !App.Headless)
+        {
+            try
+            {
+                _stickyId = App.Store.CreateSticky(prep.Event.Summary, PrepBuilder.ToMarkdown(prep));
+                App.Store.LinkStickyToEvent(prep.Event.Id, _stickyId.Value);
+            }
+            catch (Exception ex) { App.Log($"sticky create failed: {ex.Message}"); }
+        }
+
+        var body = _stickyId is { } id && !App.Headless
+            ? App.Store.GetSticky(id)?.Body ?? "" : PrepBuilder.ToMarkdown(prep);
+        EnterEdit(body.Length > 0 ? body : PrepBuilder.ToMarkdown(prep));
+        Grow();
+        _scratch?.FocusEditor();
+    }
+
+    /// <summary>
+    /// Choose which note this meeting uses — an earlier one, or a fresh one.
+    ///
+    /// This exists instead of guessing. Toki has no reliable way to know that today's "Weekly sync" is
+    /// the same conversation as last week's, and getting it wrong either buries your notes or shows you
+    /// someone else's; so the choice is simply yours, and it's remembered by id.
+    /// </summary>
+    void OnPickNote(object sender, RoutedEventArgs e)
+    {
+        if (App.CurrentPrep is not { } prep || App.Headless) return;
+        FlushScratch();
+
+        var items = new List<(string Label, Action Pick)>
+        {
+            ("Start a new note", () => UseNote(null, prep)),
+        };
+        foreach (var s in App.Store.RecentStickies(12))
+        {
+            var label = (string.IsNullOrWhiteSpace(s.Title) ? "Untitled" : s.Title)
+                        + "  ·  " + PrepBuilder.AgoLabel(s.UpdatedAt.ToLocalTime());
+            var id = s.Id;
+            items.Add((label, () => UseNote(id, prep)));
+        }
+
+        NotePicker.Show(NoteButton, items, _stickyId is { } cur
+            ? App.Store.GetSticky(cur)?.Title : null);
+    }
+
+    void UseNote(long? stickyId, PrepContent prep)
+    {
+        if (stickyId is null)
+        {
+            // A brand-new note starts from the generated card, same as the first Edit does.
+            stickyId = App.Store.CreateSticky(prep.Event.Summary, PrepBuilder.ToMarkdown(prep));
+        }
+        App.Store.LinkStickyToEvent(prep.Event.Id, stickyId.Value);
+        _stickyId = stickyId;
+        EnterEdit(App.Store.GetSticky(stickyId.Value)?.Body ?? "");
         Grow();
         _scratch?.FocusEditor();
     }
@@ -153,8 +223,7 @@ public partial class PrepCardView : UserControl
         App.State.TryGo(App.IsRecording ? PillState.RecordingOpen : PillState.Home);
     }
 
-    /// <summary>Dev/render only: show edit mode with planted text, without touching the real
-    /// scratch file.</summary>
+    /// <summary>Dev/render only: show edit mode with planted text, without touching the database.</summary>
     public void DebugOpenScratch(string markdown) { EnterEdit(markdown); Grow(); }
 
     // "9:41 – 10:11 AM  ·  in 9 min" — the time range reads soft, the countdown reads amber (the
@@ -237,7 +306,7 @@ public partial class PrepCardView : UserControl
         return p;
     }
 
-    void OnJoin(object sender, RoutedEventArgs e) => App.JoinAndRecord();
-    void OnLater(object sender, RoutedEventArgs e) => App.DismissPrepCard();
+    void OnJoin(object sender, RoutedEventArgs e) { FlushScratch(); App.JoinAndRecord(); }
+    void OnLater(object sender, RoutedEventArgs e) { FlushScratch(); App.DismissPrepCard(); }
     void OnCalendar(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Calendar);
 }

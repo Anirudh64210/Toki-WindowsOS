@@ -241,7 +241,12 @@ public static class NoteRenderer
     // The WHOLE note is ONE FlowDocument, so a single drag-select spans summary → bullets → tasks →
     // transcript and Ctrl+C copies all of it. (Separate TextBoxes only let you select within one.)
     // Checkboxes stay clickable inside the read-only document (FlowDocumentScrollViewer allows it).
-    public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null)
+    /// <param name="sticky">The meeting's own sticky note. Its BUTTON goes at the top, under the title;
+    /// the note itself opens after everything Toki wrote and BEFORE the transcript — the owner's layout:
+    /// "it extends between the end of the summary and everything, and the transcript". Supplied by the
+    /// Library (which owns storage); this renderer only positions it.</param>
+    public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null,
+        MeetingStickyView? sticky = null)
     {
         var fs = spacious ? 13.5 : 12.5;
         var doc = new FlowDocument
@@ -265,7 +270,12 @@ public static class NoteRenderer
         });
         var meta = MeetingMeta(m);
         if (!string.IsNullOrEmpty(meta))
-            doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, spacious ? 20 : 15) });
+            doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) });
+
+        // "My sticky note" — at the top, under the title, where the owner asked for it. The note it
+        // opens is placed further down, after everything Toki wrote.
+        if (sticky is not null)
+            doc.Blocks.Add(new BlockUIContainer(sticky.ToggleButton) { Margin = new Thickness(0, 0, 0, spacious ? 18 : 14) });
 
         // ── N7: evidence links ──
         // Every bullet that can be traced to a transcript line gets a small "↳" that jumps there and
@@ -296,19 +306,24 @@ public static class NoteRenderer
             else expandTranscript(Go);
         }
 
-        Paragraph WithEvidence(string text, double lineHeight, Thickness margin)
+        // The "↳" that jumps to the line this came from — or null when nothing matches well enough to
+        // point at honestly. ONE builder, so a bullet and a to-do can never drift apart.
+        Hyperlink? Link(string text)
         {
-            var p = new Paragraph(new Run(text)) { LineHeight = lineHeight, Margin = margin };
-            if (Evidence.BestSegment(text, m.Transcript) is not { } idx) return p;
-
-            var glyph = new Run(" ↳") { FontSize = fs - 1.5 };
-            var link = new Hyperlink(glyph)
+            if (Evidence.BestSegment(text, m.Transcript) is not { } idx) return null;
+            var link = new Hyperlink(new Run(" ↳") { FontSize = fs - 1.5 })
             {
                 Foreground = B("TextDim"), TextDecorations = null, Cursor = Cursors.Hand,
                 ToolTip = "Show where this came from in the transcript",
             };
             link.Click += (_, _) => JumpTo(idx);
-            p.Inlines.Add(link);
+            return link;
+        }
+
+        Paragraph WithEvidence(string text, double lineHeight, Thickness margin)
+        {
+            var p = new Paragraph(new Run(text)) { LineHeight = lineHeight, Margin = margin };
+            if (Link(text) is { } link) p.Inlines.Add(link);
             return p;
         }
 
@@ -329,8 +344,16 @@ public static class NoteRenderer
         if (m.Notes.Actions.Count > 0)
         {
             doc.Blocks.Add(DocHeader("ACTION ITEMS"));
-            foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs));
+            // Action items get evidence links too (S7). A to-do is the single most useful line to be
+            // able to check — "who agreed to this, and when?" — and it was the one kind of line the
+            // first pass left unlinked.
+            foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs, Link));
         }
+
+        // The user's own sticky note: after everything Toki wrote, before the transcript.
+        if (sticky is not null)
+            doc.Blocks.Add(new BlockUIContainer(sticky) { Margin = new Thickness(0, 14, 0, 0) });
+
         if (m.Transcript.Count > 0)
         {
             doc.Blocks.Add(DocHeader("TRANSCRIPT"));
@@ -435,7 +458,7 @@ public static class NoteRenderer
         new(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontSize = 10.5 })
         { Margin = new Thickness(0, first ? 0 : 20, 0, 8) };
 
-    static Paragraph DocAction(ActionItem a, double fs)
+    static Paragraph DocAction(ActionItem a, double fs, Func<string, Hyperlink?>? link = null)
     {
         var p = new Paragraph { Margin = new Thickness(0, 0, 0, 11), LineHeight = fs + 8 };
         var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("TokiCheck"), Margin = new Thickness(0, 0, 9, 0) };
@@ -447,6 +470,9 @@ public static class NoteRenderer
         // so they stand out, with clear spacing. Kept as TEXT (not UI chips) so Copy still captures them.
         if (Meaningful(a.Owner)) p.Inlines.Add(new Run($"   ·   {a.Owner}") { Foreground = B("Blue"), FontWeight = FontWeights.SemiBold });
         if (Meaningful(a.Due)) p.Inlines.Add(new Run($"   ·   {a.Due}") { Foreground = B("Amber"), FontWeight = FontWeights.SemiBold });
+        // The task text alone is what's searched for in the transcript — the owner/due chips are Toki's
+        // formatting, not words anybody said, and feeding them in only dilutes the match.
+        if (link?.Invoke(a.Text) is { } jump) p.Inlines.Add(jump);
         return p;
     }
 

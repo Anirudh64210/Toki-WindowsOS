@@ -116,16 +116,19 @@ public sealed class LlmService
     }
 
     /// <summary>Write notes with the active model, or null to keep the heuristic notes. Pass
-    /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).</summary>
-    /// <param name="typed">What the user typed on this meeting's prep card while it happened — it
-    /// steers the note (see <see cref="LlmNoteWriter.WriteAsync"/>).</param>
+    /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).
+    ///
+    /// The summary is written from the TRANSCRIPT alone. The user's own sticky note is deliberately not
+    /// an input (owner, 2026-08-06): it's their private thinking, sitting beside the summary rather than
+    /// inside it, and a note that quietly rewrites itself around what you jotted is a note you can no
+    /// longer trust to say what was actually said.</summary>
     public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
-        CancellationToken ct = default, NoteTemplate? force = null, string? typed = null)
+        CancellationToken ct = default, NoteTemplate? force = null)
     {
         var llm = Active();
         if (llm is null || !llm.Ready) return null;
         force ??= DefaultForced();   // honour the user's "always use X" default when no explicit override
-        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force, typed); }
+        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }
     }
 

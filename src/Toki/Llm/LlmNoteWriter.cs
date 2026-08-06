@@ -33,19 +33,18 @@ public sealed class LlmNoteWriter
     readonly ILlm _llm;
     public LlmNoteWriter(ILlm llm) => _llm = llm;
 
-    /// <param name="typed">What the user typed themselves during the meeting (prep-card scratchpad,
-    /// Markdown). When present it STEERS the note: the things a person bothered to write down by hand
-    /// are the best available signal of what actually mattered to them, and the transcript's job
-    /// becomes filling those in rather than deciding the emphasis on its own. This is the Granola
-    /// model, and the single most-praised note behaviour in the category.</param>
+    /// <remarks>
+    /// The transcript is the ONLY input. An earlier version fed the user's own sticky note in as a
+    /// steering constraint; the owner removed it (2026-08-06) and the reasoning is worth keeping: the
+    /// summary's job is to say what was said in the meeting, and a summary that reshapes itself around
+    /// your private jottings is one you can't check the room against any more. The sticky note now sits
+    /// BESIDE the summary in the same note, untouched and untouching.
+    /// </remarks>
     public async Task<NoteSet> WriteAsync(IReadOnlyList<TranscriptSegment> transcript,
-        CancellationToken ct = default, NoteTemplate? force = null, string? typed = null)
+        CancellationToken ct = default, NoteTemplate? force = null)
     {
-        var typedPlain = TypedPlain(typed);
         var heuristic = NoteExtractor.Extract(transcript);
-        // No model, or nothing was said: the user's own words are then the ONLY real content, and they
-        // must never be dropped just because the machinery downstream had nothing to work with.
-        if (!_llm.Ready || transcript.Count == 0) return WithTyped(heuristic, typedPlain);
+        if (!_llm.Ready || transcript.Count == 0) return heuristic;
 
         var chunks = Chunk(transcript, MaxChunkChars());
 
@@ -67,7 +66,7 @@ public sealed class LlmNoteWriter
                 if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d)) digests.Add(d);
             }
             // Every window was greetings/logistics/silence → an honest, minimal note. No filler.
-            if (digests.Count == 0) return WithTyped(LowSubstanceNote(), typedPlain);
+            if (digests.Count == 0) return LowSubstanceNote();
             source = string.Join("\n", digests);
             sourceIsDigests = true;
         }
@@ -76,10 +75,10 @@ public sealed class LlmNoteWriter
         var template = force ?? await ClassifyTemplate(source, sourceIsDigests, ct);
 
         // REDUCE / FINAL: the adaptive, honest note in the chosen template.
-        var note = await FinalNote(source, sourceIsDigests, template, ct, typedPlain);
-        if (note is null) return WithTyped(heuristic, typedPlain);   // total LLM failure → heuristic floor
+        var note = await FinalNote(source, sourceIsDigests, template, ct);
+        if (note is null) return heuristic;                  // total LLM failure → heuristic floor
         if (IsNothing(note.Summary) && note.Sections.Count == 0 && note.Actions.Count == 0)
-            return WithTyped(LowSubstanceNote(), typedPlain);       // model judged it low-substance
+            return LowSubstanceNote();                       // model judged it low-substance
 
         var result = new NoteSet
         {
@@ -133,30 +132,16 @@ public sealed class LlmNoteWriter
 
     // ── REDUCE / FINAL: adaptive, honest note in the chosen template ──
     async Task<FinalNoteResult?> FinalNote(string content, bool contentIsDigests, NoteTemplate template,
-        CancellationToken ct, string? typed = null)
+        CancellationToken ct)
     {
         var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
 
-        // The user's own jottings, given priority over the transcript's own sense of what mattered.
-        // Placed BEFORE the transcript so it frames everything that follows, and phrased as a
-        // constraint ("cover every point") rather than a hint — a 4B model treats soft suggestions
-        // as optional.
-        var typedSpec = string.IsNullOrWhiteSpace(typed) ? "" :
-            "The person in the meeting typed these notes THEMSELVES while it was happening:\n"
-            + $"---\n{typed}\n---\n"
-            + "Treat this as the strongest available signal of what mattered to them. Cover EVERY point they "
-            + "wrote, expanded with the detail from the transcript, and lead with those points. Never drop one "
-            + "of their points because the transcript says little about it — in that case keep the point as they "
-            + "wrote it. Never contradict them. Anything they marked as a task belongs in ACTION ITEMS. You may "
-            + "still add important things they missed, after theirs. Do not quote this block back verbatim as "
-            + "the whole note.\n\n";
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
             $"{s.ToUpperInvariant()}\n- up to 5 tight bullets for \"{s}\". Every bullet must carry information a busy "
             + "person needs — drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists."));
 
         var prompt =
-            typedSpec
-            + $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
+            $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
             + "TITLE\n3 to 6 words, specific and concise, like a calendar event — no quotes, no \"Meeting\" prefix.\n\n"
             + "SUMMARY\n2 to 4 dense, plain-English sentences: what the meeting was about and what came of it. Capture "
@@ -222,64 +207,6 @@ public sealed class LlmNoteWriter
         Questions = [],
         // No Title → NoteExtractor.Title falls back to "<app> — <date>" (honest, not a fake headline).
     };
-
-    // ── the user's own notes (N6) ──
-
-    /// <summary>Flatten the scratchpad's Markdown into plain lines a small model reads well. Capped,
-    /// because this goes in front of the transcript and must never be what overruns the context.</summary>
-    static string? TypedPlain(string? markdown)
-    {
-        if (string.IsNullOrWhiteSpace(markdown)) return null;
-
-        var sb = new StringBuilder();
-        foreach (var b in NoteMarkdown.Parse(markdown))
-        {
-            if (b.Kind == NoteBlockKind.Blank || b.Text.Length == 0) continue;
-            sb.Append(b.Kind switch
-            {
-                NoteBlockKind.Heading or NoteBlockKind.Subheading => b.Text + ":",
-                // Keep the box: "they ticked this" vs "they didn't" is exactly the kind of signal
-                // that should reach ACTION ITEMS rather than being flattened away.
-                NoteBlockKind.Todo => (b.Done ? "- [done] " : "- [task] ") + b.Text,
-                _ => "- " + b.Text,
-            }).Append('\n');
-
-            if (sb.Length > 1500) { sb.Append("…\n"); break; }
-        }
-
-        var text = sb.ToString().Trim();
-        return text.Length == 0 ? null : text;
-    }
-
-    /// <summary>Fallback only: when the model couldn't run, or judged the meeting empty, the user's own
-    /// words are the only real content there is — surface them rather than losing them behind a
-    /// "nothing substantive was discussed". Their unticked boxes become the action items.</summary>
-    static NoteSet WithTyped(NoteSet note, string? typedPlain)
-    {
-        if (string.IsNullOrWhiteSpace(typedPlain)) return note;
-
-        var bullets = typedPlain.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.TrimStart('-', ' ').Trim())
-            .Where(l => l.Length > 0)
-            .ToList();
-        if (bullets.Count == 0) return note;
-
-        note.Sections.Insert(0, new NoteSection
-        {
-            Heading = "Your notes",
-            Bullets = bullets.Select(l => l.Replace("[task] ", "").Replace("[done] ", "")).ToList(),
-        });
-
-        // Anything the user wrote as an unticked box is a real follow-up — carry it across, but never
-        // duplicate a task the writer already found.
-        foreach (var open in bullets.Where(l => l.StartsWith("[task] ", StringComparison.Ordinal))
-                                    .Select(l => l["[task] ".Length..].Trim())
-                                    .Where(t => t.Length > 0))
-            if (!note.Actions.Any(a => string.Equals(a.Text, open, StringComparison.OrdinalIgnoreCase)))
-                note.Actions.Add(new ActionItem { Text = open, Owner = "You" });
-
-        return note;
-    }
 
     // ── title ──
     async Task<string?> TitlePass(string summary, CancellationToken ct)

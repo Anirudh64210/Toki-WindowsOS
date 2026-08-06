@@ -19,6 +19,11 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                <!-- Which sticky note this meeting uses — an earlier one, or a new one. Toki never
+                     guesses this from the meeting's title (titles change; "Weekly sync" is every
+                     meeting), so the choice is explicit and remembered. -->
+                <Button x:Name="NoteButton" Style="{StaticResource IconButton}" Content="&#xE8F1;" FontSize="13"
+                        ToolTip="Which note to use for this meeting" Click="OnPickNote"/>
                 <!-- Edit turns THIS CARD into a note you carry on writing in — the recap, open items and
                      agenda arrive as real text, tick boxes and bullets (owner, 2026-08-05). -->
                 <Button x:Name="EditButton" Style="{StaticResource IconButton}" Content="&#xE70F;" FontSize="13"

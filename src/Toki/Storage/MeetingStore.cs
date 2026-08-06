@@ -9,7 +9,7 @@ namespace Toki.Storage;
 /// %APPDATA%\Toki\toki.db (hard constraint: all data local, no cloud). Manual
 /// notes and meetings share one table, distinguished by <c>kind</c>.
 /// </summary>
-public sealed class MeetingStore
+public sealed partial class MeetingStore
 {
     readonly string _connString;
 
@@ -59,6 +59,8 @@ public sealed class MeetingStore
               text TEXT NOT NULL, owner TEXT, due TEXT, done INTEGER DEFAULT 0, ord INTEGER);
             """;
         cmd.ExecuteNonQuery();
+
+        EnsureStickyTables(c);
 
         // Migration: a manual sort order for the Library list. Seed it to the current
         // newest-first order so nothing jumps around on first run.

@@ -47,28 +47,43 @@ public static class NoteMarkdown
             var line = raw.TrimEnd();
             if (line.Length == 0) { blocks.Add(new NoteBlock(NoteBlockKind.Blank, "")); continue; }
 
-            var t = line.TrimStart();
-
-            // To-do BEFORE bullet — "- [ ] x" is also a valid bullet, and the checkbox reading wins.
-            if (TryTodo(t, out var todoText, out var done))
-            { blocks.Add(new NoteBlock(NoteBlockKind.Todo, todoText, done)); continue; }
-
-            if (t.StartsWith("## ", StringComparison.Ordinal))
-            { blocks.Add(new NoteBlock(NoteBlockKind.Subheading, t[3..].Trim())); continue; }
-
-            if (t.StartsWith("# ", StringComparison.Ordinal))
-            { blocks.Add(new NoteBlock(NoteBlockKind.Heading, t[2..].Trim())); continue; }
-
-            if (t.StartsWith("- ", StringComparison.Ordinal) || t.StartsWith("* ", StringComparison.Ordinal))
-            { blocks.Add(new NoteBlock(NoteBlockKind.Bullet, t[2..].Trim())); continue; }
-
-            if (TryNumbered(t, out var numText))
-            { blocks.Add(new NoteBlock(NoteBlockKind.Numbered, numText)); continue; }
-
-            blocks.Add(new NoteBlock(NoteBlockKind.Body, line.Trim()));
+            blocks.Add(TryMarker(line.TrimStart(), out var kind, out var rest, out var done)
+                ? new NoteBlock(kind, Heal(rest), done)
+                : new NoteBlock(NoteBlockKind.Body, Heal(line.Trim())));
         }
 
         return blocks;
+    }
+
+    /// <summary>
+    /// Does this line START with one of Toki's markers, and if so which kind is it and what comes after?
+    ///
+    /// THE single definition of "this text looks like a list item / heading / tick box". Three callers
+    /// need to agree exactly: <see cref="Parse"/> (reading a file), <see cref="Write"/> (which strips a
+    /// marker the text carries so the Kind's own marker can never be written twice), and the editor
+    /// (which promotes "- " into a real bullet as you type). They used to disagree, and the result was
+    /// the reported bug: a line the user typed a dash in front of came back as "- - thing", growing a
+    /// marker every time the note was saved and reloaded.
+    /// </summary>
+    public static bool TryMarker(string? line, out NoteBlockKind kind, out string rest, out bool done)
+    {
+        kind = NoteBlockKind.Body; rest = ""; done = false;
+        var t = (line ?? "").TrimStart();
+        if (t.Length == 0) return false;
+
+        // To-do BEFORE bullet — "- [ ] x" is also a valid bullet, and the checkbox reading wins.
+        if (TryTodo(t, out var todoText, out done)) { kind = NoteBlockKind.Todo; rest = todoText; return true; }
+
+        // "## " before "# " — the longer marker has to win.
+        if (t.StartsWith("## ", StringComparison.Ordinal)) { kind = NoteBlockKind.Subheading; rest = t[3..].Trim(); return true; }
+        if (t.StartsWith("# ", StringComparison.Ordinal)) { kind = NoteBlockKind.Heading; rest = t[2..].Trim(); return true; }
+
+        if (t.StartsWith("- ", StringComparison.Ordinal) || t.StartsWith("* ", StringComparison.Ordinal))
+        { kind = NoteBlockKind.Bullet; rest = t[2..].Trim(); return true; }
+
+        if (TryNumbered(t, out var numText)) { kind = NoteBlockKind.Numbered; rest = numText; return true; }
+
+        return false;
     }
 
     /// <summary>Write blocks back to Markdown. Numbered lists are renumbered from 1 per run, so
@@ -84,6 +99,14 @@ public static class NoteMarkdown
             if (b.Kind == NoteBlockKind.Numbered) n++; else n = 0;
 
             var text = (b.Text ?? "").Trim();
+
+            // A marked block carries its marker in its KIND, so the text must not carry one too. Strip
+            // exactly ONE — the precise inverse of the one Parse consumes — so writing and reading are
+            // a fixed point. Without this a bullet reading "- two" was written as "- - two" and grew
+            // another dash on every save ("bullets are created by themselves").
+            if (b.Kind is not (NoteBlockKind.Body or NoteBlockKind.Blank)
+                && TryMarker(text, out _, out var bare, out _)) text = bare;
+
             sb.Append(b.Kind switch
             {
                 NoteBlockKind.Blank      => "",
@@ -99,6 +122,39 @@ public static class NoteMarkdown
 
         // One trailing newline at most — a note shouldn't grow blank lines every time it's saved.
         return sb.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>
+    /// Remove list-marker GLYPHS that a previous version leaked into a line's own text, so notes written
+    /// by it come back clean instead of carrying the damage forever.
+    ///
+    /// The bug (fixed 2026-08-06): the editor built bullets from WPF's native <c>List</c>, and
+    /// <c>TextRange.Text</c> on a paragraph inside a list includes the list's marker, serialised as
+    /// "•\t". So reading a line gave back "•\tAgenda item", which was then written as "- •\tAgenda item",
+    /// re-read as "•\t•\tAgenda item"… one more bullet on every single save. The owner's note reached
+    /// seven.
+    ///
+    /// The TAB is what makes this safe to strip: it's how WPF serialises a marker, and it is not
+    /// something a person types at the start of a note line. A "•" followed by a space is left alone —
+    /// that's someone writing a bullet by hand, and their text is not ours to edit.
+    /// </summary>
+    static string Heal(string text)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            var j = i;
+            if (text[j] is '•' or '▪' or '◦' or '‣') j++;
+            else
+            {
+                while (j < text.Length && char.IsDigit(text[j])) j++;      // "1." / "12." from a numbered list
+                if (j == i || j >= text.Length || text[j] is not ('.' or ')')) break;
+                j++;
+            }
+            if (j >= text.Length || text[j] != '\t') break;                // no tab → real content, stop
+            i = j + 1;
+        }
+        return i > 0 ? text[i..].TrimStart() : text;
     }
 
     /// <summary>"- [ ] thing" / "- [x] thing" (also accepts "* [X] thing").</summary>

@@ -157,6 +157,109 @@ public sealed class NoteMarkdownTests
         }
     }
 
+    // ── markers (the "bullets create themselves" bug, 2026-08-06) ──
+    //
+    // A block carries its marker in its KIND. If the marker also survives in the TEXT, Write emits both
+    // and the note grows a dash every time it's saved and reloaded. These lock that shut.
+
+    [Theory]
+    [InlineData(NoteBlockKind.Bullet, "- two", "- two")]
+    [InlineData(NoteBlockKind.Bullet, "* two", "- two")]
+    [InlineData(NoteBlockKind.Numbered, "1. first", "1. first")]
+    [InlineData(NoteBlockKind.Todo, "- [ ] call", "- [ ] call")]
+    [InlineData(NoteBlockKind.Subheading, "## Agenda", "## Agenda")]
+    public void A_marker_is_never_written_twice(NoteBlockKind kind, string text, string expected)
+    {
+        Assert.Equal(expected, NoteMarkdown.Write(new[] { new NoteBlock(kind, text) }));
+    }
+
+    [Theory]
+    [InlineData("- - two", "- two")]
+    [InlineData("- - - three", "- three")]
+    [InlineData("1. 1. first", "1. first")]
+    [InlineData("## ## Agenda", "## Agenda")]
+    public void A_doubled_marker_collapses_instead_of_growing(string md, string settled)
+    {
+        // Each save sheds exactly one stray marker and then holds — the opposite of the reported bug,
+        // where every save ADDED one. Never longer than what went in, always reaching a fixed point.
+        var text = md;
+        for (var i = 0; i < 6; i++)
+        {
+            var next = Round(text);
+            Assert.True(next.Length <= text.Length, $"grew: {text} -> {next}");
+            text = next;
+        }
+        Assert.Equal(settled, text);
+        Assert.Equal(text, Round(text));
+    }
+
+    [Fact]
+    public void Ten_save_reload_cycles_change_nothing()
+    {
+        var md = "# Plan\n\n- one\n- two\n\n1. first\n2. second\n\n- [ ] send the deck\n- [x] booked the room";
+        var text = md;
+        for (var i = 0; i < 10; i++) text = Round(text);
+        Assert.Equal(md, text);
+    }
+
+    // ── the leaked WPF list marker (the ACTUAL "bullets create themselves" loop) ──
+    //
+    // The old editor read a bulleted line back through TextRange.Text, which includes the native List's
+    // own marker as "•\t". That got written into the text, re-read with another one in front, and so on —
+    // one more bullet per save. This is the owner's real note, seven cycles deep.
+
+    [Fact]
+    public void A_note_damaged_by_the_leaked_marker_bug_comes_back_clean()
+    {
+        const string damaged = "- •\t•\t•\t•\t•\t•\t•\tConfirm launch blockers & owners";
+        var b = Assert.Single(NoteMarkdown.Parse(damaged));
+        Assert.Equal(NoteBlockKind.Bullet, b.Kind);
+        Assert.Equal("Confirm launch blockers & owners", b.Text);
+        Assert.Equal("- Confirm launch blockers & owners", Round(damaged));
+    }
+
+    [Fact]
+    public void Healing_a_damaged_numbered_list_works_the_same_way()
+    {
+        Assert.Equal("1. open with the numbers", Round("1. 1.\t1.\topen with the numbers"));
+    }
+
+    [Theory]
+    // A bullet-and-SPACE is a person typing a bullet by hand. Their text is not ours to edit.
+    [InlineData("- • a hand-typed bullet", "• a hand-typed bullet")]
+    [InlineData("- •rock • roll", "•rock • roll")]
+    [InlineData("- 1.5x the budget", "1.5x the budget")]
+    [InlineData("- 2026. what a year", "2026. what a year")]
+    public void Healing_never_touches_content_the_user_meant(string line, string expected)
+    {
+        Assert.Equal(expected, Assert.Single(NoteMarkdown.Parse(line)).Text);
+    }
+
+    [Theory]
+    [InlineData("- thing", NoteBlockKind.Bullet, "thing")]
+    [InlineData("1. thing", NoteBlockKind.Numbered, "thing")]
+    [InlineData("- [x] thing", NoteBlockKind.Todo, "thing")]
+    [InlineData("# thing", NoteBlockKind.Heading, "thing")]
+    [InlineData("## thing", NoteBlockKind.Subheading, "thing")]
+    public void TryMarker_is_the_one_definition_of_a_marker(string line, NoteBlockKind kind, string rest)
+    {
+        Assert.True(NoteMarkdown.TryMarker(line, out var k, out var r, out _));
+        Assert.Equal(kind, k);
+        Assert.Equal(rest, r);
+    }
+
+    [Theory]
+    [InlineData("plain words")]
+    [InlineData("-nospace")]
+    [InlineData("1.nospace")]
+    [InlineData("#nospace")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void TryMarker_says_no_to_everything_else(string? line)
+    {
+        Assert.False(NoteMarkdown.TryMarker(line, out _, out _, out _));
+    }
+
     [Fact]
     public void There_is_no_syntax_for_font_or_colour()
     {

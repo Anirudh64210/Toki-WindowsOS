@@ -202,7 +202,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--makeicon");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--makeicon");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -344,6 +344,8 @@ public partial class App : Application
             // crash/quit orphaned (turns data loss into a saved meeting), and clear stale
             // push-to-talk voice snippets a crash may have left in %TEMP%.
             try { RecordingRecovery.Sweep(); } catch (Exception ex) { Log($"recovery sweep (non-fatal): {ex.Message}"); }
+            // Carry any prep-card notes from the old JSON file into the sticky-note tables (once).
+            try { StickyMigration.RunOnce(Store); } catch (Exception ex) { Log($"sticky migration (non-fatal): {ex.Message}"); }
             try
             {
                 var voiceDir = Path.Combine(Path.GetTempPath(), "Toki", "voice");
@@ -578,11 +580,10 @@ public partial class App : Application
         _session = null;
         _detector?.EndRecording();
 
-        // The meeting's over: if anything was typed on its prep card, put it up for a Keep / Discard
-        // decision in the Library. Nothing is written to the store here — the user decides (N5).
-        // The same text also STEERS the AI notes below (N6), so grab it before anything can clear it.
-        var typedNotes = CurrentPrep is { } endedPrep ? Storage.PrepScratch.Get(endedPrep.Event.Id) : null;
-        if (CurrentPrep is { } p2) Storage.PrepScratch.MarkAwaiting(p2.Event.Id, p2.Event.Summary);
+        // Which sticky note was open during this meeting, if any. Captured HERE, before anything can
+        // clear CurrentPrep, and attached to the saved meeting further down — that link is the whole
+        // reason the note turns up inside the meeting's own note afterwards.
+        var stickyId = CurrentPrep is { } endedPrep ? Store.StickyForEvent(endedPrep.Event.Id) : null;
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
         LastTranscript = null;
         CurrentMeeting = null;
@@ -663,6 +664,14 @@ public partial class App : Application
                     };
                     Store.Save(meeting);
                     MarkdownMirror.Write(meeting);
+                    // Attach the sticky note that was open during it, so the meeting's note can offer
+                    // it. Only when something was actually written — an empty note attached to a
+                    // meeting is a button that opens nothing.
+                    if (stickyId is { } sid && Store.GetSticky(sid) is { Body.Length: > 0 })
+                    {
+                        Store.LinkStickyToMeeting(meeting.Id, sid);
+                        Log($"sticky note {sid} attached to meeting {meeting.Id}");
+                    }
                     LibraryWindow.MarkDirty(); // a new meeting exists — refresh the Library on next open
                     Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
                 }
@@ -683,10 +692,10 @@ public partial class App : Application
                     // Map-reduce makes several short LLM calls for a long meeting; give it room.
                     // (Still bounded so a stuck generation can never hang the pill.)
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
-                    // typedNotes steers the summary: what the user bothered to write by hand is the
-                    // best signal of what actually mattered (N6).
+                    // The TRANSCRIPT is the only input. The user's sticky note is deliberately not fed
+                    // in (owner, 2026-08-06) — it sits beside the summary, it doesn't shape it.
                     var llmNotes = LlmService.Instance
-                        .WriteNotesAsync(transcript, cts.Token, null, typedNotes)
+                        .WriteNotesAsync(transcript, cts.Token)
                         .GetAwaiter().GetResult();
                     if (llmNotes is not null)
                     {

@@ -906,3 +906,90 @@ it's citing something it isn't — the same anti-fabrication rule the assistant 
 time rather than storing means it applies retroactively to every note ever written and adds nothing to the
 database. Clicking a link whose line is past the lazy-loaded preview expands the transcript first and
 scrolls on completion.
+
+## S1–S7 — decisions from the sticky-note rework (2026-08-06)
+
+**A framework's text serialisation is not your data model.** The note editor's first version used WPF's
+native `List`/`ListItem` to get "Enter makes the next bullet" for free, and read a line's text back with
+`TextRange.Text`. For a paragraph inside a list, `TextRange.Text` **includes the list's marker**, as
+`"•\t"`. So every save wrote the marker into the line's own text, every reload put a fresh list marker in
+front of it, and the note gained a bullet per cycle — the owner's reached seven before they reported it
+(`- •\t•\t•\t•\t•\t•\t•\tConfirm launch blockers`). Nothing in the Markdown layer was wrong, which is why
+23 green round-trip tests never flickered. *The generalisable rule: when you ask a UI framework for the
+text of something it also decorates, you get the decoration too — and if that text is your storage format,
+the decoration compounds.*
+
+**The same structure caused two more defects**, found in the first run of the new test: a paragraph inside
+a `ListItem` isn't a child of `Document.Blocks` (so inserting the next line threw, and no toolbar button
+could lift a line back out of the list), and a marker the user *typed* survived into the saved Markdown on
+top of the one the block kind already implies (`- - two`); a blank line also split one list into two,
+restarting the numbering. The fix was structural, not a patch: **flat
+paragraphs, each tagged with its kind, with the marker in an `InlineUIContainer` that is not text.** Every
+line is addressable, kind changes are local, markers cannot leak, and numbering is positional — recomputed
+on every change, so it cannot go stale. Nesting is the only capability lost, and the Markdown format never
+supported it. *Generalisable rule: when a framework primitive owns part of your data model, it will
+eventually disagree with you about what the data is.*
+
+**One definition of "marker", shared by three callers.** `NoteMarkdown.TryMarker` is used by `Parse`
+(reading a file), `Write` (which strips exactly one marker — the precise inverse of the one `Parse`
+consumes) and the editor (which promotes a typed `- ` into a real bullet and eats the characters). They
+used to disagree, and disagreement between a reader and a writer is exactly how a file grows a character
+every time it's saved. The invariant now tested: repeated save/reload **converges downward** — a stray
+marker is shed, never added.
+
+**A test that can't see the bug isn't a test.** The reported fault was invisible to the pure Markdown
+round-trip tests, because it lived in the document structure. `--notetest` drives the real control: it
+types, presses Enter, clicks toolbar buttons and ticks boxes, then reads the Markdown back. It needs a real
+offscreen `Window` — a `RichTextBox` refuses a caret position until it's in a live visual tree, which is
+also why the same trick appears in `--measuretest`.
+
+**And a test that can't see the DATA isn't enough either.** The root cause was only pinned down by dumping
+what the note actually contained on disk (`--dumpnote`), which showed seven literal `•` characters that no
+amount of reading the rendering code would have revealed. "What the screen shows" and "what is saved" are
+different questions; when they disagree, only the second one explains a growing file.
+
+**Damage already written is healed on read, and healing is deliberately narrow.** `NoteMarkdown.Heal`
+strips leading marker glyphs from a line's text, but *only* when followed by a TAB — that's how WPF
+serialises a marker, and it isn't something a person types at the start of a note line. A hand-typed
+"• " (glyph then space) is left exactly as written. When repairing a user's own words, the repair must be
+narrower than the damage.
+
+**The summary is written from the transcript alone.** Typed notes used to be injected as a hard constraint
+ahead of the transcript (the Granola model). The owner removed it, and the reason generalises: a summary
+exists so you can check it against what happened in the room. One that reshapes itself around your private
+jottings can no longer serve that purpose — and the user cannot see that it has. Notes and summary now sit
+side by side, neither touching the other.
+
+**Sticky notes get their own tables because they have their own lifecycle.** They are written *before* the
+meeting record exists, may outlive any single meeting, and must survive a crash mid-sentence. So: a real
+row from the first keystroke, in `toki.db` — not a column on `meetings` (wrong cardinality), and not the
+JSON file they used to live in (which never pruned, and could only ever bind a note to the one event it was
+born on).
+
+**Linking is explicit and by id — never by matching titles.** Meeting titles change, recurring events get
+rescheduled, and two unrelated meetings are routinely both called "Weekly sync". Any heuristic here fails
+in the two worst ways available: it buries your notes, or it shows you someone else's. There are exactly
+two links (`sticky_event`, `sticky_meeting`), both written only because a person chose them. A picker
+offers recent notes with when they were last touched; "start a new one" is always the first option.
+
+**The blast radius is a design decision, not an accident.** Sticky notes are deliberately absent from the
+meetings table (so the Library list *cannot* render one — the owner's complaint was a row you couldn't
+open), from the FTS index (so Ask cannot surface private text), and from the note-writer's inputs. Deleting
+a meeting cascades the *link* and leaves the note; deleting the note cascades every link. Each of those is
+covered by a test that asserts the absence, because "it doesn't leak" is only true if something checks.
+
+**Where a feature lives is a layout constraint too.** The sticky-note reveal was first put in the
+Copy/Delete toolbar, where it squeezed the template picker down to "Template · Dec". Moved to the top of
+the note body, under the title: it's *content*, not an action performed on the note, and it no longer
+competes for the row. The note itself opens after everything Toki wrote and before the transcript.
+
+**A `StaysOpen=false` popup eats mouse-up.** The Library's sort menu had already learned this and left a
+comment; the note editor's picker had not, so every item in it was silently dead. Both notch pickers now
+share `Views/NotePicker.cs`, built on real `Button`s (Click survives; MouseLeftButtonUp does not) and
+registered with `NotchPopups` so an open menu doesn't let the notch retract underneath it.
+
+**The pre-meeting nudge is restrained, not absent.** Auto-surfacing was removed on 2026-08-05 and restored
+here, because it had been carrying a second job nobody noticed: it was the only "your meeting is starting"
+signal. It now opens the card **once**, and only when opening costs nothing — notch idle, nothing
+fullscreen. Otherwise it stays armed and one hover away. Restraint means picking the moment, not never
+appearing.

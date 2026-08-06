@@ -48,6 +48,8 @@ static class SelfTests
                 "--llmtest" => LlmTest(),
                 "--themetest" => ThemeTest(),
                 "--measuretest" => MeasureTest(),
+                "--notetest" => NoteEditorTest(),
+                "--dumpnote" => DumpNote(args),
                 "--makeicon" => MakeIcon(args),
                 "--copytest" => CopyTest(),
                 "--asktest" => AskTest(args),
@@ -62,6 +64,8 @@ static class SelfTests
         }
         catch (Exception ex)
         {
+            // The stack matters: "it threw" with no location has cost real debugging time here before.
+            Console.WriteLine(ex.StackTrace);
             return Fail($"{flag} threw: {ex.Message}");
         }
     }
@@ -723,6 +727,212 @@ static class SelfTests
             ? "RESULT: at least one page's out-of-tree measure under-reports the true height → reveal clips."
             : "RESULT: out-of-tree measure matches the true arranged height for every page.");
         return 0;
+    }
+
+    /// <summary>
+    /// Print a note's RAW stored text, with every character visible. READ-ONLY.
+    ///
+    /// Exists because "what does the screen show?" and "what is actually saved?" are different questions,
+    /// and guessing at the second one wasted real time chasing the bullet bug. Run:
+    /// <c>Toki.exe --dumpnote "some words from the note"</c>
+    /// </summary>
+    static int DumpNote(string[] args)
+    {
+        var needle = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+        if (string.IsNullOrWhiteSpace(needle)) return Fail("usage: --dumpnote <text to look for>");
+
+        var hits = 0;
+        foreach (var row in App.Store.List())
+        {
+            var m = App.Store.Get(row.Id);
+            var body = m?.Body;
+            if (body is null || body.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+            hits++;
+            Console.WriteLine($"=== #{m!.Id} [{m.Kind}] {m.Title} ===");
+            var i = 0;
+            foreach (var line in body.Replace("\r\n", "\n").Split('\n'))
+            {
+                // Leading whitespace and repeated markers are exactly what we're hunting, so make both
+                // impossible to miss.
+                Console.WriteLine($"{i++,3}: |{line}|");
+            }
+            Console.WriteLine($"--- {body.Length} chars, re-parsed as: ---");
+            foreach (var b in Storage.NoteMarkdown.Parse(body))
+                Console.WriteLine($"     {b.Kind,-10} done={b.Done,-5} |{b.Text}|");
+            Console.WriteLine();
+        }
+
+        Console.WriteLine(hits == 0 ? "no note matched." : $"{hits} note(s) matched.");
+        return 0;
+    }
+
+    /// <summary>
+    /// Drives the REAL note editor the way fingers do — types markers, presses Enter, clicks toolbar
+    /// buttons, ticks boxes — and checks the Markdown that comes back out. Written for the owner-reported
+    /// bug "the bullet points and the lists get incremented, bullets are created by themselves", which a
+    /// pure round-trip test could never have caught: the fault lived in the document structure, not the
+    /// text format. Run: Toki.exe --notetest
+    /// </summary>
+    static int NoteEditorTest()
+    {
+        var pass = 0; var fail = 0;
+
+        void Check(string what, string expected, string actual)
+        {
+            var ok = expected == actual;
+            if (ok) pass++; else fail++;
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}");
+            if (!ok)
+            {
+                Console.WriteLine($"        expected: {Show(expected)}");
+                Console.WriteLine($"        actual  : {Show(actual)}");
+            }
+        }
+        static string Show(string s) => "«" + s.Replace("\n", "⏎") + "»";
+
+        // A RichTextBox refuses a caret position until it's in a live visual tree, so each case gets a
+        // real (offscreen) window — the same trick --measuretest uses to get a true arranged height.
+        var windows = new List<System.Windows.Window>();
+        Views.NoteEditor New(string markdown = "")
+        {
+            var ed = new Views.NoteEditor();
+            var win = new System.Windows.Window
+            {
+                Width = 440, Height = 700, Left = -4000, Top = -4000,
+                WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+                Content = ed,
+            };
+            win.Show();
+            win.UpdateLayout();
+            windows.Add(win);
+            ed.Markdown = markdown;
+            ed.DebugFocus();
+            ed.DebugCaretToEnd();
+            return ed;
+        }
+
+        // 1. THE REPORTED BUG. Saving and reloading must not add anything. Ten cycles, because the
+        //    complaint was that it grows a little each time.
+        {
+            const string src = "# Plan\n\n- one\n- two\n\n1. first\n2. second\n\n- [ ] send the deck\n- [x] booked the room";
+            var ed = New(src);
+            var after = ed.Markdown;
+            for (var i = 0; i < 10; i++) { ed.Markdown = after; after = ed.Markdown; }
+            Check("ten save/reload cycles change nothing", src, after);
+        }
+
+        // 2. A marker the user TYPED becomes a real one, exactly once, and never survives into the text.
+        {
+            var ed = New();
+            ed.DebugType("- ");
+            ed.DebugType("milk");
+            Check("typing \"- \" makes ONE bullet", "- milk", ed.Markdown);
+
+            var ed2 = New();
+            ed2.DebugType("1. ");
+            ed2.DebugType("first");
+            Check("typing \"1. \" makes ONE numbered item", "1. first", ed2.Markdown);
+
+            var ed3 = New();
+            ed3.DebugType("## ");
+            ed3.DebugType("Agenda");
+            Check("typing \"## \" makes a heading", "## Agenda", ed3.Markdown);
+
+            var ed4 = New();
+            ed4.DebugType("- ");
+            ed4.DebugType("[ ] ");
+            ed4.DebugType("call Ana");
+            Check("typing \"- [ ] \" makes a tick box", "- [ ] call Ana", ed4.Markdown);
+        }
+
+        // 3. Enter continues the list; Enter on an empty item leaves it. (This is where the old
+        //    native-List structure threw, because the paragraph wasn't a child of Document.Blocks.)
+        {
+            var ed = New("- one");
+            ed.DebugCaretToEnd();
+            ed.DebugEnter();
+            ed.DebugType("two");
+            ed.DebugEnter();
+            ed.DebugEnter();
+            ed.DebugType("plain");
+            Check("Enter continues, empty Enter leaves the list", "- one\n- two\nplain", ed.Markdown);
+        }
+
+        // 4. Numbering is positional — deleting an item can't leave a hole.
+        {
+            var ed = New("1. a\n1. b\n1. c");
+            Check("numbers are renumbered from position", "1. a\n2. b\n3. c", ed.Markdown);
+        }
+
+        // 5. The toolbar can take a line OUT of a list again (the old "Body" button couldn't).
+        {
+            var ed = New("- one");
+            ed.DebugCaretToEnd();
+            ed.DebugToolbar(Storage.NoteBlockKind.Body);
+            Check("Body button removes the bullet", "one", ed.Markdown);
+
+            var ed2 = New("- two");
+            ed2.DebugCaretToEnd();
+            ed2.DebugToolbar(Storage.NoteBlockKind.Bullet);
+            Check("clicking the same list button toggles it off", "two", ed2.Markdown);
+        }
+
+        // 6. Backspace at the start of a marked line is the way out of a list.
+        {
+            var ed = New("- one\n- two");
+            ed.DebugCaretToLineStart();
+            ed.DebugBackspace();
+            Check("Backspace at line start drops the marker", "- one\ntwo", ed.Markdown);
+        }
+
+        // 7. Tick state round-trips (it's the whole point of a checklist).
+        {
+            var ed = New("- [ ] a\n- [ ] b");
+            ed.DebugTick(1, true);
+            Check("ticking a box is saved", "- [ ] a\n- [x] b", ed.Markdown);
+        }
+
+        // 8. A line whose TEXT carries a marker is never written with two.
+        {
+            var ed = New("- - two");
+            Check("a doubled marker collapses, and stays collapsed", "- two", ed.Markdown);
+        }
+
+        // 9. Blank lines are the user's own spacing — kept, not multiplied.
+        {
+            var ed = New("a\n\n\nb");
+            Check("blank lines survive exactly", "a\n\n\nb", ed.Markdown);
+        }
+
+        // 10. THE ACTUAL REPORTED LOOP. The old editor read a bulleted line back through
+        //     TextRange.Text, which includes the native List's own "•\t" marker; that got saved into
+        //     the text and picked up another one on every reload. The owner's note reached seven.
+        //     A marker GLYPH must never appear in what comes out of the editor.
+        {
+            var ed = New("## Agenda\n- Confirm launch blockers & owners\n- Lock the ship date\n1. open with the numbers");
+            var text = ed.Markdown;
+            for (var i = 0; i < 8; i++) { ed.Markdown = text; text = ed.Markdown; }
+            Check("eight reloads never grow a marker",
+                "## Agenda\n- Confirm launch blockers & owners\n- Lock the ship date\n1. open with the numbers", text);
+
+            var leaked = text.IndexOfAny(new[] { '•', '\t' }) >= 0;
+            if (leaked) { fail++; Console.WriteLine("FAIL  a list marker glyph leaked into the saved text"); }
+            else { pass++; Console.WriteLine("PASS  no marker glyph or tab ever reaches the saved text"); }
+        }
+
+        // 11. And a note already damaged by that bug heals when it's opened.
+        {
+            var ed = New("## Agenda\n- •\t•\t•\t•\t•\t•\t•\tConfirm launch blockers & owners");
+            Check("a note damaged by the old bug opens clean",
+                "## Agenda\n- Confirm launch blockers & owners", ed.Markdown);
+        }
+
+        foreach (var w in windows) w.Close();
+
+        Console.WriteLine();
+        Console.WriteLine($"RESULT: {pass} passed, {fail} failed");
+        return fail == 0 ? 0 : 1;
     }
 
     // Render the (vector) Toki mascot to a transparent PNG and pack it into a Vista-style .ico (single
