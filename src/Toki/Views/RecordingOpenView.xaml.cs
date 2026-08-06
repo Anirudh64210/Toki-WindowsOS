@@ -27,13 +27,13 @@ public partial class RecordingOpenView : UserControl
             }
             else Dot.BeginAnimation(OpacityProperty, null);
         };
-        // Live transcript preview — real segments as Toki hears them (Phase 2).
+        // Live transcript preview - real segments as Toki hears them (Phase 2).
         Loaded += (_, _) =>
         {
             LiveLine.Text = "Listening…";
             LiveLine.Opacity = 1;
             App.LivePreview += OnLiveSegment;
-            // Offer the prep card only when this meeting actually has one — an ad-hoc call Toki merely
+            // Offer the prep card only when this meeting actually has one - an ad-hoc call Toki merely
             // detected has no calendar event behind it, and a button that opens nothing is worse than
             // no button.
             PrepButton.Visibility = Calendar.PrepWatcher.Armed ? Visibility.Visible : Visibility.Collapsed;
@@ -53,7 +53,7 @@ public partial class RecordingOpenView : UserControl
         });
     }
 
-    // A lively spring-pop on Toki each time the pill expands on hover — Toki is alive and
+    // A lively spring-pop on Toki each time the pill expands on hover - Toki is alive and
     // popping up to greet you, not a static panel unfolding.
     void PlayPop()
     {
@@ -67,7 +67,7 @@ public partial class RecordingOpenView : UserControl
 
     void OnStop(object sender, RoutedEventArgs e) => App.StopRecording();
 
-    // Open the prep card mid-meeting. Recording is untouched — the mic keeps running behind it, and
+    // Open the prep card mid-meeting. Recording is untouched - the mic keeps running behind it, and
     // the card's Back button brings this page straight back.
     void OnPrep(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.PrepCard);
 }

@@ -8,7 +8,7 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The "Built with" screen — open-source attribution. This is a LICENCE OBLIGATION, not decoration:
+/// The "Built with" screen - open-source attribution. This is a LICENCE OBLIGATION, not decoration:
 /// Parakeet is CC-BY-4.0 (name + source + licence link + a note that we modified it), Qwen3 is
 /// Apache-2.0, everything else MIT. Each row opens its upstream source. Fixed height + internal scroll.
 /// The full licence texts ship alongside the app in THIRD-PARTY-NOTICES.md.
@@ -16,7 +16,7 @@ namespace Toki.Views;
 public partial class AboutView : UserControl
 {
     // (Name, what it does for us, who made it, licence, source URL). Grouped by section.
-    // Only what Toki actually ships is credited — Whisper is a stubbed fallback and is intentionally absent.
+    // Only what Toki actually ships is credited - Whisper is a stubbed fallback and is intentionally absent.
     record Credit(string Name, string Role, string Author, string Licence, string Url);
 
     static readonly (string Section, Credit[] Items)[] Sections =
@@ -66,7 +66,7 @@ public partial class AboutView : UserControl
 
     void Build()
     {
-        // Intro — the honest, human framing (Toki is on-device; thank the people who made that possible).
+        // Intro - the honest, human framing (Toki is on-device; thank the people who made that possible).
         Body.Children.Add(new TextBlock
         {
             Style = (Style)FindResource("Secondary"),
@@ -106,7 +106,7 @@ public partial class AboutView : UserControl
         left.Children.Add(sub);
         Grid.SetColumn(left, 0);
 
-        // CC-BY / Apache carry real obligations — tint their chips amber so they read as "attribution", not filler.
+        // CC-BY / Apache carry real obligations - tint their chips amber so they read as "attribution", not filler.
         var strong = c.Licence.StartsWith("CC-BY") || c.Licence.StartsWith("Apache");
         var chip = new Border
         {

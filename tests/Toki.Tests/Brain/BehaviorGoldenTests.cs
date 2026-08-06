@@ -8,7 +8,7 @@ namespace Toki.Tests.Brain;
 
 /// <summary>
 /// End-to-end behavior golden set (taxonomy §4, §6, §14) through the real Ask pipeline with a seeded
-/// store + a fake model — the HONESTY rails, person/self filters, and no-fabrication traps. A fake LLM
+/// store + a fake model - the HONESTY rails, person/self filters, and no-fabrication traps. A fake LLM
 /// records whether it was even invoked, so "an honest miss never reaches the model" is checkable.
 /// </summary>
 [Collection("NotesQaSeams")]

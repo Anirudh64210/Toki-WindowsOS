@@ -8,7 +8,7 @@ namespace Toki.Llm;
 /// (ground it in the notes) or a GENERAL question/statement the model should simply converse about
 /// from its own knowledge?
 ///
-/// The old pipeline had no such decision — every utterance that survived the small-talk/persona
+/// The old pipeline had no such decision - every utterance that survived the small-talk/persona
 /// filters was forced through notes retrieval, so "what is my name", chit-chat, world-knowledge
 /// questions and misheard commands all became document searches that either denied ("not in your
 /// notes") or, worse, fabricated a link to an unrelated meeting. That forced-retrieval design is a
@@ -23,14 +23,14 @@ namespace Toki.Llm;
 ///   2. Otherwise a RETRIEVAL PROBE: do the question's content terms actually hit anything in the
 ///      store (title or FTS)? A hit → the user's own corpus has evidence → ground it. No hit → the
 ///      notes cannot answer it, so retrieval could only mislead → let the model converse.
-/// (A judgment-call LLM classifier would also work here — Adaptive-RAG trains one — but at Toki's
+/// (A judgment-call LLM classifier would also work here - Adaptive-RAG trains one - but at Toki's
 /// scale the cue set + probe covers the same decision with zero latency and full testability.)
 /// </summary>
 public static class TurnRouter
 {
     // The user's meeting world: meeting nouns, notes/task vocabulary, and "did we/they discuss…"
     // shapes. Deliberately NOT bare "we"/"they" (that would drag "can we write a poem?" into the
-    // notes) — the pronoun only counts next to a discussion verb.
+    // notes) - the pronoun only counts next to a discussion verb.
     static readonly Regex MeetingCueRx = new(
         @"\b(meetings?|calls?|stand-?ups?|standups?|syncs?|1[:.]1s?|one-on-ones?|huddles?|retros?|retrospectives?|all-?hands|"
         + @"notes?|transcripts?|recordings?|recorded|agendas?|minutes|action\s+items?|to-?dos?|tasks?|"
@@ -67,10 +67,10 @@ public static class TurnRouter
 
     /// <summary>
     /// True when an LLM-bound turn (LookupFact / Analyze) should be answered as GENERAL conversation
-    /// — from the model's own knowledge, with NO retrieval and NO citations. Grounding stays the
+    /// - from the model's own knowledge, with NO retrieval and NO citations. Grounding stays the
     /// default whenever anything ties the turn to the meetings: a meeting cue, a date/recency, a
     /// pinned meeting (screen/follow-up), or a probe hit in the store. An Analyze turn with no
-    /// topical anchor at all ("what should I focus on?") also stays grounded — it's corpus-level
+    /// topical anchor at all ("what should I focus on?") also stays grounded - it's corpus-level
     /// *about their work* by nature.
     /// </summary>
     public static bool IsGeneralTurn(QueryPlan plan, MeetingStore store)
@@ -81,7 +81,7 @@ public static class TurnRouter
         if (HasMeetingCue(plan.Original)) return false;
 
         // A clearly general-knowledge SHAPE (definition / how-to / creative / world fact) is parametric
-        // even when an incidental content word prefix-matches a meeting title — the probe below would
+        // even when an incidental content word prefix-matches a meeting title - the probe below would
         // otherwise wrongly ground "write me a haiku about mondays" on a "Monday standup".
         if (HasGeneralKnowledgeShape(plan.Original)) return true;
 

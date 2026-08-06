@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Toki.Tests;
 
-/// <summary>N7 — pointing a note bullet at the transcript line it came from. The governing rule:
+/// <summary>N7 - pointing a note bullet at the transcript line it came from. The governing rule:
 /// a link to the WRONG line is worse than no link, because it makes the note look like it's citing
 /// something it isn't. Silence beats a confident mistake.</summary>
 public sealed class EvidenceTests
@@ -95,7 +95,7 @@ public sealed class EvidenceTests
     [Fact]
     public void Greetings_never_win()
     {
-        // Line 0 and 6 are pure logistics — no real bullet should ever land on them.
+        // Line 0 and 6 are pure logistics - no real bullet should ever land on them.
         foreach (var bullet in new[]
                  {
                      "Launch blockers are brand tokens and the Make webhook",

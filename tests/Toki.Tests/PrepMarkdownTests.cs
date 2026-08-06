@@ -38,8 +38,8 @@ public sealed class PrepMarkdownTests
             new ActionItem { Text = "No owner here." },
         }));
 
-        Assert.Contains("- [ ] Priya — Confirm brand font + hex.", md);
-        Assert.Contains("- [x] Sid — Wire the webhook.", md);
+        Assert.Contains("- [ ] Priya - Confirm brand font + hex.", md);
+        Assert.Contains("- [x] Sid - Wire the webhook.", md);
         Assert.Contains("- [ ] No owner here.", md);   // no owner → no dangling em dash
 
         // And they survive as to-dos through the editor's own format.
@@ -90,7 +90,7 @@ public sealed class PrepMarkdownTests
             new[] { new ActionItem { Text = "Confirm hex.", Owner = "Priya" } },
             new[] { "Lock the ship date" }));
 
-        // What Edit shows is exactly what a save would write back — no drift on the first keystroke.
+        // What Edit shows is exactly what a save would write back - no drift on the first keystroke.
         Assert.Equal(md.TrimEnd('\n'), NoteMarkdown.Write(NoteMarkdown.Parse(md)));
     }
 }

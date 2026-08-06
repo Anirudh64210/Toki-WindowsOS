@@ -12,8 +12,8 @@ using Xunit;
 namespace Toki.Tests;
 
 /// <summary>Voice/text create-a-meeting: deterministic detection matrix + the confirm-before-create gate.
-/// No mic, no model, no network — the create is a recording fake (<see cref="CalendarCommand.CreateOverride"/>).</summary>
-[Collection("NotesQaSeams")]   // shares NotesQa's static seams — never parallel with the other brain tests
+/// No mic, no model, no network - the create is a recording fake (<see cref="CalendarCommand.CreateOverride"/>).</summary>
+[Collection("NotesQaSeams")]   // shares NotesQa's static seams - never parallel with the other brain tests
 public sealed class CalendarCommandTests : IDisposable
 {
     readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"toki-cal-{Guid.NewGuid():N}.db");
@@ -154,7 +154,7 @@ public sealed class CalendarCommandTests : IDisposable
 
         var a2 = await NotesQa.AskAsync("tomorrow at 3", ctx);
         Assert.Contains("yes", a2.Text);              // now a confirm prompt
-        Assert.Equal(0, _creates);                    // still not created — awaiting confirm
+        Assert.Equal(0, _creates);                    // still not created - awaiting confirm
 
         await NotesQa.AskAsync("yes", ctx);
         Assert.Equal(1, _creates);
@@ -168,7 +168,7 @@ public sealed class CalendarCommandTests : IDisposable
         var ctx = new ConversationContext();
         await NotesQa.AskAsync("schedule a call with Ana tomorrow at 3", ctx);   // confirm armed at 3pm
         var a2 = await NotesQa.AskAsync("actually make it 6 to 7pm tomorrow", ctx);
-        Assert.Equal(0, _creates);                                    // NOT created — still confirming
+        Assert.Equal(0, _creates);                                    // NOT created - still confirming
         Assert.NotNull(ctx.PendingCreate);
         Assert.Contains("yes", a2.Text);                             // re-confirm, not lost
         Assert.Equal(18, ctx.PendingCreate!.Start!.Value.ToLocalTime().Hour);

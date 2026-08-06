@@ -4,8 +4,8 @@
     <!-- ════════════════════════════════════════════════════════════════════════════
          THEMEABLE BRUSHES, with the DARK defaults below. The light/dark toggle
          (ThemeManager.Apply) REPLACES each brush in the application resources with a fresh
-         one — it does NOT mutate these in place (see ARCHITECTURE "replace the brush, don't
-         mutate it") — so only DynamicResource consumers recolour live; code-built UI that
+         one - it does NOT mutate these in place (see ARCHITECTURE "replace the brush, don't
+         mutate it") - so only DynamicResource consumers recolour live; code-built UI that
          captured a brush via FindResource must rebuild on ThemeChanged. ThemeManager.Palette
          is the single source of truth for the dark↔light values; add new colours there as a
          Color+brush pair, not only here.
@@ -44,7 +44,7 @@
     <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
     <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
-    <!-- Destructive action (Delete). A clean, professional crimson (Radix red 9) — reads as a
+    <!-- Destructive action (Delete). A clean, professional crimson (Radix red 9) - reads as a
          serious action, not the loud orange-coral it was. Subtle tint behind it. Constant across themes. -->
     <SolidColorBrush x:Key="Danger" Color="#E5484D"/>
     <SolidColorBrush x:Key="DangerTint" Color="#1AE5484D"/>
@@ -59,31 +59,48 @@
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Padding" Value="14,7"/>
+        <!-- The HIT TARGET is this padded, rounded box - never the glyphs inside it. Bumped from 14,7
+             (owner, 2026-08-06: the notch buttons were "impractical", you had to aim at the text).
+             MinHeight/MinWidth put a floor under it so even a one-character label ("▾") stays easy to
+             hit; the Border always has a Background, which is what makes the whole box hit-testable
+             rather than just the letters. -->
+        <Setter Property="Padding" Value="15,8"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="MinWidth" Value="34"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                            CornerRadius="13" Padding="{TemplateBinding Padding}">
-                        <!-- BlockLineHeight clamps the line box to the glyphs; the -1px nudge corrects the
-                             residual ~1px that Segoe UI Variable still sits low (measured against a true-
-                             centre reference line). Together the label lands optically centred. -->
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextBlock.LineStackingStrategy="BlockLineHeight"
-                                          TextBlock.LineHeight="{TemplateBinding FontSize}">
-                            <ContentPresenter.RenderTransform>
-                                <TranslateTransform Y="-1"/>
-                            </ContentPresenter.RenderTransform>
-                        </ContentPresenter>
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="13">
+                        <!-- A separate OVERLAY layer carries the hover, because the fill alone can't.
+                             Plenty of buttons here are deliberately Background="Transparent" (Later,
+                             Cancel, Disconnect, "Library ›"), and dimming the opacity of something
+                             transparent is invisible - so those buttons had no hover at all and read as
+                             bare text you had to aim at. The overlay draws the rounded box exactly where
+                             the button can be clicked. -->
+                        <Border x:Name="Hl" CornerRadius="13" Background="Transparent"
+                                Padding="{TemplateBinding Padding}">
+                            <!-- BlockLineHeight clamps the line box to the glyphs; the -1px nudge corrects the
+                                 residual ~1px that Segoe UI Variable still sits low (measured against a true-
+                                 centre reference line). Together the label lands optically centred. -->
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextBlock.LineStackingStrategy="BlockLineHeight"
+                                              TextBlock.LineHeight="{TemplateBinding FontSize}">
+                                <ContentPresenter.RenderTransform>
+                                    <TranslateTransform Y="-1"/>
+                                </ContentPresenter.RenderTransform>
+                            </ContentPresenter>
+                        </Border>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.88"/>
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.75"/>
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -110,13 +127,14 @@
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="11"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Padding" Value="13,8"/>
+        <Setter Property="MinHeight" Value="32"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextBlock.LineStackingStrategy="BlockLineHeight" TextBlock.LineHeight="{TemplateBinding FontSize}"/>
@@ -124,6 +142,38 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A full-width "row" that is a BUTTON: a settings line with a title, a sub-line and a chevron,
+         which opens something. Quiet at rest, a rounded box on hover - the whole row, so the box you
+         see is exactly the area you can click. Use this instead of a Border with mouse handlers; a real
+         Button gets keyboard/automation for free and can never be mistaken for decoration. -->
+    <Style x:Key="RowButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="12"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressOverlay}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -150,7 +200,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="GridSplitter">
                     <!-- No always-on divider line (the panels' own background difference is the boundary).
-                         A subtle grey seam appears only while you hover the grab strip to resize — never a
+                         A subtle grey seam appears only while you hover the grab strip to resize - never a
                          loud coloured line. -->
                     <Border Background="Transparent">
                         <Border x:Name="Seam" Width="1" HorizontalAlignment="Center"
@@ -196,20 +246,24 @@
         </Setter>
     </Style>
 
-    <!-- Small icon button (gear, back, copy, open, close) — crisp Fluent glyph that
+    <!-- Small icon button (gear, back, copy, open, close) - crisp Fluent glyph that
          floats until hovered, then lifts on a subtle rounded highlight (design style). -->
     <Style x:Key="IconButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
         <Setter Property="FontSize" Value="14"/>
-        <Setter Property="Width" Value="30"/>
-        <Setter Property="Height" Value="30"/>
+        <!-- 34px, not 30: a bare glyph is a small thing to aim at, and this is the size the hover
+             highlight reveals - so what you can hit is exactly what lights up. -->
+        <Setter Property="Width" Value="34"/>
+        <Setter Property="Height" Value="34"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8">
+                    <!-- Transparent, NOT unset: an unset Background is null, and a null-background Border
+                         is invisible to hit testing, which leaves only the glyph itself clickable. -->
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="10">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -226,7 +280,7 @@
         </Setter>
     </Style>
 
-    <!-- ══ Type ramp — a restrained set (premium products use ~6 sizes, not 18). Weight carries
+    <!-- ══ Type ramp - a restrained set (premium products use ~6 sizes, not 18). Weight carries
          hierarchy: Regular reads, SemiBold structures. Nothing below 9.5 (illegible = slop). ══ -->
 
     <!-- Section header / overline ("DECISIONS", "COMING UP", …): small, SemiBold (not heavy Bold), dim. -->
@@ -254,6 +308,46 @@
     <!-- Page headers, greeting, timer. -->
     <Style x:Key="Title" TargetType="TextBlock" BasedOn="{StaticResource Body}">
         <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- The BIG header at the top of a Library page ("Templates", "Settings"). One style, because when
+         each page picked its own size and weight they drifted: Templates was 22 Bold and Settings 22
+         SemiBold, which reads as a different typeface even though the family is identical.
+         SETTINGS is the reference (owner, 2026-08-06) - SemiBold, not Bold. Heavy weights are what made
+         the other pages look like a different font in the first place; SemiBold structures without
+         shouting, which is the rest of the type ramp's rule too. -->
+    <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+        <Setter Property="FontSize" Value="22"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- The line under a page header. Based on Body (not Dim) because Dim is declared further down and
+         StaticResource only ever looks BACKWARDS through a dictionary - referencing it from here throws
+         "Cannot find resource named 'Dim'" at parse time. -->
+    <Style x:Key="PageSubtitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
+    </Style>
+
+    <!-- A section heading WITHIN a page ("Appearance", "AI summaries", a template's name). -->
+    <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+        <Setter Property="FontSize" Value="14.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- The header of a NOTCH page ("Meetings", "Transcript", "Settings"). Smaller than a window page
+         title because the notch is 356px wide, but the same SemiBold weight - one voice, two scales.
+         The three notch headers were already identical by hand; this makes them stay that way. -->
+    <Style x:Key="PanelTitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+        <Setter Property="FontSize" Value="13.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- The title of an open note, in the Library's reading pane. -->
+    <Style x:Key="NoteTitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+        <Setter Property="FontSize" Value="22"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
@@ -321,7 +415,7 @@
     </Style>
 
     <!-- ══ Toki checkbox: rounded square, GREEN fill + a crisp centered tick when done ══
-         Redesigned: 18px box, r5; the tick is a fixed 12px path (NOT stretched — the old uniform
+         Redesigned: 18px box, r5; the tick is a fixed 12px path (NOT stretched - the old uniform
          stretch distorted it and clipped the caps); dark-on-green (Linear/Things look); check pops
          with a gentle spring. Green = done, freeing coral to mean only record/destructive. -->
     <Style x:Key="TokiCheck" TargetType="CheckBox">
@@ -372,7 +466,7 @@
     <!-- Prep-card variant: amber resting outline ("still open" = gentle time-urgency), same geometry. -->
     <Style x:Key="TokiCheckOpen" TargetType="CheckBox" BasedOn="{StaticResource TokiCheck}"/>
 
-    <!-- ══ Toggle switch — for Settings booleans (replaces the bare Win32 checkbox). Track fills
+    <!-- ══ Toggle switch - for Settings booleans (replaces the bare Win32 checkbox). Track fills
          green + thumb slides on. ══ -->
     <Style x:Key="TokiSwitch" TargetType="CheckBox">
         <Setter Property="Cursor" Value="Hand"/>

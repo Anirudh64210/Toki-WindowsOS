@@ -4,7 +4,7 @@ namespace Toki.Calendar;
 /// A tiny stale-while-revalidate cache over <see cref="CalendarService.UpcomingAsync"/>, shared by the
 /// Home "COMING UP" glance and the Calendar page so they never double-fetch. Reads <see cref="Snapshot"/>
 /// for an instant paint; <see cref="GetAsync"/> returns fresh data (coalescing concurrent callers into
-/// one request). Raises <see cref="Changed"/> after any refresh/create/delete/update — <b>possibly on a
+/// one request). Raises <see cref="Changed"/> after any refresh/create/delete/update - <b>possibly on a
 /// background thread, so subscribers must marshal to the UI dispatcher</b>. Returns seeded samples under
 /// <see cref="App.Headless"/> so the render harness never hits the network.
 /// </summary>
@@ -27,10 +27,10 @@ public sealed class UpcomingCache
     Task<IReadOnlyList<CalEvent>>? _inflight;
 
     /// <summary>Raised after the cache changes (refresh / create / delete / update). May fire off the
-    /// UI thread — marshal in the handler.</summary>
+    /// UI thread - marshal in the handler.</summary>
     public event Action? Changed;
 
-    /// <summary>The last-known events, or null if never fetched — for an instant, no-await first paint.</summary>
+    /// <summary>The last-known events, or null if never fetched - for an instant, no-await first paint.</summary>
     public IReadOnlyList<CalEvent>? Snapshot => _cache;
 
     /// <summary>Fresh events (soonest first). Serves the cache when it's within TTL, otherwise fetches
@@ -43,7 +43,7 @@ public sealed class UpcomingCache
         {
             var fresh = _cache is not null && DateTimeOffset.UtcNow - _fetchedUtc < Ttl;
             if (fresh && !force) return Task.FromResult(_cache!);
-            // The SHARED fetch never runs on one caller's token — a cancel-on-navigate from the
+            // The SHARED fetch never runs on one caller's token - a cancel-on-navigate from the
             // first caller would fail every coalesced waiter. Each caller instead abandons its
             // own WAIT via WaitAsync while the fetch runs to completion and still fills the cache.
             _inflight ??= FetchAsync();

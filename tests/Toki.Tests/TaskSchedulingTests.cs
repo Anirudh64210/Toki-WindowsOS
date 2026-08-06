@@ -7,7 +7,7 @@ using Xunit;
 namespace Toki.Tests;
 
 /// <summary>
-/// Due-date-aware task scoping — the fix for "what tasks do I have for this week" dumping every open
+/// Due-date-aware task scoping - the fix for "what tasks do I have for this week" dumping every open
 /// task. Two layers: (1) <see cref="TaskScheduling"/> pure-function unit tests (frozen clock, no DB),
 /// (2) end-to-end task answers through the <see cref="NotesQa.StoreOverride"/> seam.
 /// </summary>
@@ -75,8 +75,8 @@ public sealed class TaskSchedulingUnitTests
         var open = new List<OpenAction>
         {
             Task("Ship v2", "You", "next Friday"),        // Aug 14 → due next week
-            Task("Reply to vendor", "You", "last Monday"),// overdue — but NOT surfaced for a future window
-            Task("Book the venue", "You", null),          // undated — NOT surfaced for a future window
+            Task("Reply to vendor", "You", "last Monday"),// overdue - but NOT surfaced for a future window
+            Task("Book the venue", "You", null),          // undated - NOT surfaced for a future window
         };
         var b = TaskScheduling.Bucket(open, start, end, Now);
 
@@ -144,7 +144,7 @@ public sealed class DueWindowAnswerTests : IDisposable
             "Sprint planning",
             new ActionItem { Text = "Send the deck", Owner = "You", Due = weekStart.AddDays(4).ToString("MMMM d") }, // this week
             new ActionItem { Text = "Ship the big refactor", Owner = "You", Due = weekStart.AddDays(20).ToString("MMMM d") })); // 3 weeks out
-        // An OLD meeting with an open task — must NOT appear under "this week".
+        // An OLD meeting with an open task - must NOT appear under "this week".
         _store.Save(MeetingOn(now.AddDays(-40), "Ancient sync",
             new ActionItem { Text = "Some old backlog item", Owner = "You", Due = null }));
 

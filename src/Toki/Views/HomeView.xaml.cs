@@ -18,7 +18,7 @@ public partial class HomeView : UserControl
     public HomeView()
     {
         InitializeComponent();
-        RefreshGreeting();   // adaptive greeting — the actual user, not a hardcoded name
+        RefreshGreeting();   // adaptive greeting - the actual user, not a hardcoded name
         RefreshGoogle();
         // Keep the card in step if the connection or the events change elsewhere.
         // Subscribe on LOADED (not the ctor): this view is a cached singleton, and a
@@ -34,7 +34,7 @@ public partial class HomeView : UserControl
             CalendarService.Instance.ConnectionChanged -= OnCalendarChanged;
             UpcomingCache.Instance.Changed -= OnCalendarChanged;
         };
-        // Toki pops + blinks when Home is revealed (on hover) — alive, glad to see you.
+        // Toki pops + blinks when Home is revealed (on hover) - alive, glad to see you.
         IsVisibleChanged += (_, e) =>
         {
             if (!(bool)e.NewValue) return;
@@ -46,7 +46,7 @@ public partial class HomeView : UserControl
             RefreshGreeting();                    // pick up a name changed in the Library settings
             if (!App.Headless) RefreshGoogle();   // refresh events each time Home is shown
         };
-        _ready = true;   // construction finished — the notch may now be safely re-grown
+        _ready = true;   // construction finished - the notch may now be safely re-grown
     }
 
     // The greeting is a CACHED view's text; it must be re-read whenever Home is shown, or a name change

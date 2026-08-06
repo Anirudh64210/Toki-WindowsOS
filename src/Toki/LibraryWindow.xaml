@@ -8,7 +8,7 @@
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
         <Grid.ColumnDefinitions>
-            <!-- Nav sidebar is a FIXED rail (no drag-resizer) — Ask/Library/Templates don't need resizing. -->
+            <!-- Nav sidebar is a FIXED rail (no drag-resizer) - Ask/Library/Templates don't need resizing. -->
             <ColumnDefinition x:Name="SidebarCol" Width="204"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
@@ -16,7 +16,7 @@
         <!-- ═══════════ Sidebar: mascot · nav · back ═══════════ -->
         <Border Grid.Column="0" Background="{DynamicResource Surface}">
             <DockPanel Margin="18,20,14,16">
-                <!-- Toki mascot — click to play a fun reaction -->
+                <!-- Toki mascot - click to play a fun reaction -->
                 <Border DockPanel.Dock="Top" x:Name="MascotBtn" Background="Transparent" Cursor="Hand"
                         HorizontalAlignment="Left" Margin="4,0,0,20" ToolTip="Poke Toki"
                         MouseLeftButtonUp="OnMascotClick">
@@ -57,7 +57,7 @@
                             </StackPanel>
                         </Grid>
 
-                        <!-- Input bar — always docked at the bottom. -->
+                        <!-- Input bar - always docked at the bottom. -->
                         <Border DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
                                 Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="6,4" Cursor="IBeam">
@@ -91,14 +91,14 @@
 
                         <!-- Conversation scroll: the landing (greeting + suggestions) when empty; the Q&A thread once asked.
                              A floating "↓ Latest" pill (same as the notch AskView's JumpPill) appears when you've scrolled
-                             UP away from the newest message — click = smooth-scroll to the end + re-anchor. -->
+                             UP away from the newest message - click = smooth-scroll to the end + re-anchor. -->
                         <Grid>
                             <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
                                 <Grid>
-                                    <!-- Ask landing — the welcome (Luma-style: a confident hero, one identity
+                                    <!-- Ask landing - the welcome (Luma-style: a confident hero, one identity
                                          line, chips that invite action; soft pink depth from the mascot). -->
                                     <StackPanel x:Name="Landing" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="620" Margin="40,20">
-                                        <!-- Hero: the mascot on a soft radial pink glow — subtle depth, not decoration. -->
+                                        <!-- Hero: the mascot on a soft radial pink glow - subtle depth, not decoration. -->
                                         <Grid x:Name="LandingHero" HorizontalAlignment="Center" Margin="0,0,0,14">
                                             <Ellipse Width="240" Height="150" IsHitTestVisible="False">
                                                 <Ellipse.Fill>
@@ -143,7 +143,7 @@
                 <!-- ── Library (list + detail) ── -->
                 <Grid x:Name="LibraryPage" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
-                        <!-- Fixed note-list column — no drag-resizer (owner: remove the VS Code resizer). -->
+                        <!-- Fixed note-list column - no drag-resizer (owner: remove the VS Code resizer). -->
                         <ColumnDefinition x:Name="ListCol" Width="300"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
@@ -161,7 +161,9 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Library" Style="{StaticResource Body}" FontSize="18" FontWeight="Bold"/>
+                                <!-- Same SemiBold weight as the Settings/Templates headers (smaller, because
+                                     it sits in the narrow list column above the search box). -->
+                                <TextBlock Text="Library" Style="{StaticResource Body}" FontSize="18" FontWeight="SemiBold"/>
                                 <TextBlock x:Name="CountLabel" Style="{StaticResource Dim}" FontSize="10" Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -187,7 +189,7 @@
                                 <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks/Manual. -->
                                 <Button x:Name="SortBtn" Style="{StaticResource IconButton}"
                                         Margin="6,0,0,0" Content="&#xE8CB;" ToolTip="Sort &amp; filter" Click="OnSortMenu"/>
-                                <!-- Drag-to-reorder on/off — OFF by default so cards never move by accident. -->
+                                <!-- Drag-to-reorder on/off - OFF by default so cards never move by accident. -->
                                 <Button x:Name="DragToggle" Style="{StaticResource IconButton}"
                                         Margin="2,0,0,0" Click="OnToggleDrag"/>
                             </StackPanel>
@@ -204,7 +206,7 @@
                             BorderBrush="{DynamicResource Hairline}" BorderThickness="1,0,0,0">
                         <!-- ONE scroll fills the whole pane: the note (toolbar → title → body) is a single
                              RichTextBox, so its scrollbar runs the FULL height from the very top of the pane,
-                             like a normal app scroll — not starting below a pinned toolbar. Left/right padding
+                             like a normal app scroll - not starting below a pinned toolbar. Left/right padding
                              lives inside the RichTextBox so the scrollbar sits flush at the pane's right edge. -->
                         <ContentControl x:Name="DetailBody"
                                         HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
@@ -212,21 +214,23 @@
                 </Grid>
 
                 <!-- ── Templates ── -->
+                <!-- Left-aligned with the SAME padding as Settings: every page in this window starts at
+                     the same left edge, so switching tabs doesn't shift the text under you. (Templates
+                     was the one centred page.) -->
                 <ScrollViewer x:Name="TemplatesPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
-                              Padding="34,30,34,30" controls:SmoothScroll.Enabled="True">
-                    <StackPanel x:Name="TemplatesList" MaxWidth="640" HorizontalAlignment="Center"/>
+                              Padding="40,34,40,34" controls:SmoothScroll.Enabled="True">
+                    <StackPanel x:Name="TemplatesList" MaxWidth="640" HorizontalAlignment="Left"/>
                 </ScrollViewer>
 
-                <!-- ── Settings — THE home for preferences: name · appearance · AI summaries · calendar
+                <!-- ── Settings - THE home for preferences: name · appearance · AI summaries · calendar
                         · about. Dividers-not-boxes: hairlines separate the sections. ── -->
                 <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
                               Padding="40,34,40,34" controls:SmoothScroll.Enabled="True">
                     <StackPanel MaxWidth="560" HorizontalAlignment="Left">
-                        <TextBlock Text="Settings" Style="{StaticResource Body}" FontSize="22" FontWeight="SemiBold"
-                                   Margin="0,0,0,26"/>
+                        <TextBlock Text="Settings" Style="{StaticResource PageTitle}" Margin="0,0,0,26"/>
 
-                        <TextBlock Text="What should Toki call you?" Style="{StaticResource Body}"
-                                   FontSize="14.5" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"
+                                   Margin="0,0,0,12"/>
                         <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,0"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 Width="340" HorizontalAlignment="Left">
@@ -255,7 +259,7 @@
 
                         <!-- ── Appearance ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="Appearance" Style="{StaticResource Body}" FontSize="14.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/>
 
                         <Grid Margin="0,14,0,0">
                             <Grid.ColumnDefinitions>
@@ -299,12 +303,12 @@
 
                         <!-- ── AI summaries (the mode + BYO-API-key flow, moved whole from the notch) ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="AI summaries" Style="{StaticResource Body}" FontSize="14.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="AI summaries" Style="{StaticResource SectionTitle}"/>
                         <views:AiSummariesSection x:Name="AiSection"/>
 
                         <!-- ── Google Calendar ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="Google Calendar" Style="{StaticResource Body}" FontSize="14.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="Google Calendar" Style="{StaticResource SectionTitle}"/>
                         <TextBlock x:Name="LibGoogleStatus" Style="{StaticResource Dim}" FontSize="12"
                                    Margin="0,3,0,0" TextWrapping="Wrap"/>
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
@@ -317,7 +321,7 @@
 
                         <!-- ── About ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="About" Style="{StaticResource Body}" FontSize="14.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="About" Style="{StaticResource SectionTitle}"/>
                         <Border Margin="-8,8,-8,0" Padding="8,10" CornerRadius="10" Background="Transparent"
                                 Cursor="Hand" MouseEnter="OnLibAboutHover" MouseLeave="OnLibAboutUnhover"
                                 MouseLeftButtonUp="OnLibOpenSource">
@@ -327,7 +331,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                                    <TextBlock Text="Built with — open source &amp; licences" Style="{StaticResource BodyStrong}"/>
+                                    <TextBlock Text="Built with - open source &amp; licences" Style="{StaticResource BodyStrong}"/>
                                     <TextBlock Text="The open models and libraries that power Toki."
                                                Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>

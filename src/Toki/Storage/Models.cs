@@ -13,7 +13,7 @@ public sealed class ActionItem
     public bool Done { get; set; }
 }
 
-/// <summary>One template section of a note — a heading and its bullets (e.g. "Blockers", "Ideas",
+/// <summary>One template section of a note - a heading and its bullets (e.g. "Blockers", "Ideas",
 /// "Key concepts"). Which sections appear depends on the meeting's template (see NoteTemplates).</summary>
 public sealed class NoteSection
 {
@@ -24,7 +24,7 @@ public sealed class NoteSection
 /// <summary>The structured notes for a meeting. Summary + Action items are always the same shape;
 /// the middle <see cref="Sections"/> are TEMPLATE-driven (standup → Updates/Blockers, interview →
 /// Strengths/Concerns, …). Older/heuristic notes leave Sections empty and use the legacy
-/// <see cref="Decisions"/>/<see cref="Questions"/> lists — <see cref="EffectiveSections"/> unifies both.</summary>
+/// <see cref="Decisions"/>/<see cref="Questions"/> lists - <see cref="EffectiveSections"/> unifies both.</summary>
 public sealed class NoteSet
 {
     /// <summary>A concise, context-aware meeting title (LLM-written when available).</summary>
@@ -73,7 +73,7 @@ public sealed record MeetingSummary(
     long Id, MeetingKind Kind, string Title, string? App,
     DateTimeOffset StartedAt, int DurationMs, string Tldr, int OpenActions, int PeopleCount);
 
-/// <summary>An open action item with the source meeting's id, title and date — for due-date-aware
+/// <summary>An open action item with the source meeting's id, title and date - for due-date-aware
 /// task scoping (the meeting date is the reference for resolving a free-text due like "Friday").</summary>
 public sealed record OpenAction(
     long MeetingId, string MeetingTitle, DateTimeOffset MeetingAt, string Text, string? Owner, string? Due);

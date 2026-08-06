@@ -5,7 +5,7 @@ using TM = Toki.Llm.TaskScheduling.TimeMode;
 namespace Toki.Tests.Brain;
 
 /// <summary>
-/// Task-query golden set (taxonomy §3, Rule T) — the provenance-vs-due-date decision (the "August 2nd"
+/// Task-query golden set (taxonomy §3, Rule T) - the provenance-vs-due-date decision (the "August 2nd"
 /// fix) as a frozen-clock pure-function suite, plus task routing. NOW = Wed 2026-08-05.
 /// </summary>
 public sealed class TaskGoldenTests

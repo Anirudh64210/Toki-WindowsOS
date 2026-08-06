@@ -4,7 +4,7 @@ namespace Toki.Detection;
 
 /// <summary>
 /// Reads which apps are using the microphone *right now* from the Windows
-/// capability-access registry — no permission prompt, and it hands us the app's
+/// capability-access registry - no permission prompt, and it hands us the app's
 /// identity. An app is live on the mic when its LastUsedTimeStop == 0.
 ///
 /// Packaged apps sit directly under ...\ConsentStore\microphone\&lt;AUMID&gt;.

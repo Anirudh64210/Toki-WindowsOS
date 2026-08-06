@@ -9,9 +9,9 @@ using Toki.Theme;
 namespace Toki.Views;
 
 /// <summary>
-/// The notch Settings — UI/VISIBILITY settings only (owner decision, 2026-08-04): theme + ghost in
+/// The notch Settings - UI/VISIBILITY settings only (owner decision, 2026-08-04): theme + ghost in
 /// the header, the glassy-notch toggle, and a row that opens the Library's Settings page, where
-/// everything else (AI summaries + API key, calendar, name, about) now lives — see
+/// everything else (AI summaries + API key, calendar, name, about) now lives - see
 /// <see cref="AiSummariesSection"/> and LibraryWindow's SettingsPage.
 /// </summary>
 public partial class SettingsView : UserControl
@@ -73,7 +73,7 @@ public partial class SettingsView : UserControl
     }
 
     // A video camera, CROSSED OUT when Toki is hidden from recordings (ghost on, the default) and
-    // plain when it's visible — an immediate, obvious on/off, no colour change needed.
+    // plain when it's visible - an immediate, obvious on/off, no colour change needed.
     void UpdateRecordingIcon()
     {
         var hidden = !AppSettings.Current.ShowInRecordings;   // ghost on = not shown in recordings
@@ -97,23 +97,19 @@ public partial class SettingsView : UserControl
         box.Children.Add(strike);
         RecordToggle.Content = box;
         RecordToggle.ToolTip = hidden
-            ? "Hidden from screen recordings & sharing — tap to show Toki (to record a demo)"
-            : "VISIBLE in screen recordings & sharing — tap to hide Toki again";
+            ? "Hidden from screen recordings & sharing - tap to show Toki (to record a demo)"
+            : "VISIBLE in screen recordings & sharing - tap to hide Toki again";
     }
 
     // ── everything else lives in the Library's Settings page ──
 
-    void OnOpenLibrarySettings(object sender, MouseButtonEventArgs e)
+    // A real Button now (RowButton), so the hover box is the template's job - the hand-rolled
+    // MouseEnter/MouseLeave handlers that used to tint a Border are gone with it.
+    void OnOpenLibrarySettings(object sender, RoutedEventArgs e)
     {
         App.CloseOverlay();                       // recording-aware: a live session keeps its bar
         LibraryWindow.OpenHubPage("settings");
     }
-
-    void OnMoreHover(object sender, MouseEventArgs e)
-    { if (sender is Border b) b.SetResourceReference(Border.BackgroundProperty, "Chip"); }
-
-    void OnMoreUnhover(object sender, MouseEventArgs e)
-    { if (sender is Border b) b.Background = Brushes.Transparent; }
 
     void OnBack(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Home);
 }

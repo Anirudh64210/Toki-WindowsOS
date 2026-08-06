@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace Toki.Interop;
 
 /// <summary>
-/// Physical-RAM probe. Toki has two heavy models — the ~2.5GB notes LLM and the
+/// Physical-RAM probe. Toki has two heavy models - the ~2.5GB notes LLM and the
 /// ~630MB speech recognizer. On a machine with plenty of RAM they can both stay
 /// resident; on a small machine (the dev PC is 6GB) keeping both loaded starves
 /// transcription (native out-of-memory crash) and makes the whole PC clunky from

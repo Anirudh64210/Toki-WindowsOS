@@ -5,27 +5,28 @@ using Toki.Transcription;
 namespace Toki.Llm;
 
 /// <summary>
-/// Writes meeting notes with a local LLM — MAP-REDUCE and ADAPTIVE.
+/// Writes meeting notes with a local LLM - MAP-REDUCE and ADAPTIVE.
 ///
 /// Why map-reduce: the local model's context is only a few thousand tokens. A single
 /// pass over a 25-minute transcript overruns it, the call throws, and we fall back to
 /// the raw-first-lines heuristic (the "summary is just the opening sentences" bug). So
 /// instead we split the transcript at speaker/segment boundaries into context-safe
 /// windows, "map" each window to a compact factual digest, then "reduce" the digests
-/// into the final note. Summarising summaries never overflows — a 2-hour meeting works
+/// into the final note. Summarising summaries never overflows - a 2-hour meeting works
 /// as well as a 5-minute one.
 ///
 /// Why adaptive + honest: not every meeting has decisions, tasks, or goals. The reduce
 /// step judges the meeting's substance and emits ONLY the sections that genuinely apply
 /// (empty sections are dropped by the renderer). A casual or inconclusive meeting gets a
-/// one-line honest note — never corporate filler manufactured to look important. This is
+/// one-line honest note - never corporate filler manufactured to look important. This is
 /// the Granola/Fireflies principle: pick the shape that fits, don't force a template.
 /// </summary>
 public sealed class LlmNoteWriter
 {
     const string System =
         "You are a meeting-notes assistant. Respond in English only. Be concise, factual, and honest. "
-        + "Output ONLY what is asked — no preamble, no explanations, no markdown headings, no 'None'.";
+        + "Output ONLY what is asked - no preamble, no explanations, no markdown headings, no 'None'. "
+        + "Never use em dashes; write a plain hyphen, a comma, or a new sentence instead.";
 
     // A window that a chunk digest / final pass will report nothing for.
     const string NothingMarker = "NOTHING";
@@ -87,7 +88,7 @@ public sealed class LlmNoteWriter
             Sections = note.Sections,     // template middle sections (empty ones already dropped)
             Actions = note.Actions,       // empty → section dropped
         };
-        // The combined pass already produced the title in the SAME call — only fall back to a
+        // The combined pass already produced the title in the SAME call - only fall back to a
         // separate title generation (an extra ~round-trip) if it somehow didn't.
         result.Title = !string.IsNullOrWhiteSpace(note.Title) ? note.Title : await TitlePass(result.Tldr, ct);
         return result;
@@ -100,7 +101,7 @@ public sealed class LlmNoteWriter
             $"This is part {part} of {total} of a meeting transcript. In 2 to 5 short dash bullets, list ONLY the "
             + "concrete things in THIS part: topics discussed, any decisions (with the stated reason, if one was given), "
             + "any tasks/follow-ups (keeping the exact NAME of whoever the task was given to, and the due date, when "
-            + "stated), and important facts. The text is auto-transcribed speech — read past obvious mis-recognitions "
+            + "stated), and important facts. The text is auto-transcribed speech - read past obvious mis-recognitions "
             + "using context, but never invent or \"correct\" a name: keep names exactly as transcribed. Capture "
             + "real content even if the talk is informal, rambling, or in fragments. Cut filler, greetings, and "
             + "logistics. Do not editorialise.\n"
@@ -115,7 +116,7 @@ public sealed class LlmNoteWriter
     {
         var prompt =
             "Pick the single best note template for this meeting from the list below. "
-            + "Reply with ONLY the template name, exactly as written — nothing else.\n\n"
+            + "Reply with ONLY the template name, exactly as written - nothing else.\n\n"
             + NoteTemplates.Menu() + "\n\n"
             + (isDigests ? "Notes:\n" : "Transcript:\n") + source;
         return Pick(await TextPass(prompt, 12, ct));
@@ -138,26 +139,26 @@ public sealed class LlmNoteWriter
 
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
             $"{s.ToUpperInvariant()}\n- up to 5 tight bullets for \"{s}\". Every bullet must carry information a busy "
-            + "person needs — drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists."));
+            + "person needs - drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists."));
 
         var prompt =
             $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
-            + "TITLE\n3 to 6 words, specific and concise, like a calendar event — no quotes, no \"Meeting\" prefix.\n\n"
+            + "TITLE\n3 to 6 words, specific and concise, like a calendar event - no quotes, no \"Meeting\" prefix.\n\n"
             + "SUMMARY\n2 to 4 dense, plain-English sentences: what the meeting was about and what came of it. Capture "
             + "real content from informal or wandering talk, but cut ALL filler.\n\n"
             + sectionSpec + "\n\n"
             + "ACTION ITEMS\n"
             + "- concrete follow-up tasks only, one per line as: task | owner: name | due: when\n"
             + "  - owner = the EXACT name of the person the task was given to, as spoken (e.g. \"Priya\"). If the "
-            + "speaker took it on themselves, use owner: You. If no person is clearly named, DROP the owner field — never guess.\n"
+            + "speaker took it on themselves, use owner: You. If no person is clearly named, DROP the owner field - never guess.\n"
             + "  - drop the due field when no time was stated.\n"
             + "  Include this section ONLY if real tasks were actually agreed.\n\n"
             + "Hard rules: never invent points, tasks, or names that aren't clearly present. When you record a decision, "
-            + "pair it with the reason that was given for it (skip the reason if none was stated — never invent one). "
+            + "pair it with the reason that was given for it (skip the reason if none was stated - never invent one). "
             + "The text is auto-transcribed speech: read past obvious mis-recognitions using context, but keep names "
             + "exactly as transcribed. A short, honest note beats "
-            + $"a padded one — omit any section that doesn't apply. Reply with exactly {NothingMarker} ONLY if the ENTIRE "
+            + $"a padded one - omit any section that doesn't apply. Reply with exactly {NothingMarker} ONLY if the ENTIRE "
             + "thing is greetings, small talk, or connection checks with no real topic at all.\n\n"
             + $"{(contentIsDigests ? "Notes" : "Transcript")}:\n{content}";
 
@@ -183,7 +184,7 @@ public sealed class LlmNoteWriter
         public List<ActionItem> Actions { get; set; } = [];
     }
 
-    /// <summary>The ONE title sanitizer (first line, quote-strip, 8-word cap) — CleanTitle and
+    /// <summary>The ONE title sanitizer (first line, quote-strip, 8-word cap) - CleanTitle and
     /// TitlePass both funnel here so a future validation tweak can never land in one and not
     /// the other (the combined pass is primary and the fallback is rarely exercised, so a
     /// divergence would look fixed in review while never running in production).</summary>
@@ -197,7 +198,7 @@ public sealed class LlmNoteWriter
 
     static string? CleanTitle(string raw) => SanitizeTitle(raw);
 
-    // An honest, minimal note for a meeting where nothing substantive happened — the opposite of
+    // An honest, minimal note for a meeting where nothing substantive happened - the opposite of
     // padding nothing into a serious-looking paragraph.
     static NoteSet LowSubstanceNote() => new()
     {
@@ -205,7 +206,7 @@ public sealed class LlmNoteWriter
         Decisions = [],
         Actions = [],
         Questions = [],
-        // No Title → NoteExtractor.Title falls back to "<app> — <date>" (honest, not a fake headline).
+        // No Title → NoteExtractor.Title falls back to "<app> - <date>" (honest, not a fake headline).
     };
 
     // ── title ──
@@ -333,6 +334,11 @@ public sealed class LlmNoteWriter
             try { outp = (await _llm.CompleteAsync(System, user, maxTokens, ct)).Trim(); }
             catch (OperationCanceledException) { return null; }
             catch { return null; }
+            // Every line of every written note funnels through here, so this is the one place that has
+            // to turn the model's em dashes into plain hyphens (owner, 2026-08-06). Asking in the prompt
+            // is not enough on its own - a 4B model still slips one in, and the one it slips in is the
+            // one the user reads. IsEmptyMarker still recognises a bare "-", so nothing downstream breaks.
+            outp = GeneralChat.PlainDashes(outp);
             if (!TextValidator.IsDegenerate(outp)) return outp;
         }
         return null;

@@ -6,7 +6,7 @@ namespace Toki.Llm;
 /// <summary>
 /// App-level LLM notes: picks the local Qwen model (or a BYO API key, per
 /// settings) and produces an upgraded <see cref="NoteSet"/> from a transcript.
-/// Owns the heavy local model — loaded once, lazily, warmed at launch. Degrades
+/// Owns the heavy local model - loaded once, lazily, warmed at launch. Degrades
 /// to null (caller keeps the heuristic notes) whenever no model is available.
 /// </summary>
 public sealed class LlmService
@@ -40,10 +40,10 @@ public sealed class LlmService
                 : "no model name set";
             if (ModelManager.QwenInstalled)
             {
-                App.Log($"API notes unavailable: {why} — falling back to the on-device model");
+                App.Log($"API notes unavailable: {why} - falling back to the on-device model");
                 return EnsureLocal();
             }
-            App.Log($"API notes unavailable: {why} — keeping heuristic notes");
+            App.Log($"API notes unavailable: {why} - keeping heuristic notes");
             return null;
         }
         if (s.NotesMode == NotesMode.HeuristicOnly) return null;
@@ -54,7 +54,7 @@ public sealed class LlmService
     {
         if (_local is not null) return _local;
         if (_localFailed || !ModelManager.QwenInstalled) return null;
-        // On a small-RAM PC, free the ~630MB recognizer before loading the 2.5GB LLM —
+        // On a small-RAM PC, free the ~630MB recognizer before loading the 2.5GB LLM -
         // both resident is what crashes/pages the machine. The recognizer reloads for
         // the next meeting.
         if (App.LowMemoryMode) TranscriptionService.Instance.Release();
@@ -80,7 +80,7 @@ public sealed class LlmService
     }
 
     /// <summary>
-    /// Warm synchronously on the caller's thread — used by the gentle low-priority
+    /// Warm synchronously on the caller's thread - used by the gentle low-priority
     /// startup warmer so the model load inherits that below-normal priority instead
     /// of running on a normal-priority thread-pool thread.
     /// </summary>
@@ -139,7 +139,7 @@ public sealed class LlmService
             : NoteTemplates.All.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>True when a model is available to (re)write notes — WITHOUT loading it. (Calling
+    /// <summary>True when a model is available to (re)write notes - WITHOUT loading it. (Calling
     /// <see cref="Active"/> would synchronously load the 2.5 GB local model, freezing the caller;
     /// this only checks that a model COULD be used, and the load happens later, off-thread.)</summary>
     public bool CanWrite()

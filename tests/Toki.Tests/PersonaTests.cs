@@ -3,8 +3,8 @@ using Xunit;
 
 namespace Toki.Tests;
 
-/// <summary>Tier 0.6 — questions about TOKI ITSELF must get a warm canned reply, never retrieval
-/// ("why are you so rude?" was literally searched against the notes — screenshot bug #4). And real
+/// <summary>Tier 0.6 - questions about TOKI ITSELF must get a warm canned reply, never retrieval
+/// ("why are you so rude?" was literally searched against the notes - screenshot bug #4). And real
 /// notes questions that merely mention "you"/"screen"/"rude" must fall through.</summary>
 public sealed class PersonaTests
 {
@@ -63,7 +63,7 @@ public sealed class PersonaTests
     }
 
     // A complaint must never be answered from the notes ("no mention of rudeness in the meeting
-    // notes…") — the reply is an apology-shaped sentence, not a retrieval result.
+    // notes…") - the reply is an apology-shaped sentence, not a retrieval result.
     [Fact]
     public void RudenessComplaint_GetsAnApology_NotASearch()
     {

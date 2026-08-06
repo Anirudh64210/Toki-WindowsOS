@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Toki.Storage;
 
 /// <summary>
-/// Persists the "Ask Toki" conversations to a small JSON file in %APPDATA%\Toki\chats.json — so the
+/// Persists the "Ask Toki" conversations to a small JSON file in %APPDATA%\Toki\chats.json - so the
 /// history rail survives restarts (all local, no cloud). Deliberately tiny and forgiving: a corrupt or
 /// missing file just yields an empty history, never a crash.
 /// </summary>
@@ -60,7 +60,7 @@ public sealed class ChatStore
             var json = JsonSerializer.Serialize(
                 conversations.OrderByDescending(c => c.Updated).ToList(),
                 new JsonSerializerOptions { WriteIndented = false });
-            // Atomic swap — a crash mid-write must not wipe every past conversation.
+            // Atomic swap - a crash mid-write must not wipe every past conversation.
             var tmp = _path + ".tmp";
             File.WriteAllText(tmp, json);
             File.Move(tmp, _path, overwrite: true);

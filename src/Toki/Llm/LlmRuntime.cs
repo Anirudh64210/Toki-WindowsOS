@@ -3,11 +3,11 @@ using Microsoft.Win32;
 namespace Toki.Llm;
 
 /// <summary>
-/// Decides — ONCE, before any llama.cpp call — how to run the local model on THIS
+/// Decides - ONCE, before any llama.cpp call - how to run the local model on THIS
 /// machine: how many layers to put on the GPU and how big a context to allocate.
 ///
 /// Why this matters: enabling the Vulkan backend but offloading 0 layers is the
-/// worst case (llama.cpp shuffles every layer CPU↔GPU — hundreds of graph splits,
+/// worst case (llama.cpp shuffles every layer CPU↔GPU - hundreds of graph splits,
 /// painfully slow). So GPU and CPU must be an all-or-partial decision made up front:
 /// the Vulkan backend is loaded ONLY when we actually intend to offload.
 ///
@@ -36,7 +36,7 @@ public static class LlmRuntime
         }
 
         // Explicit user setting (Settings → GPU): -1 forces CPU, >0 forces that many
-        // layers, 0 means auto (the default) — decided from detected VRAM below.
+        // layers, 0 means auto (the default) - decided from detected VRAM below.
         var user = AppSettings.Current.GpuLayers;
         if (user < 0) { GpuLayers = 0; ContextSize = 4096; Reason = "user setting: CPU only"; return; }
         if (user > 0) { GpuLayers = user; ContextSize = 3072; Reason = $"user setting: {user} layers on GPU"; return; }

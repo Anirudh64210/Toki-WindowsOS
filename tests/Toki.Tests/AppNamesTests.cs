@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Toki.Tests;
 
-/// <summary>Friendly app names for the meeting prompt: "Slack is in a call. Record it?" — never the
+/// <summary>Friendly app names for the meeting prompt: "Slack is in a call. Record it?" - never the
 /// raw process identity ("Com.tinyspeck.slackdesktop" leaking into the prompt wrapped the text and
 /// clipped the notch: a real live bug).</summary>
 public sealed class AppNamesTests

@@ -8,7 +8,7 @@ namespace Toki.Storage;
 /// way.
 ///
 /// Sticky notes used to live in <c>%APPDATA%\Toki\prep-scratch.json</c>, keyed by calendar event id.
-/// This is the ONLY code that still reads that file — everything else now goes through
+/// This is the ONLY code that still reads that file - everything else now goes through
 /// <see cref="MeetingStore"/>, so there is exactly one place the legacy format is understood and one
 /// moment it matters.
 ///
@@ -47,7 +47,7 @@ public static class StickyMigration
         }
         catch (Exception ex)
         {
-            App.Log($"sticky migration failed (non-fatal — file left in place, retried next launch): {ex.Message}");
+            App.Log($"sticky migration failed (non-fatal - file left in place, retried next launch): {ex.Message}");
         }
     }
 

@@ -9,11 +9,11 @@ namespace Toki.Storage;
 public enum NoteBlockKind
 {
     Body,        // ordinary paragraph
-    Heading,     // "# "   — the biggest text size
-    Subheading,  // "## "  — the middle size
+    Heading,     // "# "   - the biggest text size
+    Subheading,  // "## "  - the middle size
     Bullet,      // "- "
     Numbered,    // "1. "
-    Todo,        // "- [ ] " / "- [x] " — a tickable checkbox
+    Todo,        // "- [ ] " / "- [x] " - a tickable checkbox
     Blank,       // an empty line: the user's own spacing, preserved verbatim
 }
 
@@ -25,13 +25,13 @@ public sealed record NoteBlock(NoteBlockKind Kind, string Text, bool Done = fals
 ///
 /// Markdown is the STORAGE FORMAT on purpose: Toki already mirrors every note as a real .md file in
 /// <c>%APPDATA%\Toki\Notes\</c>, so a hand-written note stays openable in Obsidian or any text editor
-/// instead of becoming a proprietary blob — that's the "all data local, and yours" promise, kept.
+/// instead of becoming a proprietary blob - that's the "all data local, and yours" promise, kept.
 /// It also gives us exactly the feature set the owner asked for and no more: sizes (#/##), checkboxes
 /// (- [ ]), lists, and blank-line spacing. There is deliberately NO font-family or colour syntax,
 /// because those aren't offered (owner, 2026-08-05: "nothing outside normal text… just size,
 /// templates, spacing, freedom").
 ///
-/// This type is PURE — no WPF — so the round-trip is unit-testable. <see cref="Views.NoteEditor"/>
+/// This type is PURE - no WPF - so the round-trip is unit-testable. <see cref="Views.NoteEditor"/>
 /// turns these blocks into a FlowDocument and back.
 /// </summary>
 public static class NoteMarkdown
@@ -71,10 +71,10 @@ public static class NoteMarkdown
         var t = (line ?? "").TrimStart();
         if (t.Length == 0) return false;
 
-        // To-do BEFORE bullet — "- [ ] x" is also a valid bullet, and the checkbox reading wins.
+        // To-do BEFORE bullet - "- [ ] x" is also a valid bullet, and the checkbox reading wins.
         if (TryTodo(t, out var todoText, out done)) { kind = NoteBlockKind.Todo; rest = todoText; return true; }
 
-        // "## " before "# " — the longer marker has to win.
+        // "## " before "# " - the longer marker has to win.
         if (t.StartsWith("## ", StringComparison.Ordinal)) { kind = NoteBlockKind.Subheading; rest = t[3..].Trim(); return true; }
         if (t.StartsWith("# ", StringComparison.Ordinal)) { kind = NoteBlockKind.Heading; rest = t[2..].Trim(); return true; }
 
@@ -101,7 +101,7 @@ public static class NoteMarkdown
             var text = (b.Text ?? "").Trim();
 
             // A marked block carries its marker in its KIND, so the text must not carry one too. Strip
-            // exactly ONE — the precise inverse of the one Parse consumes — so writing and reading are
+            // exactly ONE - the precise inverse of the one Parse consumes - so writing and reading are
             // a fixed point. Without this a bullet reading "- two" was written as "- - two" and grew
             // another dash on every save ("bullets are created by themselves").
             if (b.Kind is not (NoteBlockKind.Body or NoteBlockKind.Blank)
@@ -120,7 +120,7 @@ public static class NoteMarkdown
             sb.Append('\n');
         }
 
-        // One trailing newline at most — a note shouldn't grow blank lines every time it's saved.
+        // One trailing newline at most - a note shouldn't grow blank lines every time it's saved.
         return sb.ToString().TrimEnd('\n');
     }
 
@@ -135,7 +135,7 @@ public static class NoteMarkdown
     /// seven.
     ///
     /// The TAB is what makes this safe to strip: it's how WPF serialises a marker, and it is not
-    /// something a person types at the start of a note line. A "•" followed by a space is left alone —
+    /// something a person types at the start of a note line. A "•" followed by a space is left alone -
     /// that's someone writing a bullet by hand, and their text is not ours to edit.
     /// </summary>
     static string Heal(string text)
@@ -173,7 +173,7 @@ public static class NoteMarkdown
         return true;
     }
 
-    /// <summary>"1. thing" / "12) thing" — any leading integer, so renumbering is ours to decide.</summary>
+    /// <summary>"1. thing" / "12) thing" - any leading integer, so renumbering is ours to decide.</summary>
     static bool TryNumbered(string t, out string text)
     {
         text = "";
@@ -193,7 +193,7 @@ public static class NoteMarkdown
     /// an AI-written one.
     ///
     /// Summary and Action items are added here because a <see cref="Llm.NoteTemplate"/> only declares
-    /// the sections IN BETWEEN — the AI writer adds those two implicitly, so a hand-written note has to
+    /// the sections IN BETWEEN - the AI writer adds those two implicitly, so a hand-written note has to
     /// as well, or the two kinds of note wouldn't look like the same product.</summary>
     public static string TemplateSkeleton(Llm.NoteTemplate template)
     {

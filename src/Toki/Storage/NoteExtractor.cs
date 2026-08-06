@@ -5,7 +5,7 @@ using Toki.Transcription;
 namespace Toki.Storage;
 
 /// <summary>
-/// Deterministic, instant, always-available note extraction — the "notes floor"
+/// Deterministic, instant, always-available note extraction - the "notes floor"
 /// (brief §5). No model required. M6 layers LLM-written notes on top, but this
 /// always works and is what a low-spec machine or a missing model falls back to.
 /// </summary>
@@ -56,7 +56,7 @@ public static partial class NoteExtractor
         return notes;
     }
 
-    /// <summary>Title from the notes, heuristically (no separate LLM pass — lesson 9).</summary>
+    /// <summary>Title from the notes, heuristically (no separate LLM pass - lesson 9).</summary>
     public static string Title(NoteSet notes, string? app, DateTimeOffset when)
     {
         // Prefer a decision (a topic-y statement) over the TL;DR, which may open
@@ -71,7 +71,7 @@ public static partial class NoteExtractor
             return CapWords(candidate, 7);
 
         var name = string.IsNullOrWhiteSpace(app) ? "Note" : Pretty(app!);
-        return $"{name} — {when:MMM d}";
+        return $"{name} - {when:MMM d}";
     }
 
     // ---- helpers ----

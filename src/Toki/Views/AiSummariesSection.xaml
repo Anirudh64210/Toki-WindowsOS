@@ -3,10 +3,10 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- The AI-summaries block (mode + BYO-API-key flow), lifted whole from the notch SettingsView
          so it has ONE home: the Library's Settings page. All persistence goes through the same
-         AppSettings paths as before — nothing here writes settings.json directly. -->
+         AppSettings paths as before - nothing here writes settings.json directly. -->
     <StackPanel>
         <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"
-                   Text="On-device is free and private. Or bring your own API key — any provider, you pay them, not us."/>
+                   Text="On-device is free and private. Or bring your own API key - any provider, you pay them, not us."/>
         <!-- Mode selector. This lives in a WINDOW, not the notch, so it gets window-sized breathing room
              (owner 2026-08-05: "tight and ugly and close to each other"). The track is padded and the
              three segments carry their own side margins, so they never touch each other. -->
@@ -24,7 +24,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                     <TextBlock Text="Use graphics card" Style="{StaticResource BodyStrong}"/>
-                    <TextBlock Text="Automatic — faster when it fits. Off = processor only."
+                    <TextBlock Text="Automatic - faster when it fits. Off = processor only."
                                Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
                 <CheckBox x:Name="GpuToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"

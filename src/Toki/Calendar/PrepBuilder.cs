@@ -6,7 +6,7 @@ using Toki.Storage;
 namespace Toki.Calendar;
 
 /// <summary>The assembled content for a pre-meeting prep card. <see cref="LastTime"/> is null for a
-/// first-time meeting (an honest empty state — we never invent a "last time").</summary>
+/// first-time meeting (an honest empty state - we never invent a "last time").</summary>
 public sealed record PrepContent(
     CalEvent Event,
     MeetingRecord? LastTime,
@@ -17,7 +17,7 @@ public sealed record PrepContent(
 }
 
 /// <summary>
-/// Builds a prep card's content DETERMINISTICALLY — pure store reads + string parsing, no LLM, so it's
+/// Builds a prep card's content DETERMINISTICALLY - pure store reads + string parsing, no LLM, so it's
 /// instant and costs nothing on a low-memory machine. Matches a calendar event to a prior meeting by
 /// TITLE/topic similarity (attendee emails aren't stored in notes), and is honest when there's no
 /// confident match. Provider-neutral (takes a <see cref="CalEvent"/>).
@@ -42,7 +42,7 @@ public static class PrepBuilder
         }
         catch
         {
-            // A store hiccup must never break the card — degrade to the first-time layout.
+            // A store hiccup must never break the card - degrade to the first-time layout.
             return new PrepContent(e, null, Array.Empty<ActionItem>(), ParseAgenda(e.Description));
         }
     }
@@ -84,7 +84,7 @@ public static class PrepBuilder
         return "";
     }
 
-    /// <summary>"TODAY" / "YESTERDAY" / "N DAYS AGO" / "N WEEKS AGO" — for the LAST TIME header.</summary>
+    /// <summary>"TODAY" / "YESTERDAY" / "N DAYS AGO" / "N WEEKS AGO" - for the LAST TIME header.</summary>
     public static string AgoLabel(DateTimeOffset when)
     {
         var days = (int)(DateTimeOffset.Now.Date - when.Date).TotalDays;
@@ -101,7 +101,7 @@ public static class PrepBuilder
 
     /// <summary>
     /// The prep card AS AN EDITABLE NOTE. Pressing Edit on the card doesn't open a blank sheet beside
-    /// it — it hands you the card's own content as text you can carry on writing in (owner, 2026-08-05),
+    /// it - it hands you the card's own content as text you can carry on writing in (owner, 2026-08-05),
     /// so the still-open items arrive as real tick boxes and the agenda as real bullets.
     /// Deterministic, same as everything else on this card: no model, no network.
     /// </summary>
@@ -117,7 +117,7 @@ public static class PrepBuilder
             sb.Append("## Still open\n");
             foreach (var a in prep.StillOpen)
             {
-                var owner = string.IsNullOrWhiteSpace(a.Owner) ? "" : a.Owner + " — ";
+                var owner = string.IsNullOrWhiteSpace(a.Owner) ? "" : a.Owner + " - ";
                 sb.Append(a.Done ? "- [x] " : "- [ ] ").Append(owner).Append(a.Text).Append('\n');
             }
             sb.Append('\n');
@@ -130,7 +130,7 @@ public static class PrepBuilder
             sb.Append('\n');
         }
 
-        // Always end with somewhere to type — an editor that opens with the caret in a heading you
+        // Always end with somewhere to type - an editor that opens with the caret in a heading you
         // didn't write is an editor you have to tidy before you can use it.
         sb.Append("## My notes\n");
         return sb.ToString();

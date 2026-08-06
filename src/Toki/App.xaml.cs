@@ -21,7 +21,7 @@ public partial class App : Application
     /// <summary>Set by the pill: opens the Toki peek into the remembered page (click on the peek).</summary>
     public static Action? OpenPeek;
 
-    /// <summary>Raised (on the UI thread) when a transcript segment finalizes DURING recording — for the
+    /// <summary>Raised (on the UI thread) when a transcript segment finalizes DURING recording - for the
     /// live-transcript preview in the recording view. Real text now, not the old fake placeholder lines.</summary>
     public static event Action<TranscriptSegment>? LivePreview;
 
@@ -32,19 +32,19 @@ public partial class App : Application
     public static bool LastRecordingSilent { get; private set; }
 
     /// <summary>Raised when a finished summarize couldn't surface because the pill was forced
-    /// elsewhere — the pill retargets its remembered context so the loader never re-appears dead.</summary>
+    /// elsewhere - the pill retargets its remembered context so the loader never re-appears dead.</summary>
     public static event Action<PillState>? ResultMissed;
 
     /// <summary>
     /// True on a memory-constrained PC (&lt;8GB RAM). In this mode Toki keeps only ONE
     /// heavy model resident at a time (release the LLM before transcribing, release
-    /// the recognizer before writing notes) and never preloads the LLM — otherwise
+    /// the recognizer before writing notes) and never preloads the LLM - otherwise
     /// the 2.5GB LLM + 630MB recognizer starve transcription and page the whole PC.
     /// </summary>
     public static bool LowMemoryMode { get; private set; }
 
     /// <summary>True in the offscreen PNG render harness (--render). Views must not hit the
-    /// network or persist settings in this mode — it runs against the user's real settings file.</summary>
+    /// network or persist settings in this mode - it runs against the user's real settings file.</summary>
     public static bool Headless { get; private set; }
 
     /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
@@ -60,7 +60,7 @@ public partial class App : Application
     /// <summary>The meeting note the user is currently LOOKING AT in the Library (null if none / a manual
     /// note / the window is closed). Powers screen-aware Ask: "what were the action items?" resolves to
     /// THIS meeting when it's on screen. DERIVED live from the Library window's actual state (visible +
-    /// user-opened note) — the old set/clear-from-scattered-callsites version went stale: it was cleared
+    /// user-opened note) - the old set/clear-from-scattered-callsites version went stale: it was cleared
     /// on hide but never restored when the warm window re-showed its old content, and the startup
     /// pre-warm set it to a note nobody was looking at, so "this meeting" grounded on the WRONG meeting
     /// (screenshot-verified). A computed property can't go stale.</summary>
@@ -89,7 +89,7 @@ public partial class App : Application
         State.TryGo(PillState.ManualNote);
     }
 
-    /// <summary>Discard a meeting entirely — remove it from the Library (DB), its Markdown mirror, and
+    /// <summary>Discard a meeting entirely - remove it from the Library (DB), its Markdown mirror, and
     /// its recording folder. Used by the "Delete" choice on the Notes screen.</summary>
     public static void DiscardMeeting(MeetingRecord? m)
     {
@@ -138,7 +138,7 @@ public partial class App : Application
     public static System.Windows.Rect? PillRect() => (Current as App)?._pill?.ScreenDipRect();
 
     /// <summary>Re-write a saved meeting's notes in a SPECIFIC template (the manual override). Returns
-    /// false when there's no transcript or no model available. Heavy — runs the LLM on the transcript.</summary>
+    /// false when there's no transcript or no model available. Heavy - runs the LLM on the transcript.</summary>
     public static async Task<bool> RewriteNotesAsync(long meetingId, string templateName, System.Threading.CancellationToken ct = default)
     {
         var m = Store.Get(meetingId);
@@ -183,14 +183,14 @@ public partial class App : Application
 
         // How much RAM does this PC have? Toki's two heavy models (2.5GB LLM + 630MB
         // recognizer) don't both fit alongside a browser + meeting app on a small
-        // machine — keeping both resident crashes transcription and pages the PC.
+        // machine - keeping both resident crashes transcription and pages the PC.
         var (totalGB, availGB) = Interop.SystemMemory.Physical();
         LowMemoryMode = totalGB > 0 && totalGB < 8.0;
         Log($"system RAM {totalGB:F1}GB (avail {availGB:F1}GB) → {(LowMemoryMode ? "LOW-MEMORY mode: one model at a time, no LLM prewarm" : "normal mode")}");
 
         // Decide how to run the model on THIS machine (GPU layers + context) BEFORE
         // any LLamaSharp call. Load the Vulkan backend ONLY when we actually intend to
-        // offload — enabling it at 0 layers is the slowest possible path (see LlmRuntime).
+        // offload - enabling it at 0 layers is the slowest possible path (see LlmRuntime).
         Llm.LlmRuntime.Resolve();
         Log($"llm runtime: {Llm.LlmRuntime.Reason}");
         try
@@ -241,18 +241,18 @@ public partial class App : Application
 
         // One Toki only. A second launch signals the running instance to show itself (so
         // double-clicking a running Toki brings it up) and then exits. Names are per-user and the
-        // objects are ACL'd to this user — a local squatter can neither DoS startup nor drive the UI.
+        // objects are ACL'd to this user - a local squatter can neither DoS startup nor drive the UI.
         _singleInstance = Interop.SingleInstance.Acquire();
         if (!_singleInstance.IsPrimary)
         {
-            Log("another instance already running — signalled it to show, exiting");
+            Log("another instance already running - signalled it to show, exiting");
             Shutdown();
             return;
         }
         _singleInstance.ListenForShow(() => Dispatcher.BeginInvoke(() => State.ForceForDemo(PillState.Home)));
 
         _pill = new PillWindow(State);
-        // Ctrl+Alt+Space is PUSH-TO-TALK (hold to speak, release to answer) — see PushToTalkHook.
+        // Ctrl+Alt+Space is PUSH-TO-TALK (hold to speak, release to answer) - see PushToTalkHook.
         _ptt = new Interop.PushToTalkHook(
             onStart: () => Dispatcher.BeginInvoke(new Action(PttStart)),
             onStop: () => Dispatcher.BeginInvoke(new Action(PttStop)));
@@ -288,13 +288,13 @@ public partial class App : Application
         else if (!AppSettings.Current.OnboardingComplete)
         {
             // First run (or any install from before onboarding existed): greet + capture the name once,
-            // land in Home. Gating on the flag — not on whether a name exists — is what corrects a stale
+            // land in Home. Gating on the flag - not on whether a name exists - is what corrects a stale
             // stored name (a wrong "Sid") too: everyone sees onboarding exactly once.
             State.ForceForDemo(PillState.Onboarding);
         }
         else
         {
-            // Double-click launch: Toki peeks from the top edge (the character first) — click
+            // Double-click launch: Toki peeks from the top edge (the character first) - click
             // it to open Home. It's never the welcome panel dropped on you.
             State.TryGo(PillState.Collapsed);
         }
@@ -306,7 +306,7 @@ public partial class App : Application
             Dispatcher.BeginInvoke(() => LibraryWindow.ShowNewNote());
 
         // Pre-warm the Library window off-screen once the app has settled, so its first
-        // open is instant (no visible build) — a clean, fast handoff from the pill.
+        // open is instant (no visible build) - a clean, fast handoff from the pill.
         Dispatcher.BeginInvoke(new Action(() =>
         {
             try { LibraryWindow.Warm(); } catch (Exception ex) { Log($"library warm (non-fatal): {ex.Message}"); }
@@ -314,20 +314,20 @@ public partial class App : Application
 
         StartMeetingDetection();
 
-        // Watch the calendar and surface a prep card ~5 min before a meeting (never headless — it reads
+        // Watch the calendar and surface a prep card ~5 min before a meeting (never headless - it reads
         // the network via UpcomingCache).
         if (!Headless) Calendar.PrepWatcher.Instance.Start();
 
         // Warm both engines ahead of the first meeting so a stop never waits on model
-        // load (lesson 2) — but GENTLY. Toki must never make the rest of the PC feel
+        // load (lesson 2) - but GENTLY. Toki must never make the rest of the PC feel
         // clunky. See WarmEnginesGently.
         WarmEnginesGently();
     }
 
     /// <summary>
     /// Load the ASR + LLM models ahead of the first meeting without disrupting the PC.
-    /// The old path fired both heavy loads at once on normal-priority threads —
-    /// reading ~3GB from disk, building graphs and uploading to the GPU all together —
+    /// The old path fired both heavy loads at once on normal-priority threads -
+    /// reading ~3GB from disk, building graphs and uploading to the GPU all together -
     /// which made the mouse and desktop stutter on first launch of the day. Instead a
     /// single below-normal-priority background thread waits for the UI to settle, then
     /// loads the models one at a time. A finished meeting still never waits on a load,
@@ -355,7 +355,7 @@ public partial class App : Application
                         File.Delete(f);
             }
             catch (Exception ex) { Log($"voice temp cleanup (non-fatal): {ex.Message}"); }
-            // On a small-RAM PC we do NOT preload the 2.5GB LLM — that's what made the
+            // On a small-RAM PC we do NOT preload the 2.5GB LLM - that's what made the
             // machine clunky on first launch and starved transcription. It loads on
             // demand (one model at a time) when a meeting actually ends.
             if (LowMemoryMode) { Log("low-memory: skipping LLM prewarm (loads on demand)"); return; }
@@ -375,7 +375,7 @@ public partial class App : Application
     {
         _detector = new MeetingDetector
         {
-            // Only interrupt when Toki is idle — never over notes or a recording — and never
+            // Only interrupt when Toki is idle - never over notes or a recording - and never
             // over a fullscreen presentation/game (the prompt is DELAYED, not dropped: the
             // detector re-offers the meeting on the next poll after fullscreen ends).
             CanPrompt = () => State.Current is PillState.Hidden or PillState.Collapsed
@@ -389,7 +389,7 @@ public partial class App : Application
         _detector.MeetingEnded += () => Dispatcher.Invoke(() =>
         {
             // Key off the SESSION, not the pill state: the auto-stop is one-shot, and if it
-            // fired while the notch was on Ask (or hidden via Esc) a state check dropped it —
+            // fired while the notch was on Ask (or hidden via Esc) a state check dropped it -
             // leaving the mic recording invisibly forever. The session can't lie.
             if (_session is not null) StopRecording();
         });
@@ -402,14 +402,14 @@ public partial class App : Application
     public static void AcceptPrompt()
     {
         BeginRecording(CurrentApp);
-        // Auto-stop when the meeting app releases the mic — but only for a prompt we
+        // Auto-stop when the meeting app releases the mic - but only for a prompt we
         // detected. A manual start is stopped by the user, so it isn't armed here
         // (some apps drop the mic when you mute, which must NOT end a manual recording).
         if (CurrentApp is not null) _detector?.BeginRecording(CurrentApp);
         State.TryGo(PillState.RecordingBar);
     }
 
-    /// <summary>User dismissed the prompt — snooze that app for 10 minutes.</summary>
+    /// <summary>User dismissed the prompt - snooze that app for 10 minutes.</summary>
     public static void DismissPrompt()
     {
         if (CurrentApp is not null) _detector?.Snooze(CurrentApp);
@@ -456,14 +456,14 @@ public partial class App : Application
     /// PrepCard state is entered). The analog of <see cref="CurrentApp"/> for MeetingPrompt.</summary>
     public static Calendar.PrepContent? CurrentPrep { get; set; }
 
-    /// <summary>"Join and record": open the meeting link (if any) and start recording — the human-in-the-
+    /// <summary>"Join and record": open the meeting link (if any) and start recording - the human-in-the-
     /// loop moment (Hard Constraint #3). Same manual-start path as <see cref="StartQuickNote"/>. Note: the
     /// browser may not have joined the call yet, so the target resolves like any manual start (mic first;
     /// system loopback still captures "them" once the call is live).</summary>
     public static void JoinAndRecord()
     {
         // KEEP the prep card armed through the meeting. It used to be cleared here, back when the card
-        // was a one-shot prompt — which meant that during the very meeting it had been prepared for,
+        // was a one-shot prompt - which meant that during the very meeting it had been prepared for,
         // the recording page had no "Prep card" button and the notes you'd written were unreachable.
         var prep = CurrentPrep;
         if (prep?.Event.HasMeetLink == true) Views.CalendarRows.OpenUrl(prep.Event.MeetLink);
@@ -481,14 +481,14 @@ public partial class App : Application
         State.TryGo(PillState.Hidden);
     }
 
-    /// <summary>True while a recording is running. Derived from the SESSION, not the pill state —
+    /// <summary>True while a recording is running. Derived from the SESSION, not the pill state -
     /// the pill can be forced elsewhere (push-to-talk, Esc, Library) while the mic is still live,
     /// and a state-derived answer then let a second session silently overwrite the first.</summary>
     public static bool IsRecording => _session is not null;
 
     /// <summary>Close the notch from any generic dismiss path (Esc, ✕, auto-hide, the "close"
     /// command, tray toggle). A live recording never vanishes: with a session running the pill
-    /// returns to the recording bar instead of hiding — an invisibly-running mic is the one
+    /// returns to the recording bar instead of hiding - an invisibly-running mic is the one
     /// thing this product must never do.</summary>
     public static void CloseOverlay()
     {
@@ -497,7 +497,7 @@ public partial class App : Application
     }
 
     /// <summary>"Start taking notes" as an assistant command (voice or typed). Same manual-start path
-    /// as the Home button — the user explicitly asked, so this IS the human in the loop (constraint #3).
+    /// as the Home button - the user explicitly asked, so this IS the human in the loop (constraint #3).
     /// Forced state (not TryGo): the command can arrive from the Ask notch or with the Library open,
     /// where the pill may be in a state with no direct edge to RecordingBar.</summary>
     public static void StartRecordingFromCommand()
@@ -515,7 +515,7 @@ public partial class App : Application
     {
         var s = Llm.AppSettings.Current;
         if (mode == Llm.NotesMode.ApiKey && string.IsNullOrWhiteSpace(s.ApiKey))
-            return "There's no API key saved yet — add one in Settings, then I can switch.";
+            return "There's no API key saved yet - add one in Settings, then I can switch.";
         if (s.NotesMode == mode)
             return mode switch
             {
@@ -529,7 +529,7 @@ public partial class App : Application
         return mode switch
         {
             Llm.NotesMode.ApiKey => "Switched to your API model.",
-            Llm.NotesMode.HeuristicOnly => "Switched to the fast built-in notes — no AI model.",
+            Llm.NotesMode.HeuristicOnly => "Switched to the fast built-in notes - no AI model.",
             _ => "Switched to the on-device model.",
         };
     }
@@ -554,16 +554,16 @@ public partial class App : Application
         var s = Llm.AppSettings.Current;
         var wanted = !on;   // ghost ON == ShowInRecordings OFF
         if (s.ShowInRecordings == wanted && GhostDisabled == wanted)
-            return on ? "Ghost mode is already on — Toki stays out of screen captures." : "Ghost mode is already off — Toki shows in recordings.";
+            return on ? "Ghost mode is already on - Toki stays out of screen captures." : "Ghost mode is already off - Toki shows in recordings.";
         s.ShowInRecordings = wanted;
         s.Save();
         SetShowInRecordings(wanted);
-        return on ? "Ghost mode on — Toki is hidden from screen recordings and shares."
-                  : "Ghost mode off — Toki will show up in recordings.";
+        return on ? "Ghost mode on - Toki is hidden from screen recordings and shares."
+                  : "Ghost mode off - Toki will show up in recordings.";
     }
 
     /// <summary>Finish first-run onboarding: persist the chosen name (empty = keep the Windows-account
-    /// fallback) and the completed flag so it never runs again, then land in Home — where the greeting
+    /// fallback) and the completed flag so it never runs again, then land in Home - where the greeting
     /// immediately shows the name they just gave.</summary>
     public static void CompleteOnboarding(string name)
     {
@@ -581,7 +581,7 @@ public partial class App : Application
         _detector?.EndRecording();
 
         // Which sticky note was open during this meeting, if any. Captured HERE, before anything can
-        // clear CurrentPrep, and attached to the saved meeting further down — that link is the whole
+        // clear CurrentPrep, and attached to the saved meeting further down - that link is the whole
         // reason the note turns up inside the meeting's own note afterwards.
         var stickyId = CurrentPrep is { } endedPrep ? Store.StickyForEvent(endedPrep.Event.Id) : null;
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
@@ -591,8 +591,8 @@ public partial class App : Application
         // Wall-clock duration = stop − start (lesson 10), captured at stop time.
         var startedAt = State.RecordingStartedAt ?? DateTimeOffset.UtcNow;
         var durationMs = (int)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        // The FRIENDLY app name ("Slack", not "Com.tinyspeck.slackdesktop") — it labels the saved
-        // meeting and seeds the fallback title "<app> — <date>", both user-facing.
+        // The FRIENDLY app name ("Slack", not "Com.tinyspeck.slackdesktop") - it labels the saved
+        // meeting and seeds the fallback title "<app> - <date>", both user-facing.
         var rawApp = session?.Target?.DisplayName ?? CurrentApp?.DisplayName;
         var app = string.IsNullOrWhiteSpace(rawApp) ? rawApp : Detection.AppNames.Friendly(rawApp);
 
@@ -612,11 +612,11 @@ public partial class App : Application
             {
                 // Live transcription already did the work DURING the meeting → use it (the fast path,
                 // no multi-minute wait). Fall back to the whole-file pass only when live produced
-                // nothing — that pass is fast on true silence and correct if the live path glitched.
+                // nothing - that pass is fast on true silence and correct if the live path glitched.
                 if (live is { Count: > 0 })
                 {
                     transcript = live;
-                    Log($"using live transcript ({live.Count} segments) — no stop-time ASR");
+                    Log($"using live transcript ({live.Count} segments) - no stop-time ASR");
                 }
                 else if (folder.Length > 0)
                 {
@@ -627,15 +627,15 @@ public partial class App : Application
 
             // An accidental tap shouldn't become a hollow Library entry with a bogus summary.
             // A meeting has real content; a mis-click yields a handful of garbled words (e.g.
-            // "Met the t I mean"). Drop anything with too few words OR a very short duration —
-            // it's not a meeting. (Was: <3s AND <5 words — too weak; a 5-word tap slipped through.)
+            // "Met the t I mean"). Drop anything with too few words OR a very short duration -
+            // it's not a meeting. (Was: <3s AND <5 words - too weak; a 5-word tap slipped through.)
             var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
             var tooTrivial = transcript is { Count: > 0 } && (words < 12 || durationMs < 4000);
-            if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) — accidental tap");
+            if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) - accidental tap");
 
             // A discarded recording must not leave its audio behind: a silent/trivial take has
             // no Library entry, so its WAV folder would be invisible, unreachable, and retained
-            // forever. Only when the transcript RAN and said "nothing here" — a null transcript
+            // forever. Only when the transcript RAN and said "nothing here" - a null transcript
             // means the ASR model was missing or failed, and then the audio is the meeting's
             // only artifact and must be kept (the startup recovery sweep picks it up later).
             if (transcript is not null && (transcript.Count == 0 || tooTrivial) && folder.Length > 0)
@@ -665,14 +665,14 @@ public partial class App : Application
                     Store.Save(meeting);
                     MarkdownMirror.Write(meeting);
                     // Attach the sticky note that was open during it, so the meeting's note can offer
-                    // it. Only when something was actually written — an empty note attached to a
+                    // it. Only when something was actually written - an empty note attached to a
                     // meeting is a button that opens nothing.
                     if (stickyId is { } sid && Store.GetSticky(sid) is { Body.Length: > 0 })
                     {
                         Store.LinkStickyToMeeting(meeting.Id, sid);
                         Log($"sticky note {sid} attached to meeting {meeting.Id}");
                     }
-                    LibraryWindow.MarkDirty(); // a new meeting exists — refresh the Library on next open
+                    LibraryWindow.MarkDirty(); // a new meeting exists - refresh the Library on next open
                     Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
                 }
                 catch (Exception ex) { Log($"save meeting failed (non-fatal): {ex.Message}"); }
@@ -681,7 +681,7 @@ public partial class App : Application
 
             // Write the good AI notes BEFORE revealing the Notes screen, so the rough
             // heuristic draft (raw transcript lines) never flashes. The Summarizing
-            // animation stays up while this runs — the user waits once and sees the
+            // animation stays up while this runs - the user waits once and sees the
             // finished notes. Returns fast (heuristic kept) when there's no AI model;
             // a timeout guards a stuck generation so the pill can never hang. We're on
             // a background thread here, so blocking on the result is safe.
@@ -693,7 +693,7 @@ public partial class App : Application
                     // (Still bounded so a stuck generation can never hang the pill.)
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
                     // The TRANSCRIPT is the only input. The user's sticky note is deliberately not fed
-                    // in (owner, 2026-08-06) — it sits beside the summary, it doesn't shape it.
+                    // in (owner, 2026-08-06) - it sits beside the summary, it doesn't shape it.
                     var llmNotes = LlmService.Instance
                         .WriteNotesAsync(transcript, cts.Token)
                         .GetAwaiter().GetResult();
@@ -704,7 +704,7 @@ public partial class App : Application
                         meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
                         Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
                         MarkdownMirror.Write(meeting);
-                        LibraryWindow.MarkDirty(); // notes/title upgraded — refresh on next open
+                        LibraryWindow.MarkDirty(); // notes/title upgraded - refresh on next open
                         Log($"notes written by LLM for meeting {meeting.Id}");
                     }
                 }
@@ -731,11 +731,11 @@ public partial class App : Application
                     // The user forced the pill away mid-summarize (Esc, notch, Library). Never
                     // leave a dead Summarizing loader behind: retarget the remembered context so
                     // an edge-summon shows the result, and reveal it now only from neutral states
-                    // — a page the user deliberately navigated to is not stomped.
+                    // - a page the user deliberately navigated to is not stomped.
                     ResultMissed?.Invoke(target);
                     if (State.Current is PillState.Hidden or PillState.Summarizing or PillState.Collapsed)
                         State.ForceForDemo(target);
-                    else Log($"summarize result ready but pill busy ({State.Current}) — saved to Library");
+                    else Log($"summarize result ready but pill busy ({State.Current}) - saved to Library");
                 }
             });
         });
@@ -743,12 +743,12 @@ public partial class App : Application
 
     static void BeginRecording(DetectedApp? app)
     {
-        // Defense in depth: no code path may ever overwrite a live session — the old
+        // Defense in depth: no code path may ever overwrite a live session - the old
         // reference would keep capturing until process exit with no way to stop it,
         // and its meeting would be lost. Re-surface the existing recording instead.
         if (_session is not null)
         {
-            Log("begin recording refused — a session is already live");
+            Log("begin recording refused - a session is already live");
             State.ForceForDemo(PillState.RecordingBar);
             return;
         }
@@ -762,7 +762,7 @@ public partial class App : Application
             CurrentApp = app; // so the saved meeting is labelled with the right app
             var session = new RecordingSession(app);
             _session = session;
-            // Start capture off the UI thread too — device init can take ~100ms.
+            // Start capture off the UI thread too - device init can take ~100ms.
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
@@ -780,7 +780,7 @@ public partial class App : Application
 
     /// <summary>
     /// Best-effort meeting app when recording starts without an explicit target.
-    /// Picks the (non-denylisted) app currently holding the mic open — how Toki
+    /// Picks the (non-denylisted) app currently holding the mic open - how Toki
     /// still captures "them" when you mute yourself and hit record, or start a
     /// recording mid-call. Null = nobody else on the mic (a genuine solo note).
     /// </summary>
@@ -791,7 +791,7 @@ public partial class App : Application
             var app = MicUsageReader.GetActiveMicApps()
                 .FirstOrDefault(a => !MeetingDetector.IsDenylisted(a));
             if (app is not null) Log($"manual start: resolved meeting target '{app.DisplayName}'");
-            else Log("manual start: no meeting app on mic — recording mic only");
+            else Log("manual start: no meeting app on mic - recording mic only");
             return app;
         }
         catch (Exception ex) { Log($"resolve meeting target failed (mic-only): {ex.Message}"); return null; }
@@ -830,7 +830,7 @@ public partial class App : Application
         Current.Shutdown();
     }
 
-    /// <summary>True once the app is intentionally quitting — lets warm-and-hidden windows
+    /// <summary>True once the app is intentionally quitting - lets warm-and-hidden windows
     /// (e.g. the Library) actually close instead of cancelling-to-hide and blocking exit.</summary>
     public static bool Exiting { get; private set; }
 
@@ -839,10 +839,10 @@ public partial class App : Application
         Exiting = true;
         _detector?.Stop();
         Calendar.PrepWatcher.Instance.Stop();
-        // Quit mid-recording: finalize the WAVs and LEAVE the folder — it has no Library entry
+        // Quit mid-recording: finalize the WAVs and LEAVE the folder - it has no Library entry
         // yet, so the startup recovery sweep turns it into a saved meeting on next launch
         // instead of the audio silently vanishing.
-        if (_session is not null) Log($"quit during recording — audio kept at {_session.FolderPath}; recovered on next launch");
+        if (_session is not null) Log($"quit during recording - audio kept at {_session.FolderPath}; recovered on next launch");
         try { _session?.Stop(); } catch { /* best effort on shutdown */ }
         _ptt?.Dispose();
         _tray?.Dispose();
@@ -850,7 +850,7 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    /// <summary>Diagnostic log at %TEMP%\toki-m1.log — "it didn't show" is only diagnosable if we can see what happened.</summary>
+    /// <summary>Diagnostic log at %TEMP%\toki-m1.log - "it didn't show" is only diagnosable if we can see what happened.</summary>
     static bool _logSizeChecked;
     public static void Log(string message)
     {
@@ -875,17 +875,17 @@ public partial class App : Application
         // Ctrl+Alt+Space summons the small Toki peek (NOT the full welcome window) / tucks it back.
         // Toki-first, like the edge-summon: you get the character, then open a page from it.
         // Force-applied so the user can never get stuck. Tucking away never hides a live
-        // recording — that collapses to the recording bar instead (see CloseOverlay).
+        // recording - that collapses to the recording bar instead (see CloseOverlay).
         if (State.Current is PillState.Hidden) State.ForceForDemo(PillState.Collapsed);
         else CloseOverlay();
     }
 
     // ── push-to-talk on the notch: hold Ctrl+Alt+Space → Toki drops down and listens; release →
-    //    transcribe → answer, all on the notch. No always-on mic — the mic runs ONLY while held. ──
+    //    transcribe → answer, all on the notch. No always-on mic - the mic runs ONLY while held. ──
     bool _pttOn;
     Audio.MicCapture? _pttMic;
     string? _pttWav;
-    Task? _pttMicStart;   // the off-thread mic start — PttStop awaits it before stopping
+    Task? _pttMicStart;   // the off-thread mic start - PttStop awaits it before stopping
     Llm.ConversationContext? _notchCtx;   // the notch's session memory (multi-turn until it closes)
     long? _notchScreenId;                 // meeting on screen when the notch opened (pill Notes view)
 
@@ -919,7 +919,7 @@ public partial class App : Application
             _pttMic = mic;
             var wav = _pttWav;
             Views.AskView.Instance?.Listening();
-            // WASAPI device init takes ~100ms — off the UI thread (same reason BeginRecording
+            // WASAPI device init takes ~100ms - off the UI thread (same reason BeginRecording
             // does it). PttStop awaits this task so Stop can never race the still-starting mic.
             _pttMicStart = Task.Run(() =>
             {
@@ -930,7 +930,7 @@ public partial class App : Application
                     Dispatcher.BeginInvoke(() =>
                     {
                         if (ReferenceEquals(_pttMic, mic) || _pttMic is null)
-                            Views.AskView.Instance?.Failed("Couldn't reach the microphone — check Windows mic permissions.");
+                            Views.AskView.Instance?.Failed("Couldn't reach the microphone - check Windows mic permissions.");
                     });
                 }
             });
@@ -938,7 +938,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"ptt mic start failed: {ex.Message}");
-            Views.AskView.Instance?.Failed("Couldn't reach the microphone — check Windows mic permissions.");
+            Views.AskView.Instance?.Failed("Couldn't reach the microphone - check Windows mic permissions.");
         }
     }
 
@@ -952,7 +952,7 @@ public partial class App : Application
         try { if (starting is not null) await starting; } catch { }   // never stop a mic mid-start
         try { mic?.Stop(); } catch { }
         try { mic?.Dispose(); } catch { }
-        if (wav is null || !File.Exists(wav)) return;   // e.g. model missing — the Failed hint already shows
+        if (wav is null || !File.Exists(wav)) return;   // e.g. model missing - the Failed hint already shows
 
         Views.AskView.Instance?.Thinking();
         string? text;
@@ -960,19 +960,19 @@ public partial class App : Application
         catch (Exception ex)
         {
             // An unprotected throw here left the notch on "Thinking…" forever and the voice
-            // WAV on disk — fail visibly, clean up always.
+            // WAV on disk - fail visibly, clean up always.
             Log($"ptt transcribe failed: {ex.Message}");
-            Views.AskView.Instance?.Failed("Couldn't transcribe that — try again.");
+            Views.AskView.Instance?.Failed("Couldn't transcribe that - try again.");
             return;
         }
         finally { try { File.Delete(wav); } catch { } }
         if (string.IsNullOrWhiteSpace(text))
         {
-            // Empty capture (short/quiet speech) is COMMON — do NOT auto-reopen the mic here, or a run of
+            // Empty capture (short/quiet speech) is COMMON - do NOT auto-reopen the mic here, or a run of
             // empty captures becomes an endless "I didn't catch that" loop that never reaches an answer.
             // A calm dead-end: say it once, the user holds to try again. (Auto re-listen is reserved for a
-            // genuine misheard COMMAND — see HandleNotchText — which is rare and high-signal.)
-            Views.AskView.Instance?.Failed("I didn't catch that — hold Ctrl + Alt + Space and try again.");
+            // genuine misheard COMMAND - see HandleNotchText - which is rare and high-signal.)
+            Views.AskView.Instance?.Failed("I didn't catch that - hold Ctrl + Alt + Space and try again.");
             return;
         }
         await HandleNotchText(text!);
@@ -988,7 +988,7 @@ public partial class App : Application
 
         // A misheard COMMAND (the owner's "start reporting" for "start recording") shouldn't get a bad
         // Q&A answer: show a short clarification of what Toki heard, and let the user hold the key and say
-        // it again. We deliberately do NOT auto-reopen the mic — a second capture was grabbing the audio
+        // it again. We deliberately do NOT auto-reopen the mic - a second capture was grabbing the audio
         // device and starving the next push-to-talk, which read as "I didn't catch that" forever.
         if (Llm.CommandRouter.TryNearMiss(text) is string hint)
         { Views.AskView.Instance?.Failed(hint); return; }
@@ -1010,7 +1010,7 @@ public partial class App : Application
         {
             _notchCtx ??= new Llm.ConversationContext();
             // Screen-aware: the note open in the Library wins; else the notes the pill was showing
-            // when the notch opened. Both derived from real view state — never a stale cached id.
+            // when the notch opened. Both derived from real view state - never a stale cached id.
             var screenId = CurrentViewedMeeting?.Id ?? _notchScreenId;
             var ans = await Task.Run(() => Llm.NotesQa.AskStreamAsync(text,
                 srcs =>
@@ -1025,7 +1025,7 @@ public partial class App : Application
                     string s;
                     lock (gate) { acc.Append(tok); s = acc.ToString(); }
                     // Stop generating once we have a full sentence past the glance budget (or the model
-                    // flagged [MORE]) — so the notch NEVER overshoots then visibly cuts back.
+                    // flagged [MORE]) - so the notch NEVER overshoots then visibly cuts back.
                     if (!capped && NotchOverBudget(s)) { capped = true; try { cts.Cancel(); } catch { } }
                 },
                 cts.Token, _notchCtx, concise: true, screenMeetingId: screenId));
@@ -1035,7 +1035,7 @@ public partial class App : Application
             var (teaser, over) = Llm.NotesQa.NotchTrim(finalRaw);
             Views.AskView.Instance?.Final(teaser, capped || over, text);
         }
-        catch (Exception ex) { flusher.Stop(); Log($"notch answer failed: {ex.Message}"); Views.AskView.Instance?.Final("Something went wrong — try again."); }
+        catch (Exception ex) { flusher.Stop(); Log($"notch answer failed: {ex.Message}"); Views.AskView.Instance?.Final("Something went wrong - try again."); }
     }
 
     static string StripMore(string s) => s.Replace("[MORE]", "").Trim();   // Trim (not just TrimEnd): a leading newline from the model must never show as a blank first line
@@ -1052,19 +1052,19 @@ public partial class App : Application
     {
         switch (c)
         {
-            // "Take me to the library" means the LIBRARY LIST — not the hub's Ask landing (that was
+            // "Take me to the library" means the LIBRARY LIST - not the hub's Ask landing (that was
             // the wrong-page bug: ShowLibrary() defaults to the Ask page).
             case Llm.AppCommand.OpenLibrary:   Views.AskView.Instance?.Command("Opening your Library."); LibraryWindow.OpenHubPage("library"); break;
             case Llm.AppCommand.OpenAsk:       Views.AskView.Instance?.Command("Opening the assistant."); LibraryWindow.OpenHubPage("ask"); break;
             case Llm.AppCommand.OpenSettings:  State.ForceForDemo(PillState.Settings); break;
             case Llm.AppCommand.GoHome:        State.ForceForDemo(PillState.Home); break;
             case Llm.AppCommand.OpenTemplates: Views.AskView.Instance?.Command("Opening Templates."); LibraryWindow.OpenHubPage("templates"); break;
-            case Llm.AppCommand.NewNote:       Views.AskView.Instance?.Command("New note — go ahead."); LibraryWindow.ShowNewNote(); break;
-            case Llm.AppCommand.NewChat:       _notchCtx = new Llm.ConversationContext(); Views.AskView.Instance?.Command("Fresh start — ask away."); break;
+            case Llm.AppCommand.NewNote:       Views.AskView.Instance?.Command("New note - go ahead."); LibraryWindow.ShowNewNote(); break;
+            case Llm.AppCommand.NewChat:       _notchCtx = new Llm.ConversationContext(); Views.AskView.Instance?.Command("Fresh start - ask away."); break;
             case Llm.AppCommand.Close:         CloseOverlay(); break;
             case Llm.AppCommand.Help:          Views.AskView.Instance?.Help(); break;
             case Llm.AppCommand.StartRecording:
-                if (IsRecording) { Views.AskView.Instance?.Command("Already recording — the bar's up top."); break; }
+                if (IsRecording) { Views.AskView.Instance?.Command("Already recording - the bar's up top."); break; }
                 StartRecordingFromCommand();   // notch morphs straight into the recording bar
                 break;
             case Llm.AppCommand.UseApiModel:      Views.AskView.Instance?.Command(SwitchNotesMode(Llm.NotesMode.ApiKey)); break;
@@ -1103,8 +1103,8 @@ public partial class App : Application
         menu.Items.Add(Item("Demo: arm a prep card", () =>
         {
             CurrentPrep = Dev.PrepSamples.Matched();
-            State.ForceForDemo(PillState.Collapsed);   // land on the peek — hover it to open the card
-            Log("prep: demo card armed — hover the peek, or start recording and use the Prep card button");
+            State.ForceForDemo(PillState.Collapsed);   // land on the peek - hover it to open the card
+            Log("prep: demo card armed - hover the peek, or start recording and use the Prep card button");
         }));
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Library", () => LibraryWindow.ShowLibrary()));
@@ -1121,7 +1121,7 @@ public partial class App : Application
 
         var tray = new TaskbarIcon
         {
-            ToolTipText = "Toki — Ctrl+Alt+Space",
+            ToolTipText = "Toki - Ctrl+Alt+Space",
             ContextMenu = menu,
         };
         try { tray.IconSource = new BitmapImage(new Uri("pack://application:,,,/Assets/toki.ico")); }

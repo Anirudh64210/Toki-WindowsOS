@@ -13,15 +13,15 @@ public class ApiLlmTests
     [InlineData("https://openrouter.ai/api/v1", "https://openrouter.ai/api/v1/chat/completions")]
     [InlineData("  https://api.groq.com/openai/v1  ", "https://api.groq.com/openai/v1/chat/completions")]  // pasted whitespace
     [InlineData("https://localhost:8080", "https://localhost:8080/v1/chat/completions")]                    // local https proxy
-    [InlineData("http://localhost:11434", "http://localhost:11434/v1/chat/completions")]                    // Ollama — loopback http is safe (never leaves the PC)
+    [InlineData("http://localhost:11434", "http://localhost:11434/v1/chat/completions")]                    // Ollama - loopback http is safe (never leaves the PC)
     [InlineData("http://127.0.0.1:1234/v1", "http://127.0.0.1:1234/v1/chat/completions")]                   // LM Studio
     public void EndpointJoinsV1ExactlyOnce(string baseUrl, string expected)
         => Assert.Equal(expected, ApiLlm.TryBuildEndpoint(baseUrl)!.ToString());
 
     // The key is a credential: over the network it MUST be https. Plain http is allowed only on
-    // loopback (tested above); a remote http URL — where the key would travel in the clear — is rejected.
+    // loopback (tested above); a remote http URL - where the key would travel in the clear - is rejected.
     [Theory]
-    [InlineData("http://api.openai.com")]         // remote plaintext — never
+    [InlineData("http://api.openai.com")]         // remote plaintext - never
     [InlineData("ftp://api.openai.com")]
     [InlineData("api.openai.com")]                // no scheme
     [InlineData("not a url")]
@@ -60,7 +60,7 @@ public class ApiLlmTests
         => Assert.Equal(expected, ApiLlm.TryBuildModelsEndpoint(baseUrl)!.ToString());
 
     [Theory]
-    [InlineData("http://api.openai.com")]   // remote plaintext — never
+    [InlineData("http://api.openai.com")]   // remote plaintext - never
     [InlineData("api.openai.com")]           // no scheme
     [InlineData("")]
     [InlineData(null)]
@@ -84,7 +84,7 @@ public class ApiLlmTests
     [Fact]
     public async Task TestAsyncReportsBadConfigWithoutThrowingOrNetwork()
     {
-        // Misconfigured clients fail fast with a human message — no exception, no request.
+        // Misconfigured clients fail fast with a human message - no exception, no request.
         var (ok, msg) = await new ApiLlm("sk-x", "gpt-4o-mini", "http://api.openai.com").TestAsync();
         Assert.False(ok);
         Assert.Contains("https", msg);

@@ -10,7 +10,7 @@ namespace Toki.Storage;
 ///
 /// Why it exists: a small on-device model phrases things less elegantly than a cloud one, and users
 /// forgive that completely once they can check the source in one click. Toki already keeps the whole
-/// transcript, so this closes most of the perceived-quality gap for free — the competitors' loudest
+/// transcript, so this closes most of the perceived-quality gap for free - the competitors' loudest
 /// complaint is having no way to verify what the AI claims.
 ///
 /// Deterministic word overlap, no model, no embeddings. The floor matters more than the recall: a
@@ -19,7 +19,7 @@ namespace Toki.Storage;
 /// </summary>
 public static class Evidence
 {
-    /// <summary>How many consecutive transcript lines a single bullet may be matched against — a
+    /// <summary>How many consecutive transcript lines a single bullet may be matched against - a
     /// summarised point often spans a sentence that got split across two or three utterances.</summary>
     const int MaxWindow = 3;
 
@@ -91,7 +91,7 @@ public static class Evidence
         {
             var w = raw.Trim('\'', '’', '-', '*', '#').ToLowerInvariant();
             if (w.Length < 3 || Stop.Contains(w)) continue;
-            // Crude singular/plural fold so "blockers" matches "blocker" — cheap and safe enough for
+            // Crude singular/plural fold so "blockers" matches "blocker" - cheap and safe enough for
             // a relevance score (it never changes what the user sees, only which line is offered).
             if (w.Length > 4 && w.EndsWith("s") && !w.EndsWith("ss")) w = w[..^1];
             set.Add(w);

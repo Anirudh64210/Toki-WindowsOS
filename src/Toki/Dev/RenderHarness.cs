@@ -10,14 +10,14 @@ using Toki.Views;
 namespace Toki.Dev;
 
 /// <summary>
-/// Renders each view to a PNG via RenderTargetBitmap — captures the visual tree
+/// Renders each view to a PNG via RenderTargetBitmap - captures the visual tree
 /// directly, so it works even though the live overlay is a transparent (layered)
 /// window that plain screen-capture can't see. Run: <c>Toki.exe --render &lt;dir&gt;</c>.
 /// </summary>
 static class RenderHarness
 {
     // (state, width, capHeight). Height is MEASURED from the view's content (matching the runtime's
-    // content-tight auto-height) and capped — so these PNGs reflect what you actually see.
+    // content-tight auto-height) and capped - so these PNGs reflect what you actually see.
     static readonly (PillState State, double W, double Cap)[] Shots =
     [
         (PillState.MeetingPrompt, 288, 300),
@@ -42,17 +42,17 @@ static class RenderHarness
             var latest = new Storage.MeetingStore().List().FirstOrDefault(x => x.Kind == Storage.MeetingKind.Meeting);
             if (latest is not null) App.CurrentMeeting = new Storage.MeetingStore().Get(latest.Id);
         }
-        catch { /* no store yet — Notes renders its fallback */ }
+        catch { /* no store yet - Notes renders its fallback */ }
         foreach (var (state, w, cap) in Shots)
             Shot(dir, $"{state}", Build(state), w, cap);
 
-        // The meeting prompt with REAL raw app identities — proves the friendly-name mapping
+        // The meeting prompt with REAL raw app identities - proves the friendly-name mapping
         // ("Com.tinyspeck.slackdesktop" → "Slack") and that a long/wrapping prompt is fully visible
         // at its measured height (the regression shots for the cut-off-notch bug).
         var slack = new MeetingPromptView(); slack.Refresh("Com.tinyspeck.slackdesktop");
         Shot(dir, "MeetingPrompt-slack", slack, 288, 300);
 
-        // The Calendar create composer, opened with sample text — proves the parse-preview line renders.
+        // The Calendar create composer, opened with sample text - proves the parse-preview line renders.
         var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
         Shot(dir, "Calendar-composer", composer, 360, 520);
 
@@ -67,7 +67,7 @@ static class RenderHarness
         App.CurrentPrep = PrepSamples.FirstTime();
         Shot(dir, "PrepCard-firsttime", new PrepCardView(), 356, 360);
 
-        // The prep card WITH the scratchpad open (N3) — the "your notes" half of the card, which is
+        // The prep card WITH the scratchpad open (N3) - the "your notes" half of the card, which is
         // otherwise a one-line prompt until you click it.
         App.CurrentPrep = PrepSamples.Matched();
         var scratched = new PrepCardView();
@@ -78,7 +78,7 @@ static class RenderHarness
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
         Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
 
-        // The hand-written note editor (N1) showing its whole vocabulary at once — both text sizes,
+        // The hand-written note editor (N1) showing its whole vocabulary at once - both text sizes,
         // a ticked and an unticked to-do, a bulleted list and a numbered one. Built standalone with
         // sample text on purpose: this must never touch the real note store to render.
         var editor = new NoteEditor { MinHeight = 380 };
@@ -100,7 +100,7 @@ static class RenderHarness
         Shot(dir, "NoteEditor", editor, 520, 560);
 
         // First-run onboarding, all three steps. These are the only screens a user sees exactly once,
-        // so they're the hardest to capture by hand — and the first thing a design review wants.
+        // so they're the hardest to capture by hand - and the first thing a design review wants.
         string[] steps = ["1-name", "2-privacy", "3-allset"];
         for (var i = 0; i < steps.Length; i++)
         {
@@ -114,7 +114,7 @@ static class RenderHarness
     /// content-tight auto-height, capped).</summary>
     static void Shot(string dir, string name, UserControl view, double w, double cap)
     {
-        // Measure the view's real content height at this width, cap it — mirrors the runtime.
+        // Measure the view's real content height at this width, cap it - mirrors the runtime.
         view.Measure(new Size(w - 2, double.PositiveInfinity));
         var h = Math.Min(cap, Math.Ceiling(view.DesiredSize.Height) + 1);
         var pill = new Border

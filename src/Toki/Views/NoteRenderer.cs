@@ -13,7 +13,7 @@ namespace Toki.Views;
 /// Builds a meeting's notes (Summary / Key points / Action items / Transcript) into a
 /// panel, shared by the pill Notes view and the Library window. Clean, generous, consistent
 /// spacing so it reads calm. Section labels are colour-CODED by meaning (decisions green,
-/// actions blue, questions/risks purple — one accent per meaning, per design ⑤); everything
+/// actions blue, questions/risks purple - one accent per meaning, per design ⑤); everything
 /// else is quiet grey. Text is left-aligned (justify makes rivers in a narrow column).
 /// </summary>
 public static class NoteRenderer
@@ -23,7 +23,7 @@ public static class NoteRenderer
     static FontFamily Ui => (FontFamily)Res("UiFont");
 
     // A note is only useful if you can select + copy it. Every piece of note TEXT is a read-only,
-    // borderless, transparent TextBox — looks like plain text, but selectable with an I-beam cursor
+    // borderless, transparent TextBox - looks like plain text, but selectable with an I-beam cursor
     // and Ctrl+C. (Bulk copy is the Copy menu; this is for grabbing a line or a phrase.)
     static TextBox Sel(string text, double fs, Brush fg, TextAlignment align = TextAlignment.Left)
     {
@@ -73,7 +73,7 @@ public static class NoteRenderer
         if (m.Transcript.Count > 0)
         {
             SectionHeader(body, "TRANSCRIPT", spacious);
-            // Show a short PREVIEW (a few lines) — a full hour-long transcript shouldn't just lie
+            // Show a short PREVIEW (a few lines) - a full hour-long transcript shouldn't just lie
             // there. A "Show full transcript" button reveals the rest on demand (streamed in so it
             // never freezes the window). Most of the time the summary + tasks are all you want.
             var preview = Math.Min(3, m.Transcript.Count);
@@ -117,7 +117,7 @@ public static class NoteRenderer
         foreach (var r in list) body.Children.Add(r);
     }
 
-    // Section label — small uppercase, well spaced, COLOR-CODED by meaning (design ⑤): decisions green,
+    // Section label - small uppercase, well spaced, COLOR-CODED by meaning (design ⑤): decisions green,
     // actions blue, questions/risks purple; everything else quiet grey. Weight = SemiBold, never heavy.
     static void SectionHeader(Panel body, string title, bool spacious, bool first = false) =>
         body.Children.Add(new TextBlock
@@ -222,7 +222,7 @@ public static class NoteRenderer
             or "tbd" or "tba" or "unknown" or "unassigned" or "name" or "when");
     }
 
-    // Name/due chip — a bright accent chip (blue), not the old dim grey that vanished. These are
+    // Name/due chip - a bright accent chip (blue), not the old dim grey that vanished. These are
     // important labels, so they read clearly on both themes (accent brushes swap per theme).
     static Border Tag(string text) => new()
     {
@@ -242,7 +242,7 @@ public static class NoteRenderer
     // transcript and Ctrl+C copies all of it. (Separate TextBoxes only let you select within one.)
     // Checkboxes stay clickable inside the read-only document (FlowDocumentScrollViewer allows it).
     /// <param name="sticky">The meeting's own sticky note. Its BUTTON goes at the top, under the title;
-    /// the note itself opens after everything Toki wrote and BEFORE the transcript — the owner's layout:
+    /// the note itself opens after everything Toki wrote and BEFORE the transcript - the owner's layout:
     /// "it extends between the end of the summary and everything, and the transcript". Supplied by the
     /// Library (which owns storage); this renderer only positions it.</param>
     public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null,
@@ -261,25 +261,26 @@ public static class NoteRenderer
             doc.Blocks.Add(new BlockUIContainer(topBar) { Margin = new Thickness(0, 0, 0, 14) });
 
         // Title + date/time live at the TOP of the scroll (not a pinned header above it), so the note
-        // reads from the very top and the title scrolls WITH the body — and both are selectable as part
+        // reads from the very top and the title scrolls WITH the body - and both are selectable as part
         // of the one document (drag-select / Ctrl+C spans title → transcript).
         doc.Blocks.Add(new Paragraph(new Run(m.Title))
         {
-            FontSize = spacious ? 22 : 18, FontWeight = FontWeights.Bold, Foreground = B("Text"),
+            // SemiBold, matching every other title in the app - Bold was the odd one out.
+            FontSize = spacious ? 22 : 18, FontWeight = FontWeights.SemiBold, Foreground = B("Text"),
             Margin = new Thickness(0, 0, 0, 3),
         });
         var meta = MeetingMeta(m);
         if (!string.IsNullOrEmpty(meta))
             doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) });
 
-        // "My sticky note" — at the top, under the title, where the owner asked for it. The note it
+        // "My sticky note" - at the top, under the title, where the owner asked for it. The note it
         // opens is placed further down, after everything Toki wrote.
         if (sticky is not null)
             doc.Blocks.Add(new BlockUIContainer(sticky.ToggleButton) { Margin = new Thickness(0, 0, 0, spacious ? 18 : 14) });
 
         // ── N7: evidence links ──
         // Every bullet that can be traced to a transcript line gets a small "↳" that jumps there and
-        // highlights it. Bullets that CAN'T be traced get nothing — a link to the wrong line would make
+        // highlights it. Bullets that CAN'T be traced get nothing - a link to the wrong line would make
         // the note look like it's citing something it isn't. Computed here at render time rather than
         // stored, so it works on notes written before this existed and costs nothing on disk.
         RichTextBox? host = null;
@@ -294,7 +295,7 @@ public static class NoteRenderer
                 var rect = target.ContentStart.GetCharacterRect(LogicalDirection.Forward);
                 host.ScrollToVerticalOffset(Math.Max(0, host.VerticalOffset + rect.Top - 70));
 
-                // A brief tint, then back — enough to find the line with your eye, not a permanent mark.
+                // A brief tint, then back - enough to find the line with your eye, not a permanent mark.
                 target.Background = B("Chip");
                 var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
                 t.Tick += (_, _) => { t.Stop(); target.Background = Brushes.Transparent; };
@@ -306,7 +307,7 @@ public static class NoteRenderer
             else expandTranscript(Go);
         }
 
-        // The "↳" that jumps to the line this came from — or null when nothing matches well enough to
+        // The "↳" that jumps to the line this came from - or null when nothing matches well enough to
         // point at honestly. ONE builder, so a bullet and a to-do can never drift apart.
         Hyperlink? Link(string text)
         {
@@ -345,7 +346,7 @@ public static class NoteRenderer
         {
             doc.Blocks.Add(DocHeader("ACTION ITEMS"));
             // Action items get evidence links too (S7). A to-do is the single most useful line to be
-            // able to check — "who agreed to this, and when?" — and it was the one kind of line the
+            // able to check - "who agreed to this, and when?" - and it was the one kind of line the
             // first pass left unlinked.
             foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs, Link));
         }
@@ -377,7 +378,7 @@ public static class NoteRenderer
                 doc.Blocks.Add(holder);
 
                 var expanding = false;
-                // Shared by the button and by any evidence link that points past the preview — a link
+                // Shared by the button and by any evidence link that points past the preview - a link
                 // has to be able to fill the transcript in before it can scroll to its line.
                 void Expand(Action? done)
                 {
@@ -420,7 +421,7 @@ public static class NoteRenderer
             }
         }
 
-        // A READ-ONLY RichTextBox — not a FlowDocumentScrollViewer. This is the one WPF control
+        // A READ-ONLY RichTextBox - not a FlowDocumentScrollViewer. This is the one WPF control
         // whose selection is rock-solid: click anywhere and drag from the very top to the very
         // bottom and it highlights continuously across summary → bullets → to-dos → transcript;
         // Ctrl+A selects the whole note, Ctrl+C copies it. Read-only blocks editing, not selection.
@@ -434,13 +435,13 @@ public static class NoteRenderer
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Foreground = B("Text"), Cursor = Cursors.IBeam,
         };
-        // Never the Win32 right-click menu — we don't ship Windows chrome. Ctrl+C / the Copy button do the copying.
+        // Never the Win32 right-click menu - we don't ship Windows chrome. Ctrl+C / the Copy button do the copying.
         rtb.ContextMenuOpening += (_, e) => e.Handled = true;
         host = rtb;   // evidence links scroll THIS box (closed over above, assigned once it exists)
         return rtb;
     }
 
-    /// <summary>The plain text a full top-to-bottom select-all of the note document yields —
+    /// <summary>The plain text a full top-to-bottom select-all of the note document yields -
     /// the real artifact the copy feature must produce. Used by the Copy button and --copytest.</summary>
     public static string FullText(MeetingRecord m)
     {
@@ -451,7 +452,7 @@ public static class NoteRenderer
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>Duration · full date/time · app — the note's meta line, sitting under the title.</summary>
+    /// <summary>Duration · full date/time · app - the note's meta line, sitting under the title.</summary>
     static string MeetingMeta(MeetingRecord m) => TimeText.FullMeta(m);
 
     static Paragraph DocHeader(string title, bool first = false) =>
@@ -466,11 +467,11 @@ public static class NoteRenderer
         check.Unchecked += (_, _) => Toggle(a, false);
         p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.TextTop });
         p.Inlines.Add(new Run(a.Text) { Foreground = a.Done ? B("TextDim") : B("Text") });
-        // Owner / due are IMPORTANT labels — bright, bold, accent-coloured (person = blue, due = amber)
+        // Owner / due are IMPORTANT labels - bright, bold, accent-coloured (person = blue, due = amber)
         // so they stand out, with clear spacing. Kept as TEXT (not UI chips) so Copy still captures them.
         if (Meaningful(a.Owner)) p.Inlines.Add(new Run($"   ·   {a.Owner}") { Foreground = B("Blue"), FontWeight = FontWeights.SemiBold });
         if (Meaningful(a.Due)) p.Inlines.Add(new Run($"   ·   {a.Due}") { Foreground = B("Amber"), FontWeight = FontWeights.SemiBold });
-        // The task text alone is what's searched for in the transcript — the owner/due chips are Toki's
+        // The task text alone is what's searched for in the transcript - the owner/due chips are Toki's
         // formatting, not words anybody said, and feeding them in only dilutes the match.
         if (link?.Invoke(a.Text) is { } jump) p.Inlines.Add(jump);
         return p;
@@ -490,7 +491,7 @@ public static class NoteRenderer
         string.Join(Environment.NewLine, m.Transcript.Select(s =>
             $"{(s.Speaker == Speaker.You ? "You" : "Them")}: {s.Text}"));
 
-    /// <summary>Plain-text of the NOTES (title, summary, template sections, to-dos) for the Copy menu —
+    /// <summary>Plain-text of the NOTES (title, summary, template sections, to-dos) for the Copy menu -
     /// clean markdown-ish text the user can paste anywhere.</summary>
     public static string NotesText(MeetingRecord m)
     {

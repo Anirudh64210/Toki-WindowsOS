@@ -4,7 +4,7 @@
              xmlns:controls="clr-namespace:Toki.Controls">
     <!-- Expanded recording controls, Glass/Luma-compact: ONE header row (tiny Toki + pulsing coral
          dot + elapsed time · compact Stop on the right), a hairline divider, and the live transcript
-         line under it. The dot + timer ARE the recording cue — no separate "Recording" label, no
+         line under it. The dot + timer ARE the recording cue - no separate "Recording" label, no
          stacked full-width button, no dead vertical space. Click the header (or Toki) to collapse
          back to the out-of-the-way peek. -->
     <!-- The live line stays a single line (latest utterance) so the auto-height notch never jumps
@@ -29,7 +29,7 @@
                 <Button x:Name="PrepButton" Style="{StaticResource PillButton}" FontSize="11"
                         Padding="10,5" Margin="0,0,6,0" Visibility="Collapsed"
                         Content="Prep card" Click="OnPrep"
-                        ToolTip="Your prep notes for this meeting — jot things down while you talk"/>
+                        ToolTip="Your prep notes for this meeting - jot things down while you talk"/>
                 <Button Style="{StaticResource CoralButton}" FontSize="11" Padding="11,5"
                         Click="OnStop" ToolTip="Stop recording">
                     <StackPanel Orientation="Horizontal">
@@ -41,7 +41,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- Divider, not a box (design rule) — separates the controls from the live transcript. -->
+        <!-- Divider, not a box (design rule) - separates the controls from the live transcript. -->
         <Rectangle Height="1" Fill="{DynamicResource Hairline}" Margin="0,9,0,0"
                    SnapsToDevicePixels="True"/>
 

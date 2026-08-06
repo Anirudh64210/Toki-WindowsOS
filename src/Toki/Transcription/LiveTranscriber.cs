@@ -5,8 +5,8 @@ using NAudio.Wave.SampleProviders;
 namespace Toki.Transcription;
 
 /// <summary>
-/// INCREMENTAL (live) transcription. Instead of one whole-file Parakeet pass after Stop — which
-/// took ~10 minutes on a 25-minute meeting — this transcribes DURING the meeting: each capture
+/// INCREMENTAL (live) transcription. Instead of one whole-file Parakeet pass after Stop - which
+/// took ~10 minutes on a 25-minute meeting - this transcribes DURING the meeting: each capture
 /// stream is tapped, resampled to 16 kHz mono, and a single background worker decodes it in
 /// ~15-second windows (cut at quiet points, so never mid-word) as the audio arrives. By the time
 /// you hit Stop, almost everything is already transcribed; only the final short remainder is left.
@@ -16,7 +16,7 @@ namespace Toki.Transcription;
 /// stutters. Same slice-decode path as the whole-file decode, so transcript quality is identical.
 ///
 /// Fail-safe: this never touches the WASAPI capture logic (it only observes the buffers already
-/// being written to WAV), and if it produces nothing the caller falls back to the whole-file pass —
+/// being written to WAV), and if it produces nothing the caller falls back to the whole-file pass -
 /// so a meeting is never lost.
 /// </summary>
 public sealed class LiveTranscriber
@@ -39,7 +39,7 @@ public sealed class LiveTranscriber
     volatile bool _stop;
     bool _started;
 
-    /// <summary>Raised (on the worker thread) each time a window finalizes into segments — for live preview.</summary>
+    /// <summary>Raised (on the worker thread) each time a window finalizes into segments - for live preview.</summary>
     public event Action<TranscriptSegment>? SegmentFinalized;
 
     public LiveTranscriber(TranscriptionService service) => _service = service;
@@ -81,7 +81,7 @@ public sealed class LiveTranscriber
         // final flush below serializes behind it on the decode gate instead of mutating the
         // same pipes the worker is reading (which corrupted the transcript tail).
         if (_worker?.Join(TimeSpan.FromSeconds(30)) == false)
-            App.Log("live stop: worker busy past 30s — flush will wait on the decode gate");
+            App.Log("live stop: worker busy past 30s - flush will wait on the decode gate");
         // Final flush: whatever audio is still buffered gets one last decode per stream.
         foreach (var pipe in _pipes)
         {
@@ -108,7 +108,7 @@ public sealed class LiveTranscriber
         {
             var did = false;
             // Guarded: an escaping exception on a raw background thread would take down the
-            // whole PROCESS mid-meeting. Log, breathe, keep transcribing — the whole-file
+            // whole PROCESS mid-meeting. Log, breathe, keep transcribing - the whole-file
             // pass at stop still covers anything a bad window missed.
             try
             {
@@ -173,7 +173,7 @@ public sealed class LiveTranscriber
             _buffer = new BufferedWaveProvider(fmt)
             {
                 // Generous ceiling: the worker drains continuously (decode is faster than real-time), so
-                // this stays near-empty in real use — it only matters as a safety cap if the worker
+                // this stays near-empty in real use - it only matters as a safety cap if the worker
                 // briefly stalls. Env-tunable for stress tests.
                 BufferDuration = TimeSpan.FromSeconds(Env("TOKI_LIVE_BUFSEC", 120)),
                 DiscardOnBufferOverflow = true,   // never throw into the capture thread

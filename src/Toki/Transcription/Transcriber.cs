@@ -5,7 +5,7 @@ namespace Toki.Transcription;
 
 /// <summary>
 /// Whole-file transcription with Parakeet TDT via sherpa-onnx. The recognizer is
-/// heavy (~630MB of ONNX) — construct once and reuse. Each file gets a fresh
+/// heavy (~630MB of ONNX) - construct once and reuse. Each file gets a fresh
 /// stream (offline streams are one-shot); the recognizer carries no cross-file
 /// state, so there's no leaked state between meetings (lesson 5).
 /// </summary>
@@ -82,13 +82,13 @@ public sealed class Transcriber : IDisposable
     /// <summary>
     /// Public slice decode for LIVE incremental transcription: decode [start,end) of a buffer at a
     /// given meeting-time offset. Same one-shot-stream path the whole-file decode uses, so quality
-    /// is identical — the live path just hands it ~15s windows during the meeting instead of the
+    /// is identical - the live path just hands it ~15s windows during the meeting instead of the
     /// whole file at the end.
     /// </summary>
     public IReadOnlyList<TranscriptSegment> TranscribeSlice(float[] samples, int start, int end, double offsetSec, Speaker speaker) =>
         TranscribeWindow(samples, start, end, offsetSec, speaker);
 
-    /// <summary>Public quiet-point finder for the live windower — cut here to avoid slicing a word.</summary>
+    /// <summary>Public quiet-point finder for the live windower - cut here to avoid slicing a word.</summary>
     public static int FindQuietCut(float[] samples, int center, int radius) => QuietCut(samples, center, radius);
 
     /// <summary>Decode one slice [start,end) with a fresh stream; timestamps offset to meeting time.</summary>
@@ -106,7 +106,7 @@ public sealed class Transcriber : IDisposable
         return GroupIntoSegments(r.Tokens, r.Timestamps, r.Durations, offsetSec, speaker);
     }
 
-    /// <summary>Index of the quietest 25ms frame within ±radius of center — a safe place to cut.</summary>
+    /// <summary>Index of the quietest 25ms frame within ±radius of center - a safe place to cut.</summary>
     static int QuietCut(float[] samples, int center, int radius)
     {
         var lo = Math.Max(FrameSamples, center - radius);
@@ -148,7 +148,7 @@ public sealed class Transcriber : IDisposable
             // LEADING SPACE on the token (" Rashmi" = " R","as","h","m","i"); sub-word pieces
             // carry no leading space. Splitting on a time-gap alone would cut mid-word on
             // hesitant/pausey speech, shattering "Deepika" into "D / eep / ik / a".
-            // At a word boundary we break on the end of a sentence (". ? !") — always — OR on a
+            // At a word boundary we break on the end of a sentence (". ? !") - always - OR on a
             // real pause (>0.8s), but the pause break only fires once the line already has enough
             // words (MinWordsForPauseBreak). Otherwise a presenter pausing between words produces
             // one word per line (the real regression). So lines land per-utterance: not per-word,
@@ -172,7 +172,7 @@ public sealed class Transcriber : IDisposable
         return segments;
     }
 
-    /// <summary>True if this token begins a new word — marked by a leading space in this
+    /// <summary>True if this token begins a new word - marked by a leading space in this
     /// Parakeet build (" word"), or a ▁ marker in other SentencePiece builds.</summary>
     static bool StartsWord(string tok) =>
         tok.Length > 0 && (tok[0] == '▁' || char.IsWhiteSpace(tok[0]));

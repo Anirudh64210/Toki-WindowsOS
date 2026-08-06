@@ -40,7 +40,7 @@ public static class SafeShell
         return true;
     }
 
-    /// <summary>Reveal a file in Explorer — only when it resolves INSIDE one of the app's own data
+    /// <summary>Reveal a file in Explorer - only when it resolves INSIDE one of the app's own data
     /// directories (never an arbitrary path), so a poisoned DB row can't point Explorer elsewhere.</summary>
     public static bool RevealInExplorer(string? path, params string[] allowedRoots)
     {

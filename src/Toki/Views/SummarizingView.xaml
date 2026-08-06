@@ -8,7 +8,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <!-- Row 0 is EXACTLY the sliver height (13px): when tucked, only this row shows, so the
-                 sliver is a clean dark tab carrying just the shimmer — never a clipped slice of Toki. -->
+                 sliver is a clean dark tab carrying just the shimmer - never a clipped slice of Toki. -->
             <RowDefinition Height="13"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>

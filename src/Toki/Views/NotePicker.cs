@@ -7,7 +7,7 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// Toki's own dropdown — never a native Windows menu (the Library's sort menu learned that the hard way,
+/// Toki's own dropdown - never a native Windows menu (the Library's sort menu learned that the hard way,
 /// and Windows chrome on a notch that's meant to feel like one object is instantly wrong).
 ///
 /// Two things here are load-bearing, both paid for in bugs:

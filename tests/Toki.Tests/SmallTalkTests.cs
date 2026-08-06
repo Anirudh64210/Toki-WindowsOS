@@ -26,7 +26,7 @@ public sealed class SmallTalkTests
     public void Intercepts_small_talk(string input)
         => Assert.NotNull(SmallTalk.TryReply(input));
 
-    // Real questions — even ones containing a greeting word — must fall through to the notes Q&A (null).
+    // Real questions - even ones containing a greeting word - must fall through to the notes Q&A (null).
     [Theory]
     [InlineData("what did we decide in the standup")]
     [InlineData("good morning what's on my plate today")]
@@ -38,7 +38,7 @@ public sealed class SmallTalkTests
     public void Falls_through_real_questions(string input)
         => Assert.Null(SmallTalk.TryReply(input));
 
-    // ── P9.1: AFFECTION ("I love you, Toki") must get a warm canned reply, never notes retrieval —
+    // ── P9.1: AFFECTION ("I love you, Toki") must get a warm canned reply, never notes retrieval -
     //    the live run sent it to the notes engine, which INVENTED a grounded-sounding ramble. And the
     //    address must match the FUZZY wake-name (the ASR heard "Toky"). ──
     [Theory]

@@ -4,7 +4,7 @@
              xmlns:controls="clr-namespace:Toki.Controls">
     <DockPanel Margin="14,12,14,10">
         <!-- Header: the ONLY arrow (back) · title + scroll-synced subtitle · Today (appears when scrolled
-             away) · ＋ New. Week paging is gone — the agenda is one continuous scroll (the cache already
+             away) · ＋ New. Week paging is gone - the agenda is one continuous scroll (the cache already
              holds ~31 days), which removed the two week arrows and two rebuild triggers. -->
         <Grid DockPanel.Dock="Top">
             <Grid.ColumnDefinitions>
@@ -32,7 +32,7 @@
                 BorderBrush="{DynamicResource Hairline}" BorderThickness="0,1,0,0" Padding="0,12,0,2">
             <StackPanel>
                 <!-- Separate fields (owner: not everything crammed in one box): title, then day + time.
-                     Day/Time accept natural words ("tomorrow", "Friday", "2pm") — resolved live below. -->
+                     Day/Time accept natural words ("tomorrow", "Friday", "2pm") - resolved live below. -->
                 <TextBlock Text="Title" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
                 <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
                     <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="36"
@@ -103,7 +103,7 @@
                 <StackPanel x:Name="Days"/>
             </ScrollViewer>
 
-            <!-- Empty / loading / error / disconnected — one panel, populated in code -->
+            <!-- Empty / loading / error / disconnected - one panel, populated in code -->
             <StackPanel x:Name="StatePanel" VerticalAlignment="Center" HorizontalAlignment="Center"
                         Visibility="Collapsed" Margin="20,0"/>
 

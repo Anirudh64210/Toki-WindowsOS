@@ -12,7 +12,7 @@ namespace Toki.Views;
 /// so both read identically. Premium agenda language (owner's reference designs): a coloured accent
 /// bar per event, title + "time · place", overlapping attendee initials, an amber relative-time hint
 /// when imminent, and an obvious Join. Everything pulls colours/fonts from Theme.xaml by key, so a
-/// live theme swap recolours it (rows are rebuilt on ThemeChanged). No provider-specific types here —
+/// live theme swap recolours it (rows are rebuilt on ThemeChanged). No provider-specific types here -
 /// only <see cref="CalEvent"/>.
 /// </summary>
 static class CalendarRows
@@ -22,7 +22,7 @@ static class CalendarRows
     static FontFamily Icons => (FontFamily)Application.Current.Resources["IconFont"];
 
     // ── per-event accent bar + per-person avatar colours ──
-    // Deterministic (string.GetHashCode is randomised per process — never use it for a stable colour).
+    // Deterministic (string.GetHashCode is randomised per process - never use it for a stable colour).
     // Coral is deliberately absent: it means record/destructive only. Amber on events would collide
     // with the imminent treatment, so it's only in the person palette.
 
@@ -43,7 +43,7 @@ static class CalendarRows
         Width = 3, CornerRadius = new CornerRadius(1.5), Background = EventAccent(e), Margin = margin,
     };
 
-    // ── attendee avatars: overlapping initial circles (no photos on-device — initials are honest) ──
+    // ── attendee avatars: overlapping initial circles (no photos on-device - initials are honest) ──
 
     /// <summary>Up to <paramref name="max"/> overlapping initial circles + a "+N" bubble for the rest.</summary>
     public static FrameworkElement AvatarStack(IEnumerable<CalAttendee> people, double size = 16, int max = 3)
@@ -196,10 +196,10 @@ static class CalendarRows
         grid.Children.Add(right);
 
         // Hover reveals an inline action strip (Vercel/Wispr style) below the row. Indent 52 (the time
-        // gutter), NOT the title x — the full set of links must fit the page width.
+        // gutter), NOT the title x - the full set of links must fit the page width.
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
         if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
-        // Share: copy the JOINABLE Google Meet link — the only link worth sharing. (The calendar-page
+        // Share: copy the JOINABLE Google Meet link - the only link worth sharing. (The calendar-page
         // link is pointless to send someone; "Open in Google" below already covers viewing the event.)
         if (e.HasMeetLink && e.MeetLink is { Length: > 0 } meetUrl)
             strip.Children.Add(CopyLink(meetUrl));
@@ -266,7 +266,7 @@ static class CalendarRows
             { EasingFunction = growing ? Motion.EaseOut : Motion.EaseIn });
     }
 
-    // A text-link action (brightens on hover) — the strip's buttons.
+    // A text-link action (brightens on hover) - the strip's buttons.
     static FrameworkElement ActionLink(string label, bool danger, Action action)
     {
         var restKey = danger ? "Danger" : "TextDim";
@@ -400,13 +400,13 @@ static class CalendarRows
     {
         if (e.IsAllDay) return "All day";
         var s = e.StartLocal; var en = e.EndLocal;
-        // "9:41 – 10:11 AM" — drop the first meridiem when both sides share it.
+        // "9:41 – 10:11 AM" - drop the first meridiem when both sides share it.
         var sameMeridiem = (s.Hour < 12) == (en.Hour < 12);
         var startFmt = sameMeridiem ? "h:mm" : "h:mm tt";
         return $"{s.ToString(startFmt, CultureInfo.InvariantCulture)} – {en.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
     }
 
-    // Agenda sub-line: duration · place. (People are no longer words here — the avatar stack beside
+    // Agenda sub-line: duration · place. (People are no longer words here - the avatar stack beside
     // this text carries them; "Meet" as a venue would be redundant next to the Join button.)
     static string SubtitleText(CalEvent e)
     {
@@ -434,7 +434,7 @@ static class CalendarRows
         return $"in {(int)until.TotalDays} d";
     }
 
-    /// <summary>Starts within 15 minutes (and hasn't started) — gets the amber urgency treatment.</summary>
+    /// <summary>Starts within 15 minutes (and hasn't started) - gets the amber urgency treatment.</summary>
     public static bool Imminent(CalEvent e) => e.Until > TimeSpan.Zero && e.Until <= TimeSpan.FromMinutes(15);
 
     // ── shared helpers ──
@@ -454,11 +454,11 @@ static class CalendarRows
         return b;
     }
 
-    // Web links ONLY — calendar data (a conferenceData join link on any invite) is
+    // Web links ONLY - calendar data (a conferenceData join link on any invite) is
     // attacker-influenceable, so every open goes through the one shell choke point.
     public static void OpenUrl(string? url) => Toki.Interop.SafeShell.OpenUrl(url);
 
-    // Smooth opacity fade (Motion.Micro, ease-out) — hover reveals appear/vanish gently.
+    // Smooth opacity fade (Motion.Micro, ease-out) - hover reveals appear/vanish gently.
     static void Fade(UIElement el, double to) =>
         el.BeginAnimation(UIElement.OpacityProperty,
             new System.Windows.Media.Animation.DoubleAnimation(to, Motion.Dur(Motion.Micro))

@@ -6,7 +6,7 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// A tiny dropdown menu that belongs to the notch — a rounded dark card of buttons anchored under an
+/// A tiny dropdown menu that belongs to the notch - a rounded dark card of buttons anchored under an
 /// element. Registers with <see cref="NotchPopups"/> so the notch doesn't tuck/dismiss while it's open
 /// (the same treatment the model/provider dropdowns get). Reuses Theme.xaml tokens.
 /// </summary>
@@ -51,7 +51,7 @@ static class NotchMenu
         popup.IsOpen = true;
     }
 
-    // A flat button that lights up on hover — same idiom as IconButton, left-aligned text.
+    // A flat button that lights up on hover - same idiom as IconButton, left-aligned text.
     static ControlTemplate ItemTemplate()
     {
         var t = new ControlTemplate(typeof(Button));

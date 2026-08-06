@@ -38,7 +38,7 @@ public sealed class CommandRouterTests
     public void Strips_politeness_and_address(string input, AppCommand expected)
         => Assert.Equal(expected, CommandRouter.TryMatch(input));
 
-    // Natural-language variations of the same intent should all work — not just one hard-coded phrase.
+    // Natural-language variations of the same intent should all work - not just one hard-coded phrase.
     [Theory]
     [InlineData("pull up my library", AppCommand.OpenLibrary)]
     [InlineData("jump to the library", AppCommand.OpenLibrary)]
@@ -93,12 +93,12 @@ public sealed class CommandRouterTests
     public void New_commands_match(string input, AppCommand expected)
         => Assert.Equal(expected, CommandRouter.TryMatch(input));
 
-    // "start a note" is the TYPED manual note, not a recording — the two must not collide.
+    // "start a note" is the TYPED manual note, not a recording - the two must not collide.
     [Fact]
     public void StartANote_IsStillNewNote()
         => Assert.Equal(AppCommand.NewNote, CommandRouter.TryMatch("start a note"));
 
-    // The whole point: these are QUESTIONS that mention a command target — they must NOT fire an action.
+    // The whole point: these are QUESTIONS that mention a command target - they must NOT fire an action.
     [Theory]
     [InlineData("what did we decide in the settings review?")]
     [InlineData("what settings did we discuss")]
@@ -155,7 +155,7 @@ public sealed class CommandRouterTests
     public void Fuzzy_wake_name_and_articles_still_command(string input, AppCommand expected)
         => Assert.Equal(expected, CommandRouter.TryMatch(input));
 
-    // ── P9.1: the live-run command misses — model switch + note phrasings must be commands. ──
+    // ── P9.1: the live-run command misses - model switch + note phrasings must be commands. ──
     [Theory]
     [InlineData("switch to api key settings", AppCommand.UseApiModel)]
     [InlineData("can you switch to the api model", AppCommand.UseApiModel)]
@@ -170,7 +170,7 @@ public sealed class CommandRouterTests
         => Assert.Equal(expected, CommandRouter.TryMatch(input));
 
     // The question-shape veto must survive all of the above breadth: a genuine question about a
-    // command target — even wake-addressed — still falls through to the Q&A.
+    // command target - even wake-addressed - still falls through to the Q&A.
     [Theory]
     [InlineData("what did we decide about the library redesign?")]
     [InlineData("hey toki, what did we decide about the library redesign")]

@@ -5,7 +5,7 @@ using Toki.Transcription;
 namespace Toki.Storage;
 
 /// <summary>
-/// Writes each meeting to a plain Markdown file under %APPDATA%\Toki\Notes\ — a
+/// Writes each meeting to a plain Markdown file under %APPDATA%\Toki\Notes\ - a
 /// user-inspectable, sync-friendly copy of the notes (the research's "every
 /// meeting is a local file you own" principle). The DB is the source of truth;
 /// this is a mirror + export format.
@@ -21,13 +21,13 @@ public static class MarkdownMirror
         var path = Path.Combine(NotesDir, $"{Safe(m.Title)}-{m.Id}.md");
         // Containment guard: Safe() already strips path separators and traversal, but a title is
         // LLM/transcript-derived (attacker-influenceable), so assert the final path really is inside
-        // NotesDir before writing — a regression in Safe() becomes a caught error, not an arbitrary write.
+        // NotesDir before writing - a regression in Safe() becomes a caught error, not an arbitrary write.
         var full = Path.GetFullPath(path);
         var root = Path.GetFullPath(NotesDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"note path escaped the Notes directory: {full}");
         // The filename embeds the TITLE, and the LLM retitles the meeting after the first
-        // mirror write — drop any older mirror of this id first, or every retitle leaves a
+        // mirror write - drop any older mirror of this id first, or every retitle leaves a
         // stale duplicate .md (same id, old name) on disk forever.
         try
         {

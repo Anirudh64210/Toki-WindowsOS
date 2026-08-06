@@ -117,7 +117,7 @@ public sealed class SearchableDropdown : Border
             if (_searchBox.Visibility == Visibility.Visible)
                 Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => _search.Focus()));
         };
-        // When the popup closes (a pick, Esc, or a StaysOpen=false click-away), remember WHEN — so a
+        // When the popup closes (a pick, Esc, or a StaysOpen=false click-away), remember WHEN - so a
         // click that lands back on this pill row is read as "close", never as an immediate re-open.
         _popup.Closed += (_, _) => { NotchPopups.Unregister(_popup); _justClosedTick = Environment.TickCount64; };
     }
@@ -141,7 +141,7 @@ public sealed class SearchableDropdown : Border
     {
         if (_popup.IsOpen) { _popup.IsOpen = false; return; }
         // Clicking the pill while its popup is open first triggers StaysOpen=false to CLOSE the popup
-        // (on the mouse-down), THEN this mouse-up would re-open it — so it never seemed to close. If it
+        // (on the mouse-down), THEN this mouse-up would re-open it - so it never seemed to close. If it
         // only just closed, treat this click as the close and stay shut.
         if (Environment.TickCount64 - _justClosedTick < 250) return;
         if (_items.Count == 0) return;

@@ -22,9 +22,9 @@ public class MeetingDetectorTests
         DetectedApp? prompted = null;
         d.MeetingDetected += a => prompted = a;
 
-        d.PollOnce([Chrome]);          // 1st poll — not yet
+        d.PollOnce([Chrome]);          // 1st poll - not yet
         Assert.Null(prompted);
-        d.PollOnce([Chrome]);          // 2nd consecutive — now
+        d.PollOnce([Chrome]);          // 2nd consecutive - now
         Assert.Equal(Chrome, prompted);
     }
 
@@ -36,7 +36,7 @@ public class MeetingDetectorTests
         d.MeetingDetected += _ => count++;
 
         d.PollOnce([Chrome]);
-        d.PollOnce([]);        // gone — counter resets
+        d.PollOnce([]);        // gone - counter resets
         d.PollOnce([Chrome]);  // only 1 consecutive again
         Assert.Equal(0, count);
         d.PollOnce([Chrome]);  // 2 consecutive
@@ -63,7 +63,7 @@ public class MeetingDetectorTests
     }
 
     // The ongoing-meeting re-surface: after a real prompt is dismissed (→ Snooze), if the call is STILL
-    // going when the cooldown expires, the prompt re-appears ONCE more — it isn't silenced for the whole
+    // going when the cooldown expires, the prompt re-appears ONCE more - it isn't silenced for the whole
     // mic-session after a single "Not now".
     [Fact]
     public void PromptedThenDismissed_ReSurfacesAfterCooldown_IfStillOnMic()
@@ -123,7 +123,7 @@ public class MeetingDetectorTests
 
         d.PollOnce([]);         // absent 1
         d.PollOnce([]);         // absent 2
-        d.PollOnce([Chrome]);   // back — reset
+        d.PollOnce([Chrome]);   // back - reset
         d.PollOnce([]);
         d.PollOnce([]);
         Assert.Equal(0, ended);

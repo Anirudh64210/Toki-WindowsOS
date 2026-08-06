@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
     <!-- Minimal, no title bar: the mascot IS the identity; answers are plain text on the surface (no
-         chat-app bubbles). Content-sized — it never opens big. -->
+         chat-app bubbles). Content-sized - it never opens big. -->
     <DockPanel Margin="16,12,16,11" LastChildFill="True">
         <!-- Top: mascot (identity + live state) left; a tiny status word; a ghost close, right. -->
         <Grid DockPanel.Dock="Top">
@@ -21,7 +21,7 @@
                     FontSize="11" Opacity="0.45" VerticalAlignment="Top" ToolTip="Close" Click="OnClose"/>
         </Grid>
 
-        <!-- Live state strip (listening waveform / thinking loader / hint) — sits just under the mascot. -->
+        <!-- Live state strip (listening waveform / thinking loader / hint) - sits just under the mascot. -->
         <StackPanel x:Name="StatusStrip" DockPanel.Dock="Top" Margin="0,8,0,0">
             <Border x:Name="WaveHost" Height="24" HorizontalAlignment="Left" Margin="1,0,0,0"/>
             <Border x:Name="LoaderHost" Visibility="Collapsed" HorizontalAlignment="Left" Margin="1,0,0,0"/>

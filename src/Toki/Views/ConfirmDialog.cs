@@ -6,7 +6,7 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// A small, on-brand confirmation dialog — replaces the dated Win32 <see cref="MessageBox"/>. It's a
+/// A small, on-brand confirmation dialog - replaces the dated Win32 <see cref="MessageBox"/>. It's a
 /// borderless rounded window that follows the current theme (light or dark), with a title, a message,
 /// and Cancel / confirm buttons. Returns true only if the user confirms. Esc = cancel, Enter = confirm.
 /// </summary>

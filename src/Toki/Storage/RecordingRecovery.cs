@@ -5,7 +5,7 @@ namespace Toki.Storage;
 
 /// <summary>
 /// Startup sweep over %APPDATA%\Toki\Recordings: any folder no saved meeting references is an
-/// orphan — a crash or quit mid-recording (the WAVs survive thanks to periodic header flushes),
+/// orphan - a crash or quit mid-recording (the WAVs survive thanks to periodic header flushes),
 /// or an old discarded take from before cleanup existed. Real audio is RECOVERED into a saved
 /// meeting (transcribe → heuristic notes → Library), so a crash converts to "your meeting is
 /// still here" instead of silent data loss; tiny/silent leftovers are deleted so no invisible
@@ -16,7 +16,7 @@ public static class RecordingRecovery
     static string Root => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Toki", "Recordings");
 
-    /// <summary>Anything smaller is an accidental tap's worth of audio — not a meeting.</summary>
+    /// <summary>Anything smaller is an accidental tap's worth of audio - not a meeting.</summary>
     const long MinRecoverBytes = 100_000;
 
     public static void Sweep()
@@ -39,7 +39,7 @@ public static class RecordingRecovery
     {
         if (known.Contains(Path.GetFullPath(dir))) return;
 
-        // Never touch a folder that's still being written — an active recording's WAVs
+        // Never touch a folder that's still being written - an active recording's WAVs
         // update continuously, so a recent file write means live capture, not an orphan.
         var wavs = Directory.GetFiles(dir, "*.wav");
         if (wavs.Any(w => DateTime.UtcNow - File.GetLastWriteTimeUtc(w) < TimeSpan.FromMinutes(2)))
@@ -53,18 +53,18 @@ public static class RecordingRecovery
             return;
         }
 
-        // Real audio with no Library entry. Without the ASR model we can't judge it — keep it
+        // Real audio with no Library entry. Without the ASR model we can't judge it - keep it
         // for a later launch rather than ever deleting a meeting's only artifact.
         if (!TranscriptionService.ModelReady) return;
 
         App.Log($"recovery: transcribing orphaned recording {dir} ({bytes / 1024}KB)");
         var transcript = TranscriptionService.Instance.Process(dir);
         var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
-        if (transcript is null) return;                       // ASR error — keep the audio
+        if (transcript is null) return;                       // ASR error - keep the audio
         if (transcript.Count == 0 || words < 12)
         {
             Directory.Delete(dir, true);                      // genuinely nothing said
-            App.Log($"recovery: orphan {dir} was silent/trivial — deleted");
+            App.Log($"recovery: orphan {dir} was silent/trivial - deleted");
             return;
         }
 

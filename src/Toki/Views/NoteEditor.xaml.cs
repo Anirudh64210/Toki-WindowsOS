@@ -13,18 +13,18 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// The hand-written note editor — ONE control, reused by the Library's manual notes, the editable prep
+/// The hand-written note editor - ONE control, reused by the Library's manual notes, the editable prep
 /// card and the in-meeting sticky note (owner regroup, 2026-08-05).
 ///
 /// What it offers, and nothing more: three text SIZES, tickable TO-DOS, bullet and numbered LISTS,
 /// blank-line SPACING, and one-tap insertion of any of Toki's note TEMPLATES. There is deliberately no
-/// font-family and no colour — the owner ruled both out ("nothing outside normal text… just size,
+/// font-family and no colour - the owner ruled both out ("nothing outside normal text… just size,
 /// templates, spacing, freedom"), and leaving them out is also what keeps the Markdown mirror honest:
 /// everything on screen survives a round-trip to a plain .md file.
 ///
 /// ── Structure, and why it changed (2026-08-06) ──
 /// Every line is a FLAT <see cref="Paragraph"/> in <c>Document.Blocks</c>, carrying its
-/// <see cref="NoteBlockKind"/> and — for a bullet, number or to-do — a leading marker held in an
+/// <see cref="NoteBlockKind"/> and - for a bullet, number or to-do - a leading marker held in an
 /// <see cref="InlineUIContainer"/> that is NOT part of the text.
 ///
 /// The first version used WPF's native <see cref="List"/> for bullets and numbers, to get
@@ -33,7 +33,7 @@ namespace Toki.Views;
 ///   1. A paragraph inside a ListItem is not a child of Document.Blocks, so inserting the next line
 ///      after it threw, and the "Body" button could never lift a line back OUT of the list.
 ///   2. The list's marker was invisible to the text model, so a marker the user TYPED ("- ") stayed in
-///      the text and was written to Markdown on top of the one the kind already implies — "- - two",
+///      the text and was written to Markdown on top of the one the kind already implies - "- - two",
 ///      growing another dash on every save.
 ///   3. A blank line silently split one list into two, restarting the numbering.
 /// Flat paragraphs remove all three by construction: every line is addressable, every kind change is a
@@ -48,15 +48,15 @@ public partial class NoteEditor : UserControl
 {
     /// <summary>Width of the marker gutter. Text hangs past it, so a wrapped bullet lines up under
     /// itself instead of under its own dot. Wide enough for a tick box or "10." AND a clear gap after
-    /// it — at 21 the checkbox sat flush against the first letter.</summary>
+    /// it - at 21 the checkbox sat flush against the first letter.</summary>
     const double MarkerWidth = 26;
 
-    bool _loading;    // rebuilding from Markdown — the document is ours, not the user's
-    bool _mutating;   // our own structural edit — don't re-enter the text-changed repair
+    bool _loading;    // rebuilding from Markdown - the document is ours, not the user's
+    bool _mutating;   // our own structural edit - don't re-enter the text-changed repair
     bool _compact;
     public event EventHandler? Changed;
 
-    /// <summary>Compact toolbar for narrow hosts — the notch is 356px wide, where the full labelled
+    /// <summary>Compact toolbar for narrow hosts - the notch is 356px wide, where the full labelled
     /// toolbar wraps onto two rows and eats the card. Same capabilities, glyphs instead of words, with
     /// the three text sizes behind one "Aa" button.</summary>
     public bool Compact
@@ -131,6 +131,7 @@ public partial class NoteEditor : UserControl
     static void ApplyStyle(Paragraph p, NoteBlockKind kind)
     {
         p.ClearValue(Paragraph.TextIndentProperty);
+        p.ClearValue(Paragraph.LineHeightProperty);   // only Blank sets one; it must not survive a change
         p.FontWeight = FontWeights.Normal;
         switch (kind)
         {
@@ -143,10 +144,10 @@ public partial class NoteEditor : UserControl
             case NoteBlockKind.Blank:
                 // A blank line is a BEAT, not a full empty row. Headings already carry a top margin,
                 // so rendering the user's blank at full body height stacked into a chasm between
-                // sections. Small enough to read as breathing room; still preserved on save.
-                // LineHeight, not just FontSize — the document sets LineHeight=20, and that wins over
-                // font size unless the paragraph overrides it.
-                p.FontSize = 6; p.LineHeight = 9;
+                // sections. LineHeight alone does the shrinking (the document's LineHeight=20 wins
+                // otherwise). The FONT SIZE deliberately stays at body size: it used to be 6, and the
+                // first character typed into a blank line came out mosquito-sized.
+                p.FontSize = 13; p.LineHeight = 9;
                 break;
             case NoteBlockKind.Bullet:
             case NoteBlockKind.Numbered:
@@ -159,9 +160,19 @@ public partial class NoteEditor : UserControl
                 p.FontSize = 13; p.Margin = new Thickness(0);
                 break;
         }
+
+        // WPF stamps the CARET's formatting onto whatever you type, so a Run born inside a heading (or
+        // an old tiny blank line) carries its own explicit FontSize/FontWeight that then outranks the
+        // paragraph. Clear it: on this surface the LINE decides how its text looks, always.
+        foreach (var inline in p.Inlines)
+            if (inline is Run r)
+            {
+                r.ClearValue(TextElement.FontSizeProperty);
+                r.ClearValue(TextElement.FontWeightProperty);
+            }
     }
 
-    /// <summary>The leading marker for a kind — a real CheckBox for a to-do, a glyph for a list. Held in
+    /// <summary>The leading marker for a kind - a real CheckBox for a to-do, a glyph for a list. Held in
     /// an <see cref="InlineUIContainer"/> so it can never be read back as part of the line's TEXT, which
     /// is what let a typed "- " and the kind's own dash pile up on each other.</summary>
     InlineUIContainer? MakeMarker(NoteBlockKind kind, bool done)
@@ -171,7 +182,7 @@ public partial class NoteEditor : UserControl
         {
             case NoteBlockKind.Todo:
             {
-                // Not focusable, so typing and arrow keys flow straight past it into the text — the box
+                // Not focusable, so typing and arrow keys flow straight past it into the text - the box
                 // is for clicking, the line is for writing.
                 var box = new CheckBox
                 {
@@ -189,7 +200,7 @@ public partial class NoteEditor : UserControl
             default: return null;
         }
 
-        child.HorizontalAlignment = HorizontalAlignment.Left;   // glyph left, gap right — never flush to the text
+        child.HorizontalAlignment = HorizontalAlignment.Left;   // glyph left, gap right - never flush to the text
         var host = new Border { Width = MarkerWidth, Child = child, Background = Brushes.Transparent };
         return new InlineUIContainer(host) { BaselineAlignment = BaselineAlignment.Center, Tag = kind };
     }
@@ -219,10 +230,16 @@ public partial class NoteEditor : UserControl
         if (MarkerOf(p)?.Tag is NoteBlockKind marked) return marked;
         var tagged = p.Tag as NoteBlockKind?;
         if (tagged is NoteBlockKind.Bullet or NoteBlockKind.Numbered or NoteBlockKind.Todo) return NoteBlockKind.Body;
+
+        // A blank line someone has typed into is not blank any more. Without this it stayed tagged Blank,
+        // kept the short spacing line-height, AND - far worse - NoteMarkdown.Write emits nothing for a
+        // Blank block, so the sentence they just typed was thrown away on the next save.
+        if (tagged is NoteBlockKind.Blank && TextOf(p).Trim().Length > 0) return NoteBlockKind.Body;
+
         return tagged ?? NoteBlockKind.Body;
     }
 
-    /// <summary>The line's text — Runs only. Markers live in InlineUIContainers and are excluded by
+    /// <summary>The line's text - Runs only. Markers live in InlineUIContainers and are excluded by
     /// construction, so the text model never sees them.</summary>
     static string TextOf(Paragraph p)
     {
@@ -277,7 +294,7 @@ public partial class NoteEditor : UserControl
         Raise();
     }
 
-    /// <summary>Re-style any line whose look no longer matches what it is — a paragraph WPF created by
+    /// <summary>Re-style any line whose look no longer matches what it is - a paragraph WPF created by
     /// splitting or pasting, or one whose marker the user deleted.</summary>
     void Normalize()
     {
@@ -291,7 +308,7 @@ public partial class NoteEditor : UserControl
     }
 
     /// <summary>Typing "- ", "1. ", "# " or "[] " turns the line into the real thing and eats the
-    /// characters — which is both what every notes app does AND what stops the marker from surviving
+    /// characters - which is both what every notes app does AND what stops the marker from surviving
     /// into the text and being written twice.
     ///
     /// Only fires the instant the marker is COMPLETED (nothing typed after it yet). A pasted sentence
@@ -344,7 +361,7 @@ public partial class NoteEditor : UserControl
         Editor.CaretPosition = p.ContentEnd;
     }
 
-    /// <summary>Numbers are POSITIONAL, recomputed on every change — inserting or deleting an item can
+    /// <summary>Numbers are POSITIONAL, recomputed on every change - inserting or deleting an item can
     /// never leave "1. 2. 2. 5." behind. A run restarts at 1 after any line that isn't numbered.</summary>
     void Renumber()
     {
@@ -368,13 +385,13 @@ public partial class NoteEditor : UserControl
         else if (e.Key == Key.Back) e.Handled = HandleBackspace();
     }
 
-    /// <summary>Enter is ours, for every line kind — WPF's own split copies a paragraph's formatting but
+    /// <summary>Enter is ours, for every line kind - WPF's own split copies a paragraph's formatting but
     /// not its marker, which used to leave a "heading" that wasn't one and a bullet with no dot.
     /// Enter on a marked line makes the NEXT one; Enter on an EMPTY marked line ends the list instead.</summary>
     bool HandleReturn()
     {
         if (Editor.CaretPosition?.Paragraph is not { } p) return false;
-        if (p.Parent is not FlowDocument) return false;    // pasted nesting — let WPF handle it
+        if (p.Parent is not FlowDocument) return false;    // pasted nesting - let WPF handle it
         if (!Editor.Selection.IsEmpty) return false;       // replacing a selection is WPF's job
 
         var kind = DerivedKind(p);
@@ -411,15 +428,15 @@ public partial class NoteEditor : UserControl
     }
 
     /// <summary>Backspace at the very start of a marked line removes the marker instead of eating the
-    /// line before it — the standard way out of a list, and the one people reach for first.</summary>
+    /// line before it - the standard way out of a list, and the one people reach for first.</summary>
     bool HandleBackspace()
     {
         if (Editor.CaretPosition?.Paragraph is not { } p) return false;
         if (!Editor.Selection.IsEmpty) return false;
         if (DerivedKind(p) is not (NoteBlockKind.Bullet or NoteBlockKind.Numbered or NoteBlockKind.Todo)) return false;
         // "At the start" means nothing but the marker sits to the left. Comparing pointers directly is
-        // brittle — WPF hands back an equivalent-but-not-identical position depending on which way the
-        // caret arrived — so ask what TEXT is to the left instead.
+        // brittle - WPF hands back an equivalent-but-not-identical position depending on which way the
+        // caret arrived - so ask what TEXT is to the left instead.
         if ((new TextRange(p.ContentStart, Editor.CaretPosition).Text ?? "").Trim().Length != 0) return false;
 
         _mutating = true;
@@ -430,7 +447,7 @@ public partial class NoteEditor : UserControl
         return true;
     }
 
-    // The first position AFTER the marker — the caret must never land in the gutter, or a split would
+    // The first position AFTER the marker - the caret must never land in the gutter, or a split would
     // carry the marker into the tail text.
     static TextPointer AfterMarker(Paragraph p, TextPointer caret) =>
         MarkerOf(p) is { } m && caret.CompareTo(m.ElementEnd) < 0 ? m.ElementEnd : caret;
@@ -465,7 +482,7 @@ public partial class NoteEditor : UserControl
         Toolbar.Children.Add(Chip("Template", "Insert the sections of one of Toki's note shapes", ShowTemplates));
     }
 
-    /// <summary>Compact mode's size picker — the three sizes behind one "Aa" button.</summary>
+    /// <summary>Compact mode's size picker - the three sizes behind one "Aa" button.</summary>
     void ShowSizes() => ShowPicker(new (string, Action)[]
     {
         ("Title",   () => SetKind(NoteBlockKind.Heading)),
@@ -480,13 +497,17 @@ public partial class NoteEditor : UserControl
         var text = new TextBlock
         {
             Text = label, FontSize = 11, FontFamily = (FontFamily)FindResource("UiFont"),
-            VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
         text.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
 
+        // The whole rounded box is the target, not the two characters inside it. In compact mode these
+        // labels are a single glyph ("•", "1.", "Aa"), which is why they need a floor on their size -
+        // aiming at a bullet point is not a thing anyone should have to do (owner, 2026-08-06).
         var b = new Border
         {
-            Padding = new Thickness(9, 5, 9, 5), CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 7, 10, 7), CornerRadius = new CornerRadius(9),
+            MinWidth = 32, MinHeight = 30,
             Margin = new Thickness(0, 0, 4, 4), Background = Brushes.Transparent,
             Cursor = Cursors.Hand, Child = text, ToolTip = tip,
         };
@@ -497,7 +518,7 @@ public partial class NoteEditor : UserControl
     }
 
     /// <summary>Re-style every paragraph the selection touches. Works on a selection, not just the
-    /// caret, so you can turn five lines into headings in one go — and pressing the SAME button again
+    /// caret, so you can turn five lines into headings in one go - and pressing the SAME button again
     /// turns them back into plain lines, which is the only way to leave a list with the mouse.</summary>
     void SetKind(NoteBlockKind kind)
     {
@@ -553,11 +574,11 @@ public partial class NoteEditor : UserControl
     void ShowTemplates() =>
         ShowPicker(NoteTemplates.All.Select(t => (t.Name, (Action)(() => InsertTemplate(t)))).ToArray());
 
-    /// <summary>Toki's own themed popup — see <see cref="NotePicker"/>, which is also why the rows are
+    /// <summary>Toki's own themed popup - see <see cref="NotePicker"/>, which is also why the rows are
     /// real Buttons (a Border's mouse-up gets eaten as the popup closes, leaving dead menu items).</summary>
     void ShowPicker((string Label, Action Pick)[] items) => NotePicker.Show(Toolbar, items);
 
-    /// <summary>Append a template's sections to what's already written — never replace it. Someone who
+    /// <summary>Append a template's sections to what's already written - never replace it. Someone who
     /// has already typed half a page and then picks a shape shouldn't lose the half page.</summary>
     public void InsertTemplate(NoteTemplate template)
     {
@@ -575,7 +596,7 @@ public partial class NoteEditor : UserControl
         CaretToEnd();
     }
 
-    /// <summary>End of the LAST LINE — not Document.ContentEnd, which sits outside every paragraph and
+    /// <summary>End of the LAST LINE - not Document.ContentEnd, which sits outside every paragraph and
     /// a RichTextBox refuses as a caret position.</summary>
     void CaretToEnd()
     {
@@ -589,7 +610,7 @@ public partial class NoteEditor : UserControl
     internal void DebugFocus() { Editor.Focus(); }
     internal void DebugCaretToEnd() => CaretToEnd();
 
-    /// <summary>Type at the caret, exactly as the keyboard would — including the TextChanged pass that
+    /// <summary>Type at the caret, exactly as the keyboard would - including the TextChanged pass that
     /// promotes a typed "- " into a real bullet.</summary>
     internal void DebugType(string text)
     {
@@ -600,6 +621,16 @@ public partial class NoteEditor : UserControl
         // freshly-added Run's own ContentEnd is not a pointer the RichTextBox will accept.)
         CaretToEnd();
     }
+
+    /// <summary>Put the caret at the end of a given line, the way clicking on it would.</summary>
+    internal void DebugCaretToLine(int index)
+    {
+        if (Paragraphs().ElementAtOrDefault(index) is { } p) Editor.CaretPosition = p.ContentEnd;
+    }
+
+    /// <summary>The rendered font size of a line - what the eye actually sees.</summary>
+    internal double DebugFontSize(int index) =>
+        Paragraphs().ElementAtOrDefault(index) is { } p ? p.FontSize : -1;
 
     internal void DebugCaretToLineStart()
     {

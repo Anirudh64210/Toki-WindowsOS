@@ -6,7 +6,7 @@ namespace Toki.Detection;
 /// Turns a raw detected app identity ("Com.tinyspeck.slackdesktop", "ms-teams", "chrome.exe",
 /// "ZoomIt64_...") into the human name a prompt can say ("Slack is in a call. Record it?").
 /// The raw identifier leaking into the meeting prompt was a real live bug: the reverse-DNS name
-/// wrapped to two lines and overflowed the prompt's height, so the notch rendered cut off — and it
+/// wrapped to two lines and overflowed the prompt's height, so the notch rendered cut off - and it
 /// read like debug output. Known apps map exactly; unknown ones are cleaned (reverse-DNS/".exe"/
 /// "desktop" stripped) and title-cased instead of shown raw.
 /// </summary>
@@ -70,7 +70,7 @@ public static class AppNames
             if (key.Length >= 5 && whole.Contains(key)) return name;
 
         // Unknown app: strip reverse-DNS chrome ("com"/"org"/"net"/"io", a likely vendor segment) and
-        // the "desktop"/"app"/"client" suffix, then title-case what's left — a readable name, never
+        // the "desktop"/"app"/"client" suffix, then title-case what's left - a readable name, never
         // the raw identifier.
         var meaningful = tokens
             .Where(t => !Regex.IsMatch(t, @"^(com|org|net|io|co|www|app|apps|desktop|client|electron|x64|x86|win32|win64)$", RegexOptions.IgnoreCase))
@@ -78,7 +78,7 @@ public static class AppNames
             .Where(t => t.Length > 0)
             .ToList();
         if (meaningful.Count == 0) return TitleCase(tokens.LastOrDefault() ?? r);
-        // Reverse-DNS puts the vendor before the product ("com.tinyspeck.slackdesktop") — the LAST
+        // Reverse-DNS puts the vendor before the product ("com.tinyspeck.slackdesktop") - the LAST
         // meaningful token is usually the product; keep up to the last two for compound names.
         var take = meaningful.Count > 2 ? meaningful.Skip(meaningful.Count - 2).ToList() : meaningful;
         return string.Join(" ", take.Select(TitleCase));

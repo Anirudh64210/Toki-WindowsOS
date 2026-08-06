@@ -14,7 +14,7 @@ namespace Toki.Calendar;
 public sealed record GoogleTokens(string AccessToken, DateTimeOffset ExpiresUtc, string? RefreshToken, string? Email);
 
 /// <summary>A clean, human-readable auth failure. <see cref="NeedsReconnect"/> is true when the
-/// stored grant is dead (revoked / expired / invalid) and the user must sign in again — the caller
+/// stored grant is dead (revoked / expired / invalid) and the user must sign in again - the caller
 /// clears the token and drops to the "Not connected" state rather than crashing mid-meeting.</summary>
 public sealed class GoogleAuthException : Exception
 {
@@ -25,7 +25,7 @@ public sealed class GoogleAuthException : Exception
 /// <summary>
 /// Google OAuth 2.0 for an installed (desktop) app: the loopback-redirect flow with PKCE.
 /// The user's own browser talks directly to Google; Google redirects to a one-shot HttpListener
-/// on 127.0.0.1; we exchange the code for tokens. Nothing routes through a Toki server — the whole
+/// on 127.0.0.1; we exchange the code for tokens. Nothing routes through a Toki server - the whole
 /// flow is browser ↔ Google ↔ localhost, so hard constraint #1 ($0 upkeep, no backend) holds.
 ///
 /// Networking style mirrors <see cref="Toki.Llm.ApiLlm"/>: one static HttpClient, System.Text.Json,
@@ -46,12 +46,12 @@ public static class GoogleAuth
 
     // ── OAuth client credentials ──
     // For an installed app Google's client_id + client_secret are, in Google's own words, "not treated
-    // as a secret" — they ship in every desktop app (rclone, gcloud, Google's own libraries). Real
+    // as a secret" - they ship in every desktop app (rclone, gcloud, Google's own libraries). Real
     // security comes from PKCE + the exact loopback redirect + the user consenting to THEIR OWN data;
     // a leaked secret buys an attacker nothing without a user clicking consent. Do NOT "fix" this into
-    // a backend — that would break the $0-upkeep constraint. Resolved in order:
+    // a backend - that would break the $0-upkeep constraint. Resolved in order:
     //   1. env vars TOKI_GOOGLE_CLIENT_ID / TOKI_GOOGLE_CLIENT_SECRET (dev),
-    //   2. %APPDATA%\Toki\google_client.json (the file Google's console hands you — drop it in),
+    //   2. %APPDATA%\Toki\google_client.json (the file Google's console hands you - drop it in),
     //   3. the embedded consts below (filled at ship time).
     const string EmbeddedClientId = "";
     const string EmbeddedClientSecret = "";
@@ -59,7 +59,7 @@ public static class GoogleAuth
     static (string Id, string Secret)? _cred;
     static bool _credResolved;
 
-    /// <summary>True once an OAuth client is available from any source — the Connect button/self-test
+    /// <summary>True once an OAuth client is available from any source - the Connect button/self-test
     /// check this and show a clear "not set up" message instead of a broken flow.</summary>
     public static bool IsConfigured => Credentials() is not null;
 
@@ -156,7 +156,7 @@ public static class GoogleAuth
             { Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["token"] = token }) };
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
         }
-        catch { /* offline / already-revoked — the local token is cleared regardless */ }
+        catch { /* offline / already-revoked - the local token is cleared regardless */ }
     }
 
     // ── PKCE + URL building (pure, unit-tested) ──
@@ -190,7 +190,7 @@ public static class GoogleAuth
         return $"{AuthEndpoint}?{qs}";
     }
 
-    /// <summary>Pull the <c>email</c> claim out of an id_token WITHOUT verifying the signature — it
+    /// <summary>Pull the <c>email</c> claim out of an id_token WITHOUT verifying the signature - it
     /// arrived over TLS straight from Google's token endpoint and is used for display only.</summary>
     public static string? DecodeIdTokenEmail(string? idToken)
     {
@@ -230,7 +230,7 @@ public static class GoogleAuth
                 listener.Start();
                 return (listener, $"http://127.0.0.1:{port}");   // exact string reused in the token exchange
             }
-            catch (HttpListenerException) { /* rare race — the port got taken between probe and Start */ }
+            catch (HttpListenerException) { /* rare race - the port got taken between probe and Start */ }
         }
         throw new GoogleAuthException("Couldn't open a local port for the Google sign-in.", needsReconnect: false);
     }
@@ -248,8 +248,8 @@ public static class GoogleAuth
 
                 var q = ParseQuery(ctx.Request.Url?.Query);
                 // STATE FIRST: only a request carrying the state WE generated is Google's redirect.
-                // Anything else — favicon, a port-scanning browser tab firing ?error=x at loopback
-                // ports, a stray local process — is served a neutral page and IGNORED, so a bogus
+                // Anything else - favicon, a port-scanning browser tab firing ?error=x at loopback
+                // ports, a stray local process - is served a neutral page and IGNORED, so a bogus
                 // hit can no longer tear down the listener while the real redirect is in flight.
                 if (!q.TryGetValue("state", out var gotState) || !FixedEquals(gotState, expectedState))
                 {
@@ -261,7 +261,7 @@ public static class GoogleAuth
                 {
                     await WritePage(ctx, Page("Sign-in cancelled", "Toki wasn't connected. You can close this tab.")).ConfigureAwait(false);
                     throw new GoogleAuthException(err == "access_denied"
-                        ? "You declined the Google permission — Toki wasn't connected."
+                        ? "You declined the Google permission - Toki wasn't connected."
                         : $"Google returned an error ({err}).", needsReconnect: false);
                 }
 
@@ -311,8 +311,8 @@ public static class GoogleAuth
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw new GoogleAuthException("Google sign-in timed out.", needsReconnect: false); }
         // HttpClient's OWN timeout (caller's ct not cancelled) must also map to the documented
-        // GoogleAuthException contract — a raw TaskCanceledException flew past every caller.
-        catch (OperationCanceledException) { throw new GoogleAuthException("Google didn't respond — check your connection.", needsReconnect: false); }
+        // GoogleAuthException contract - a raw TaskCanceledException flew past every caller.
+        catch (OperationCanceledException) { throw new GoogleAuthException("Google didn't respond - check your connection.", needsReconnect: false); }
         catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google (network error).", needsReconnect: false); }
 
         if (!resp.IsSuccessStatusCode)
@@ -336,7 +336,7 @@ public static class GoogleAuth
             var expiresIn = root.TryGetProperty("expires_in", out var ex) && ex.TryGetInt32(out var s) ? s : 3600;
             var refresh = root.TryGetProperty("refresh_token", out var r) ? r.GetString() : null;
             var idToken = root.TryGetProperty("id_token", out var i) ? i.GetString() : null;
-            // 60s early-refresh margin absorbs clock skew — never trust expires_in to the second.
+            // 60s early-refresh margin absorbs clock skew - never trust expires_in to the second.
             var expiresUtc = DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, expiresIn) - 60);
             return new GoogleTokens(access!, expiresUtc, refresh, DecodeIdTokenEmail(idToken));
         }
@@ -355,7 +355,7 @@ public static class GoogleAuth
 
     static string FriendlyTokenError(string? code, HttpStatusCode status) => code switch
     {
-        "invalid_grant" => "Your Google sign-in has expired — please connect again.",
+        "invalid_grant" => "Your Google sign-in has expired - please connect again.",
         "invalid_client" => "Toki's Google sign-in isn't set up correctly (invalid client).",
         "access_denied" => "You declined the Google permission.",
         _ => $"Google refused the sign-in (HTTP {(int)status}).",
@@ -397,7 +397,7 @@ public static class GoogleAuth
             await ctx.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
             ctx.Response.OutputStream.Close();
         }
-        catch { /* the browser may have moved on — nothing to do */ }
+        catch { /* the browser may have moved on - nothing to do */ }
     }
 
     static string Page(string title, string sub) =>

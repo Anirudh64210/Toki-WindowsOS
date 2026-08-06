@@ -10,7 +10,7 @@
         </Style>
     </UserControl.Resources>
     <!-- The notch Settings is UI/visibility ONLY (owner: "the notch should only have the visibility,
-         UI settings"). Everything else — AI summaries, calendar, name, about — lives on the Library's
+         UI settings"). Everything else - AI summaries, calendar, name, about - lives on the Library's
          Settings page; the row at the bottom takes you there. -->
     <DockPanel Margin="14,12,14,8">
         <Grid DockPanel.Dock="Top">
@@ -21,7 +21,7 @@
             </Grid.ColumnDefinitions>
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="Settings" Style="{StaticResource Body}" FontSize="13.5" FontWeight="SemiBold"/>
+                <TextBlock Text="Settings" Style="{StaticResource PanelTitle}"/>
                 <TextBlock Text="Toki 1.0 · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
             <!-- Global toggles, shown ONCE in the header: screen-recording visibility (ghost) + light/dark. -->
@@ -48,10 +48,14 @@
                 </Grid>
 
                 <!-- Everything else → the Library's Settings page. -->
-                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,16,0,4"/>
-                <Border Margin="-6,2,-6,0" Padding="6,9" CornerRadius="10" Background="Transparent"
-                        Cursor="Hand" MouseEnter="OnMoreHover" MouseLeave="OnMoreUnhover"
-                        MouseLeftButtonUp="OnOpenLibrarySettings">
+                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,16,0,6"/>
+                <!-- ONE rounded button, not a row with an arrow beside it. It used to hang past both
+                     edges on negative margins, so its hover box read as a full-width rectangle rather
+                     than a button, and the chevron on the right looked like the thing you were meant to
+                     click (owner, 2026-08-06). Now: a real Button, a proper rounded box that sits INSIDE
+                     the card, and the chevron is decoration inside it - not hit-testable, so it can
+                     never look like a separate control. -->
+                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -63,9 +67,10 @@
                                        Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
-                                   FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
+                                   FontSize="12" Foreground="{DynamicResource TextDim}"
+                                   VerticalAlignment="Center" IsHitTestVisible="False"/>
                     </Grid>
-                </Border>
+                </Button>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

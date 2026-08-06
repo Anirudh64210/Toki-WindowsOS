@@ -5,7 +5,7 @@ using Toki.Transcription;
 namespace Toki.Storage;
 
 /// <summary>
-/// Local SQLite store for meetings, transcripts, and notes — everything lives in
+/// Local SQLite store for meetings, transcripts, and notes - everything lives in
 /// %APPDATA%\Toki\toki.db (hard constraint: all data local, no cloud). Manual
 /// notes and meetings share one table, distinguished by <c>kind</c>.
 /// </summary>
@@ -86,7 +86,7 @@ public sealed partial class MeetingStore
 
         // Full-text search index for "Ask your notes" (FTS5, bundled in e_sqlite3). A standalone
         // table keyed by meeting id; body = every searchable field concatenated. If FTS5 is somehow
-        // unavailable, retrieval falls back to keyword LIKE — never fatal.
+        // unavailable, retrieval falls back to keyword LIKE - never fatal.
         try
         {
             using (var mk = c.CreateCommand())
@@ -112,7 +112,7 @@ public sealed partial class MeetingStore
     }
 
     // The one place the FTS "body" is defined: title + summary + sections + manual body + transcript +
-    // action items + legacy decisions/questions — everything the user might search for.
+    // action items + legacy decisions/questions - everything the user might search for.
     const string FtsSelect = """
         SELECT m.id, m.title,
           COALESCE(m.tldr,'') || ' ' || COALESCE(m.sections_json,'') || ' ' || COALESCE(m.body,'') || ' ' ||
@@ -154,12 +154,12 @@ public sealed partial class MeetingStore
     }
 
     /// <summary>Best-matching MEETING ids for a free-text query, ranked by BM25 (title weighted). Empty
-    /// if FTS is unavailable or nothing matches — the caller then falls back to keyword/recent.</summary>
-    /// <summary>The ONE FTS5 query builder. Parameter binding does NOT protect a MATCH argument — the
+    /// if FTS is unavailable or nothing matches - the caller then falls back to keyword/recent.</summary>
+    /// <summary>The ONE FTS5 query builder. Parameter binding does NOT protect a MATCH argument - the
     /// bound value is still parsed by FTS5's own grammar (AND/OR/NOT/NEAR/quotes/column filters), so a
     /// raw <c>"</c> or <c>*</c> could throw or alter the query. Safety comes from reducing every term to
     /// alphanumerics and emitting a grammar-free prefix-OR. Returns "" when nothing usable remains (the
-    /// caller must then skip the MATCH entirely — an empty MATCH is a syntax error). Public + static so
+    /// caller must then skip the MATCH entirely - an empty MATCH is a syntax error). Public + static so
     /// it is the single, testable choke point for anything that reaches a MATCH clause.</summary>
     public static string ToFtsQuery(string? query)
     {
@@ -199,7 +199,7 @@ public sealed partial class MeetingStore
     /// <summary>Meetings whose TITLE contains any of the given terms (case-insensitive substring),
     /// newest first. The recall backstop for the Ask retrieval: on a small corpus a query term
     /// appearing in a meeting's title is near-certain relevance (BM25F-style field priority), and it
-    /// must never be drowned by prefix-OR BM25 noise — the live "meeting regarding Amazon" miss.
+    /// must never be drowned by prefix-OR BM25 noise - the live "meeting regarding Amazon" miss.
     /// Terms should already be content-filtered (no stop/ask words); this method additionally ignores
     /// terms shorter than 3 chars so a fragment can't over-match.</summary>
     public List<long> TitleMatchIds(IEnumerable<string> terms)
@@ -228,7 +228,7 @@ public sealed partial class MeetingStore
         return found.OrderByDescending(x => x.At).Select(x => x.Id).ToList();
     }
 
-    // (id, started_at) for every real meeting — the basis for deterministic temporal resolution
+    // (id, started_at) for every real meeting - the basis for deterministic temporal resolution
     // (recency / date-range), parsed in C# so it's robust to timezone-offset string differences.
     List<(long Id, DateTimeOffset At)> MeetingTimes()
     {
@@ -254,7 +254,7 @@ public sealed partial class MeetingStore
     public List<long> MeetingIdsInRange(DateTimeOffset start, DateTimeOffset end) =>
         MeetingTimes().Where(x => x.At >= start && x.At < end).OrderByDescending(x => x.At).Select(x => x.Id).ToList();
 
-    /// <summary>Open (undone) action items across all meetings, newest meeting first — for the Ask
+    /// <summary>Open (undone) action items across all meetings, newest meeting first - for the Ask
     /// "what are my open tasks / what did I commit to" router (answered from data, never hallucinated).</summary>
     public List<(string Meeting, string Text, string? Owner, string? Due)> OpenActions(int limit)
     {
@@ -274,7 +274,7 @@ public sealed partial class MeetingStore
         return list;
     }
 
-    /// <summary>Open action items with their source meeting's id + start time — for due-date-aware task
+    /// <summary>Open action items with their source meeting's id + start time - for due-date-aware task
     /// scoping ("what's due this week"): the meeting date is the reference point for resolving a free-text
     /// due like "Friday" (it means the Friday after THAT meeting).</summary>
     public List<OpenAction> OpenActionsWithDates(int limit)
@@ -297,7 +297,7 @@ public sealed partial class MeetingStore
         return list;
     }
 
-    /// <summary>Every distinct action-item owner name across all meetings (done or not) — the closed
+    /// <summary>Every distinct action-item owner name across all meetings (done or not) - the closed
     /// vocabulary the Ask person-filter resolves against ("what did Mac have as action items?"). A
     /// query word only counts as a PERSON when it matches a name that actually exists in the data, so
     /// the filter can't fire on an arbitrary word.</summary>
@@ -575,7 +575,7 @@ public sealed partial class MeetingStore
         if (s.Length == 0) return ("", null, null);
 
         // Escape LIKE wildcards so a literal % or _ in the search box matches itself
-        // (TitleMatchIds already does this — the two paths had diverged).
+        // (TitleMatchIds already does this - the two paths had diverged).
         s = s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
         var transcriptFilter = speaker is null
             ? "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.text LIKE $term ESCAPE '\\'"

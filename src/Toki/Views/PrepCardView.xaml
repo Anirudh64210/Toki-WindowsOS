@@ -9,7 +9,7 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <!-- Back to the recording page — only while a recording is running (owner flow). -->
+                <!-- Back to the recording page - only while a recording is running (owner flow). -->
                 <Button x:Name="BackButton" Style="{StaticResource IconButton}" Content="&#xE76B;" FontSize="13"
                         Margin="0,0,4,0" Visibility="Collapsed" ToolTip="Back to recording" Click="OnBack"/>
                 <StackPanel VerticalAlignment="Center">
@@ -19,12 +19,12 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-                <!-- Which sticky note this meeting uses — an earlier one, or a new one. Toki never
+                <!-- Which sticky note this meeting uses - an earlier one, or a new one. Toki never
                      guesses this from the meeting's title (titles change; "Weekly sync" is every
                      meeting), so the choice is explicit and remembered. -->
                 <Button x:Name="NoteButton" Style="{StaticResource IconButton}" Content="&#xE8F1;" FontSize="13"
                         ToolTip="Which note to use for this meeting" Click="OnPickNote"/>
-                <!-- Edit turns THIS CARD into a note you carry on writing in — the recap, open items and
+                <!-- Edit turns THIS CARD into a note you carry on writing in - the recap, open items and
                      agenda arrive as real text, tick boxes and bullets (owner, 2026-08-05). -->
                 <Button x:Name="EditButton" Style="{StaticResource IconButton}" Content="&#xE70F;" FontSize="13"
                         ToolTip="Edit these notes" Click="OnEdit"/>
@@ -41,7 +41,7 @@
         </StackPanel>
 
         <!-- The prep context: one subtle inset box (the single deliberate box on this card).
-             Replaced in place by the editor once you press Edit — same card, now writable. -->
+             Replaced in place by the editor once you press Edit - same card, now writable. -->
         <Border x:Name="ContextBox" Background="{DynamicResource SurfaceHi}" CornerRadius="12"
                 Padding="12,11,12,12" Margin="0,12,0,0">
             <StackPanel>
@@ -63,7 +63,7 @@
                     <TextBlock Text="&#xE735;" FontFamily="{StaticResource IconFont}" FontSize="9"
                                Foreground="{DynamicResource Pink}" Margin="0,2,6,0" VerticalAlignment="Top"/>
                     <TextBlock x:Name="FirstTimeLine" Style="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap"
-                               MaxWidth="270" Text="First time with this one — I’ll take notes if you record."/>
+                               MaxWidth="270" Text="First time with this one - I’ll take notes if you record."/>
                 </StackPanel>
 
                 <!-- STILL OPEN (rows built in code) -->

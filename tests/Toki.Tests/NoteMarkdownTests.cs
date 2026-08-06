@@ -117,7 +117,7 @@ public sealed class NoteMarkdownTests
     [Fact]
     public void Numbered_runs_are_renumbered_from_one()
     {
-        // The user deleted item 2 and inserted another later — output must read 1. 2. 3.
+        // The user deleted item 2 and inserted another later - output must read 1. 2. 3.
         var md = "5. alpha\n9. beta\n2. gamma";
         Assert.Equal("1. alpha\n2. beta\n3. gamma", Round(md));
     }
@@ -180,7 +180,7 @@ public sealed class NoteMarkdownTests
     [InlineData("## ## Agenda", "## Agenda")]
     public void A_doubled_marker_collapses_instead_of_growing(string md, string settled)
     {
-        // Each save sheds exactly one stray marker and then holds — the opposite of the reported bug,
+        // Each save sheds exactly one stray marker and then holds - the opposite of the reported bug,
         // where every save ADDED one. Never longer than what went in, always reaching a fixed point.
         var text = md;
         for (var i = 0; i < 6; i++)
@@ -205,7 +205,7 @@ public sealed class NoteMarkdownTests
     // ── the leaked WPF list marker (the ACTUAL "bullets create themselves" loop) ──
     //
     // The old editor read a bulleted line back through TextRange.Text, which includes the native List's
-    // own marker as "•\t". That got written into the text, re-read with another one in front, and so on —
+    // own marker as "•\t". That got written into the text, re-read with another one in front, and so on -
     // one more bullet per save. This is the owner's real note, seven cycles deep.
 
     [Fact]

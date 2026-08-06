@@ -10,7 +10,7 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The Calendar page: ONE continuous agenda scroll over the ~31-day horizon (week bands separate it —
+/// The Calendar page: ONE continuous agenda scroll over the ~31-day horizon (week bands separate it -
 /// no week paging, so only the back arrow remains), a scroll-synced subtitle + a Today pill that appears
 /// when you scroll away, per-event Join, a natural-language create composer, and delete (undo for solo
 /// events, confirm for guested). Fixed height + internal scroll. Talks only to the provider-neutral facade + models.
@@ -24,7 +24,7 @@ public partial class CalendarView : UserControl
     QuickEvent? _parsed;
     CalEvent? _pendingUndo;
     CalEvent? _editing;                // non-null while the composer is editing an existing event
-    string? _lastRenderSig;            // render-key of the last agenda — skip redundant rebuilds
+    string? _lastRenderSig;            // render-key of the last agenda - skip redundant rebuilds
     bool _entranceDone;                // the entrance stagger runs ONCE, never on a refresh
     readonly List<(FrameworkElement El, string Label, int Count)> _bands = new();  // week separators, for scroll-synced subtitle
 
@@ -109,7 +109,7 @@ public partial class CalendarView : UserControl
         // (snapshot + fetch, cache events, the 60s tick); rebuilding + re-staggering identical rows is what
         // flickered. Today's date is in the key so a midnight rollover forces one rebuild.
         // Theme is in the key too: the rows are code-built and capture their brushes, so a light↔dark swap
-        // MUST rebuild them — otherwise the dedup keeps the old theme's text colour (black text on dark).
+        // MUST rebuild them - otherwise the dedup keeps the old theme's text colour (black text on dark).
         var sig = string.Join(",", upcoming.Select(e => $"{e.Id}:{e.StartUtc.Ticks}:{e.Summary}:{e.HasMeetLink}"))
                   + "#" + DateTime.Today.Ticks + "@" + Theme.ThemeManager.Current;
         if (sig == _lastRenderSig && StatePanel.Visibility != Visibility.Visible) return;
@@ -256,19 +256,19 @@ public partial class CalendarView : UserControl
         }
         catch (GoogleAuthException ex)
         {
-            UpcomingCache.Instance.Upsert(e);   // put it back — the delete didn't take
+            UpcomingCache.Instance.Upsert(e);   // put it back - the delete didn't take
             RenderFromSnapshot();
-            ShowActionBar($"Couldn’t delete — {ex.Message}", ("OK", false, HideActionBar), null);
+            ShowActionBar($"Couldn’t delete - {ex.Message}", ("OK", false, HideActionBar), null);
         }
         catch (Exception ex)
         {
-            // Belt and braces: this is an async void with an OPTIMISTIC removal above — any
+            // Belt and braces: this is an async void with an OPTIMISTIC removal above - any
             // unexpected throw (cancel, a future client change) must still roll the event
             // back, or it silently vanishes from the UI while still existing at Google.
             App.Log($"calendar delete failed: {ex.Message}");
             UpcomingCache.Instance.Upsert(e);
             RenderFromSnapshot();
-            ShowActionBar("Couldn’t delete — try again.", ("OK", false, HideActionBar), null);
+            ShowActionBar("Couldn’t delete - try again.", ("OK", false, HideActionBar), null);
         }
     }
 
@@ -345,7 +345,7 @@ public partial class CalendarView : UserControl
         var blob = new Controls.TokiBlob();
         var art = new Viewbox { Width = 48, Height = 48, Child = blob, HorizontalAlignment = HorizontalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand };
         art.MouseEnter += (_, _) => blob.React();   // a little delight on hover
-        SetState(art, "Nothing coming up — all clear.", ("＋ Plan something", () => OnNew(this, new RoutedEventArgs())));
+        SetState(art, "Nothing coming up - all clear.", ("＋ Plan something", () => OnNew(this, new RoutedEventArgs())));
     }
 
     void ShowError(GoogleAuthException? ex)
@@ -436,7 +436,7 @@ public partial class CalendarView : UserControl
                 var y = b.El.TransformToAncestor(Scroller).Transform(new Point(0, 0)).Y;
                 if (y <= 8) current = b; else break;   // the last band that's scrolled to/above the top is the current one
             }
-            catch { break; }   // not laid out yet — keep the first band
+            catch { break; }   // not laid out yet - keep the first band
         }
         Subtitle.Text = $"{current.Label} · {current.Count} event{(current.Count == 1 ? "" : "s")}";
     }
@@ -505,7 +505,7 @@ public partial class CalendarView : UserControl
 
     void OnComposerKey(object s, System.Windows.Input.KeyEventArgs e)
     {
-        // Keep Esc/Enter inside the composer — never let them bubble to the notch (Esc would hide it).
+        // Keep Esc/Enter inside the composer - never let them bubble to the notch (Esc would hide it).
         if (e.Key == System.Windows.Input.Key.Escape) { e.Handled = true; CloseComposer(); }
         else if (e.Key == System.Windows.Input.Key.Enter) { e.Handled = true; TryCreate(); }
     }
@@ -569,7 +569,7 @@ public partial class CalendarView : UserControl
 
     void UpdateMeetChip() => SetChipActive(MeetChip, _addMeet);
 
-    // A chip fills with a soft green when active, outlines when not — the fill IS the on/off (no "✓" text).
+    // A chip fills with a soft green when active, outlines when not - the fill IS the on/off (no "✓" text).
     void SetChipActive(Button chip, bool on)
     {
         chip.Background = on ? (Brush)FindResource("GreenDark") : Brushes.Transparent;
@@ -608,7 +608,7 @@ public partial class CalendarView : UserControl
             if (editing is null) Scroller.ScrollToTop();   // reveal the newly-created event
         }
         catch (GoogleAuthException ex) { CreateFailed(ex.Message); }
-        catch { CreateFailed(editing is null ? "Couldn’t create — try again." : "Couldn’t save — try again."); }
+        catch { CreateFailed(editing is null ? "Couldn’t create - try again." : "Couldn’t save - try again."); }
         finally { ComposerCreate.Content = editing is null ? "Create" : "Save"; UpdateCreateEnabled(); }
     }
 

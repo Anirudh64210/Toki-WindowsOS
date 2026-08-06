@@ -10,7 +10,7 @@ namespace Toki.Transcription;
 /// small time window (brief §8, lesson 6).
 ///
 /// Guard: for short lines (&lt;3 significant words) require an EXACT normalized
-/// match — fuzzy-matching interjections like "yeah"/"okay" would wrongly delete
+/// match - fuzzy-matching interjections like "yeah"/"okay" would wrongly delete
 /// real things the user said.
 /// </summary>
 public static class TranscriptMerger
@@ -58,7 +58,7 @@ public static class TranscriptMerger
         return false;
     }
 
-    /// <summary>Shared words as a fraction of the SHORTER line — catches echo where
+    /// <summary>Shared words as a fraction of the SHORTER line - catches echo where
     /// one transcript picked up extra/misheard words around the same phrase.</summary>
     static double Containment(string[] a, string[] b)
     {

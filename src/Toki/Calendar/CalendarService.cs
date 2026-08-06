@@ -6,7 +6,7 @@ namespace Toki.Calendar;
 /// The single facade every UI surface (Home button, future notch preview / prep cards / meeting
 /// creator) talks to. Owns the in-memory access token + its expiry and refreshes it lazily, so
 /// callers never touch OAuth. The long-lived refresh token lives (DPAPI-encrypted) in AppSettings;
-/// the access token is deliberately NOT persisted — one refresh on first use after a restart.
+/// the access token is deliberately NOT persisted - one refresh on first use after a restart.
 /// </summary>
 public sealed class CalendarService
 {
@@ -21,7 +21,7 @@ public sealed class CalendarService
     TokenState? _token;
 
     /// <summary>Raised when the connection state flips (connected, disconnected, or a dead grant was
-    /// cleared) so the UI can re-render. May fire on a background thread — marshal to the UI thread.</summary>
+    /// cleared) so the UI can re-render. May fire on a background thread - marshal to the UI thread.</summary>
     public event Action? ConnectionChanged;
 
     public bool IsConnected => AppSettings.Current.GoogleConnected;
@@ -52,7 +52,7 @@ public sealed class CalendarService
         if (!string.IsNullOrEmpty(rt)) await GoogleAuth.RevokeAsync(rt!).ConfigureAwait(false);
     }
 
-    /// <summary>Wipe the stored grant + in-memory token and tell the UI — shared by disconnect,
+    /// <summary>Wipe the stored grant + in-memory token and tell the UI - shared by disconnect,
     /// a rejected refresh, and an undecryptable DPAPI blob. Always ends honestly disconnected.</summary>
     void ClearDeadGrant(AppSettings s)
     {
@@ -72,7 +72,7 @@ public sealed class CalendarService
     public async Task<CalEvent> UpdateAsync(string eventId, NewEvent ev, bool hasMeetAlready, CancellationToken ct = default)
         => await CalendarClient.PatchAsync(await AccessTokenAsync(ct).ConfigureAwait(false), eventId, ev, hasMeetAlready, ct).ConfigureAwait(false);
 
-    /// <summary>The connected calendar provider's display name — the one place the UI names it, so an
+    /// <summary>The connected calendar provider's display name - the one place the UI names it, so an
     /// Outlook backend later is a string swap, not a UI rewrite.</summary>
     public string ProviderName => "Google Calendar";
 
@@ -80,7 +80,7 @@ public sealed class CalendarService
         => await CalendarClient.DeleteAsync(await AccessTokenAsync(ct).ConfigureAwait(false), eventId, ct).ConfigureAwait(false);
 
     /// <summary>A valid access token, refreshing if needed. Throws <see cref="GoogleAuthException"/>
-    /// (NeedsReconnect) if there's no grant or the refresh is rejected — in the latter case the dead
+    /// (NeedsReconnect) if there's no grant or the refresh is rejected - in the latter case the dead
     /// token is cleared and the UI is notified, so a failure surfaces as "reconnect", never a crash.</summary>
     async Task<string> AccessTokenAsync(CancellationToken ct)
     {
@@ -97,12 +97,12 @@ public sealed class CalendarService
             {
                 // A stored blob that won't DECRYPT (Windows password force-reset, settings file
                 // moved to another account) previously kept IsConnected true forever while every
-                // fetch failed — a contradictory state that never healed. Clear it honestly.
+                // fetch failed - a contradictory state that never healed. Clear it honestly.
                 if (!string.IsNullOrEmpty(s.GoogleRefreshTokenProtected))
                 {
-                    App.Log("google refresh token present but undecryptable — clearing the dead grant");
+                    App.Log("google refresh token present but undecryptable - clearing the dead grant");
                     ClearDeadGrant(s);
-                    throw new GoogleAuthException("Your Google connection couldn't be read — please connect again.", needsReconnect: true);
+                    throw new GoogleAuthException("Your Google connection couldn't be read - please connect again.", needsReconnect: true);
                 }
                 throw new GoogleAuthException("Toki isn't connected to Google Calendar.", needsReconnect: true);
             }
@@ -119,7 +119,7 @@ public sealed class CalendarService
             }
             catch (GoogleAuthException ex) when (ex.NeedsReconnect)
             {
-                ClearDeadGrant(s);   // dead grant — clear it so the UI shows "connect again"
+                ClearDeadGrant(s);   // dead grant - clear it so the UI shows "connect again"
                 throw;
             }
         }

@@ -113,7 +113,7 @@ public partial class LibraryView : UserControl
     {
         if (!ConfirmDialog.Show(null, "Delete this?",
                 $"“{m.Title}” and its audio will be removed for good. This can't be undone.")) return;
-        // DiscardMeeting is the one true delete (DB + Markdown mirror + recording folder) —
+        // DiscardMeeting is the one true delete (DB + Markdown mirror + recording folder) -
         // the promise in the dialog includes the audio.
         try { App.DiscardMeeting(App.Store.Get(m.Id)); } catch (Exception ex) { App.Log($"delete failed: {ex.Message}"); }
         Reload();

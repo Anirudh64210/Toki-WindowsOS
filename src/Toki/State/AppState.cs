@@ -9,13 +9,13 @@ public sealed class AppState
     static readonly Dictionary<PillState, PillState[]> Allowed = new()
     {
         // The tiny Toki pill (Collapsed) is the resting state; hovering it reveals Home,
-        // hovering out collapses Home back to it — so Collapsed ⇄ Home both ways.
+        // hovering out collapses Home back to it - so Collapsed ⇄ Home both ways.
         [PillState.Hidden]        = [PillState.Home, PillState.MeetingPrompt, PillState.Collapsed, PillState.PrepCard],
         [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden, PillState.PrepCard],
         [PillState.MeetingPrompt] = [PillState.RecordingBar, PillState.Hidden],
         [PillState.RecordingBar]  = [PillState.RecordingOpen, PillState.Summarizing],
         // RecordingOpen ⇄ PrepCard: mid-meeting you can pull up the prep card (and its scratchpad)
-        // from the recording page and come straight back — owner flow, 2026-08-05.
+        // from the recording page and come straight back - owner flow, 2026-08-05.
         [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing, PillState.PrepCard],
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
         [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Library],
@@ -28,7 +28,7 @@ public sealed class AppState
         [PillState.PrepCard]      = [PillState.RecordingBar, PillState.RecordingOpen, PillState.Hidden, PillState.Calendar, PillState.Home, PillState.Collapsed, PillState.Summarizing],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
         // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
-        // while the notch is up threw KeyNotFound — e.g. a "start taking notes" command mid-Ask.
+        // while the notch is up threw KeyNotFound - e.g. a "start taking notes" command mid-Ask.
         [PillState.Ask]           = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.RecordingBar],
         // First-run onboarding (forced in at startup). Finishing it lands in Home (the greeting then
         // proves the name they just gave), or the user can dismiss to the resting peek.

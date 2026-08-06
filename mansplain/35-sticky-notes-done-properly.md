@@ -1,4 +1,4 @@
-# 35 — Sticky notes, done properly (and the bullet bug)
+# 35 - Sticky notes, done properly (and the bullet bug)
 
 *2026-08-06*
 
@@ -9,12 +9,12 @@ Both turned out to be worth more than the features they were about.
 
 ## The bug: bullets breeding
 
-You said the bullets and lists "get incremented — bullets are created by themselves."
+You said the bullets and lists "get incremented - bullets are created by themselves."
 
 That was real, and I want to be honest about how I found it, because I nearly didn't. My first instinct
 was to read the code and reason about it, and I did that for a while and got nowhere. So I stopped and
 wrote a test that *pretends to be your fingers*: it types characters into the real note editor, presses
-Enter, clicks the toolbar buttons, ticks boxes — and then reads back what would be saved to disk.
+Enter, clicks the toolbar buttons, ticks boxes - and then reads back what would be saved to disk.
 
 It failed on the first run. Three different ways.
 
@@ -37,7 +37,7 @@ Numbering is recalculated from position every time anything changes, so it can't
 And now typing `- ` does what you'd expect from any notes app: it turns the line into a bullet and eats
 the two characters. Same for `1. `, `# `, and `[] ` for a tick box.
 
-The test that caught it is permanent — `--notetest`, 13 checks, including saving and reloading the same
+The test that caught it is permanent - `--notetest`, 13 checks, including saving and reloading the same
 note ten times in a row and demanding that nothing changes.
 
 ---
@@ -49,7 +49,7 @@ what you cared about. You've asked me to take it out, and you're right.
 
 Here's the reason, put the way it landed for me: **a summary is something you check against the room.**
 You read it and think "yes, that's what happened." If it has quietly rearranged itself around your private
-jottings, it can't do that job any more — and worse, you can't tell that it has. It looks the same.
+jottings, it can't do that job any more - and worse, you can't tell that it has. It looks the same.
 
 So: the summary is written from the transcript and nothing else. Your notes sit next to it, untouched, and
 touching nothing.
@@ -63,22 +63,22 @@ they don't even open. Correct on both counts. Gone.
 
 Underneath, they were also built wrong. They lived in a small file keyed to a calendar event, which meant
 a note could only ever belong to the one meeting it was born on, and the file never cleaned itself up.
-They're now proper records in the same database as everything else — a real row from the first keystroke,
+They're now proper records in the same database as everything else - a real row from the first keystroke,
 so a crash mid-sentence costs nothing.
 
 **The bit you specifically asked about: how does Toki know which note goes with which meeting?**
 
-It doesn't guess. Ever. You told me not to depend on titles and you were right to — titles change,
+It doesn't guess. Ever. You told me not to depend on titles and you were right to - titles change,
 meetings get renamed, and "Weekly sync" is a meeting everybody on earth has. Any guess here fails in one
 of the two worst ways: it buries your notes, or it shows you somebody else's.
 
 So there's a small list button on the prep card. It offers "Start a new note" first, then your recent
 notes with when you last touched each one. You pick. Toki remembers *that specific note*, by its internal
-id — not by its name, not by the meeting's name. Which means one note can happily run across a whole year
+id - not by its name, not by the meeting's name. Which means one note can happily run across a whole year
 of a weekly 1:1, and renaming a meeting can never lose it.
 
 **Where it lives now.** Open a meeting in the Library and there's a **"My sticky note"** button right under
-the title. Click it and the note opens *inside* that meeting's note — after everything Toki wrote, just
+the title. Click it and the note opens *inside* that meeting's note - after everything Toki wrote, just
 before the transcript, exactly where you described it. You can type in it, tick things off, delete it. It
 saves itself as you type; there's no Save button anywhere else in Toki and I didn't want to invent one here.
 
@@ -86,7 +86,7 @@ saves itself as you type; there's no Save button anywhere else in Toki and I did
 true if something actually checks:
 
 - It can't appear as a row in the Library list.
-- It can't come back as an answer when you Ask — it's your private page.
+- It can't come back as an answer when you Ask - it's your private page.
 - It can't influence the summary.
 - Deleting a meeting deletes the *connection*, not your writing. You might still want it next week.
 
@@ -96,10 +96,10 @@ true if something actually checks:
 
 **Your meeting-is-starting nudge is back.** Yesterday we made the prep card hover-only. Testing it, I
 think that removal quietly took something else with it: the card appearing was also the only thing telling
-you a meeting was about to start. It's back, but polite — it opens once, and only if Toki isn't busy and
+you a meeting was about to start. It's back, but polite - it opens once, and only if Toki isn't busy and
 you're not in something fullscreen. Otherwise it just sits there armed, one hover away.
 
-**To-dos now have the ↳ arrow too.** You asked about this last time — why some lines link to the
+**To-dos now have the ↳ arrow too.** You asked about this last time - why some lines link to the
 transcript and some don't. Part of the answer was a genuine gap on my side: I'd only wired the arrow into
 the summary bullets, and never into the action items, which are the lines you'd *most* want to check. Fixed.
 
@@ -117,5 +117,5 @@ None of it has met a real meeting yet. That's your bit.
 
 One thing I got wrong that's worth writing down: the critique I wrote yesterday listed eleven things about
 the note editor and **did not contain the bug you found the next day**. I'd reviewed the part I'd just
-written tests for — the part I already understood — instead of the part with no tests at all. That's
+written tests for - the part I already understood - instead of the part with no tests at all. That's
 backwards, and I've noted it at the bottom of that document so it stays noted.

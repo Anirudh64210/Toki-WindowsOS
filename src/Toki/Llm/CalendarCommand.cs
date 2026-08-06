@@ -13,7 +13,7 @@ public sealed record PendingCalendarCreate(
 /// <summary>
 /// Deterministic "create a meeting" command for the dialogue brain: detects a scheduling utterance
 /// ("schedule a call with Ana tomorrow at 3"), extracts title/time via the shared
-/// <see cref="QuickEventParser"/>, and — crucially — **never creates anything until the user confirms**
+/// <see cref="QuickEventParser"/>, and - crucially - **never creates anything until the user confirms**
 /// (a mishearing must not silently book a meeting). Provider-neutral (goes through CalendarService).
 /// </summary>
 public static class CalendarCommand
@@ -24,7 +24,7 @@ public static class CalendarCommand
 
     const RegexOptions Ro = RegexOptions.IgnoreCase | RegexOptions.Compiled;
 
-    // Event nouns that make a create verb a scheduling command (NOT "note" — that's NewNote's job).
+    // Event nouns that make a create verb a scheduling command (NOT "note" - that's NewNote's job).
     const string Nouns = @"(meeting|call|event|appointment|sync|catch[- ]?up|check[- ]?in|1[: ]?1|one[- ]on[- ]one|stand[- ]?up|interview|demo|session|review|lunch|coffee|chat)";
 
     // Verb directly followed by (article) + an event noun: "schedule a call", "set up a sync",
@@ -53,7 +53,7 @@ public static class CalendarCommand
         var text = (input ?? "").Trim();
         if (text.Length == 0) return null;
 
-        // Strip ASR/politeness fluff (shared with CommandRouter — one source of truth).
+        // Strip ASR/politeness fluff (shared with CommandRouter - one source of truth).
         text = CommandRouter.Fluff.Replace(text, "").Trim();
         text = CommandRouter.TrailFluff.Replace(text, "").Trim();
         if (text.Length == 0) return null;
@@ -74,12 +74,12 @@ public static class CalendarCommand
         RemindLead.IsMatch(text) || CreateVerbNoun.IsMatch(text) || CalendarPhrase.IsMatch(text);
 
     // Explicit title change on a follow-up ("call it design sync", "name it 1:1", "rename to weekly").
-    // Deliberately NOT "make it …" — that's ambiguous with a time change ("make it 4pm"), handled as time.
+    // Deliberately NOT "make it …" - that's ambiguous with a time change ("make it 4pm"), handled as time.
     static readonly Regex TitleSet = new(
         @"\b(?:call it|name it|title(?:\s+it|d)?|rename(?:\s+it)?\s+to|let'?s\s+call\s+it)\s+(?<t>.+)$", Ro);
 
     /// <summary>
-    /// Multi-turn slot-fill: merge a follow-up turn's corrections into a pending draft — a new day/time
+    /// Multi-turn slot-fill: merge a follow-up turn's corrections into a pending draft - a new day/time
     /// (incl. a range "6 to 7pm tomorrow"), an added person/email, or an explicit title change. Returns
     /// the merged draft and whether anything actually changed (false → the turn wasn't a correction, so
     /// the caller can re-prompt or release). Never books anything; pure + deterministic.
@@ -103,7 +103,7 @@ public static class CalendarCommand
         foreach (var e in parsed.Emails)
             if (!emails.Contains(e, StringComparer.OrdinalIgnoreCase)) { emails.Add(e); changed = true; }
 
-        // Explicit title change — but never treat a pure time/day phrase as a title ("call it" won't
+        // Explicit title change - but never treat a pure time/day phrase as a title ("call it" won't
         // fire on "make it 4pm"; and if the captured title parses as a time, ignore it).
         var tm = TitleSet.Match(turn);
         if (tm.Success)
@@ -142,7 +142,7 @@ public static class CalendarCommand
 
     public static string ConfirmPrompt(PendingCalendarCreate p)
     {
-        // The start keeps its own am/pm whenever it differs from the end's — "11:30–12:00 PM"
+        // The start keeps its own am/pm whenever it differs from the end's - "11:30–12:00 PM"
         // read as an EVENING slot ("11:30 PM"), on the one line whose job is time verification.
         var when = "sometime";
         if (p.Start is { } s)
@@ -152,9 +152,9 @@ public static class CalendarCommand
             when = sameHalf ? $"{DayLabel(s)}, {s:h:mm}–{end:h:mm tt}"
                             : $"{DayLabel(s)}, {s:h:mm tt}–{end:h:mm tt}";
         }
-        var msg = $"Create “{p.Title}” — {when} on {Provider}? Say yes to create it, tell me what to change "
+        var msg = $"Create “{p.Title}” - {when} on {Provider}? Say yes to create it, tell me what to change "
                 + "(day, time, title, or who), or no to skip.";
-        if (p.PersonMentioned is { } who) msg += $" {who}’s in the title — I can only invite people by email.";
+        if (p.PersonMentioned is { } who) msg += $" {who}’s in the title - I can only invite people by email.";
         return msg;
     }
 
@@ -162,18 +162,18 @@ public static class CalendarCommand
         $"When should “{p.Title}” be? Say a day and time, like “tomorrow at 3”.";
 
     public static string NotConnected() =>
-        "I can’t create events yet — connect Google Calendar in Settings and I’ll take care of it.";
+        "I can’t create events yet - connect Google Calendar in Settings and I’ll take care of it.";
 
-    public static string Cancelled() => "Okay, scrapped — nothing was created.";
+    public static string Cancelled() => "Okay, scrapped - nothing was created.";
 
     static string Success(CalEvent e) =>
-        $"Done — “{e.Summary}” is on your {Provider}, {DayLabel(e.StartLocal)} at {e.StartLocal:h:mm tt}.";
+        $"Done - “{e.Summary}” is on your {Provider}, {DayLabel(e.StartLocal)} at {e.StartLocal:h:mm tt}.";
 
     static string Reconnect() =>
-        "Your Google Calendar link expired — reconnect in Settings, then ask me again. Nothing was created.";
+        "Your Google Calendar link expired - reconnect in Settings, then ask me again. Nothing was created.";
 
     static string Failed() =>
-        "Couldn’t reach Google Calendar just now — nothing was created. Try again in a moment.";
+        "Couldn’t reach Google Calendar just now - nothing was created. Try again in a moment.";
 
     /// <summary>Create the event (after the user confirmed). Never throws; returns the spoken/written
     /// result. Honest on not-connected / reconnect / failure. Optimistically updates the cache.</summary>
@@ -183,12 +183,12 @@ public static class CalendarCommand
         if (p.Start is not { } start) return WhenPrompt(p);
         if (!(ConnectedOverride ?? CalendarService.Instance.IsConnected)) return NotConnected();
 
-        // Voice-created MEETINGS get a Google Meet link by default — matching the composer's default
+        // Voice-created MEETINGS get a Google Meet link by default - matching the composer's default
         // (MeetChip starts on): a "call with Ana" without a link isn't joinable, and the link is what
-        // the calendar's "Copy Meet link" shares. Reminders are personal, not calls — no Meet room.
+        // the calendar's "Copy Meet link" shares. Reminders are personal, not calls - no Meet room.
         var addMeet = !p.Title.StartsWith("Reminder", StringComparison.Ordinal);
         var ev = new NewEvent(p.Title, start, p.End ?? start.AddMinutes(30), p.Emails, AddMeet: addMeet,
-            Description: p.PersonMentioned is { } who ? $"Mentioned: {who} (no email — invite them from Google Calendar)." : null);
+            Description: p.PersonMentioned is { } who ? $"Mentioned: {who} (no email - invite them from Google Calendar)." : null);
         try
         {
             var created = CreateOverride is { } ov

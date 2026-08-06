@@ -11,18 +11,18 @@ namespace Toki.Views;
 
 /// <summary>
 /// Pre-meeting prep card: title + when, a one-line recap of last time, still-open action items, and the
-/// agenda — plus Join-and-record / Later. Content is assembled deterministically by <see cref="PrepBuilder"/>
+/// agenda - plus Join-and-record / Later. Content is assembled deterministically by <see cref="PrepBuilder"/>
 /// and handed in via <see cref="App.CurrentPrep"/>; this view only renders it (no network, no model).
 ///
 /// It is also where a meeting's STICKY NOTE is written. Pressing Edit turns the card itself into the
-/// note — the recap, open items and agenda arrive as real text you carry on writing in. The note is a
+/// note - the recap, open items and agenda arrive as real text you carry on writing in. The note is a
 /// row in the database from that moment, saved on every pause in typing, and which note this meeting
 /// uses is always the user's explicit choice (see <see cref="ShowNotePicker"/>): Toki never matches
 /// notes to meetings by title, because titles change and two meetings are often called the same thing.
 /// </summary>
 public partial class PrepCardView : UserControl
 {
-    // Same re-entrancy guard as HomeView — NEVER grow the notch during construction.
+    // Same re-entrancy guard as HomeView - NEVER grow the notch during construction.
     bool _ready;
     void Grow() { if (_ready && !App.Headless) App.GrowNotch(); }
 
@@ -94,7 +94,7 @@ public partial class PrepCardView : UserControl
     // ── the sticky note ──
 
     /// <summary>Open whichever note this meeting is linked to. Once you've written on a card it STAYS
-    /// written — reopening shows your version, not the generated one, because your words outrank
+    /// written - reopening shows your version, not the generated one, because your words outrank
     /// Toki's. A meeting with no note yet shows the generated card, and Edit starts one.</summary>
     void PaintScratch(string eventId)
     {
@@ -113,8 +113,8 @@ public partial class PrepCardView : UserControl
         EditButton.Visibility = Visibility.Visible;
     }
 
-    /// <summary>Turn the card into the note. The generated content comes along as real text — open
-    /// items as tick boxes, agenda as bullets — so you carry on writing rather than starting over.</summary>
+    /// <summary>Turn the card into the note. The generated content comes along as real text - open
+    /// items as tick boxes, agenda as bullets - so you carry on writing rather than starting over.</summary>
     void EnterEdit(string markdown)
     {
         if (_scratch is null)
@@ -137,8 +137,8 @@ public partial class PrepCardView : UserControl
         catch (Exception ex) { App.Log($"sticky save failed: {ex.Message}"); }
     }
 
-    /// <summary>Start writing. If this meeting has no note yet, one is created NOW — a row on disk from
-    /// the first keystroke, so a crash mid-sentence can't cost anything — seeded with the card's own
+    /// <summary>Start writing. If this meeting has no note yet, one is created NOW - a row on disk from
+    /// the first keystroke, so a crash mid-sentence can't cost anything - seeded with the card's own
     /// content and linked to this event.</summary>
     void OnEdit(object sender, RoutedEventArgs e)
     {
@@ -162,7 +162,7 @@ public partial class PrepCardView : UserControl
     }
 
     /// <summary>
-    /// Choose which note this meeting uses — an earlier one, or a fresh one.
+    /// Choose which note this meeting uses - an earlier one, or a fresh one.
     ///
     /// This exists instead of guessing. Toki has no reliable way to know that today's "Weekly sync" is
     /// the same conversation as last week's, and getting it wrong either buries your notes or shows you
@@ -205,7 +205,7 @@ public partial class PrepCardView : UserControl
 
     // ── recording-aware chrome (N4) ──
 
-    /// <summary>Mid-recording the card is a side-trip: drop the Join/Later pair — you're already in the
+    /// <summary>Mid-recording the card is a side-trip: drop the Join/Later pair - you're already in the
     /// meeting, so "Join and record" would be nonsense. Back is ALWAYS shown, because while a card is
     /// armed hovering the peek opens this card, and without a way out you could never reach Home.</summary>
     void PaintChrome()
@@ -226,7 +226,7 @@ public partial class PrepCardView : UserControl
     /// <summary>Dev/render only: show edit mode with planted text, without touching the database.</summary>
     public void DebugOpenScratch(string markdown) { EnterEdit(markdown); Grow(); }
 
-    // "9:41 – 10:11 AM  ·  in 9 min" — the time range reads soft, the countdown reads amber (the
+    // "9:41 – 10:11 AM  ·  in 9 min" - the time range reads soft, the countdown reads amber (the
     // reference card's urgency accent). Runs use SetResourceReference so a live theme swap recolours.
     void PaintWhen(CalEvent e)
     {
@@ -234,7 +234,7 @@ public partial class PrepCardView : UserControl
         var range = new Run(CalendarRows.TimeRange(e));
         range.SetResourceReference(TextElement.ForegroundProperty, "TextSoft");
         WhenText.Inlines.Add(range);
-        // Amber only when it's genuinely urgent (≤15 min / started) — a card previewed further out
+        // Amber only when it's genuinely urgent (≤15 min / started) - a card previewed further out
         // keeps a quiet countdown, not a false alarm.
         var urgent = CalendarRows.Imminent(e) || e.Until <= TimeSpan.Zero;
         var rel = new Run("  ·  " + (CalendarRows.RelativeTime(e) is { Length: > 0 } r ? r : "now"))
@@ -243,7 +243,7 @@ public partial class PrepCardView : UserControl
         WhenText.Inlines.Add(rel);
     }
 
-    // "5 invited · 3 accepted" + overlapping initials — only from the REAL invite list; a meeting with
+    // "5 invited · 3 accepted" + overlapping initials - only from the REAL invite list; a meeting with
     // no guests shows nothing (never fabricated).
     void PaintPeople(CalEvent e)
     {
@@ -268,7 +268,7 @@ public partial class PrepCardView : UserControl
         {
             Style = (Style)FindResource("TokiCheck"), IsChecked = a.Done, Margin = new Thickness(0, 1, 0, 0),
         };
-        // Ticking an item off from the card is real — write it through to the store (never in the harness).
+        // Ticking an item off from the card is real - write it through to the store (never in the harness).
         check.Checked += (_, _) => { if (!App.Headless) App.Store.SetActionDone(a.Id, true); };
         check.Unchecked += (_, _) => { if (!App.Headless) App.Store.SetActionDone(a.Id, false); };
         Grid.SetColumn(check, 0);
@@ -282,7 +282,7 @@ public partial class PrepCardView : UserControl
         if (!string.IsNullOrWhiteSpace(a.Owner))
         {
             text.Inlines.Add(new Run(a.Owner) { Foreground = (Brush)FindResource("Amber"), FontWeight = FontWeights.SemiBold });
-            text.Inlines.Add(new Run(" — " + a.Text));
+            text.Inlines.Add(new Run(" - " + a.Text));
         }
         else text.Inlines.Add(new Run(a.Text));
         Grid.SetColumn(text, 1);

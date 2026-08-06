@@ -7,7 +7,7 @@ namespace Toki.Audio;
 /// <summary>
 /// One recording: the "you" mic stream always, plus the "them" per-process
 /// loopback stream when a meeting app is known. Writes both WAVs into a
-/// per-meeting folder under %APPDATA%\Toki\Recordings\. Robust by design —
+/// per-meeting folder under %APPDATA%\Toki\Recordings\. Robust by design -
 /// if the loopback tap fails, the mic keeps recording (mic-only note).
 /// </summary>
 public sealed class RecordingSession
@@ -26,7 +26,7 @@ public sealed class RecordingSession
 
     LiveTranscriber? _live;
     /// <summary>The transcript built LIVE during the meeting (merged + echo-de-duped), or null if live
-    /// transcription didn't run — in which case the caller does the whole-file pass. Set by <see cref="Stop"/>.</summary>
+    /// transcription didn't run - in which case the caller does the whole-file pass. Set by <see cref="Stop"/>.</summary>
     public IReadOnlyList<TranscriptSegment>? LiveTranscript { get; private set; }
     /// <summary>The live transcriber (for wiring a live-preview handler), available after <see cref="Start"/>.</summary>
     public LiveTranscriber? Live => _live;
@@ -48,11 +48,11 @@ public sealed class RecordingSession
     public void Start()
     {
         // Live transcription: transcribe DURING the meeting so Stop is near-instant. Only when the
-        // model is present (else it can't decode — the whole-file pass at stop covers that case).
+        // model is present (else it can't decode - the whole-file pass at stop covers that case).
         if (LiveEnabled && TranscriptionService.ModelReady)
             _live = new LiveTranscriber(TranscriptionService.Instance);
 
-        // "You" — always. Prepare first, wire the live tap, THEN begin: wiring after the
+        // "You" - always. Prepare first, wire the live tap, THEN begin: wiring after the
         // capture was already running could miss the first words of the meeting.
         try
         {
@@ -66,7 +66,7 @@ public sealed class RecordingSession
         }
         catch (Exception ex) { App.Log($"mic start failed: {ex.Message}"); }
 
-        // "Them" — only if we can resolve the meeting app to a PID.
+        // "Them" - only if we can resolve the meeting app to a PID.
         if (Target is not null)
         {
             var pid = ProcessResolver.FindPid(Target);
@@ -109,7 +109,7 @@ public sealed class RecordingSession
         }
         App.Log($"recording stopped: you peak {_mic.PeakLevel:P0}, them peak {_loopback.PeakLevel:P0}");
 
-        // Finalize live transcription (drains + decodes the last short remainder) — this is the whole
+        // Finalize live transcription (drains + decodes the last short remainder) - this is the whole
         // point: almost everything was already transcribed during the meeting, so Stop is quick.
         try { LiveTranscript = _live?.Stop(); }
         catch (Exception ex) { App.Log($"live transcription stop failed: {ex.Message}"); LiveTranscript = null; }

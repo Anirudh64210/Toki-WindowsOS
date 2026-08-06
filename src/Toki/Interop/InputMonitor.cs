@@ -72,7 +72,7 @@ public sealed class InputMonitor : IDisposable
                 else if (w == WmMouseWheel && _onWheel is not null)
                 {
                     // The wheel goes to the FOCUSED window by default (or the hovered one only if the OS
-                    // "scroll inactive windows" setting is on) — so scrolling the notch fell through to the
+                    // "scroll inactive windows" setting is on) - so scrolling the notch fell through to the
                     // app behind it. We catch every wheel here: if it's over the notch's scrollable content,
                     // scroll the notch AND return non-zero to CONSUME it, so the window behind never moves.
                     var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);

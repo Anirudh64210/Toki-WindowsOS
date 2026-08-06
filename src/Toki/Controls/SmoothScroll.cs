@@ -14,7 +14,7 @@ namespace Toki.Controls
     /// <c>controls:SmoothScroll.Enabled="True"</c> on the ScrollViewer.
     ///
     /// Our scrollers wrap plain StackPanels (CanContentScroll is false by default), so the viewer
-    /// already scrolls by pixels — all that was missing was the animation. Kept deliberately tiny
+    /// already scrolls by pixels - all that was missing was the animation. Kept deliberately tiny
     /// and allocation-light; it never fights the ScrollBar (dragging the thumb still works because
     /// we only intercept the wheel).
     /// </summary>
@@ -66,14 +66,14 @@ namespace Toki.Controls
         static void OnWheel(object sender, MouseWheelEventArgs e)
         {
             var sv = (ScrollViewer)sender;
-            if (sv.ScrollableHeight <= 0) return; // nothing to scroll here — let it bubble to a parent
+            if (sv.ScrollableHeight <= 0) return; // nothing to scroll here - let it bubble to a parent
             e.Handled = true;
             Nudge(sv, e.Delta);
         }
 
         /// <summary>Animate the viewer by one wheel delta (120 = one notch). Shared by the ScrollViewer's own
         /// wheel handler AND the global mouse-hook path (which scrolls the notch even when it isn't the focused
-        /// window — the reason meeting-overlay scrolling otherwise fell through to the window behind).</summary>
+        /// window - the reason meeting-overlay scrolling otherwise fell through to the window behind).</summary>
         public static void Nudge(ScrollViewer sv, int delta)
         {
             if (sv.ScrollableHeight <= 0) return;

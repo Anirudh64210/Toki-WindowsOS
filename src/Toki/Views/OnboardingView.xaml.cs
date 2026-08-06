@@ -6,8 +6,8 @@ using Toki.Llm;
 namespace Toki.Views;
 
 /// <summary>
-/// First-run onboarding, rendered inside the notch (no separate wizard window). Three short steps —
-/// name → privacy-as-pitch → all set — each a height morph via <see cref="App.GrowNotch"/>. Finishing
+/// First-run onboarding, rendered inside the notch (no separate wizard window). Three short steps -
+/// name → privacy-as-pitch → all set - each a height morph via <see cref="App.GrowNotch"/>. Finishing
 /// persists the name + the OnboardingComplete flag and lands in Home, where the greeting immediately
 /// uses the name they just gave (proof the answer mattered). See <see cref="AppSettings.OnboardingComplete"/>.
 /// </summary>
@@ -16,7 +16,7 @@ public partial class OnboardingView : UserControl
     public OnboardingView()
     {
         InitializeComponent();
-        // Prefill with the name Toki currently holds (so a stale/wrong one — e.g. "Sid" — is shown and
+        // Prefill with the name Toki currently holds (so a stale/wrong one - e.g. "Sid" - is shown and
         // corrected here); empty on a fresh install, where the field's prompt asks for it.
         NameBox.Text = AppSettings.Current.UserName ?? "";
         Loaded += (_, _) =>

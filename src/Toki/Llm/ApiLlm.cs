@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Toki.Llm;
 
 /// <summary>
-/// Optional "bring your own API key" model — provider-agnostic. It speaks the common
+/// Optional "bring your own API key" model - provider-agnostic. It speaks the common
 /// chat-completions wire format that virtually every provider and router implements, so
 /// the user can point it at ANY model they like: OpenAI, Anthropic/Claude &amp; Google/Gemini
 /// (directly via their compatible endpoints, or through a router like OpenRouter with one
@@ -15,16 +15,16 @@ namespace Toki.Llm;
 /// never touches that cost (hard constraint #1).
 ///
 /// Security posture: HTTPS over the network (the key never travels in the clear; plain http
-/// only for loopback), the key goes on each request — never on the shared client, never in a
-/// log or exception message — and every failure surfaces as a short human-readable message.
+/// only for loopback), the key goes on each request - never on the shared client, never in a
+/// log or exception message - and every failure surfaces as a short human-readable message.
 /// </summary>
 public sealed class ApiLlm : ILlm
 {
     // ONE client for the process (per-call clients exhaust sockets). No default auth
-    // header — the key can change between calls, so it rides on each request instead.
+    // header - the key can change between calls, so it rides on each request instead.
     // No client-wide timeout: HttpClient.Timeout covers the WHOLE operation including
     // reading the body, so a 60s cap silently killed long streamed answers and long
-    // completions — precisely on the supported slow backends (LM Studio/Ollama on CPU).
+    // completions - precisely on the supported slow backends (LM Studio/Ollama on CPU).
     // Deadlines are per-call instead: ListModels/Test carry 12s CTSes, and Complete/
     // Stream get a connect deadline + an idle watchdog below.
     static readonly HttpClient Http = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
@@ -53,13 +53,13 @@ public sealed class ApiLlm : ILlm
     /// OpenRouter's <c>/api/v1</c>) without ever doubling it: the final path always ends in
     /// <c>/v1/chat/completions</c> exactly once.
     /// Scheme rule: <b>https required over the network</b> (an API key is a credential and must
-    /// never travel in the clear) — but plain <c>http</c> is allowed for a <b>loopback</b> address
+    /// never travel in the clear) - but plain <c>http</c> is allowed for a <b>loopback</b> address
     /// (localhost / 127.0.0.1 / [::1]), where the traffic never leaves this machine, so a local
     /// proxy like Ollama or LM Studio works.
     /// </summary>
     public static Uri? TryBuildEndpoint(string? baseUrl) => TryBuildV1(baseUrl, "chat/completions");
 
-    /// <summary>The <c>…/v1/models</c> URL for the same base — used to fetch a provider's
+    /// <summary>The <c>…/v1/models</c> URL for the same base - used to fetch a provider's
     /// live model list. Same scheme rules as <see cref="TryBuildEndpoint"/>.</summary>
     public static Uri? TryBuildModelsEndpoint(string? baseUrl) => TryBuildV1(baseUrl, "models");
 
@@ -79,7 +79,7 @@ public sealed class ApiLlm : ILlm
 
     /// <summary>
     /// Fetch the provider's available model IDs from <c>…/v1/models</c> so the picker can
-    /// show a live, always-current list. Never throws — returns (false, human message, empty)
+    /// show a live, always-current list. Never throws - returns (false, human message, empty)
     /// on any failure. Doubles as a key check: a successful list means the key + address work.
     /// Anthropic's list endpoint wants <c>x-api-key</c> + <c>anthropic-version</c>; every other
     /// OpenAI-compatible provider takes a Bearer token.
@@ -142,7 +142,7 @@ public sealed class ApiLlm : ILlm
         return ids.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>Short, safe status message per class — no body, no key.</summary>
+    /// <summary>Short, safe status message per class - no body, no key.</summary>
     static string StatusReason(HttpStatusCode status) => (int)status switch
     {
         401 or 403 => "Your API key was rejected (check the key).",
@@ -176,7 +176,7 @@ public sealed class ApiLlm : ILlm
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(body) };
             req.Headers.Authorization = new("Bearer", _apiKey);   // per-request, never on the shared client
-            // Deadline only until the provider ACCEPTS the request — generation time is unbounded
+            // Deadline only until the provider ACCEPTS the request - generation time is unbounded
             // by us (slow local models are a supported configuration; callers carry their own CTS).
             using var connect = CancellationTokenSource.CreateLinkedTokenSource(ct);
             connect.CancelAfter(ConnectDeadline);
@@ -211,7 +211,7 @@ public sealed class ApiLlm : ILlm
         if (_apiKey.Length == 0) throw new InvalidOperationException("No API key is set.");
         if (_model.Length == 0) throw new InvalidOperationException("No API model is set.");
 
-        // Dictionary (not an anonymous type) so the optional "stop" field is only sent when set —
+        // Dictionary (not an anonymous type) so the optional "stop" field is only sent when set -
         // some OpenAI-compatible providers reject stop:null.
         var body = new Dictionary<string, object>
         {
@@ -250,13 +250,13 @@ public sealed class ApiLlm : ILlm
             using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new System.IO.StreamReader(stream);
             // Idle watchdog: unlimited TOTAL stream time (long answers are legitimate), but a
-            // dead connection — no bytes at all — must still terminate. Re-armed on every line.
+            // dead connection - no bytes at all - must still terminate. Re-armed on every line.
             using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(ct);
             watchdog.CancelAfter(StreamIdleDeadline);
             // OpenAI-style Server-Sent Events: lines of "data: {json}", terminated by "data: [DONE]".
             // ReadLineAsync(ct) (not EndOfStream, whose empty-buffer refill is a SYNCHRONOUS,
-            // uncancelable network read): honors cancellation promptly — the notch cancels this
-            // token routinely at the glance budget — and returns null cleanly at EOF.
+            // uncancelable network read): honors cancellation promptly - the notch cancels this
+            // token routinely at the glance budget - and returns null cleanly at EOF.
             while (true)
             {
                 string? line;
@@ -276,7 +276,7 @@ public sealed class ApiLlm : ILlm
                     if (delta.TryGetProperty("content", out var cnt) && cnt.ValueKind == JsonValueKind.String)
                         piece = cnt.GetString();
                 }
-                catch { /* keep-alive / non-JSON line — skip */ }
+                catch { /* keep-alive / non-JSON line - skip */ }
                 if (!string.IsNullOrEmpty(piece)) yield return piece;
             }
         }
@@ -284,7 +284,7 @@ public sealed class ApiLlm : ILlm
 
     /// <summary>
     /// Tiny 1-token round trip for the Settings "Test connection" button. Never throws
-    /// and never hangs — a short timeout and a (success, human message) result instead.
+    /// and never hangs - a short timeout and a (success, human message) result instead.
     /// </summary>
     public async Task<(bool ok, string message)> TestAsync(CancellationToken ct = default)
     {
@@ -296,7 +296,7 @@ public sealed class ApiLlm : ILlm
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(12));
             await CompleteAsync("You are a connection test.", "Reply with OK.", 1, timeout.Token).ConfigureAwait(false);
-            return (true, "Connected — your key works.");
+            return (true, "Connected - your key works.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return (false, "Test cancelled."); }
         catch (OperationCanceledException) { return (false, "Couldn't reach the provider (timed out)."); }
@@ -305,7 +305,7 @@ public sealed class ApiLlm : ILlm
 
     // ── response handling (defensive: providers return error shapes, HTML, nothing…) ──
 
-    /// <summary>choices[0].message.content, or a clear error — never a NullReference/KeyNotFound.</summary>
+    /// <summary>choices[0].message.content, or a clear error - never a NullReference/KeyNotFound.</summary>
     string ExtractContent(string raw)
     {
         try
@@ -328,7 +328,7 @@ public sealed class ApiLlm : ILlm
             + ProviderDetail(raw));
     }
 
-    /// <summary>A short human message per status class. Safe to show/log — never contains the key.</summary>
+    /// <summary>A short human message per status class. Safe to show/log - never contains the key.</summary>
     string ErrorFor(HttpStatusCode status, string body)
     {
         var reason = (int)status switch
@@ -342,7 +342,7 @@ public sealed class ApiLlm : ILlm
         return reason + ProviderDetail(body);
     }
 
-    /// <summary>The provider's own error.message when the body carries one — trimmed,
+    /// <summary>The provider's own error.message when the body carries one - trimmed,
     /// capped, and scrubbed so a quoted-back key can never leak into a log.</summary>
     string ProviderDetail(string body)
     {

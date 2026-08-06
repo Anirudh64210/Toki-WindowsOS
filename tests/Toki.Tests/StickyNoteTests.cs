@@ -10,7 +10,7 @@ namespace Toki.Tests;
 /// <summary>
 /// Sticky notes: the user's own writing about a meeting.
 ///
-/// The rules being locked down here are the ones the owner asked for by name — a note is linked to a
+/// The rules being locked down here are the ones the owner asked for by name - a note is linked to a
 /// meeting BY CHOICE and never by matching titles, a saved note stays saved, and none of this is allowed
 /// to leak into the parts of the product that were already working.
 /// </summary>
@@ -113,7 +113,7 @@ public sealed class StickyNoteTests : IDisposable
     [Fact]
     public void One_note_can_run_across_several_meetings()
     {
-        // A recurring 1:1 where you keep the same running page — the case that made a per-event JSON
+        // A recurring 1:1 where you keep the same running page - the case that made a per-event JSON
         // file the wrong shape in the first place.
         var week1 = Meeting("1:1 with Ana");
         var week2 = Meeting("1:1 with Ana");
@@ -178,7 +178,7 @@ public sealed class StickyNoteTests : IDisposable
         var older = _store.CreateSticky("older", "text");
         System.Threading.Thread.Sleep(5);
         var newer = _store.CreateSticky("newer", "text");
-        _store.CreateSticky("blank", "   ");          // nothing to reuse — don't offer it
+        _store.CreateSticky("blank", "   ");          // nothing to reuse - don't offer it
 
         var recent = _store.RecentStickies();
         Assert.Equal(new[] { newer, older }, recent.Select(s => s.Id));
@@ -200,7 +200,7 @@ public sealed class StickyNoteTests : IDisposable
     public void Sticky_notes_are_not_searchable_and_cannot_surface_in_Ask()
     {
         // Deliberate: it's the user's private page. It doesn't steer the summary and it doesn't come
-        // back as an answer either — otherwise "it never influences anything" would only be half true.
+        // back as an answer either - otherwise "it never influences anything" would only be half true.
         var meetingId = Meeting("Pricing sync");
         var note = _store.CreateSticky("mine", "zzyzxsecretword");
         _store.LinkStickyToMeeting(meetingId, note);
@@ -232,7 +232,7 @@ public sealed class StickyNoteTests : IDisposable
             Assert.Equal("Pricing sync", _store.GetSticky(id.Value)!.Title);
             Assert.Null(_store.StickyForEvent("evt-b"));          // nothing was written in it
 
-            // Renamed, never deleted — the user's words survive even if this went wrong.
+            // Renamed, never deleted - the user's words survive even if this went wrong.
             Assert.False(File.Exists(legacy));
             Assert.True(File.Exists(legacy + ".migrated"));
         }

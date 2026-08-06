@@ -30,7 +30,7 @@
     <PackageReference Include="LLamaSharp.Backend.Vulkan" Version="0.27.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
     <!-- Override the vulnerable native SQLite (2.1.6, GHSA-2m69-gcr7-jv3q) that Microsoft.Data.Sqlite
-         8.0.11 pulls transitively — 2.1.12 is patched and stays on the compatible 2.1 line. -->
+         8.0.11 pulls transitively - 2.1.12 is patched and stays on the compatible 2.1 line. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.Recognizers.Text.DateTime" Version="1.8.13" />
     <PackageReference Include="NAudio" Version="2.2.1" />

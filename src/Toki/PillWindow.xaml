@@ -11,13 +11,13 @@
     <!-- Transparent window (like Cluely / Cheating Daddy): the Border IS the pill, with
          a translucent frosted surface so the desktop shows through. Ghost mode
          (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
-         capture even though it's transparent — the two are NOT mutually exclusive.
+         capture even though it's transparent - the two are NOT mutually exclusive.
          A real acrylic blur-behind is applied in code (SetWindowCompositionAttribute). -->
-    <!-- Rounded only on the BOTTOM — the top is flush with the screen edge, so it reads as
+    <!-- Rounded only on the BOTTOM - the top is flush with the screen edge, so it reads as
          a notch carved into the top, not a floating pill. -->
     <!-- A VIRTUAL NOTCH, not a glass pill: PITCH BLACK and fully opaque, so it reads as a hole
          carved out of the top edge (like the macOS notch / Dynamic Island). No white sheen, no
-         translucency — a clean black slab. Even a 13px tucked sliver is an unmistakable dark tab. -->
+         translucency - a clean black slab. Even a 13px tucked sliver is an unmistakable dark tab. -->
     <Border x:Name="Root" CornerRadius="0,0,8,8" BorderThickness="1,0,1,1"
             Background="{DynamicResource Notch}" BorderBrush="{DynamicResource NotchBorder}">
         <Grid>

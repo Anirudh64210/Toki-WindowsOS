@@ -10,7 +10,7 @@ namespace Toki.Views;
 public partial class RecordingBarView : UserControl
 {
     /// <summary>Play the dramatic flip-and-fall only when recording STARTS. On a hover-collapse from
-    /// the open screen Toki is already upside-down, so it should just settle — not re-flip (that read
+    /// the open screen Toki is already upside-down, so it should just settle - not re-flip (that read
     /// as an abrupt "shut down"). Set by the pill before the peek is shown.</summary>
     public bool FlipOnShow { get; set; } = true;
 

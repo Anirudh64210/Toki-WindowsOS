@@ -9,7 +9,7 @@
             <controls:TokiBlob x:Name="Toki"/>
         </Viewbox>
 
-        <!-- STEP 0 — name -->
+        <!-- STEP 0 - name -->
         <StackPanel x:Name="StepName" Margin="0,12,0,0">
             <TextBlock Text="Hi, I'm Toki." Style="{StaticResource Body}" FontSize="16" FontWeight="SemiBold"
                        HorizontalAlignment="Center"/>
@@ -26,7 +26,7 @@
                     Margin="0,12,0,0" HorizontalContentAlignment="Center" Click="OnNameNext"/>
         </StackPanel>
 
-        <!-- STEP 1 — privacy is the pitch, not legalese -->
+        <!-- STEP 1 - privacy is the pitch, not legalese -->
         <StackPanel x:Name="StepPrivacy" Visibility="Collapsed" Margin="0,12,0,0">
             <TextBlock Text="Everything stays on this laptop." Style="{StaticResource Body}" FontSize="14.5"
                        FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
@@ -49,7 +49,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                Foreground="{DynamicResource Green}" VerticalAlignment="Top" Margin="0,1,10,0"/>
-                    <TextBlock Grid.Column="1" Text="Nothing is ever uploaded — no account, no cloud." Style="{StaticResource Dim}"
+                    <TextBlock Grid.Column="1" Text="Nothing is ever uploaded - no account, no cloud." Style="{StaticResource Dim}"
                                FontSize="12" TextWrapping="Wrap"/>
                 </Grid>
             </StackPanel>
@@ -65,7 +65,7 @@
             </Grid>
         </StackPanel>
 
-        <!-- STEP 2 — all set -->
+        <!-- STEP 2 - all set -->
         <StackPanel x:Name="StepDone" Visibility="Collapsed" Margin="0,12,0,0">
             <TextBlock x:Name="DoneTitle" Text="You're all set." Style="{StaticResource Body}" FontSize="16"
                        FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>

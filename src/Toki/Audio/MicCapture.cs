@@ -6,13 +6,13 @@ using NAudio.Wave;
 namespace Toki.Audio;
 
 /// <summary>
-/// Captures the default microphone (WASAPI shared mode) to a WAV file — the
+/// Captures the default microphone (WASAPI shared mode) to a WAV file - the
 /// "you" stream. Reports the peak level so a self-test can prove real audio
 /// (not silence) was recorded.
 ///
 /// Mid-recording resilience: if the default communications mic CHANGES (headset
 /// plugged in / unplugged, Bluetooth drop) the capture rebuilds itself on the new
-/// default device and keeps writing to the SAME WAV — buffers are converted to the
+/// default device and keeps writing to the SAME WAV - buffers are converted to the
 /// original writer format when the new device's format differs. Without this, a
 /// device switch silently killed the "you" stream for the rest of the meeting.
 /// The WAV header is also re-finalized every few seconds so a crash or power loss
@@ -37,12 +37,12 @@ public sealed class MicCapture : IDisposable
     public float PeakLevel => _peak;
 
     /// <summary>Optional passive tap: capture bytes in the WRITER's format as they arrive, for live
-    /// transcription. Purely an observer of the buffer already being written to WAV — must never
+    /// transcription. Purely an observer of the buffer already being written to WAV - must never
     /// affect capture. Wire it between <see cref="Prepare"/> and <see cref="Begin"/> so the very
     /// first buffers are tapped too.</summary>
     public Action<byte[], int>? OnBuffer;
 
-    /// <summary>Open the default device and the WAV writer WITHOUT starting capture — so the
+    /// <summary>Open the default device and the WAV writer WITHOUT starting capture - so the
     /// caller can wire <see cref="OnBuffer"/>/live-transcription against <see cref="Format"/>
     /// before the first buffer arrives. Follow with <see cref="Begin"/>.</summary>
     public void Prepare(string wavPath)
@@ -86,7 +86,7 @@ public sealed class MicCapture : IDisposable
     {
         lock (_gate)
         {
-            if (_writer is null) return;   // stopped (or mid-rebuild) — drop the straggler buffer
+            if (_writer is null) return;   // stopped (or mid-rebuild) - drop the straggler buffer
             var buf = e.Buffer;
             var bytes = e.BytesRecorded;
             if (_converter is not null) (buf, bytes) = _converter.Convert(buf, bytes);
@@ -107,12 +107,12 @@ public sealed class MicCapture : IDisposable
         }
     }
 
-    /// <summary>The capture stopped on its own (device unplugged/disabled mid-recording) —
+    /// <summary>The capture stopped on its own (device unplugged/disabled mid-recording) -
     /// try to carry on with whatever the new default mic is.</summary>
     void OnStopped(object? sender, StoppedEventArgs e)
     {
         if (e.Exception is null) return;               // deliberate Stop()
-        App.Log($"mic capture stopped unexpectedly ({e.Exception.Message}) — rebuilding");
+        App.Log($"mic capture stopped unexpectedly ({e.Exception.Message}) - rebuilding");
         System.Threading.Tasks.Task.Run(RebuildOnDefaultDevice);
     }
 
@@ -142,7 +142,7 @@ public sealed class MicCapture : IDisposable
             }
             catch (Exception ex)
             {
-                // No usable mic right now — a later device arrival triggers another attempt.
+                // No usable mic right now - a later device arrival triggers another attempt.
                 App.Log($"mic rebuild failed (will retry on next device change): {ex.Message}");
             }
         }
@@ -205,7 +205,7 @@ public sealed class MicCapture : IDisposable
 
     /// <summary>Default-device-change watcher. Windows fires these on a COM callback thread;
     /// the rebuild takes the capture lock, so it is safe from any thread. Only the
-    /// communications-capture role matters — that's the device this capture opened.</summary>
+    /// communications-capture role matters - that's the device this capture opened.</summary>
     sealed class DeviceWatcher(MicCapture owner) : IMMNotificationClient
     {
         public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)

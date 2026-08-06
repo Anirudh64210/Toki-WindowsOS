@@ -11,7 +11,7 @@ public partial class MeetingPromptView : UserControl
         Refresh();
         // Belt and braces: if the detected app changed while the cached view was off-screen, re-fit
         // the notch to the (possibly re-wrapped) text once shown. The AUTHORITATIVE text update runs
-        // in Refresh() BEFORE PillWindow measures the content height — Loaded fires after layout, so
+        // in Refresh() BEFORE PillWindow measures the content height - Loaded fires after layout, so
         // updating only here was the real clip bug (height measured on stale one-line text, longer
         // text then wrapped past the reveal clip and the prompt rendered cut off).
         Loaded += (_, _) => { Refresh(); App.GrowNotch(); };
@@ -34,15 +34,15 @@ public partial class MeetingPromptView : UserControl
     {
         if (calendarMatch)
         {
-            // A scheduled call is on right now — "Join call" opens the Meet link; "Record" is secondary.
-            Prompt.Text = string.IsNullOrWhiteSpace(title) ? "A meeting is on now — join?" : $"“{title}” is on now — join?";
+            // A scheduled call is on right now - "Join call" opens the Meet link; "Record" is secondary.
+            Prompt.Text = string.IsNullOrWhiteSpace(title) ? "A meeting is on now - join?" : $"“{title}” is on now - join?";
             JoinBtn.Visibility = Visibility.Visible;
             RecordBtn.Content = "Record";
             RecordBtn.Style = (Style)FindResource("WhiteButton");
         }
         else
         {
-            // Ad-hoc detected call — the FRIENDLY app name, never the raw process id (a past live bug).
+            // Ad-hoc detected call - the FRIENDLY app name, never the raw process id (a past live bug).
             var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
             Prompt.Text = string.IsNullOrWhiteSpace(name) ? "A meeting's in progress." : $"{name} is in a call.";
             JoinBtn.Visibility = Visibility.Collapsed;

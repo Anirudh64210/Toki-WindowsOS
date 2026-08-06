@@ -32,7 +32,7 @@ public sealed class ModelManager
         EnsureFileAsync(QwenUrl, QwenPath, progress, ct);
 
     // Meaning-search embedder: bge-small-en-v1.5 (MIT), Q8_0 GGUF (~34MB, single file). Runs on CPU via
-    // LLamaSharp — no second inference runtime — so the GPU stays free for Qwen. Optional: when absent,
+    // LLamaSharp - no second inference runtime - so the GPU stays free for Qwen. Optional: when absent,
     // retrieval falls back to keyword/FTS only.
     public const string EmbedUrl =
         "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf";

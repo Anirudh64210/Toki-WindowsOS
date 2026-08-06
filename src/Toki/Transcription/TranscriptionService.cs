@@ -6,7 +6,7 @@ namespace Toki.Transcription;
 /// App-level transcription: turns a finished recording folder (you.wav / them.wav)
 /// into one merged, echo-de-duped transcript. Owns the heavy Parakeet recognizer
 /// and creates it once, lazily. Degrades gracefully (returns null) if the model
-/// isn't installed yet — a recording is never lost, it just isn't transcribed
+/// isn't installed yet - a recording is never lost, it just isn't transcribed
 /// until the model is present (lesson 2).
 /// </summary>
 public sealed class TranscriptionService
@@ -22,7 +22,7 @@ public sealed class TranscriptionService
     TranscriptionService() { }
 
     /// <summary>
-    /// Transcribe both streams of a recording folder (sequentially — a sherpa-onnx
+    /// Transcribe both streams of a recording folder (sequentially - a sherpa-onnx
     /// offline recognizer is NOT safe to run concurrently, even as two instances:
     /// concurrent decode produced non-deterministic, corrupt transcripts in testing,
     /// so correctness wins over the ~15% wall-clock a parallel run would save) and
@@ -37,7 +37,7 @@ public sealed class TranscriptionService
         }
 
         // On a small-RAM PC the 2.5GB notes LLM cannot be resident while the recognizer
-        // decodes a long meeting — that's the native OOM crash. Free it first so the
+        // decodes a long meeting - that's the native OOM crash. Free it first so the
         // recognizer has room; the LLM reloads on demand after transcription.
         if (App.LowMemoryMode) Toki.Llm.LlmService.Instance.Release();
 
@@ -57,7 +57,7 @@ public sealed class TranscriptionService
 
     /// <summary>
     /// Decode one LIVE window [start,end) of a stream's 16k-mono buffer at a meeting-time offset,
-    /// using the SHARED recognizer under the SAME gate as the stop-time decode — so live windows
+    /// using the SHARED recognizer under the SAME gate as the stop-time decode - so live windows
     /// and any stop-time pass never run concurrently (concurrent decode corrupts sherpa-onnx output).
     /// Returns [] if the model isn't ready or the decode throws (never crashes the recording).
     /// </summary>
@@ -106,7 +106,7 @@ public sealed class TranscriptionService
         {
             var samples = AudioLoader.To16kMono(wavPath);
             // Skip a near-silent stream (e.g. the user's mic muted the whole call).
-            // Decoding it costs the full ~4x-real-time grind yet yields nothing — on
+            // Decoding it costs the full ~4x-real-time grind yet yields nothing - on
             // a muted-mic meeting that was ~half the total processing time (real logs).
             // Silence is not failure (lesson 4): a muted stream just isn't transcribed.
             if (IsSilent(samples))
@@ -118,7 +118,7 @@ public sealed class TranscriptionService
         }
         catch (Exception ex)
         {
-            // Parakeet errored (not silence) — this is where the whisper.cpp
+            // Parakeet errored (not silence) - this is where the whisper.cpp
             // fallback will run (lesson 4). For now, log and skip this stream.
             App.Log($"Parakeet error on {speaker} stream: {ex.Message} (whisper fallback: TODO)");
             return [];

@@ -22,7 +22,7 @@ static class SelfTests
 
     public static int Run(string flag, string[] args)
     {
-        // Render “—”, “✓” etc. correctly in the console instead of mojibake (ΓÇö). Best-effort:
+        // Render “-”, “✓” etc. correctly in the console instead of mojibake (ΓÇö). Best-effort:
         // throws if stdout is redirected in some shells, which is harmless here.
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
@@ -79,13 +79,13 @@ static class SelfTests
         var file = args[i + 1];
         if (!File.Exists(file)) return Fail($"file not found: {file}");
         if (!Toki.Transcription.TranscriptionService.ModelReady)
-            return Fail("Parakeet model not installed — run --asrtest once to fetch it.");
+            return Fail("Parakeet model not installed - run --asrtest once to fetch it.");
         Console.WriteLine($"[--voicetest] transcribing {Path.GetFileName(file)} via TranscribeFile()...");
         var text = Toki.Transcription.TranscriptionService.Instance.TranscribeFile(file);
         if (text is null) return Fail("TranscribeFile returned null (model/decoder error).");
         Console.WriteLine($"[--voicetest] result: \"{text}\"");
-        if (text.Length == 0) { Console.WriteLine("[--voicetest] empty — PASS only if the clip was silent."); return 0; }
-        Console.WriteLine("[--voicetest] PASS — non-empty transcription returned.");
+        if (text.Length == 0) { Console.WriteLine("[--voicetest] empty - PASS only if the clip was silent."); return 0; }
+        Console.WriteLine("[--voicetest] PASS - non-empty transcription returned.");
         return 0;
     }
 
@@ -102,10 +102,10 @@ static class SelfTests
             { try { return en.GetDefaultAudioEndpoint(NAudio.CoreAudioApi.DataFlow.Capture, r); } catch { return null; } }
             var comm = Def(NAudio.CoreAudioApi.Role.Communications);
             var cons = Def(NAudio.CoreAudioApi.Role.Console);
-            Console.WriteLine($"  DEFAULT (Communications — USED BY TOKI): {comm?.FriendlyName ?? "(none)"} [{comm?.State}]");
+            Console.WriteLine($"  DEFAULT (Communications - USED BY TOKI): {comm?.FriendlyName ?? "(none)"} [{comm?.State}]");
             Console.WriteLine($"  DEFAULT (Console/Multimedia)           : {cons?.FriendlyName ?? "(none)"} [{cons?.State}]");
             if (comm is not null && cons is not null && comm.ID != cons.ID)
-                Console.WriteLine("  ⚠ MISMATCH — Toki's mic differs from your general default. This is likely the cause.");
+                Console.WriteLine("  ⚠ MISMATCH - Toki's mic differs from your general default. This is likely the cause.");
             Console.WriteLine("  all capture devices:");
             foreach (var d in en.EnumerateAudioEndPoints(NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.DeviceState.All))
                 Console.WriteLine($"    - {d.FriendlyName} [{d.State}]");
@@ -125,9 +125,9 @@ static class SelfTests
         Console.WriteLine($"  peak   : {mic.PeakLevel:P1}");
         if (size <= 44)
             return Fail("no audio data written (only a WAV header).");
-        Console.WriteLine($"[--mictest] PASS — play {Path.GetFileName(path)} and you should hear yourself.");
+        Console.WriteLine($"[--mictest] PASS - play {Path.GetFileName(path)} and you should hear yourself.");
         if (mic.PeakLevel < 0.005f)
-            Console.WriteLine("  note: peak is very low — was the mic muted or silent?");
+            Console.WriteLine("  note: peak is very low - was the mic muted or silent?");
         return 0;
     }
 
@@ -149,9 +149,9 @@ static class SelfTests
         Console.WriteLine($"  peak  : {cap.PeakLevel:P1}");
         if (size <= 44)
             return Fail("no audio captured. Is that app actually producing sound?");
-        Console.WriteLine($"[--loopbacktest] PASS — play {Path.GetFileName(path)} and you should hear that app.");
+        Console.WriteLine($"[--loopbacktest] PASS - play {Path.GetFileName(path)} and you should hear that app.");
         if (cap.PeakLevel < 0.005f)
-            Console.WriteLine("  note: peak is near silence — the app may not have played audio during the test.");
+            Console.WriteLine("  note: peak is near silence - the app may not have played audio during the test.");
         return 0;
     }
 
@@ -159,7 +159,7 @@ static class SelfTests
     {
         if (!ModelManager.QwenInstalled)
         {
-            Console.WriteLine("[--llmtest] Qwen3-4B not installed — downloading (~2.5 GB, one time)...");
+            Console.WriteLine("[--llmtest] Qwen3-4B not installed - downloading (~2.5 GB, one time)...");
             var last = -5;
             var progress = new Progress<double>(p =>
             {
@@ -173,7 +173,7 @@ static class SelfTests
 
         var transcript = new List<TranscriptSegment>
         {
-            new(Speaker.Them, 0, 4000, "So where are we on the launch — what's left before we can ship?"),
+            new(Speaker.Them, 0, 4000, "So where are we on the launch - what's left before we can ship?"),
             new(Speaker.You, 4200, 9000, "Tool's basically done. The only blockers are the brand tokens and wiring the Make webhook."),
             new(Speaker.Them, 9200, 13000, "Okay. Let's move the ship date to Thursday then, and keep the email capture optional."),
             new(Speaker.You, 13200, 17000, "Sounds good. I'll wire the webhook this week. Priya, can you confirm the brand font and hex tomorrow?"),
@@ -182,7 +182,7 @@ static class SelfTests
 
         Console.WriteLine("[--llmtest] loading Qwen + writing notes (one structured pass + title)...");
         var sw = Stopwatch.StartNew();
-        // Run off the UI thread — LLamaSharp's async continuations would otherwise
+        // Run off the UI thread - LLamaSharp's async continuations would otherwise
         // deadlock against this thread being blocked on the result.
         var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(transcript)).GetAwaiter().GetResult();
         sw.Stop();
@@ -197,14 +197,14 @@ static class SelfTests
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
 
         if (sw.ElapsedMilliseconds > 40000)
-            Console.WriteLine($"  [warn] took {sw.ElapsedMilliseconds / 1000.0:0.0}s — target is under 30s.");
+            Console.WriteLine($"  [warn] took {sw.ElapsedMilliseconds / 1000.0:0.0}s - target is under 30s.");
         if (TextValidator.IsDegenerate(notes.Tldr)) return Fail("SUMMARY is degenerate (CJK / repetition).");
-        Console.WriteLine("[--llmtest] PASS — notes generated, English, no degeneration. Read them: do they match the transcript?");
+        Console.WriteLine("[--llmtest] PASS - notes generated, English, no degeneration. Read them: do they match the transcript?");
         return 0;
     }
 
     /// <summary>Re-run the LLM note writer on a STORED meeting's real transcript and print the
-    /// result — so we can verify the notes engine against actual meetings (e.g. the 25-min one that
+    /// result - so we can verify the notes engine against actual meetings (e.g. the 25-min one that
     /// used to summarise only its first lines) without recording again.</summary>
     static int ReNotes(string[] args)
     {
@@ -219,7 +219,7 @@ static class SelfTests
         if (m.Transcript.Count == 0) return Fail("meeting has no transcript to summarise.");
 
         var sw = Stopwatch.StartNew();
-        // Off the UI thread — LLamaSharp async continuations would deadlock a blocked caller.
+        // Off the UI thread - LLamaSharp async continuations would deadlock a blocked caller.
         var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(m.Transcript)).GetAwaiter().GetResult();
         sw.Stop();
         if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
@@ -231,13 +231,13 @@ static class SelfTests
         foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
         Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
-        Console.WriteLine("[--renotes] done — read the notes: do they reflect the WHOLE meeting, honestly (no filler)?");
+        Console.WriteLine("[--renotes] done - read the notes: do they reflect the WHOLE meeting, honestly (no filler)?");
         return 0;
     }
 
     /// <summary>
     /// Feed a WAV through the LIVE transcriber the way capture would during a meeting, and prove that
-    /// most segments finalize DURING the stream — so Stop only decodes the short remainder (the whole
+    /// most segments finalize DURING the stream - so Stop only decodes the short remainder (the whole
     /// point of Phase 2). Paced ~2× real-time so the worker keeps up; use a short-ish clip.
     /// </summary>
     static int LiveTest(string[] args)
@@ -248,11 +248,11 @@ static class SelfTests
 
         if (!ModelManager.IsInstalled(ModelManager.Parakeet))
         {
-            Console.WriteLine("[--livetest] Parakeet not installed — run --asrtest once to fetch it.");
+            Console.WriteLine("[--livetest] Parakeet not installed - run --asrtest once to fetch it.");
             return Fail("model missing");
         }
 
-        // A folder feeds BOTH you.wav + them.wav concurrently — the real two-stream meeting load.
+        // A folder feeds BOTH you.wav + them.wav concurrently - the real two-stream meeting load.
         var streams = new List<(Speaker Speaker, string Wav)>();
         if (Directory.Exists(path))
         {
@@ -305,7 +305,7 @@ static class SelfTests
         Console.WriteLine($"  >>> STOP finalized in {stopSw.ElapsedMilliseconds} ms → {result.Count} total merged segments <<<");
         if (result.Count == 0)
         {
-            Console.WriteLine("[--livetest] empty — treat as silence. PASS if the clip was silent.");
+            Console.WriteLine("[--livetest] empty - treat as silence. PASS if the clip was silent.");
             return 0;
         }
         Console.WriteLine("  --- HEAD ---");
@@ -316,7 +316,7 @@ static class SelfTests
             Console.WriteLine("  --- TAIL ---");
             foreach (var s in result.TakeLast(3)) Console.WriteLine($"   [{s.Start:mm\\:ss}] {s.Speaker,-4} {s.Text}");
         }
-        Console.WriteLine($"[--livetest] PASS — {duringStream} segments finalized mid-stream; Stop only had {stopSw.ElapsedMilliseconds} ms left. In a real meeting that's your wait after clicking Stop.");
+        Console.WriteLine($"[--livetest] PASS - {duringStream} segments finalized mid-stream; Stop only had {stopSw.ElapsedMilliseconds} ms left. In a real meeting that's your wait after clicking Stop.");
         return 0;
     }
 
@@ -349,19 +349,19 @@ static class SelfTests
 
         var m2 = new MeetingRecord
         {
-            Title = "Weekly 1:1 — Rounak", App = "zoom.exe",
+            Title = "Weekly 1:1 - Rounak", App = "zoom.exe",
             StartedAt = DateTimeOffset.Now.AddDays(-3), DurationMs = 18 * 60 * 1000,
             Transcript = [new(Speaker.You, 0, 3000, "Landing page hero is roughed in, pricing next.")],
             Notes = new NoteSet
             {
-                Tldr = "Landing page — hero roughed in, pricing next. Keep it one page for launch.",
+                Tldr = "Landing page - hero roughed in, pricing next. Keep it one page for launch.",
                 Decisions = ["Keep the landing page to one page for launch."],
                 Actions = [new ActionItem { Text = "Draft pricing section.", Owner = "You" }],
             },
         };
         store.Save(m2); MarkdownMirror.Write(m2);
 
-        store.CreateManualNote("Prep — Design review", "- ask about the analytics platform\n- confirm the ship date\n- bring the webhook URL");
+        store.CreateManualNote("Prep - Design review", "- ask about the analytics platform\n- confirm the ship date\n- bring the webhook URL");
         Console.WriteLine($"[--seed] inserted 2 meetings + 1 manual note into {MeetingStore.DbPathDefault}");
         return 0;
     }
@@ -376,7 +376,7 @@ static class SelfTests
 
             var rec = new MeetingRecord
             {
-                Title = "Design review — PixelFlow", App = "chrome.exe", DurationMs = 24 * 60 * 1000,
+                Title = "Design review - PixelFlow", App = "chrome.exe", DurationMs = 24 * 60 * 1000,
                 Transcript =
                 [
                     new(Speaker.Them, 0, 2000, "So what is left before we ship?"),
@@ -418,7 +418,7 @@ static class SelfTests
             if (store.List().Count != 0) return Fail("delete failed");
             Console.WriteLine("  deleted both (cascade ok)");
 
-            Console.WriteLine("[--dbtest] PASS — insert / search / update / delete round-trip works.");
+            Console.WriteLine("[--dbtest] PASS - insert / search / update / delete round-trip works.");
             return 0;
         }
         catch (Exception ex) { return Fail($"--dbtest threw: {ex}"); }
@@ -445,7 +445,7 @@ static class SelfTests
         var merged = TranscriptMerger.Merge(you, them);
         var echoRemoved = merged.Count(s => s.Speaker == Speaker.You && s.Text.Contains("what is left")) == 0
                           && merged.Count(s => s.Text.Contains("what is left")) == 1;
-        Console.WriteLine($"  echo de-dup: {(echoRemoved ? "OK — duplicate removed, one copy kept" : "FAIL")}");
+        Console.WriteLine($"  echo de-dup: {(echoRemoved ? "OK - duplicate removed, one copy kept" : "FAIL")}");
 
         var notes = NoteExtractor.Extract(merged);
         var title = NoteExtractor.Title(notes, "chrome.exe", DateTimeOffset.Now);
@@ -463,7 +463,7 @@ static class SelfTests
                  && notes.Questions.Any(q => q.Contains("analytics"))
                  && !hasGarbage;
         if (!ok) return Fail("planted items not all extracted (or title garbage).");
-        Console.WriteLine("[--notestest] PASS — echo removed; decisions/actions/questions extracted; title clean.");
+        Console.WriteLine("[--notestest] PASS - echo removed; decisions/actions/questions extracted; title clean.");
         return 0;
     }
 
@@ -487,7 +487,7 @@ static class SelfTests
         Console.WriteLine($"  {transcript.Count} merged segments in {sw.ElapsedMilliseconds} ms:");
         foreach (var s in transcript)
             Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Speaker,-4}  {s.Text}");
-        Console.WriteLine("[--transcribetest] PASS — you/them attributed, echo removed, one timeline.");
+        Console.WriteLine("[--transcribetest] PASS - you/them attributed, echo removed, one timeline.");
         return 0;
     }
 
@@ -501,7 +501,7 @@ static class SelfTests
         // Model must be present (download at onboarding in the real app; here on demand).
         if (!ModelManager.IsInstalled(ModelManager.Parakeet))
         {
-            Console.WriteLine("[--asrtest] Parakeet model not installed — downloading (~630 MB, one time)...");
+            Console.WriteLine("[--asrtest] Parakeet model not installed - downloading (~630 MB, one time)...");
             var last = -5;
             var progress = new Progress<double>(p =>
             {
@@ -531,7 +531,7 @@ static class SelfTests
                           $"({audioSecs / Math.Max(0.001, sw.Elapsed.TotalSeconds):0.0}x real-time)");
         if (segments.Count == 0)
         {
-            Console.WriteLine("[--asrtest] empty transcript — treat as silence (nobody spoke). PASS if the clip was silent.");
+            Console.WriteLine("[--asrtest] empty transcript - treat as silence (nobody spoke). PASS if the clip was silent.");
             return 0;
         }
 
@@ -543,7 +543,7 @@ static class SelfTests
             Console.WriteLine("  --- TAIL ---");
             foreach (var s in segments.TakeLast(3)) Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Text}");
         }
-        Console.WriteLine($"[--asrtest] PASS — verify the TAIL matches the END of the audio (proves no mid-file truncation).");
+        Console.WriteLine($"[--asrtest] PASS - verify the TAIL matches the END of the audio (proves no mid-file truncation).");
         return 0;
     }
 
@@ -571,7 +571,7 @@ static class SelfTests
             Console.WriteLine($"  them.wav: {(File.Exists(session.ThemWavPath) ? new FileInfo(session.ThemWavPath).Length + " bytes" : "MISSING")}  peak {session.ThemPeak:P0}");
         if (!File.Exists(you) || new FileInfo(you).Length <= 44)
             return Fail("recording session did not write a mic WAV.");
-        Console.WriteLine("[--recordtest] PASS — session wrote real audio files.");
+        Console.WriteLine("[--recordtest] PASS - session wrote real audio files.");
         return 0;
     }
 
@@ -586,7 +586,7 @@ static class SelfTests
             var active = MicUsageReader.GetActiveMicApps();
             if (active.Count == 0)
             {
-                Console.WriteLine($"  [{i + 1,2}] mic idle — no app is capturing.");
+                Console.WriteLine($"  [{i + 1,2}] mic idle - no app is capturing.");
             }
             else
             {
@@ -601,8 +601,8 @@ static class SelfTests
             Thread.Sleep(2500);
         }
         Console.WriteLine(everSawCandidate
-            ? "[--detecttest] PASS — at least one real meeting candidate was seen."
-            : "[--detecttest] done — no candidate seen (start a call during the test to see one).");
+            ? "[--detecttest] PASS - at least one real meeting candidate was seen."
+            : "[--detecttest] done - no candidate seen (start a call during the test to see one).");
         return 0;
     }
 
@@ -669,7 +669,7 @@ static class SelfTests
     // Diagnoses the notch auto-height cut-off headlessly (no RenderTargetBitmap, which hangs offscreen).
     // For each auto-height page it prints TWO heights: (A) the out-of-tree Measure that PillWindow.
     // ContentHeight uses today, and (B) the TRUE arranged height from a real offscreen window. If A < B,
-    // the reveal is sized short and the content's bottom clips — that's the bug.
+    // the reveal is sized short and the content's bottom clips - that's the bug.
     static int MeasureTest()
     {
         var cases = new (string name, double w, Func<System.Windows.Controls.UserControl> build)[]
@@ -712,7 +712,7 @@ static class SelfTests
             var actual = b.ActualHeight;
             win.Close();
 
-            // Natural (unconstrained) width — if it exceeds the state width, a non-wrapping row (e.g. the
+            // Natural (unconstrained) width - if it exceeds the state width, a non-wrapping row (e.g. the
             // prompt's button row) would overflow/clip at the notch edges.
             b.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
             var natW = b.DesiredSize.Width;
@@ -768,8 +768,8 @@ static class SelfTests
     }
 
     /// <summary>
-    /// Drives the REAL note editor the way fingers do — types markers, presses Enter, clicks toolbar
-    /// buttons, ticks boxes — and checks the Markdown that comes back out. Written for the owner-reported
+    /// Drives the REAL note editor the way fingers do - types markers, presses Enter, clicks toolbar
+    /// buttons, ticks boxes - and checks the Markdown that comes back out. Written for the owner-reported
     /// bug "the bullet points and the lists get incremented, bullets are created by themselves", which a
     /// pure round-trip test could never have caught: the fault lived in the document structure, not the
     /// text format. Run: Toki.exe --notetest
@@ -792,7 +792,7 @@ static class SelfTests
         static string Show(string s) => "«" + s.Replace("\n", "⏎") + "»";
 
         // A RichTextBox refuses a caret position until it's in a live visual tree, so each case gets a
-        // real (offscreen) window — the same trick --measuretest uses to get a true arranged height.
+        // real (offscreen) window - the same trick --measuretest uses to get a true arranged height.
         var windows = new List<System.Windows.Window>();
         Views.NoteEditor New(string markdown = "")
         {
@@ -859,7 +859,7 @@ static class SelfTests
             Check("Enter continues, empty Enter leaves the list", "- one\n- two\nplain", ed.Markdown);
         }
 
-        // 4. Numbering is positional — deleting an item can't leave a hole.
+        // 4. Numbering is positional - deleting an item can't leave a hole.
         {
             var ed = New("1. a\n1. b\n1. c");
             Check("numbers are renumbered from position", "1. a\n2. b\n3. c", ed.Markdown);
@@ -899,7 +899,7 @@ static class SelfTests
             Check("a doubled marker collapses, and stays collapsed", "- two", ed.Markdown);
         }
 
-        // 9. Blank lines are the user's own spacing — kept, not multiplied.
+        // 9. Blank lines are the user's own spacing - kept, not multiplied.
         {
             var ed = New("a\n\n\nb");
             Check("blank lines survive exactly", "a\n\n\nb", ed.Markdown);
@@ -919,6 +919,30 @@ static class SelfTests
             var leaked = text.IndexOfAny(new[] { '•', '\t' }) >= 0;
             if (leaked) { fail++; Console.WriteLine("FAIL  a list marker glyph leaked into the saved text"); }
             else { pass++; Console.WriteLine("PASS  no marker glyph or tab ever reaches the saved text"); }
+        }
+
+        // 10b. THE MOSQUITO-TEXT BUG. Clicking on the empty line between two sections and typing used
+        //      to give 6px text - and worse, that line was still tagged Blank, and Write emits nothing
+        //      for a Blank block, so the sentence was thrown away on the next save.
+        {
+            var ed = New("## Agenda\n\nsome body text");
+            ed.DebugCaretToLine(1);              // the blank line between them
+            ed.DebugType("typed on the blank line");
+            Check("typing on a blank line keeps the text",
+                "## Agenda\ntyped on the blank line\nsome body text", ed.Markdown);
+
+            var size = ed.DebugFontSize(1);
+            if (Math.Abs(size - 13) < 0.01) { pass++; Console.WriteLine("PASS  and it is body-sized, not mosquito-sized"); }
+            else { fail++; Console.WriteLine($"FAIL  line is {size}px, expected 13"); }
+        }
+
+        // 10c. The same line, emptied again, goes back to being a blank beat rather than staying a
+        //      full-height row.
+        {
+            var ed = New("a\n\nb");
+            Check("a blank line is still a blank line", "a\n\nb", ed.Markdown);
+            if (Math.Abs(ed.DebugFontSize(1) - 13) < 0.01) { pass++; Console.WriteLine("PASS  a blank line is body-sized (its LINE HEIGHT is what shrinks)"); }
+            else { fail++; Console.WriteLine($"FAIL  blank line font is {ed.DebugFontSize(1)}px, expected 13"); }
         }
 
         // 11. And a note already damaged by that bug heals when it's opened.
@@ -1012,7 +1036,7 @@ static class SelfTests
 
     // Proves the Library note is selectable + copyable TOP TO BOTTOM. Builds the note document,
     // programmatically selects the whole thing (exactly what a drag from top to bottom + Ctrl+C does),
-    // and checks the captured text contains every part — summary, a bullet, a to-do, a transcript line.
+    // and checks the captured text contains every part - summary, a bullet, a to-do, a transcript line.
     // This is the real artifact the screenshot could never show.
     static int CopyTest()
     {
@@ -1021,14 +1045,14 @@ static class SelfTests
             Title = "Q3 Planning Sync",
             Notes = new NoteSet
             {
-                Tldr = "SUMMARY_MARKER — the team agreed to ship the beta in August.",
-                Sections = { new NoteSection { Heading = "Decisions", Bullets = { "BULLET_MARKER — cut scope to the core flow" } } },
-                Actions = { new ActionItem { Text = "TODO_MARKER — send the beta invite list", Owner = "Sid" } },
+                Tldr = "SUMMARY_MARKER - the team agreed to ship the beta in August.",
+                Sections = { new NoteSection { Heading = "Decisions", Bullets = { "BULLET_MARKER - cut scope to the core flow" } } },
+                Actions = { new ActionItem { Text = "TODO_MARKER - send the beta invite list", Owner = "Sid" } },
             },
             Transcript =
             {
-                new TranscriptSegment(Speaker.You, 0, 1000, "YOU_MARKER — where are we on the timeline?"),
-                new TranscriptSegment(Speaker.Them, 1000, 2000, "THEM_MARKER — beta lands next week."),
+                new TranscriptSegment(Speaker.You, 0, 1000, "YOU_MARKER - where are we on the timeline?"),
+                new TranscriptSegment(Speaker.Them, 1000, 2000, "THEM_MARKER - beta lands next week."),
             },
         };
 
@@ -1072,13 +1096,13 @@ static class SelfTests
 
         var open = store.OpenActions(8);
         Console.WriteLine($"open tasks in library: {open.Count} (showing up to 8)");
-        foreach (var a in open) Console.WriteLine($"  • {a.Text}  —  {a.Meeting}");
+        foreach (var a in open) Console.WriteLine($"  • {a.Text}  -  {a.Meeting}");
 
         // Deterministic query understanding (no model): show intent, parsed time, and the meeting(s)
-        // the pipeline resolves — this proves "most recent"/"on <date>" pick the RIGHT meeting.
+        // the pipeline resolves - this proves "most recent"/"on <date>" pick the RIGHT meeting.
         var plan = Toki.Llm.QueryUnderstanding.Parse(q, DateTimeOffset.Now);
-        Console.WriteLine($"── plan: intent={plan.Intent}  rank={(plan.Rank?.ToString() ?? "—")}  " +
-            $"range={(plan.HasDateRange ? $"{plan.RangeStart:MMM d}..{plan.RangeEnd:MMM d}" : "—")}  residual=\"{plan.Residual}\"");
+        Console.WriteLine($"── plan: intent={plan.Intent}  rank={(plan.Rank?.ToString() ?? "-")}  " +
+            $"range={(plan.HasDateRange ? $"{plan.RangeStart:MMM d}..{plan.RangeEnd:MMM d}" : "-")}  residual=\"{plan.Residual}\"");
         if (plan.Rank == Toki.Llm.RecencyDir.Latest)
             Console.WriteLine($"   resolved latest → {store.Get(store.LatestMeetingIds(1).FirstOrDefault())?.Title}");
         if (plan.HasDateRange)
@@ -1086,7 +1110,7 @@ static class SelfTests
                 Console.WriteLine($"   resolved in-range → {store.Get(id)?.Title}  ({store.Get(id)?.StartedAt:MMM d})");
 
         // Only the DETERMINISTIC intents are answered here (they need no model). Summary/lookup would
-        // load Qwen (slow/absent in this headless test) — we've already shown their resolved meeting above.
+        // load Qwen (slow/absent in this headless test) - we've already shown their resolved meeting above.
         var deterministic = plan.Intent is Toki.Llm.QueryIntent.Count or Toki.Llm.QueryIntent.ListMeetings or Toki.Llm.QueryIntent.ListTasks;
         if (deterministic)
         {
@@ -1116,7 +1140,7 @@ static class SelfTests
             ("what happened in my last meeting", Toki.Llm.QueryIntent.SummarizeOne),
             ("meeting on July 30", Toki.Llm.QueryIntent.SummarizeOne),
             ("what did we decide about the survey forms", Toki.Llm.QueryIntent.LookupFact),
-            ("AI tool review and survey follow up", Toki.Llm.QueryIntent.LookupFact),   // NOT tasks — the bug
+            ("AI tool review and survey follow up", Toki.Llm.QueryIntent.LookupFact),   // NOT tasks - the bug
             ("what are my open tasks", Toki.Llm.QueryIntent.ListTasks),
             ("what tasks do I have for this week", Toki.Llm.QueryIntent.ListTasks),
             ("what's due on Friday", Toki.Llm.QueryIntent.ListTasks),
@@ -1131,7 +1155,7 @@ static class SelfTests
         foreach (var (q, want) in cases)
         {
             var p = Toki.Llm.QueryUnderstanding.Parse(q, now);
-            var temporal = p.Rank is { } r ? $"rank={r}" : p.HasDateRange ? $"{p.RangeStart:MMM d}..{p.RangeEnd:MMM d}" : "—";
+            var temporal = p.Rank is { } r ? $"rank={r}" : p.HasDateRange ? $"{p.RangeStart:MMM d}..{p.RangeEnd:MMM d}" : "-";
             var ok = p.Intent == want;
             if (ok) pass++;
             Console.WriteLine($"{(ok ? "ok " : "XX ")} \"{q}\"\n      intent={p.Intent} (want {want})  time=[{temporal}]  residual=\"{p.Residual}\"");
@@ -1184,7 +1208,7 @@ static class SelfTests
     static string Head(string s) => s.Length > 120 ? s[..120] + "…" : s;
 
     // Verifies the on-device embedder: a paraphrase pair must score higher than an unrelated pair
-    // (the whole point of meaning-search — matching words the transcript never used).
+    // (the whole point of meaning-search - matching words the transcript never used).
     static int EmbedTest()
     {
         if (!ModelManager.EmbedInstalled)
@@ -1204,8 +1228,8 @@ static class SelfTests
         var simPara = Toki.Llm.EmbeddingService.Cosine(q, para);
         var simUn = Toki.Llm.EmbeddingService.Cosine(q, un);
         Console.WriteLine($"dim={q.Length}");
-        Console.WriteLine($"cosine(hiring, 'bringing someone onto the team') = {simPara:F3}   (paraphrase — should be higher)");
-        Console.WriteLine($"cosine(hiring, 'postgres replication lag')       = {simUn:F3}   (unrelated — should be lower)");
+        Console.WriteLine($"cosine(hiring, 'bringing someone onto the team') = {simPara:F3}   (paraphrase - should be higher)");
+        Console.WriteLine($"cosine(hiring, 'postgres replication lag')       = {simUn:F3}   (unrelated - should be lower)");
         var ok = simPara > simUn && simPara > 0.4f;
         Console.WriteLine(ok ? "PASS: meaning-search ranks the paraphrase above the unrelated text" : "FAIL: embeddings not discriminating");
         return ok ? 0 : 1;
@@ -1232,10 +1256,10 @@ static class SelfTests
             {
                 case "connect":
                     if (svc.IsConnected) { Console.WriteLine($"[--caltest] already connected as {svc.AccountEmail}. Run '--caltest disconnect' to reset."); return 0; }
-                    Console.WriteLine("[--caltest connect] opening your browser — sign in to Google and click Allow...");
+                    Console.WriteLine("[--caltest connect] opening your browser - sign in to Google and click Allow...");
                     svc.ConnectAsync().GetAwaiter().GetResult();
-                    Console.WriteLine($"[--caltest] PASS — connected as {svc.AccountEmail}. Refresh token stored (DPAPI-encrypted).");
-                    Console.WriteLine("  verify: open %APPDATA%\\Toki\\settings.json — GoogleRefreshTokenProtected is opaque base64 (no plaintext token).");
+                    Console.WriteLine($"[--caltest] PASS - connected as {svc.AccountEmail}. Refresh token stored (DPAPI-encrypted).");
+                    Console.WriteLine("  verify: open %APPDATA%\\Toki\\settings.json - GoogleRefreshTokenProtected is opaque base64 (no plaintext token).");
                     return 0;
 
                 case "disconnect":
@@ -1244,19 +1268,19 @@ static class SelfTests
                     return 0;
 
                 case "insert":
-                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    if (!svc.IsConnected) return Fail("not connected - run: Toki.exe --caltest connect");
                     var start = DateTimeOffset.Now.AddMinutes(10);
-                    var draft = new Toki.Calendar.NewEvent("Toki self-test — safe to ignore", start, start.AddMinutes(15));
+                    var draft = new Toki.Calendar.NewEvent("Toki self-test - safe to ignore", start, start.AddMinutes(15));
                     Console.WriteLine("[--caltest insert] creating a throwaway event 10 min from now...");
                     var created = svc.CreateAsync(draft).GetAwaiter().GetResult();
                     Console.WriteLine($"  created id={created.Id}");
                     Console.WriteLine($"  link  : {created.HtmlLink}");
                     svc.DeleteAsync(created.Id).GetAwaiter().GetResult();
-                    Console.WriteLine("[--caltest] PASS — event created then deleted; nothing left in your calendar.");
+                    Console.WriteLine("[--caltest] PASS - event created then deleted; nothing left in your calendar.");
                     return 0;
 
                 case "update":
-                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    if (!svc.IsConnected) return Fail("not connected - run: Toki.exe --caltest connect");
                     var s0 = DateTimeOffset.Now.AddMinutes(20);
                     Console.WriteLine("[--caltest update] insert → patch (rename + move +30 min) → verify → delete...");
                     var ins = svc.CreateAsync(new Toki.Calendar.NewEvent("Toki update-test A", s0, s0.AddMinutes(15))).GetAwaiter().GetResult();
@@ -1265,7 +1289,7 @@ static class SelfTests
                     var ok = patched.Summary == "Toki update-test B" && Math.Abs((patched.StartUtc - s1.ToUniversalTime()).TotalMinutes) < 1;
                     Console.WriteLine($"  now: \"{patched.Summary}\" at {patched.StartLocal:HH:mm}");
                     svc.DeleteAsync(ins.Id).GetAwaiter().GetResult();
-                    Console.WriteLine(ok ? "[--caltest] PASS — edit applied then cleaned up." : "FAIL: patch didn't take");
+                    Console.WriteLine(ok ? "[--caltest] PASS - edit applied then cleaned up." : "FAIL: patch didn't take");
                     return ok ? 0 : 1;
 
                 case "parse":
@@ -1278,13 +1302,13 @@ static class SelfTests
                     return qp.Start is not null ? 0 : 1;
 
                 default: // list
-                    if (!svc.IsConnected) return Fail("not connected — run: Toki.exe --caltest connect");
+                    if (!svc.IsConnected) return Fail("not connected - run: Toki.exe --caltest connect");
                     Console.WriteLine("[--caltest] refreshing token + listing the next 7 days...");
                     var events = svc.UpcomingAsync(7).GetAwaiter().GetResult();
                     Console.WriteLine($"  {events.Count} event(s) in the next 7 days for {svc.AccountEmail}:");
                     if (events.Count == 0)
                     {
-                        Console.WriteLine("[--caltest] PASS — read path works (calendar is just empty for the next week).");
+                        Console.WriteLine("[--caltest] PASS - read path works (calendar is just empty for the next week).");
                         return 0;
                     }
                     void Print(Toki.Calendar.CalEvent e) => Console.WriteLine(
@@ -1298,7 +1322,7 @@ static class SelfTests
                         Console.WriteLine("  --- TAIL ---");
                         foreach (var e in events.TakeLast(3)) Print(e);
                     }
-                    Console.WriteLine("[--caltest] PASS — read + auto-refresh work. Do these match your real calendar?");
+                    Console.WriteLine("[--caltest] PASS - read + auto-refresh work. Do these match your real calendar?");
                     return 0;
             }
         }
@@ -1314,7 +1338,7 @@ static class SelfTests
             var store = new MeetingStore(dbPath);
             store.Save(new MeetingRecord
             {
-                Title = "Design review — PixelFlow", Kind = MeetingKind.Meeting, StartedAt = DateTimeOffset.Now.AddDays(-2),
+                Title = "Design review - PixelFlow", Kind = MeetingKind.Meeting, StartedAt = DateTimeOffset.Now.AddDays(-2),
                 Notes = new NoteSet
                 {
                     Tldr = "Blockers are brand tokens and the webhook. Ship moved to Thursday.",
@@ -1327,7 +1351,7 @@ static class SelfTests
                 DateTimeOffset.UtcNow.AddMinutes(5), DateTimeOffset.UtcNow.AddMinutes(35), false, null,
                 "https://meet.google.com/x", "https://cal", new List<Toki.Calendar.CalAttendee> { new("a@x.com", "A", "accepted", false, false) });
 
-            var match = Toki.Calendar.PrepBuilder.Build(Ev("Design review — PixelFlow"), store);
+            var match = Toki.Calendar.PrepBuilder.Build(Ev("Design review - PixelFlow"), store);
             var noMatch = Toki.Calendar.PrepBuilder.Build(Ev("Quarterly finance deep-dive"), store);
             var agenda = Toki.Calendar.PrepBuilder.ParseAgenda("<ul><li>Confirm blockers</li><li>Lock the ship date</li></ul>");
 
@@ -1340,7 +1364,7 @@ static class SelfTests
                      && noMatch.LastTime is null
                      && agenda.Count == 2 && agenda[0] == "Confirm blockers";
             Console.WriteLine(ok
-                ? "[--preptest] PASS — matched a prior meeting by title, pulled 2 open items, rejected the unrelated event, parsed the agenda."
+                ? "[--preptest] PASS - matched a prior meeting by title, pulled 2 open items, rejected the unrelated event, parsed the agenda."
                 : "FAIL: prep matching/agenda wrong");
             return ok ? 0 : 1;
         }
@@ -1409,7 +1433,7 @@ static class SelfTests
         }
         finally { CalendarCommand.ConnectedOverride = null; CalendarCommand.CreateOverride = null; }
 
-        Console.WriteLine(pass ? "[--voicecreatetest] PASS — detection matrix + confirm gate all correct." : "FAIL");
+        Console.WriteLine(pass ? "[--voicecreatetest] PASS - detection matrix + confirm gate all correct." : "FAIL");
         return pass ? 0 : 1;
     }
 

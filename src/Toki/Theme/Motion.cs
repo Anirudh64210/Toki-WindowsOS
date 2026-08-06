@@ -5,7 +5,7 @@ using System.Windows.Media.Animation;
 namespace Toki.Theme;
 
 /// <summary>
-/// Central MOTION TOKENS — the one place that defines how fast things move and how they ease, so the whole
+/// Central MOTION TOKENS - the one place that defines how fast things move and how they ease, so the whole
 /// app reads as a single motion system instead of a pile of scattered literals (from docs/ui-revamp-
 /// research.md §1/§3e, the Glass / Material / Fluent / Carbon consensus).
 ///
@@ -14,7 +14,7 @@ namespace Toki.Theme;
 /// Durations sit in the researched sweet spots (micro-feedback ~100–150ms, component transitions
 /// ~150–250ms, container/view transitions ~250–400ms; nothing over ~350ms reads as sluggish).
 ///
-/// Character/mascot animation (TokiBlob) is deliberately EXEMPT — personality motion may be springy or
+/// Character/mascot animation (TokiBlob) is deliberately EXEMPT - personality motion may be springy or
 /// longer; only functional UI motion is standardised here.
 /// </summary>
 public static class Motion
@@ -29,10 +29,10 @@ public static class Motion
 
     public static Duration Dur(int ms) => new(TimeSpan.FromMilliseconds(ms));
 
-    // ── easings (new per call — WPF easing functions are cheap and immutable in use) ──
-    /// <summary>Arriving / expanding motion — decelerates to a gentle stop.</summary>
+    // ── easings (new per call - WPF easing functions are cheap and immutable in use) ──
+    /// <summary>Arriving / expanding motion - decelerates to a gentle stop.</summary>
     public static IEasingFunction EaseOut => new CubicEase { EasingMode = EasingMode.EaseOut };
-    /// <summary>Leaving / collapsing motion — accelerates away.</summary>
+    /// <summary>Leaving / collapsing motion - accelerates away.</summary>
     public static IEasingFunction EaseIn => new CubicEase { EasingMode = EasingMode.EaseIn };
     /// <summary>Only for an element transforming in place (rare); prefer EaseOut for reveals.</summary>
     public static IEasingFunction EaseInOut => new CubicEase { EasingMode = EasingMode.EaseInOut };

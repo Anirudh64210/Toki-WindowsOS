@@ -75,7 +75,7 @@ public static class QuickEventParser
         }
         if (futures.Count > 0)
         {
-            // Ambiguous bare hours ("at 3") resolve to BOTH 3 AM and 3 PM — prefer the business-hours
+            // Ambiguous bare hours ("at 3") resolve to BOTH 3 AM and 3 PM - prefer the business-hours
             // reading (7am–8pm), since a meeting "at 3" means the afternoon; else the soonest future.
             static bool Biz((DateTimeOffset s, DateTimeOffset e) x) => x.s.Hour is >= 7 and < 20;
             var biz = futures.Where(Biz).OrderBy(x => x.s).ToList();

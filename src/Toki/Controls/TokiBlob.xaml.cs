@@ -7,7 +7,7 @@ using System.Windows.Threading;
 namespace Toki.Controls;
 
 /// <summary>
-/// The Toki character — a soft gradient-shaded pink cloud with two eyes that breathes
+/// The Toki character - a soft gradient-shaded pink cloud with two eyes that breathes
 /// continuously and blinks at natural, slightly irregular intervals. Self-animating: any
 /// view that drops a &lt;TokiBlob/&gt; in gets a living character with no extra wiring.
 /// It also has a vocabulary of reactions: <see cref="React"/> cycles fun one-off animations
@@ -27,7 +27,7 @@ public partial class TokiBlob : UserControl
     {
         InitializeComponent();
         _blinkTimer.Tick += OnBlinkTick;
-        // Only animate while actually on screen — cached-but-hidden views must
+        // Only animate while actually on screen - cached-but-hidden views must
         // not burn CPU (this was part of the slowness).
         IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Pause(); };
         Unloaded += (_, _) => Pause();
@@ -103,7 +103,7 @@ public partial class TokiBlob : UserControl
         ResumeBreathingAfter(680);
     }
 
-    /// <summary>Cycle a fun one-off reaction each call (for the clickable mascot) — a different
+    /// <summary>Cycle a fun one-off reaction each call (for the clickable mascot) - a different
     /// expression/motion every tap so it feels alive, not a single canned bounce.</summary>
     public void React()
     {

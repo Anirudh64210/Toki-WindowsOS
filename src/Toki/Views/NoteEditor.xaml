@@ -4,7 +4,7 @@
              xmlns:controls="clr-namespace:Toki.Controls">
     <!-- The one editable note surface, reused by the Library's hand-written notes, the prep card and
          the in-meeting scratchpad. Deliberately small: sizes, to-dos, lists, spacing, templates.
-         NO font family and NO colour — owner, 2026-08-05.
+         NO font family and NO colour - owner, 2026-08-05.
 
          The toolbar WRAPS, because this same control has to work at 356px inside the notch and at
          full width in the Library window. -->

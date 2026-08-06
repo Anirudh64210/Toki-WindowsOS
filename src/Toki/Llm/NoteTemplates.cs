@@ -2,7 +2,7 @@ namespace Toki.Llm;
 
 /// <summary>One note template: a name, a one-line "when it applies" (for auto-detection), and the
 /// middle section headings it produces. SUMMARY (always) and ACTION ITEMS (when tasks exist) are
-/// implicit and added by the writer — a template only defines the sections in between.</summary>
+/// implicit and added by the writer - a template only defines the sections in between.</summary>
 public sealed record NoteTemplate(string Name, string When, string[] Sections);
 
 /// <summary>
@@ -39,6 +39,6 @@ public static class NoteTemplates
         All.FirstOrDefault(t => string.Equals(t.Name, name?.Trim(), System.StringComparison.OrdinalIgnoreCase))
         ?? General;
 
-    /// <summary>The classification menu shown to the model: "Name — when it applies".</summary>
+    /// <summary>The classification menu shown to the model: "Name - when it applies".</summary>
     public static string Menu() => string.Join("\n", All.Select(t => $"- {t.Name}: {t.When}"));
 }

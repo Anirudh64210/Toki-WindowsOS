@@ -3,12 +3,12 @@ using System.Text.RegularExpressions;
 namespace Toki.Llm;
 
 /// <summary>
-/// Tier 0.7 of the dialogue brain — the USER_FACT / IDENTITY turns:
+/// Tier 0.7 of the dialogue brain - the USER_FACT / IDENTITY turns:
 ///
 /// 1. The user STATES a fact about themself ("call me Anirudh", "my name is …", "I work at …") →
 ///    capture it, remember it (persisted via <see cref="UserProfile"/>), and acknowledge naturally.
 /// 2. The user asks about THEMSELF ("what is my name", "who am I", "what do you know about me") →
-///    answer from the profile — NEVER a notes search. ("What is my name" being searched against the
+///    answer from the profile - NEVER a notes search. ("What is my name" being searched against the
 ///    meeting notes and answered with three citations was a real, screenshot-verified failure: the
 ///    old pipeline had no concept of a fact the user just told it.)
 ///
@@ -18,7 +18,7 @@ namespace Toki.Llm;
 /// </summary>
 public static class UserFacts
 {
-    // "call me X" / "my name is X" / "i'm called X" — allowing the connective lead the live
+    // "call me X" / "my name is X" / "i'm called X" - allowing the connective lead the live
     // screenshot produced ("BUT YOU call me anirudh"). The captured value is 1–3 word-ish tokens.
     static readonly Regex NameRx = new(
         @"^(?:(?:but|and|no|hey|well|actually|so|btw|please|listen)[,\s]+)*" +
@@ -26,7 +26,7 @@ public static class UserFacts
         @"([a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*){0,2})\s*[.!?]*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // "i'm X" / "i am X" — only trusted when the value survives the not-a-name guard below
+    // "i'm X" / "i am X" - only trusted when the value survives the not-a-name guard below
     // ("i'm tired" is a state, not a name).
     static readonly Regex IAmRx = new(
         @"^(?:(?:but|and|no|hey|well|actually|so)[,\s]+)*i'?\s*a?m\s+([a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*)?)\s*[.!?]*$",
@@ -47,7 +47,7 @@ public static class UserFacts
         "not","just","still","also","very","really","so","too","quite","the","a","an","your","his","her",
     };
 
-    // "i work at/for X" · "my role/job/title is X" — durable facts worth keeping.
+    // "i work at/for X" · "my role/job/title is X" - durable facts worth keeping.
     static readonly Regex WorkRx = new(
         @"^(?:(?:but|and|so|btw|actually)[,\s]+)*i\s+work\s+(?:at|for|in)\s+(.{2,60}?)\s*[.!?]*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -79,7 +79,7 @@ public static class UserFacts
         {
             var name = TitleCase(m.Groups[1].Value);
             UserProfile.SetName(name);
-            return $"Got it — {name} it is. Nice to meet you properly!";
+            return $"Got it - {name} it is. Nice to meet you properly!";
         }
 
         m = IAmRx.Match(t);
@@ -87,7 +87,7 @@ public static class UserFacts
         {
             var name = TitleCase(m.Groups[1].Value);
             UserProfile.SetName(name);
-            return $"Nice to meet you, {name} — I'll remember that.";
+            return $"Nice to meet you, {name} - I'll remember that.";
         }
 
         m = WorkRx.Match(t);
@@ -97,7 +97,7 @@ public static class UserFacts
             var fact = $"Works at {place}";
             UserProfile.AddFact(fact);
             ctx?.SessionFacts.Add(fact);
-            return $"Noted — you work at {place}.";
+            return $"Noted - you work at {place}.";
         }
 
         m = RoleRx.Match(t);
@@ -107,7 +107,7 @@ public static class UserFacts
             var fact = $"Role: {role}";
             UserProfile.AddFact(fact);
             ctx?.SessionFacts.Add(fact);
-            return $"Noted — {role}. Good to know.";
+            return $"Noted - {role}. Good to know.";
         }
 
         return null;
@@ -124,10 +124,10 @@ public static class UserFacts
         {
             var name = UserProfile.DisplayName;
             if (string.IsNullOrEmpty(name))
-                return "I don't know your name yet — tell me with “call me …” and I'll remember it.";
+                return "I don't know your name yet - tell me with “call me …” and I'll remember it.";
             return UserProfile.NameWasSetByUser
                 ? $"You're {name}."
-                : $"Going by this PC's account, you're {name} — say “call me …” if you'd rather I use something else.";
+                : $"Going by this PC's account, you're {name} - say “call me …” if you'd rather I use something else.";
         }
 
         if (AboutMeRx.IsMatch(t))
@@ -135,7 +135,7 @@ public static class UserFacts
             var name = UserProfile.DisplayName;
             var facts = UserProfile.Facts;
             if (string.IsNullOrEmpty(name) && facts.Count == 0)
-                return "Not much yet — tell me things like “call me …” or “I work at …” and I'll remember them.";
+                return "Not much yet - tell me things like “call me …” or “I work at …” and I'll remember them.";
             var bits = new List<string>();
             if (!string.IsNullOrEmpty(name)) bits.Add($"you're {name}");
             bits.AddRange(facts.Select(f => f.StartsWith("Works at", StringComparison.OrdinalIgnoreCase)

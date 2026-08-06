@@ -6,7 +6,7 @@ namespace Toki.Audio;
 /// Streaming PCM format converter: decodes capture buffers from one WAV format and
 /// re-encodes them in another (channel remix + linear-interpolation resample). Used
 /// when the default mic changes MID-recording and the replacement device records in
-/// a different format than the WAV writer was opened with — the alternative (a new
+/// a different format than the WAV writer was opened with - the alternative (a new
 /// file per device) breaks the one-WAV-per-stream transcription contract.
 ///
 /// Linear interpolation is deliberate: ASR-grade fidelity at a few lines of code,
@@ -15,7 +15,7 @@ namespace Toki.Audio;
 /// </summary>
 public sealed class BufferConverter
 {
-    // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT — how a WaveFormatExtensible says "32-bit float".
+    // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT - how a WaveFormatExtensible says "32-bit float".
     static readonly Guid IeeeFloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
 
     readonly WaveFormat _from, _to;

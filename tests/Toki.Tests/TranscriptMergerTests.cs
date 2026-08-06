@@ -35,7 +35,7 @@ public class TranscriptMergerTests
         var merged = TranscriptMerger.Merge(
             [You(8000, "brand font and the make webhook url")],
             [Them(1000, "brand font and the make webhook url")]);
-        Assert.Equal(2, merged.Count); // 7s apart — not an echo
+        Assert.Equal(2, merged.Count); // 7s apart - not an echo
     }
 
     [Fact]

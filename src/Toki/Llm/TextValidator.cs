@@ -5,7 +5,7 @@ namespace Toki.Llm;
 /// <summary>
 /// Guards against the ways a 4-bit local model degenerates (lesson 8): drifting
 /// into CJK/kana/Hangul, or collapsing into repeated characters like "!!!!!!".
-/// Never show the user degenerate output — reject, retry once, then fall back to
+/// Never show the user degenerate output - reject, retry once, then fall back to
 /// the heuristic notes.
 /// </summary>
 public static partial class TextValidator
@@ -18,7 +18,7 @@ public static partial class TextValidator
         return false;
     }
 
-    /// <summary>True if the text contains CJK, kana, or Hangul — Qwen drifting off English.</summary>
+    /// <summary>True if the text contains CJK, kana, or Hangul - Qwen drifting off English.</summary>
     public static bool HasNonLatinScript(string text)
     {
         foreach (var ch in text)

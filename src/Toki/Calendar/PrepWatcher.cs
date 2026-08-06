@@ -36,7 +36,7 @@ public sealed class PrepWatcher
         {
             _wired = true;
             _timer.Tick += (_, _) => Tick();
-            // A fresh fetch completing mid-window: react promptly (marshal — the event fires off-thread).
+            // A fresh fetch completing mid-window: react promptly (marshal - the event fires off-thread).
             UpcomingCache.Instance.Changed += () =>
                 Application.Current?.Dispatcher.BeginInvoke(new Action(TryRaise));
         }
@@ -53,10 +53,10 @@ public sealed class PrepWatcher
         if (!CalendarService.Instance.IsConnected) return;
         WarmCache();                     // keep UpcomingCache fresh (coalesced by its 60s TTL)
 
-        // Disarm a card whose meeting is behind us — otherwise hovering the peek would keep opening a
+        // Disarm a card whose meeting is behind us - otherwise hovering the peek would keep opening a
         // stale prep card instead of Home. Never while recording: the card (and its scratchpad) has to
         // stay reachable from the recording page for the whole meeting, which is the point of N4.
-        // Note this does NOT touch PrepScratch — what the user typed outlives the card, and N5 decides
+        // Note this does NOT touch PrepScratch - what the user typed outlives the card, and N5 decides
         // whether to keep it.
         if (!App.IsRecording && App.State.Current != PillState.PrepCard
             && App.CurrentPrep is { } cp && cp.Event.EndUtc < DateTimeOffset.UtcNow)
@@ -86,7 +86,7 @@ public sealed class PrepWatcher
 
         // …and SURFACE it once, quietly (owner, 2026-08-06: "meeting is about to start, user gets auto
         // prompted to take a look at his notes"). This was removed a day earlier when the card was made
-        // hover-only, and removing it took the "your meeting is starting" nudge with it — notes you have
+        // hover-only, and removing it took the "your meeting is starting" nudge with it - notes you have
         // to remember to go and look at are notes you don't look at.
         //
         // Restraint is still the design, so it opens ONLY when opening it costs nothing: the notch must
@@ -97,7 +97,7 @@ public sealed class PrepWatcher
             App.State.TryGo(PillState.PrepCard);
             App.Log($"prep: surfaced card for '{cand.Summary}' ({mins} min out)");
         }
-        else App.Log($"prep: armed card for '{cand.Summary}' ({mins} min out) — notch busy, hover to open");
+        else App.Log($"prep: armed card for '{cand.Summary}' ({mins} min out) - notch busy, hover to open");
 
         // Prune ids no longer upcoming so the set can't grow forever.
         _shown.RemoveWhere(id => events.All(e => e.Id != id));
@@ -114,7 +114,7 @@ public sealed class PrepWatcher
 
     async void WarmCache()
     {
-        try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline — the next tick retries */ }
+        try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline - the next tick retries */ }
     }
 
 }

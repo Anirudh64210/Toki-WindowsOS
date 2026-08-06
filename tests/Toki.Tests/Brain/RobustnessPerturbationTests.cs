@@ -5,7 +5,7 @@ namespace Toki.Tests.Brain;
 
 /// <summary>
 /// Robustness overlay (taxonomy §15): a curated seed set of (utterance → route) is multiplied by
-/// route-INVARIANT mutations — casing, punctuation, and (for the canned/command routes that strip a
+/// route-INVARIANT mutations - casing, punctuation, and (for the canned/command routes that strip a
 /// wake-name address) leading/trailing "Toki" and politeness fluff. Push-to-talk ASR gives no
 /// punctuation and mangled casing, so routing MUST survive all of it. This is where the suite passes
 /// 1000+ cases while testing a real property.

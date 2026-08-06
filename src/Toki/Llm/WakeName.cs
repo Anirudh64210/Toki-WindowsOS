@@ -5,15 +5,15 @@ namespace Toki.Llm;
 /// <summary>
 /// The ONE place that knows what "Toki" sounds like to the ASR. Push-to-talk goes through Parakeet,
 /// and a short made-up name is exactly what a general ASR model mis-hears: the owner's live session
-/// produced "Doki", "Toky", "Docie", "Toku", "Tokyo", "Doky" — and every one of those fell straight
+/// produced "Doki", "Toky", "Docie", "Toku", "Tokyo", "Doky" - and every one of those fell straight
 /// through the routers (which only knew the literal "toki") into notes retrieval, where the model
 /// then hallucinated a grounded-sounding answer. The standard fix in shipping voice assistants is a
 /// fuzzy/phonetic alias list for exactly this ("entity synonyms/aliases + phonetic similarity",
-/// MindMeld/Webex robust-NLP guidance) — so this class is that closed alias list, shared by
+/// MindMeld/Webex robust-NLP guidance) - so this class is that closed alias list, shared by
 /// <see cref="CommandRouter"/>, <see cref="SmallTalk"/> and <see cref="Persona"/>.
 ///
 /// Scope discipline: the pattern is ONLY ever used to strip a leading/trailing ADDRESS ("hey doki,
-/// …" / "…, toky."). It never rewrites the question that goes to retrieval — so a real question
+/// …" / "…, toky."). It never rewrites the question that goes to retrieval - so a real question
 /// about e.g. Tokyo is untouched on the Q&amp;A path.
 /// </summary>
 public static class WakeName

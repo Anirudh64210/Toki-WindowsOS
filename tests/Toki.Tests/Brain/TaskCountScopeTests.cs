@@ -16,14 +16,14 @@ namespace Toki.Tests.Brain;
 /// through the real Ask pipeline (seeded temp store + fake model), plus frozen-clock parse/mode
 /// goldens, and prove a REAL topic + date still scopes to the topic.
 /// </summary>
-[Collection("NotesQaSeams")]   // shares NotesQa's static seams — never parallel with the other brain tests
+[Collection("NotesQaSeams")]   // shares NotesQa's static seams - never parallel with the other brain tests
 public sealed class TaskCountScopeTests : IDisposable
 {
     readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"toki-cnt-{Guid.NewGuid():N}.db");
     readonly MeetingStore _store;
     readonly FakeLlm _llm = new();
 
-    // The day both meetings happened — a past day, like the live Aug-2 report (today = Aug 4).
+    // The day both meetings happened - a past day, like the live Aug-2 report (today = Aug 4).
     readonly DateTimeOffset _day = DateTimeOffset.Now.AddDays(-2);
 
     public TaskCountScopeTests()
@@ -62,7 +62,7 @@ public sealed class TaskCountScopeTests : IDisposable
 
     void Seed()
     {
-        // TWO meetings on the SAME day, each with open tasks — the live-report shape.
+        // TWO meetings on the SAME day, each with open tasks - the live-report shape.
         _store.Save(M(_day.Date.AddHours(10), "SUS Metrics and MR Rate Trends",
             "Reviewed SUS metrics and merge-request rate trends.",
             new ActionItem { Text = "Update the SUS dashboard", Owner = "You" },
@@ -71,7 +71,7 @@ public sealed class TaskCountScopeTests : IDisposable
             "Went through SLO metrics and the open bug backlog.",
             new ActionItem { Text = "Triage the open bug backlog", Owner = "You" },
             new ActionItem { Text = "Draft the SLO error budget doc", Owner = "Dev" }));
-        // A meeting on ANOTHER day — its tasks must never appear in the date-scoped answer.
+        // A meeting on ANOTHER day - its tasks must never appear in the date-scoped answer.
         _store.Save(M(DateTimeOffset.Now.AddDays(-9), "Pricing sync",
             "We agreed the one-time $20 price, no subscription.",
             new ActionItem { Text = "Send the pricing deck", Owner = "Ana" }));
@@ -93,7 +93,7 @@ public sealed class TaskCountScopeTests : IDisposable
         var q = string.Format(template, _day.ToString("MMMM d", System.Globalization.CultureInfo.InvariantCulture));
         var ans = await Ask(q);
 
-        // BOTH same-day meetings' tasks — never just the one FTS liked best.
+        // BOTH same-day meetings' tasks - never just the one FTS liked best.
         Assert.Contains("Update the SUS dashboard", ans.Text);
         Assert.Contains("Triage the open bug backlog", ans.Text);
         // And not the other day's task.

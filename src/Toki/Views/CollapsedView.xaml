@@ -7,7 +7,7 @@
          white eye edges landed on fractional device pixels and shimmered on the left during the open
          (the "little glitch left of centre"). Snapping keeps those edges on whole pixels. -->
     <Grid Background="Transparent" Cursor="Hand" MouseLeftButtonUp="OnOpen"
-          ToolTip="Toki — hover to open"
+          ToolTip="Toki - hover to open"
           UseLayoutRounding="True" SnapsToDevicePixels="True"
           RenderOptions.BitmapScalingMode="HighQuality">
         <Viewbox Width="28" HorizontalAlignment="Center" VerticalAlignment="Center">

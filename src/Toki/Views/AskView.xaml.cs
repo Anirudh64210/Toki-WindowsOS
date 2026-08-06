@@ -10,9 +10,9 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The push-to-talk voice notch — a minimal, chrome-light conversation. No title bar (the mascot is the
+/// The push-to-talk voice notch - a minimal, chrome-light conversation. No title bar (the mascot is the
 /// identity); assistant answers are PLAIN TEXT on the surface, not chat bubbles; only the user's line is
-/// differentiated (dim, with a small pink tick). Grows to content and scrolls past a cap — never opens big.
+/// differentiated (dim, with a small pink tick). Grows to content and scrolls past a cap - never opens big.
 /// A scrollable THREAD keeps the whole session until the notch closes. Driven by <see cref="App"/> via
 /// <see cref="Instance"/>.
 /// </summary>
@@ -31,7 +31,7 @@ public partial class AskView : UserControl
     string? _moreQuestion;
 
     // Stick-to-bottom: the thread auto-follows the newest text ONLY while you're already parked at the
-    // bottom. The moment you scroll UP to read earlier turns, following stops — so a streaming answer (or
+    // bottom. The moment you scroll UP to read earlier turns, following stops - so a streaming answer (or
     // a new token) can never yank you back down (the "scroll fights me" glitch). A new turn you initiate
     // (asking a question, a command reply) re-pins to the bottom, because you want to see the new thing.
     bool _stick = true;
@@ -46,12 +46,12 @@ public partial class AskView : UserControl
     }
 
     // Re-evaluate "am I pinned to the bottom?" ONLY on a user-driven scroll. Content growth (streaming
-    // tokens, an inserted scope line) changes ExtentHeight — we must ignore those, or every token would
+    // tokens, an inserted scope line) changes ExtentHeight - we must ignore those, or every token would
     // reset the flag and defeat the point. A user wheel/drag has ExtentHeightChange == 0.
     void OnThreadScroll(object sender, ScrollChangedEventArgs e)
     {
         // Re-evaluate "pinned to bottom" only on a USER scroll (content growth changes ExtentHeight, which
-        // must NOT flip the flag). ~120px threshold (research §3a: 8px was hair-trigger — any sub-pixel
+        // must NOT flip the flag). ~120px threshold (research §3a: 8px was hair-trigger - any sub-pixel
         // extent wobble un-anchored the reader).
         if (e.ExtentHeightChange == 0 && (e.VerticalChange != 0 || e.ViewportHeightChange != 0))
             _stick = ThreadScroll.VerticalOffset >= ThreadScroll.ScrollableHeight - 120;
@@ -79,7 +79,7 @@ public partial class AskView : UserControl
     }
 
     // Follow the newest content only if the user is parked at the bottom (see _stick). Deferred to
-    // Background priority so it runs AFTER the just-appended text has been measured into the extent —
+    // Background priority so it runs AFTER the just-appended text has been measured into the extent -
     // otherwise ScrollToEnd targets the pre-append (too-short) extent and lands a line high.
     void Follow()
     {
@@ -135,7 +135,7 @@ public partial class AskView : UserControl
         App.GrowNotch();
     }
 
-    /// <summary>Show which note this answer is grounded on ("About: MR Rate Target…") — screen-aware
+    /// <summary>Show which note this answer is grounded on ("About: MR Rate Target…") - screen-aware
     /// answers must SHOW their scope, or a wrong grounding is invisible and trust dies. One line,
     /// dim, above the streaming answer; once per turn.</summary>
     public void Scope(string title)
@@ -188,7 +188,7 @@ public partial class AskView : UserControl
     }
 
     public void Help()
-        => TokiSay("Ask about your meetings — decisions, tasks, who said what. Or say “schedule a call with Ana "
+        => TokiSay("Ask about your meetings - decisions, tasks, who said what. Or say “schedule a call with Ana "
             + "tomorrow at 3”, “take me to the library”, “open settings”, “new note”, or “go home”.");
 
     // A standalone Toki line (no preceding user turn): commands, errors, help.
@@ -213,7 +213,7 @@ public partial class AskView : UserControl
     // ── plain-text turns (no bubbles) ──
 
     // The one standard "arrive" motion for new content: fade up a few px, ease-out (Motion tokens). Only
-    // NEW rows animate — existing history never moves. Render transform only, so layout is untouched.
+    // NEW rows animate - existing history never moves. Render transform only, so layout is untouched.
     static void Arrive(FrameworkElement el)
     {
         if (App.Headless) return;
@@ -254,7 +254,7 @@ public partial class AskView : UserControl
             Text = text, IsReadOnly = true, IsReadOnlyCaretVisible = false, BorderThickness = new Thickness(0),
             Background = Brushes.Transparent, FontFamily = Ui, FontSize = fs, TextWrapping = TextWrapping.Wrap,
             Padding = new Thickness(0), Cursor = Cursors.IBeam, IsTabStop = false,
-            FocusVisualStyle = null,   // no focus outline — it reads as plain text, not a form field
+            FocusVisualStyle = null,   // no focus outline - it reads as plain text, not a form field
             SelectionOpacity = 0.35,
         };
         tb.SetResourceReference(Control.ForegroundProperty, fgKey);
@@ -262,7 +262,7 @@ public partial class AskView : UserControl
         return tb;
     }
 
-    // Progressive disclosure as an inline LINK (not a pill button) — "See full answer in Library →".
+    // Progressive disclosure as an inline LINK (not a pill button) - "See full answer in Library →".
     FrameworkElement MoreLink()
     {
         var link = new TextBlock { Text = "See full answer in Library  →", FontSize = 12, FontFamily = Ui, Cursor = Cursors.Hand, Margin = new Thickness(0, 7, 0, 1) };
@@ -326,7 +326,7 @@ public partial class AskView : UserControl
 
     // ── thinking loader ──
 
-    // Three pulsing dots — the calm "thinking" indicator (Glass/ChatGPT pattern), staggered so the pulse
+    // Three pulsing dots - the calm "thinking" indicator (Glass/ChatGPT pattern), staggered so the pulse
     // travels across them. Replaces the old sliding bar.
     void BuildLoader()
     {

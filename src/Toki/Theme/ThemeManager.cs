@@ -8,7 +8,7 @@ public enum AppTheme { Dark, Light }
 /// <summary>
 /// Live light/dark switching. Every themeable colour in Theme.xaml is a Color resource that the
 /// brushes bind to with DynamicResource; this just writes the right Color values into
-/// Application.Resources for the chosen theme, and — because DynamicResource is a live link — every
+/// Application.Resources for the chosen theme, and - because DynamicResource is a live link - every
 /// brush (and thus every control, even those using {StaticResource}) recolours instantly with no
 /// rebuild and no per-view code. Default is Dark (Toki's signature black notch); Light is a clean,
 /// Apple-like near-white.
@@ -18,13 +18,13 @@ public static class ThemeManager
     public static AppTheme Current { get; private set; } = AppTheme.Dark;
 
     /// <summary>Fired after the palette swaps. Views built in CODE (which capture brushes via
-    /// FindResource and so don't re-resolve on their own) subscribe to rebuild/recolour — the Library
+    /// FindResource and so don't re-resolve on their own) subscribe to rebuild/recolour - the Library
     /// list + detail, the pill Library, the Notes content. XAML DynamicResource consumers don't need it.</summary>
     public static event Action? ThemeChanged;
 
     // brush key → (dark, light). Dark mirrors the Theme.xaml defaults (re-asserted so a toggle back
     // is exact); Light is the inverted, contrast-checked palette. Accents that don't invert (Coral,
-    // Pink, Purple) are absent on purpose — they're constant brushes.
+    // Pink, Purple) are absent on purpose - they're constant brushes.
     static readonly (string Key, string Dark, string Light)[] Palette =
     {
         // Light values are warm, soft Apple off-whites (not stark "x-ray" #FFFFFF); dark values are
@@ -37,10 +37,10 @@ public static class ThemeManager
         ("TextDim",          "#98989D", "#86868B"),  // secondary/dim text (Apple secondary label)
         ("Ink",              "#161618", "#FBFBFD"),  // Library reading pane (soft, not glaring white)
         // The notch is a TINTED MIRROR: semi-transparent (alpha < FF) so the desktop colours behind it
-        // bleed through slightly — a see-through slab, not a blur. Kept fairly opaque so text stays
+        // bleed through slightly - a see-through slab, not a blur. Kept fairly opaque so text stays
         // readable and it never washes out to grey (the reason it went opaque before).
-        ("Notch",            "#D9000000", "#E0FCFCFE"),  // ~85% black / ~88% white — desktop shows faintly through
-        ("NotchGlass",       "#BF0F0F13", "#D6F8F8FC"),  // glassy toggle: ~75% — more see-through, frosted look
+        ("Notch",            "#D9000000", "#E0FCFCFE"),  // ~85% black / ~88% white - desktop shows faintly through
+        ("NotchGlass",       "#BF0F0F13", "#D6F8F8FC"),  // glassy toggle: ~75% - more see-through, frosted look
         ("NotchBorder",      "#40FFFFFF", "#33000000"),  // a soft rim so the glassy edge reads
         ("WhiteBtn",         "#F2F2F2", "#1D1D1F"),  // primary CTA button fill (inverts to near-black)
         ("CtaText",          "#161618", "#FCFCFE"),  // text on the CTA
@@ -65,9 +65,9 @@ public static class ThemeManager
     /// <summary>
     /// Recolour the whole app to the given theme by REPLACING each themed brush resource in the app's
     /// top-level dictionary with a fresh brush of the new colour. Every consumer references these via
-    /// {DynamicResource}, so replacing the resource makes them re-resolve and repaint instantly — no
+    /// {DynamicResource}, so replacing the resource makes them re-resolve and repaint instantly - no
     /// rebuild, no per-view code. (We do NOT mutate a brush's .Color: WPF freezes brushes once they've
-    /// been rendered, and a frozen brush throws "read-only state" on mutation — replacing sidesteps
+    /// been rendered, and a frozen brush throws "read-only state" on mutation - replacing sidesteps
     /// that entirely.) MUST run once at startup BEFORE windows are built so consumers bind to these.
     /// </summary>
     public static void Apply(AppTheme theme)

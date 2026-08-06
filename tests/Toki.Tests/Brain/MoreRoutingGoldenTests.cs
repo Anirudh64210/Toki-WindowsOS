@@ -52,7 +52,7 @@ public sealed class MoreRoutingGoldenTests : IClassFixture<BrainFixture>
     [InlineData("how many syncs this week")]
     public void Counting_RoutesToCount(string q) => Assert.Equal(Route.Count, R(q));
 
-    // Counting TASKS is answered by the task route (the list carries the count) — either is acceptable.
+    // Counting TASKS is answered by the task route (the list carries the count) - either is acceptable.
     [Theory]
     [InlineData("how many open tasks do I have")]
     [InlineData("how many things are on my plate")]

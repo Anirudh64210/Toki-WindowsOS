@@ -56,7 +56,7 @@ public partial class NotesView : UserControl
             try
             {
                 Clipboard.SetText(NoteRenderer.TranscriptText(m));
-                // Feedback checkmark reverts after a moment — a permanent ✓ made the copy
+                // Feedback checkmark reverts after a moment - a permanent ✓ made the copy
                 // button look consumed and unpressable.
                 var prior = CopyBtn.Content;
                 CopyBtn.Content = "✓";
@@ -121,7 +121,7 @@ public partial class NotesView : UserControl
     // The meeting is auto-saved when it's transcribed, so "Save to Library" just keeps it and closes.
     void OnSaveToLibrary(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Hidden);
 
-    // "Delete" discards it entirely (DB + notes file + audio) — the user decided not to keep it.
+    // "Delete" discards it entirely (DB + notes file + audio) - the user decided not to keep it.
     void OnDelete(object sender, RoutedEventArgs e)
     {
         App.DiscardMeeting(App.CurrentMeeting);

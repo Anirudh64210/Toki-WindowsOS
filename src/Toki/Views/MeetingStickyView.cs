@@ -7,7 +7,7 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// A meeting's STICKY NOTE, shown inside the meeting's own note — between the summary and the
+/// A meeting's STICKY NOTE, shown inside the meeting's own note - between the summary and the
 /// transcript, behind a button at the top.
 ///
 /// This replaces the version that put a Keep/Discard card in the Library list. The owner's verdict on
@@ -16,7 +16,7 @@ namespace Toki.Views;
 ///
 /// What it is, precisely: your private page. It never steers the summary (see
 /// <see cref="Llm.LlmNoteWriter"/>), it isn't in the search index, and Toki never writes a word in it.
-/// It saves itself as you type — the app has no Save buttons anywhere else and shouldn't grow one here —
+/// It saves itself as you type - the app has no Save buttons anywhere else and shouldn't grow one here -
 /// and Delete is two-step, because this is text a person typed by hand and one stray click must not
 /// lose it.
 /// </summary>
@@ -74,7 +74,7 @@ public sealed class MeetingStickyView : Border
         stack.Children.Add(header);
         stack.Children.Add(_slot);
 
-        // An amber hairline, not a filled box — it's yours and it's different, but it isn't a warning.
+        // An amber hairline, not a filled box - it's yours and it's different, but it isn't a warning.
         // (Dividers, not boxes: the one box on this page earns it by being a different KIND of content.)
         BorderBrush = B("Amber");
         BorderThickness = new Thickness(1);
@@ -87,7 +87,7 @@ public sealed class MeetingStickyView : Border
         _save.Tick += (_, _) => { _save.Stop(); Flush(); };
     }
 
-    /// <summary>True when this meeting already has a note — decides what the button above it says.</summary>
+    /// <summary>True when this meeting already has a note - decides what the button above it says.</summary>
     public bool HasNote => _stickyId is not null;
 
     Button? _toggle;
@@ -96,7 +96,7 @@ public sealed class MeetingStickyView : Border
     /// The button that opens this note, sitting at the TOP of the meeting note, just under the title.
     ///
     /// It lives here rather than in the Copy/Delete toolbar for two reasons: a sticky note is CONTENT,
-    /// not an action performed on the note, and the toolbar is already at its width — adding a fourth
+    /// not an action performed on the note, and the toolbar is already at its width - adding a fourth
     /// button there squeezed the template picker down to "Template · Dec".
     /// </summary>
     public FrameworkElement ToggleButton
@@ -105,7 +105,7 @@ public sealed class MeetingStickyView : Border
         {
             if (_toggle is not null) return _toggle;
 
-            // Segoe MDL2 "Pinned" — ties the button to the amber-edged panel it opens.
+            // Segoe MDL2 "Pinned" - ties the button to the amber-edged panel it opens.
             var pin = new TextBlock
             {
                 Text = "", FontSize = 11, Foreground = B("Amber"),
@@ -171,7 +171,7 @@ public sealed class MeetingStickyView : Border
     /// taking a screenshot can never write into the user's real notes.</summary>
     internal void DebugSeed(string markdown)
     {
-        _stickyId = DebugId;                    // never a real row — Flush and Delete both refuse it
+        _stickyId = DebugId;                    // never a real row - Flush and Delete both refuse it
         _editor = new NoteEditor { MinHeight = 150 };
         _editor.Markdown = markdown;
         _slot.Content = _editor;
@@ -184,7 +184,7 @@ public sealed class MeetingStickyView : Border
         else Reveal();
     }
 
-    /// <summary>Write pending edits now — on closing the window, switching notes, or hiding the panel.
+    /// <summary>Write pending edits now - on closing the window, switching notes, or hiding the panel.
     /// Called from every exit, because "I typed it and it wasn't there" is unforgivable.</summary>
     /// <summary>The id <see cref="DebugSeed"/> uses. Negative, so it can never collide with a real
     /// AUTOINCREMENT row, and every write path checks for it.</summary>
