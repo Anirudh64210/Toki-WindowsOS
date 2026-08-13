@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:theme="clr-namespace:Toki.Theme">
 
     <!-- ════════════════════════════════════════════════════════════════════════════
          THEMEABLE BRUSHES, with the DARK defaults below. The light/dark toggle
@@ -22,8 +23,12 @@
     <SolidColorBrush x:Key="NotchBorder" Color="#33000000"/>
     <SolidColorBrush x:Key="WhiteBtn" Color="#F2F2F2"/>
     <SolidColorBrush x:Key="CtaText" Color="#141414"/>
-    <SolidColorBrush x:Key="HoverOverlay" Color="#1FFFFFFF"/>
-    <SolidColorBrush x:Key="PressOverlay" Color="#33FFFFFF"/>
+    <!-- Hover / press wash. 22% white, not 12%: the notch is pitch black, and 12% white over #000 is
+         RGB ~31 - about 1.15:1 contrast, which nobody can see. The buttons were highlighting across
+         their whole box all along; there was nothing visible to show for it. Keep these in step with
+         ThemeManager.Palette, which is the source of truth for the light values. -->
+    <SolidColorBrush x:Key="HoverOverlay" Color="#38FFFFFF"/>
+    <SolidColorBrush x:Key="PressOverlay" Color="#57FFFFFF"/>
     <SolidColorBrush x:Key="Hairline" Color="#18FFFFFF"/>
     <SolidColorBrush x:Key="SelectionBorder" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="CheckBorder" Color="#55FFFFFF"/>
@@ -81,16 +86,15 @@
                              the button can be clicked. -->
                         <Border x:Name="Hl" CornerRadius="13" Background="Transparent"
                                 Padding="{TemplateBinding Padding}">
-                            <!-- BlockLineHeight clamps the line box to the glyphs; the -1px nudge corrects the
-                                 residual ~1px that Segoe UI Variable still sits low (measured against a true-
-                                 centre reference line). Together the label lands optically centred. -->
+                            <!-- Centred on the CAP HEIGHT, not on the line box. WPF centres the line box,
+                                 which reserves descender space the letters do not use, so a label centred
+                                 by layout sits visibly low. OpticalCenter reads the real font metrics and
+                                 nudges by the exact amount, scaled to the font size - the previous fixed
+                                 fixed 1px nudge was right at one size and wrong everywhere else
+                                 (measured: every pill label still sat 1.7px low). The hittest self-test
+                                 fails above 1.5px. -->
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              TextBlock.LineStackingStrategy="BlockLineHeight"
-                                              TextBlock.LineHeight="{TemplateBinding FontSize}">
-                                <ContentPresenter.RenderTransform>
-                                    <TranslateTransform Y="-1"/>
-                                </ContentPresenter.RenderTransform>
-                            </ContentPresenter>
+                                              theme:OpticalCenter.Enabled="True"/>
                         </Border>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -425,7 +429,14 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
+                    <!-- The tick box READS as 18px but is HIT as 24. A transparent 24x24 pad around it
+                         costs nothing visually and lifts the target to the 24px floor a pointer needs -
+                         ticking a to-do should not require precision. The pad must be Transparent, not
+                         unset: unset is null and a null background is invisible to hit testing, which
+                         would leave only the 18px box clickable and make this pointless. -->
+                    <Grid Background="Transparent" Width="24" Height="24">
                     <Border x:Name="Box" Width="18" Height="18" CornerRadius="5"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
                             Background="Transparent" BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
                             SnapsToDevicePixels="True" RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform x:Name="BoxScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
@@ -435,6 +446,7 @@
                               HorizontalAlignment="Center" VerticalAlignment="Center"
                               Data="M 1.5,6 L 4.6,9 L 10.5,2.6"/>
                     </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource CheckBorderHover}"/>
@@ -475,11 +487,17 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
+                    <!-- The track READS as 36x21 but is HIT as 36x26. A switch is a small thing to aim
+                         at and the extra height is invisible; the pad must be Transparent (not unset,
+                         which is null and not hit-testable) or it adds nothing. -->
+                    <Grid Background="Transparent" Height="26">
                     <Border x:Name="Track" Width="36" Height="21" CornerRadius="10.5"
+                            VerticalAlignment="Center"
                             Background="{DynamicResource Chip}" SnapsToDevicePixels="True">
                         <Border x:Name="Thumb" Width="15" Height="15" CornerRadius="7.5"
                                 Background="{DynamicResource WhiteBtn}" HorizontalAlignment="Left" Margin="3,0,0,0"/>
                     </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Track" Property="Background" Value="{DynamicResource Green}"/>

@@ -447,7 +447,7 @@ public partial class CalendarView : UserControl
     {
         if (Composer.Visibility == Visibility.Visible && _editing is null) { CloseComposer(); return; }
         _editing = null;
-        _durationMin = 30; DurationChip.Content = "30 min";
+        _durationMin = 30; UpdateDurationChip();
         _addMeet = _lastAddMeet; UpdateMeetChip();
         Composer.Visibility = Visibility.Visible;
         PeopleRow.Visibility = Visibility.Collapsed; PeopleBox.Text = "";
@@ -464,7 +464,7 @@ public partial class CalendarView : UserControl
     {
         _editing = ev;
         _durationMin = Math.Max(15, (int)Math.Round((ev.EndUtc - ev.StartUtc).TotalMinutes));
-        DurationChip.Content = DurLabel(_durationMin);
+        UpdateDurationChip();
         _addMeet = ev.HasMeetLink; UpdateMeetChip();
         var emails = ev.Attendees.Where(a => !a.IsSelf && a.Email is not null).Select(a => a.Email!).ToList();
         PeopleBox.Text = string.Join(", ", emails);
@@ -556,14 +556,34 @@ public partial class CalendarView : UserControl
     void UpdateCreateEnabled() =>
         ComposerCreate.IsEnabled = _parsed is { Start: not null } && !string.IsNullOrWhiteSpace(_parsed.Summary);
 
-    void OnCycleDuration(object s, RoutedEventArgs e)
+    /// <summary>
+    /// The lengths a meeting is actually booked for, in the order Google and Outlook offer them.
+    ///
+    /// This used to be a chip that CYCLED 30 -> 60 -> 90 -> 30 on each click, which made 15 and 45
+    /// unreachable no matter how many times you pressed it, and forced you to click through lengths you
+    /// did not want to reach the one you did. A duration is a CHOICE FROM A SET, and a set belongs in a
+    /// list you can see - the affordance every calendar in the world uses.
+    /// </summary>
+    static readonly int[] DurationChoices = [15, 30, 45, 60, 90, 120];
+
+    void OnPickDuration(object s, RoutedEventArgs e)
     {
-        _durationMin = _durationMin switch { < 60 => 60, 60 => 90, _ => 30 };
-        DurationChip.Content = DurLabel(_durationMin);
-        ReparseComposer();
+        var items = DurationChoices
+            .Select(m => (DurLabel(m), (Action)(() =>
+            {
+                _durationMin = m;
+                UpdateDurationChip();
+                ReparseComposer();
+            })))
+            .ToList();
+        NotePicker.Show(DurationChip, items, DurLabel(_durationMin));
     }
 
-    static string DurLabel(int min) => min < 60 ? $"{min} min" : min == 60 ? "1 h" : min % 60 == 0 ? $"{min / 60} h" : $"1 h {min - 60} m";
+    // The chevron says "there are other options" - without it a chip reads as a toggle, which is exactly
+    // how the cycling version got away with hiding four of its six choices.
+    void UpdateDurationChip() => DurationChip.Content = $"{DurLabel(_durationMin)}  ▾";
+
+    static string DurLabel(int min) => min < 60 ? $"{min} min" : min == 60 ? "1 hour" : min % 60 == 0 ? $"{min / 60} hours" : $"1 h {min - 60} m";
 
     void OnToggleMeet(object s, RoutedEventArgs e) { _addMeet = !_addMeet; _lastAddMeet = _addMeet; UpdateMeetChip(); }
 

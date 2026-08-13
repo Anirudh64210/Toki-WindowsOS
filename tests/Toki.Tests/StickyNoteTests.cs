@@ -274,15 +274,71 @@ public sealed class StickyNoteTests : IDisposable
     }
 
     [Fact]
-    public void A_corrupt_legacy_file_is_left_alone_rather_than_thrown_away()
+    public void A_corrupt_legacy_file_is_parked_not_retried_forever()
     {
+        // This exact content is what the owner's machine had: the log carried
+        //   "sticky migration failed ... 't' is an invalid start of a property name"
+        // on EVERY launch, because the old code left an unparseable file in place "to retry next
+        // launch" - and a file that cannot be parsed never will. Park it instead, with the text intact.
         var legacy = Path.Combine(_dir, "prep-scratch.json");
         File.WriteAllText(legacy, "{ this is not json at all");
         StickyMigration.PathOverride = legacy;
         try
         {
-            StickyMigration.RunOnce(_store);         // must not throw
-            Assert.True(File.Exists(legacy));        // still there, to be looked at by a human
+            StickyMigration.RunOnce(_store);          // must not throw
+            Assert.False(File.Exists(legacy));        // no longer retried
+            Assert.True(File.Exists(legacy + ".unreadable"));
+            // The user's words are still on disk, untouched, for a person to read.
+            Assert.Equal("{ this is not json at all", File.ReadAllText(legacy + ".unreadable"));
+
+            // And a second launch does nothing at all - no error, no noise.
+            StickyMigration.RunOnce(_store);
+            Assert.True(File.Exists(legacy + ".unreadable"));
+        }
+        finally { StickyMigration.PathOverride = null; }
+    }
+
+    [Fact]
+    public void A_second_launch_racing_the_first_cannot_migrate_the_same_note_twice()
+    {
+        // Two launches in quick succession really did overlap on the owner's machine: the migration
+        // runs on a background thread 3s after start, so both processes saw the file, both read it, and
+        // both wrote the note. The log showed "migrated 1 prep-card note(s)" three times in under a
+        // second. The fix is to CLAIM the file by renaming it before reading - the one atomic operation
+        // a filesystem offers - so the losers find nothing.
+        var legacy = Path.Combine(_dir, "prep-scratch.json");
+        File.WriteAllText(legacy, """{ "evt-a": { "Text": "mine", "Title": "T" } }""");
+        StickyMigration.PathOverride = legacy;
+        try
+        {
+            // Stand in for the other process having already claimed it: the file is mid-flight under
+            // its .migrating name, so this run must not find anything to do.
+            File.Move(legacy, legacy + ".migrating");
+            StickyMigration.RunOnce(_store);
+            Assert.Empty(_store.RecentStickies());
+
+            // Now the winner finishes; exactly one note exists.
+            File.Move(legacy + ".migrating", legacy);
+            StickyMigration.RunOnce(_store);
+            Assert.Single(_store.RecentStickies());
+        }
+        finally { StickyMigration.PathOverride = null; }
+    }
+
+    [Fact]
+    public void An_empty_legacy_file_migrates_quietly_and_is_retired()
+    {
+        // The owner's real file was "{}" - nothing to carry, but it still has to be retired or the
+        // migration reruns on every launch.
+        var legacy = Path.Combine(_dir, "prep-scratch.json");
+        File.WriteAllText(legacy, "{}");
+        StickyMigration.PathOverride = legacy;
+        try
+        {
+            StickyMigration.RunOnce(_store);
+            Assert.False(File.Exists(legacy));
+            Assert.True(File.Exists(legacy + ".migrated"));
+            Assert.Empty(_store.RecentStickies());
         }
         finally { StickyMigration.PathOverride = null; }
     }

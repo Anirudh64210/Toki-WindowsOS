@@ -186,18 +186,41 @@
                                          VerticalContentAlignment="Center" Height="36" FontSize="12.5" TextChanged="OnSearch"/>
                             </Border>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks/Manual. -->
+                                <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks. -->
                                 <Button x:Name="SortBtn" Style="{StaticResource IconButton}"
                                         Margin="6,0,0,0" Content="&#xE8CB;" ToolTip="Sort &amp; filter" Click="OnSortMenu"/>
-                                <!-- Drag-to-reorder on/off - OFF by default so cards never move by accident. -->
-                                <Button x:Name="DragToggle" Style="{StaticResource IconButton}"
-                                        Margin="2,0,0,0" Click="OnToggleDrag"/>
                             </StackPanel>
                         </Grid>
 
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
-                            <StackPanel x:Name="Cards"/>
-                        </ScrollViewer>
+                        <!-- The meeting list only builds the rows that are on screen. The ScrollViewer is
+                             INSIDE the control's template on purpose: an ItemsControl wrapped in an outer
+                             ScrollViewer is measured with infinite height, so every row is realised and
+                             virtualization does nothing. ScrollUnit=Pixel keeps SmoothScroll's per-pixel
+                             glide (item-unit scrolling would jump a whole card per notch).
+                             The empty state is an overlay, not a row, so it can't be virtualized away. -->
+                        <Grid>
+                            <views:MeetingList x:Name="Cards"
+                                               VirtualizingPanel.IsVirtualizing="True"
+                                               VirtualizingPanel.VirtualizationMode="Recycling"
+                                               VirtualizingPanel.ScrollUnit="Pixel">
+                                <ItemsControl.Template>
+                                    <ControlTemplate TargetType="ItemsControl">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" CanContentScroll="True"
+                                                      Focusable="False" controls:SmoothScroll.Enabled="True">
+                                            <ItemsPresenter/>
+                                        </ScrollViewer>
+                                    </ControlTemplate>
+                                </ItemsControl.Template>
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </views:MeetingList>
+                            <TextBlock x:Name="CardsEmpty" Style="{StaticResource Dim}" FontSize="12"
+                                       TextAlignment="Center" TextWrapping="Wrap" Margin="0,24,0,0"
+                                       VerticalAlignment="Top" Visibility="Collapsed"/>
+                        </Grid>
                     </DockPanel>
 
                     <!-- One subtle hairline divides the list from the note (the splitter that used to draw
@@ -254,6 +277,40 @@
                             <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBlock x:Name="LibNameSavedText" Style="{StaticResource Body}" FontSize="12.5"
+                                       Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- ── Names Toki should always get right ──
+                             The roster behind speaker naming and name correction. AppSettings.PinnedNames
+                             has been read by NameLexicon since T2, but nothing could ever write it - the
+                             escape hatch existed with no handle on it. A name typed here is TRUSTED: it
+                             beats what the recogniser heard, it lets a spoken name be attached to a voice,
+                             and it is the only fix for a name the library cannot settle by frequency. -->
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <TextBlock Text="People Toki should spell right" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
+                                   Margin="0,6,0,12" MaxWidth="420" HorizontalAlignment="Left"
+                                   Text="Names your meetings use often. Toki trusts these over what it thinks it heard, and uses them to put a name to a voice. One per line, or separated by commas."/>
+                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
+                                Width="340" HorizontalAlignment="Left">
+                            <TextBox x:Name="LibPinnedBox" Background="Transparent" BorderThickness="0"
+                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                     MinHeight="72" MaxHeight="150" FontSize="13.5" FontFamily="{StaticResource UiFont}"
+                                     AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                     TextChanged="OnLibPinnedChanged"/>
+                        </Border>
+
+                        <StackPanel x:Name="LibPinnedActions" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
+                            <Button x:Name="LibPinnedSave" Style="{StaticResource WhiteButton}" Content="Save"
+                                    Padding="26,9" Click="OnLibPinnedSave"/>
+                            <Button Style="{StaticResource PillButton}" Background="Transparent"
+                                    Content="Cancel" Padding="20,9" Margin="8,0,0,0" Click="OnLibPinnedCancel"/>
+                        </StackPanel>
+                        <StackPanel x:Name="LibPinnedSaved" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
+                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                       Foreground="{DynamicResource Green}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="LibPinnedSavedText" Style="{StaticResource Body}" FontSize="12.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
                         </StackPanel>
 

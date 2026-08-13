@@ -70,9 +70,16 @@ public static class NoteRenderer
             Section(body, sec.Heading.ToUpperInvariant(), sec.Bullets.Select(b => Bullet(b, fs, spacious)), spacious);
         Section(body, "ACTION ITEMS", m.Notes.Actions.Select(a => ActionRow(a, fs, spacious)), spacious);
 
+        // The notch is where the note is FIRST seen, and the speakers are being worked out at exactly
+        // that moment. Say so here too, or the names appear to arrive from nowhere.
+        var resolving = m.Id > 0 && App.IsResolvingSpeakers(m.Id);
+        if (resolving && m.Notes.Actions.Count > 0)
+            body.Children.Add(new ThinkingDots("working out who owns these"));
+
         if (m.Transcript.Count > 0)
         {
             SectionHeader(body, "TRANSCRIPT", spacious);
+            if (resolving) body.Children.Add(new ThinkingDots("telling the speakers apart"));
             // Show a short PREVIEW (a few lines) - a full hour-long transcript shouldn't just lie
             // there. A "Show full transcript" button reveals the rest on demand (streamed in so it
             // never freezes the window). Most of the time the summary + tasks are all you want.
@@ -198,7 +205,8 @@ public static class NoteRenderer
             Margin = new Thickness(0, fs / 2 - 7, 10, 0), MinWidth = 40, HorizontalAlignment = HorizontalAlignment.Left,
             Child = new TextBlock
             {
-                Text = you ? "YOU" : "THEM", FontSize = 8.5, FontWeight = FontWeights.Bold,
+                // The resolved name once the speakers have been told apart, else YOU/THEM.
+                Text = seg.Label.ToUpperInvariant(), FontSize = 8.5, FontWeight = FontWeights.Bold,
                 Foreground = B(you ? "Text" : "TextDim"), FontFamily = Ui, TextAlignment = TextAlignment.Center,
             },
         };
@@ -245,8 +253,13 @@ public static class NoteRenderer
     /// the note itself opens after everything Toki wrote and BEFORE the transcript - the owner's layout:
     /// "it extends between the end of the summary and everything, and the transcript". Supplied by the
     /// Library (which owns storage); this renderer only positions it.</param>
+    /// <param name="renameSpeaker">Called with (oldName, newName) when the user corrects a speaker. Null
+    /// (the notch, the render harness) simply omits the speaker row - this renderer never touches storage.</param>
+    /// <param name="resolving">True while this meeting's speakers are still being worked out in the
+    /// background. The note is COMPLETE and readable either way; this only marks the two parts that are
+    /// about to gain names, so they change visibly rather than silently.</param>
     public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null,
-        MeetingStickyView? sticky = null)
+        MeetingStickyView? sticky = null, Action<string, string>? renameSpeaker = null, bool resolving = false)
     {
         var fs = spacious ? 13.5 : 12.5;
         var doc = new FlowDocument
@@ -345,6 +358,11 @@ public static class NoteRenderer
         if (m.Notes.Actions.Count > 0)
         {
             doc.Blocks.Add(DocHeader("ACTION ITEMS"));
+            // The to-dos are here and readable; who owns them arrives a few seconds later, when the
+            // speakers resolve. Say so, rather than let a name appear out of nowhere.
+            if (resolving)
+                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("working out who owns these"))
+                { Margin = new Thickness(0, 0, 0, 4) });
             // Action items get evidence links too (S7). A to-do is the single most useful line to be
             // able to check - "who agreed to this, and when?" - and it was the one kind of line the
             // first pass left unlinked.
@@ -358,6 +376,13 @@ public static class NoteRenderer
         if (m.Transcript.Count > 0)
         {
             doc.Blocks.Add(DocHeader("TRANSCRIPT"));
+            if (resolving)
+                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("telling the speakers apart"))
+                { Margin = new Thickness(0, 0, 0, 4) });
+            // Who Toki thinks was in the room, each one a click away from being corrected. Absent
+            // entirely when the speakers were never told apart, so a plain two-party call is unchanged.
+            if (renameSpeaker is not null && SpeakerChips.Build(m.Transcript, renameSpeaker) is { } chips)
+                doc.Blocks.Add(new BlockUIContainer(chips) { Margin = new Thickness(0, 0, 0, 6) });
             var preview = Math.Min(3, m.Transcript.Count);
             for (var i = 0; i < preview; i++)
             {
@@ -481,15 +506,14 @@ public static class NoteRenderer
     {
         var you = seg.Speaker == Speaker.You;
         var p = new Paragraph { Margin = new Thickness(0, 0, 0, 9), LineHeight = fs + 7 };
-        p.Inlines.Add(new Run($"{(you ? "You" : "Them")}:  ") { FontWeight = FontWeights.SemiBold, Foreground = B(you ? "Text" : "TextDim") });
+        p.Inlines.Add(new Run($"{seg.Label}:  ") { FontWeight = FontWeights.SemiBold, Foreground = B(you ? "Text" : "TextDim") });
         p.Inlines.Add(new Run(seg.Text) { Foreground = B(you ? "Text" : "TextDim") });
         return p;
     }
 
     /// <summary>Plain-text of a meeting's transcript, for the Copy button.</summary>
     public static string TranscriptText(MeetingRecord m) =>
-        string.Join(Environment.NewLine, m.Transcript.Select(s =>
-            $"{(s.Speaker == Speaker.You ? "You" : "Them")}: {s.Text}"));
+        string.Join(Environment.NewLine, m.Transcript.Select(s => $"{s.Label}: {s.Text}"));
 
     /// <summary>Plain-text of the NOTES (title, summary, template sections, to-dos) for the Copy menu -
     /// clean markdown-ish text the user can paste anywhere.</summary>

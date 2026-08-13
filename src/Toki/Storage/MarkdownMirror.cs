@@ -80,7 +80,7 @@ public static class MarkdownMirror
         {
             sb.AppendLine("## Transcript");
             foreach (var s in m.Transcript)
-                sb.AppendLine($"**{(s.Speaker == Speaker.You ? "You" : "Them")}:** {s.Text}").AppendLine();
+                sb.AppendLine($"**{s.Label}:** {s.Text}").AppendLine();
         }
         return sb.ToString();
     }

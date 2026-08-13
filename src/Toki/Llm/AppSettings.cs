@@ -28,6 +28,16 @@ public sealed class AppSettings
     /// falls back to the Windows account name when empty.</summary>
     public string? UserName { get; set; }
 
+    /// <summary>
+    /// Names and terms the user has told Toki to get right, one per line (or comma-separated).
+    ///
+    /// The escape hatch for what frequency cannot settle. Toki repairs most mis-heard names by counting
+    /// spellings across the library, but some never appear correctly at all ("Yashtren" for "Yashina" is
+    /// four edits away and does not even sound alike to the matcher). A name typed here is treated as
+    /// ground truth and is allowed a wider match, because the user has asserted it.
+    /// </summary>
+    public string? PinnedNames { get; set; }
+
     /// <summary>True once the user has been through the first-run onboarding (name + privacy + done).
     /// Defaults false so EVERY existing install sees it once - which is also how a stale/wrong stored
     /// name gets corrected. Set true only when the user finishes (or skips) onboarding.</summary>

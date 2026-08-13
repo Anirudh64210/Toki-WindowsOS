@@ -25,6 +25,116 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
+## Pinned names + the migration that retried forever (2026-08-13)
+
+**Built**
+
+- **Settings → "People Toki should spell right".** `AppSettings.PinnedNames` had been READ by
+  `NameLexicon` since T2, but nothing could ever write it - the escape hatch existed with no handle on
+  it, so the only way to fix a name the library could not settle by frequency was hand-editing JSON.
+  Now a multi-line box beside the name field, with the same Save/Cancel/confirm pattern. A name typed
+  here is trusted: correction reaches further towards it, and the speaker namer will attach it to a
+  voice on evidence that would not be enough for a name nobody vouched for.
+
+**Fixed**
+
+- **The sticky migration logged an error on every single launch.** `prep-scratch.json` was read, then
+  migrated, then renamed - and that is not atomic. Two launches in quick succession genuinely overlapped
+  (the migration runs on a background thread 3s after start), so both read the same file and both wrote
+  the same note. The owner's log showed `migrated 1 prep-card note(s)` **three times in under a second**.
+- **And an unreadable file retried forever.** The old code left a file it could not parse in place "to
+  be retried next launch" - but a file that cannot be parsed never will, so it logged
+  `'t' is an invalid start of a property name` on every launch with no path to success.
+
+Both fixed by **claiming the file with a rename before reading it** - the one operation a filesystem
+makes atomic. Whoever wins the rename owns the migration; everyone else finds nothing and leaves. An
+unparseable file is parked as `.unreadable` (text intact, never deleted) instead of retried, and an
+unexpected failure puts the file back so the next launch really can try again.
+
+1,844 tests green.
+
+## Button fundamentals - the box is the button (2026-08-12)
+
+Owner: *"the pressable button area is still the text or the symbol"* and *"the symmetry for the text on
+the button is still weirdly not symmetric, and not centered"*. Two separate defects, both now measured
+rather than eyeballed. Full write-up: [`docs/button-fundamentals.md`](docs/button-fundamentals.md).
+
+**Built**
+
+- **New `--hittest`.** Walks the real visual tree of every notch state and asks WPF what would receive a
+  click at nine points inside each control. **A screenshot cannot catch either of these defects** - the
+  pixels are identical whether a button works or not.
+- **`Views/HitTarget.cs`** - one shared wrapper that makes anything clickable a proper box.
+- **`Theme/OpticalCenter.cs`** - centres a label on its cap height, computed from the font's real
+  metrics, replacing a hard-coded 1px nudge.
+
+**What was broken**
+
+`44 problems` on the first run. The Calendar action strip (`Edit`, `Copy link`, `Open in Google`,
+`Delete`) were bare TextBlocks with click handlers, so only the glyphs responded while the hover fill lit
+the whole row - the highlight was a lie about where the button was. All 11 About credit rows had negative
+side margins that put 6px of each row outside the parent's clip. Tick boxes were 18px, the switch 21px.
+And every pill label sat **1.7px low**, because a fixed 1px correction cannot be right at more than one
+font size.
+
+**Result**
+
+```
+[--hittest] checked 170 clickable controls across every notch state
+RESULT: every clickable box is clickable edge to edge, and every label is centred.
+```
+
+Deliberately fundamentals only - hit targets, centring, clipping - because a full design and haptics
+revamp is coming and styling done now would be thrown away.
+
+## T5 + T8 - the speakers, and the list (2026-08-12)
+
+**Built**
+
+- **T8: speakers get names, and Toki keeps nobody's voice.** `them.wav` is split into voices and each one
+  is named *from the conversation itself* - a self-introduction ("I'm Priya"), a handover ("over to you,
+  Priya"), a thank-you ("thanks, Priya"), or being addressed by a name that is on the calendar. Nothing
+  about anybody's voice is stored: reopen the meeting tomorrow and Toki has no way to recognise them.
+  Full write-up: [`docs/speaker-naming.md`](docs/speaker-naming.md).
+- **Rename once, applies everywhere.** A row of people sits above the transcript; click one, type the
+  right name, and every line that voice said updates. A rename is a text update, not a retrained model.
+- **The note arrives in two waves, and says so.** Summary and to-dos land at the usual speed; the names
+  and to-do owners follow a few seconds later, in place. While that is pending the two sections show a
+  pulsing "telling the speakers apart" / "working out who owns these" - because a note that silently
+  rewrites itself while you read it is unsettling in a way a slower note is not. Owner's call: *"I don't
+  like the idea of increasing the wait time"*.
+- **To-do owners come free, with no second model pass** (`Llm/ActionOwners.cs`). Every to-do already had
+  an evidence link to the line it came from; once that line knows who spoke it, a to-do somebody
+  volunteered for names its own owner. Only first-person commitments count - *"I'll send the deck"* names
+  the speaker, *"Craig will send the deck"* names nobody. **This closes T4 as a side effect of T8.**
+- **T5: the Library list is virtualized** (`Views/MeetingList.cs`) and **drag-reorder was removed** at the
+  owner's request - which is what made virtualization safe, since walking the cards by index is the one
+  thing it silently breaks.
+
+**Verified by running** (not by reading the code)
+
+```
+--uitest        build the whole list   424.2 ms -> 46.1 ms   all three budgets PASS
+--speakertest   meeting 75 (a real 1:1)   2 voices, correctly separated,
+                                          remote person named "Devi" from "Thank you, Devi."
+                meeting 76 (11 people)    3 voices - under-split, no calendar connected
+1,826 tests green.
+```
+
+**What broke, and what it taught**
+
+- **The first real run invented participants called "Please" and "Otherwise"**, from lines like *"Please,
+  please break out right away, everyone."* Both are perfect vocative shapes; neither is a person. A
+  hand-written list of not-names is never finished, so the fix is a general rule: **a word said in
+  lowercase anywhere in the same meeting is not a name.** Real names essentially never appear lowercase.
+  That caught two of the three. "Otherwise" survived because it never happened to be said lowercase in
+  that transcript - so the weakest signal (a bare vocative) now requires a name a human supplied.
+- **The clustering threshold turned one announcer into six speakers.** Moved 0.55 -> 0.80. No single
+  value serves both a one-to-one and an eleven-person call, so the question is which way to be wrong:
+  under-splitting is coarse, over-splitting invents colleagues who were never in the room.
+- **A consequence worth knowing:** because diarisation runs *after* the notes (owner's call - nothing may
+  delay the notes), the note writer does not see the names on a fresh meeting. They appear on a rewrite.
+
 ## M0 - Scaffold (2026-07-15)
 
 **Built**
@@ -1231,3 +1341,144 @@ apart.
 buttons; Library, Templates, Settings, Home and the notch Settings all re-rendered and checked by eye
 (including a `hub-nav-hover.png` frame, since hover is otherwise invisible to a headless screenshot);
 run against the packaged `dist/Toki.exe`.
+
+## T1-T8 (The first real meetings) - 2026-08-11, IN PROGRESS
+
+Two real recordings, back to back: an 8-minute 2-person call and a 6-minute 11-person team call. Full
+error analysis in **[`docs/real-meeting-findings.md`](docs/real-meeting-findings.md)**. The headline is
+that **every failure was invisible to the 1,800-test suite**, because the suite tested the layers and not
+the artifact a person reads.
+
+**Done**
+
+- **T1 - the transcript was shredded.** 182 segments in 8 minutes, and short interjections spliced into
+  the middle of sentences (`"did Craig mention ask"` / `"idea."` / `"you to like do this?"`). Cause:
+  `TranscriptMerger` did echo-dedup then `OrderBy(StartMs)` and **nothing else** - no same-speaker
+  merging existed. Consecutive lines from one person now join into a turn (1.5s gap, capped at 700 chars
+  so a monologue still breaks into paragraphs), and short backchannels are moved out of the middle of
+  someone else's sentence. Timestamps survive, so evidence links still resolve. One fix, three symptoms:
+  readability, a note document down from 182 paragraphs to ~40, and better chunk boundaries for the writer.
+- **T2 - names.** `Transcription/NameCorrector.cs`. Names that sound alike are clustered (compact
+  Metaphone + edit distance) and collapse to one spelling: a **trusted** one first (the user's own name,
+  a calendar attendee, a pinned term), else the **most frequent across the whole library**. Craig/Greg is
+  a dead tie inside one meeting and not close across the library, which is exactly why the corpus is the
+  authority. Guards: ordinary words are excluded before matching ("Great" can never become "Craig"),
+  sentence-initial words are excluded, two trusted spellings in one cluster means two real people, and a
+  dead tie is left alone. A trusted name may reach further because the user asserted it.
+- **T3 - the Summary was raw transcript, twice.** The model returned good sections but skipped `SUMMARY`,
+  and the writer substituted `NoteExtractor.Tldr` - the first ~140 characters of the transcript. Now it
+  asks again with a summary-only prompt, and if that fails leaves the summary EMPTY so the renderer drops
+  the section. This also fixes the title: "Evacuate Immediate Action Required" for a meeting about
+  centralising team reports came from titling the raw-transcript summary.
+- **T7 - a roll-call became eleven to-dos.** The chair read out a register and every name became a task.
+  A task now needs an action in it; a bare name (or a pair) is a person. Near-duplicate tasks collapse.
+
+**Chosen after research: post-ASR correction, not decode-time biasing.** Contextual biasing is the
+principled fix and sherpa-onnx supports it for Parakeet TDT, but hotwords on a BPE model need a
+`bpe.vocab` and the model archive Toki ships has none; it would also force beam search over greedy. Post
+correction is deterministic, unit-testable, free at runtime, and repairs the meetings already saved.
+
+**In progress**
+
+- **T8 - diarisation.** 11 people collapsed into "Them" is what let a register be read as tasks. The
+  two-stream design helps: `you.wav` means the local user is already perfectly separated, so only
+  `them.wav` needs splitting. sherpa-onnx 1.13.4 already exposes `OfflineSpeakerDiarization`, pyannote
+  segmentation, `SpeakerEmbeddingExtractor`, `FastClusteringConfig` and - the important one -
+  `SpeakerEmbeddingManager` (Add/Search/Verify), the primitive for naming a voice once and recognising it
+  in later meetings. No new dependency; two small model downloads. Licence/size/CPU cost under research.
+- **T4** action-item owners (all four of meeting 75's to-dos were the owner's, and none said so).
+- **T5** UI: `Select()` rebuilds all 52 cards to move one highlight; `OnSearch` re-queries and rebuilds
+  per keystroke; `Cards` is a non-virtualizing `StackPanel`.
+- Wiring T1/T2 into the save path, the Settings names list, a "Re-clean saved transcripts" button, and
+  underlining corrected words in the transcript.
+
+**Not yet addressed:** both meetings were classified "Decision log" when neither made a decision, so the
+Rationale section reads as invented justification.
+
+**Verified so far:** 1,807 tests green, all new ones written from the two real transcripts.
+
+### T1-T8 progress (2026-08-12)
+
+**T2 name correction is now WIRED and live.** Building it was not the whole job: there is a *live*
+transcription path (Toki decodes during the meeting) which skips `TranscriptionService.Process`
+entirely at stop time, and name correction only existed inside `Process`. Since the live path is the one
+most meetings actually take, the feature would have looked correct in testing (via the fallback) and
+done nothing in real use. Both routes now call it. The lexicon has two tiers: **trusted** (the user's own
+name, calendar attendee display names, and a new `AppSettings.PinnedNames`) which wins outright and gets
+a wider match because a human typed it, and **corpus** (every spelling counted across all transcripts,
+titles, summaries, and action-item owners weighted 3x) which settles what one meeting cannot.
+
+**T5 UI performance - the two constant costs are fixed, measured.** Full write-up with the
+with/without/who/when/how of virtualization: **[`docs/ui-performance.md`](docs/ui-performance.md)**.
+
+- `Select()` called `LoadList()` to *"refresh selection highlight"*, so every click on a note re-ran the
+  SQL query and rebuilt ~800 visual elements to change one brush. Now walks the on-screen cards:
+  **424 ms -> 0.4 ms**.
+- `OnSearch` rebuilt per keystroke; typing "pricing" cost seven queries and seven rebuilds. Now debounced
+  at 180 ms: **one** rebuild.
+- New **`--uitest`** self-test measures all of it against the real database with pass/fail budgets, so
+  "slow and clunky" is a number. Current: selection PASS (0.4 ms), note render PASS (139 ms), list build
+  **FAIL** (424 ms at 54 meetings, of which ~343 ms is WPF laying out cards nobody can see).
+  Virtualization is therefore justified by measurement rather than by principle; the risk is drag-reorder,
+  which walks `Cards.Children` **by index**.
+
+**T8 diarisation - measured, awaiting two owner decisions.** New **`--diartest`** benchmarks two routes on
+real meeting audio. On the owner's PC, 8.4 minutes of `them.wav`:
+
+| Route | Measured | Extrapolated to 60 min |
+|---|---|---|
+| Textbook (segmentation sweep + per-hop embeddings) | 59.6 s (RTF 0.119) | ~7 min |
+| **ASR-guided (one embedding per utterance Toki already found)** | **7.1 s (RTF 0.014)** | **~50 s** |
+
+The shortcut is published prior art, not a hack: **Turn-to-Diarize** (Google, ICASSP 2022) reports 31x
+less compute at one hour *and lower* DER on 2 of 3 datasets, because a fixed sliding window straddles
+speaker boundaries and creates confusion errors. It also sidesteps an unfixed
+[AccessViolationException in sherpa's .NET diarisation](https://github.com/k2-fsa/sherpa-onnx/issues/3253)
+on multi-chunk audio, which is uncatchable in .NET and would kill the process.
+
+Two findings that changed the design:
+- **Average linkage, not complete.** Complete linkage asks that *every* pair in a cluster be close, so one
+  bad moment (network drop, mic distance) splits a person permanently. Measured: one remote speaker came
+  out as 5 clusters at the default threshold and never fewer than 2 even at 0.95. Average linkage reaches
+  the correct 1.
+- **No single threshold serves both meetings.** 0.80 gets a 1:1 exactly right and collapses an 11-person
+  call to 2; 0.55 gets the team call roughly right and shatters one person into 5. So: use the calendar
+  attendee count when known (passing the true count worked perfectly), default conservative when not
+  (under-splitting is today's behaviour; over-splitting invents people), and let the user set the number,
+  which is cheap because re-clustering takes ~5 s.
+
+GPU was investigated and rejected: the shipped NuGet is CPU-only, `Provider = "cuda"` silently falls back,
+and a measured CUDA build on an RTX 3090 still gave RTF 0.24 because the bottleneck is thousands of tiny
+sequential inferences.
+
+## Sticky notes that accept typing, and a duration you can choose (2026-08-13)
+
+**Fixed: "Add a sticky note" opened the panel and typing did nothing.**
+
+Root cause: `Reveal()` called `Focus()` on the editor in the same breath as adding it to the panel -
+before it was in a laid-out visual tree. `Focus()` on a control that is not yet laid out returns false
+and does nothing, **silently**. Keyboard focus therefore stayed on the read-only `RichTextBox` that HOSTS
+the sticky panel, and a read-only RichTextBox swallows every keystroke without a sound.
+
+The editor itself was fine the whole time - which is exactly why `--notetest` passed all 20 checks while
+the feature was unusable. **The defect was in the hosting, not the control.** New `--stickytest` drives
+the sticky note where it actually lives, inside a real meeting document, and it reproduced the bug on the
+first run. Focus now happens after layout, and a click anywhere in the panel puts the caret back in the
+note (the host RichTextBox very much wants focus back).
+
+**Fixed: the meeting-duration chip could not reach 15 or 45 minutes.** It CYCLED 30 -> 60 -> 90 -> 30 on
+each click, so two of the six sensible lengths were unreachable no matter how many times you pressed it,
+and you had to click through lengths you did not want. A duration is a choice from a set, and a set
+belongs in a list you can see - the affordance every calendar uses. Now a dropdown: 15 / 30 / 45 / 1 hour
+/ 1 h 30 m / 2 hours, with a chevron so it reads as a choice rather than a toggle.
+
+**Same fix, same reasoning, in the note editor:** the three separate Title / Heading / Body chips became
+one "Aa" size picker. Three chips spent the whole toolbar width and still read as three unrelated
+buttons.
+
+**Not done, deliberately: Bold / Italic.** They do not exist anywhere and `NoteMarkdown` has no inline
+formatting, so it needs markdown round-trip plus tests - and it collides head-on with the S8 fix that
+CLEARS per-Run FontWeight to stop the "mosquito text" data loss. Both previous bugs in this control were
+data loss. Tracked rather than rushed at the end of a session.
+
+1,846 tests green; `--notetest` 20/20; `--stickytest` 3/3; `--hittest` clean.

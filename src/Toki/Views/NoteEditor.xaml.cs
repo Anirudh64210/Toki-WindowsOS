@@ -471,9 +471,11 @@ public partial class NoteEditor : UserControl
             return;
         }
 
-        Toolbar.Children.Add(Chip("Title", "Biggest text size", () => SetKind(NoteBlockKind.Heading)));
-        Toolbar.Children.Add(Chip("Heading", "Middle text size", () => SetKind(NoteBlockKind.Subheading)));
-        Toolbar.Children.Add(Chip("Body", "Normal text", () => SetKind(NoteBlockKind.Body)));
+        // ONE size control, not three chips. Text size is a choice from a set, and three separate chips
+        // spend the bar's whole width saying so while still reading as three unrelated buttons - the same
+        // shape of mistake as the calendar's cycling duration chip. The picker names the sizes, so
+        // nothing is hidden behind a glyph.
+        Toolbar.Children.Add(Chip("Aa  ▾", "Text size", ShowSizes));
         Toolbar.Children.Add(Gap());
         Toolbar.Children.Add(Chip("☑ To-do", "A line with a tick box", () => SetKind(NoteBlockKind.Todo)));
         Toolbar.Children.Add(Chip("• List", "Bulleted list", () => SetKind(NoteBlockKind.Bullet)));
@@ -482,7 +484,7 @@ public partial class NoteEditor : UserControl
         Toolbar.Children.Add(Chip("Template", "Insert the sections of one of Toki's note shapes", ShowTemplates));
     }
 
-    /// <summary>Compact mode's size picker - the three sizes behind one "Aa" button.</summary>
+    /// <summary>The three text sizes, behind one "Aa" button. Used by both toolbars.</summary>
     void ShowSizes() => ShowPicker(new (string, Action)[]
     {
         ("Title",   () => SetKind(NoteBlockKind.Heading)),

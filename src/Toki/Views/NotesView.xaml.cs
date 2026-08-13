@@ -15,6 +15,14 @@ public partial class NotesView : UserControl
         Loaded += (_, _) => Populate();
         // Note content is built in code (NoteRenderer/FindResource) → re-render on a theme swap.
         Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { if (IsLoaded) Populate(); });
+        // The speakers land a few seconds after the note does. Re-read the meeting so the loaders are
+        // replaced by real names in place, rather than the note quietly differing next time it is opened.
+        App.SpeakersResolved += id => Dispatcher.BeginInvoke(() =>
+        {
+            if (!IsLoaded || App.CurrentMeeting?.Id != id) return;
+            if (App.Store.Get(id) is { } fresh) App.CurrentMeeting = fresh;
+            Populate();
+        });
     }
 
     void Populate()
@@ -102,7 +110,7 @@ public partial class NotesView : UserControl
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 7, 0),
             Child = new TextBlock
             {
-                Text = you ? "YOU" : "THEM", FontSize = 8.5, FontWeight = FontWeights.Bold,
+                Text = seg.Label.ToUpperInvariant(), FontSize = 8.5, FontWeight = FontWeights.Bold,
                 Foreground = (Brush)FindResource(you ? "Blue" : "TextDim"), FontFamily = (FontFamily)FindResource("UiFont"),
             },
         };

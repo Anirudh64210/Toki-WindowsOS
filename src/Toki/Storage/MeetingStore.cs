@@ -74,6 +74,17 @@ public sealed partial class MeetingStore
         seed.CommandText = "UPDATE meetings SET sort_order = (SELECT COUNT(*) FROM meetings m2 WHERE m2.started_at > meetings.started_at) WHERE sort_order IS NULL;";
         seed.ExecuteNonQuery();
 
+        // Migration: who actually said each line, once the speakers have been told apart ("Priya",
+        // "Speaker 2"). Deliberately a SEPARATE column from `speaker`, which stays the stream the audio
+        // came from: the search prefixes and the people-count both key off that, and it is a fact rather
+        // than an inference. NULL = never diarised, and the transcript falls back to You/Them.
+        if (!ColumnExists(c, "transcript", "speaker_tag"))
+        {
+            using var alterTag = c.CreateCommand();
+            alterTag.CommandText = "ALTER TABLE transcript ADD COLUMN speaker_tag TEXT;";
+            alterTag.ExecuteNonQuery();
+        }
+
         // Migration: template name + its flexible sections (JSON). Older rows have neither and fall
         // back to the legacy decisions/questions tables via NoteSet.EffectiveSections.
         foreach (var col in new[] { "template", "sections_json" })
@@ -301,6 +312,43 @@ public sealed partial class MeetingStore
     /// vocabulary the Ask person-filter resolves against ("what did Mac have as action items?"). A
     /// query word only counts as a PERSON when it matches a name that actually exists in the data, so
     /// the filter can't fire on an arbitrary word.</summary>
+    /// <summary>Every transcript line ever recorded, for building the name lexicon. Capped, because the
+    /// point is a frequency vote and the newest meetings carry it - not a full corpus scan on a machine
+    /// that may have thousands of them.</summary>
+    public List<string> TranscriptLines(int limit = 20000)
+    {
+        var list = new List<string>();
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT text FROM transcript ORDER BY id DESC LIMIT $n;";
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) list.Add(r.GetString(0));
+        }
+        catch (Exception ex) { App.Log($"transcript lines: {ex.Message}"); }
+        return list;
+    }
+
+    /// <summary>Meeting titles and summaries - where a name often appears spelled correctly even when a
+    /// transcript mangled it ("cascading from Craig's team").</summary>
+    public List<string> NoteText(int limit = 500)
+    {
+        var list = new List<string>();
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT title, COALESCE(tldr,'') FROM meetings ORDER BY id DESC LIMIT $n;";
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) { list.Add(r.GetString(0)); list.Add(r.GetString(1)); }
+        }
+        catch (Exception ex) { App.Log($"note text: {ex.Message}"); }
+        return list;
+    }
+
     public List<string> ActionOwners()
     {
         var list = new List<string>();
@@ -388,8 +436,8 @@ public sealed partial class MeetingStore
         }
 
         InsertLines(c, "transcript", id, m.Transcript.Select((s, i) =>
-            (object[])[s.Speaker.ToString(), s.StartMs, s.EndMs, s.Text, i]),
-            "speaker, start_ms, end_ms, text, ord", "$speaker, $start_ms, $end_ms, $text, $ord");
+            (object[])[s.Speaker.ToString(), s.StartMs, s.EndMs, s.Text, i, (object?)s.Tag ?? DBNull.Value]),
+            "speaker, start_ms, end_ms, text, ord, speaker_tag", "$speaker, $start_ms, $end_ms, $text, $ord, $speaker_tag");
         InsertSimple(c, "decisions", id, m.Notes.Decisions);
         InsertSimple(c, "questions", id, m.Notes.Questions);
         foreach (var (a, i) in m.Notes.Actions.Select((a, i) => (a, i)))
@@ -612,6 +660,7 @@ public sealed partial class MeetingStore
             cmd.Parameters.AddWithValue("$end_ms", row[2]);
             cmd.Parameters.AddWithValue("$text", row[3]);
             cmd.Parameters.AddWithValue("$ord", row[4]);
+            if (row.Length > 5) cmd.Parameters.AddWithValue("$speaker_tag", row[5]);
             cmd.ExecuteNonQuery();
         }
     }
@@ -619,13 +668,85 @@ public sealed partial class MeetingStore
     static List<TranscriptSegment> ReadTranscript(SqliteConnection c, long id)
     {
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT speaker, start_ms, end_ms, text FROM transcript WHERE meeting_id=$id ORDER BY ord";
+        cmd.CommandText = "SELECT speaker, start_ms, end_ms, text, speaker_tag FROM transcript WHERE meeting_id=$id ORDER BY ord";
         cmd.Parameters.AddWithValue("$id", id);
         var list = new List<TranscriptSegment>();
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            list.Add(new TranscriptSegment(Enum.Parse<Speaker>(r.GetString(0)), r.GetInt32(1), r.GetInt32(2), r.GetString(3)));
+            list.Add(new TranscriptSegment(Enum.Parse<Speaker>(r.GetString(0)), r.GetInt32(1), r.GetInt32(2), r.GetString(3))
+            {
+                Tag = r.IsDBNull(4) ? null : r.GetString(4),
+            });
         return list;
+    }
+
+    /// <summary>
+    /// Write the resolved speaker names onto a saved transcript, by position.
+    ///
+    /// Used twice: once when diarisation finishes in the background, and again every time the user
+    /// renames a speaker. Renaming is a plain text update - there is no voice model to retrain and
+    /// nothing to remember for next time, which is exactly why a rename is instant and free.
+    /// </summary>
+    public void SetSpeakerTags(long meetingId, IReadOnlyList<string?> tagsInOrder)
+    {
+        try
+        {
+            using var c = Open();
+            using var tx = c.BeginTransaction();
+            for (var i = 0; i < tagsInOrder.Count; i++)
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "UPDATE transcript SET speaker_tag=$t WHERE meeting_id=$m AND ord=$o";
+                cmd.Parameters.AddWithValue("$t", (object?)tagsInOrder[i] ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$m", meetingId);
+                cmd.Parameters.AddWithValue("$o", i);
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch (Exception ex) { App.Log($"set speaker tags: {ex.Message}"); }
+    }
+
+    /// <summary>Fill in a to-do's owner, by position, without touching its text or done state.</summary>
+    public void SetActionOwners(long meetingId, IReadOnlyList<(int Index, string Owner)> owners)
+    {
+        if (owners.Count == 0) return;
+        try
+        {
+            using var c = Open();
+            using var tx = c.BeginTransaction();
+            foreach (var (index, owner) in owners)
+            {
+                using var cmd = c.CreateCommand();
+                // Only where the owner is still empty: the user may have typed one while this ran, and
+                // a background inference must never overwrite a person's own answer.
+                cmd.CommandText = "UPDATE action_items SET owner=$o WHERE meeting_id=$m AND ord=$i AND (owner IS NULL OR owner='')";
+                cmd.Parameters.AddWithValue("$o", owner);
+                cmd.Parameters.AddWithValue("$m", meetingId);
+                cmd.Parameters.AddWithValue("$i", index);
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch (Exception ex) { App.Log($"set action owners: {ex.Message}"); }
+    }
+
+    /// <summary>Rename one speaker everywhere in a meeting. "Assign the name once and it applies across
+    /// the whole transcript" - the correction affordance that makes automatic naming safe to ship.</summary>
+    public void RenameSpeaker(long meetingId, string from, string to)
+    {
+        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
+        try
+        {
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE transcript SET speaker_tag=$to WHERE meeting_id=$m AND speaker_tag=$from";
+            cmd.Parameters.AddWithValue("$to", to.Trim());
+            cmd.Parameters.AddWithValue("$from", from);
+            cmd.Parameters.AddWithValue("$m", meetingId);
+            cmd.ExecuteNonQuery();
+        }
+        catch (Exception ex) { App.Log($"rename speaker: {ex.Message}"); }
     }
 
     static List<string> ReadSimple(SqliteConnection c, string table, long id)

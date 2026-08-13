@@ -20,6 +20,35 @@ public sealed class ModelManager
         Folder: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
         RequiredFiles: ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]);
 
+    /// <summary>
+    /// Speaker segmentation (pyannote 3.0, MIT, (c) 2022 CNRS). Finds WHO is talking WHEN, before any
+    /// identity is attached.
+    ///
+    /// The exact filename matters more than usual here: the same GitHub release also contains
+    /// `sherpa-onnx-reverb-diarization-v1/v2`, which are under Rev's **non-production** licence and
+    /// cannot ship in a paid app. They are one line away in any copy-paste, so the safe name is pinned
+    /// here and nowhere else.
+    /// </summary>
+    public static readonly ModelSpec Segmentation = new(
+        Id: "pyannote-segmentation-3-0",
+        Url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        Folder: "sherpa-onnx-pyannote-segmentation-3-0",
+        RequiredFiles: ["model.onnx"]);
+
+    /// <summary>Speaker embedding (3D-Speaker CAM++, Apache-2.0 on both code and weights - the cleanest
+    /// licence position available). Turns a slice of speech into a voice fingerprint, which is what makes
+    /// "the same person again" answerable.</summary>
+    public const string SpeakerEmbedUrl =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx";
+    public static string SpeakerEmbedPath =>
+        Path.Combine(ModelsRoot, "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx");
+    public static bool SpeakerEmbedInstalled => File.Exists(SpeakerEmbedPath);
+    public static Task EnsureSpeakerEmbedAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(SpeakerEmbedUrl, SpeakerEmbedPath, progress, ct);
+
+    /// <summary>Both pieces present, so speakers can actually be told apart.</summary>
+    public static bool DiarisationInstalled => IsInstalled(Segmentation) && SpeakerEmbedInstalled;
+
     public static string ModelsRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Toki", "Models");
 

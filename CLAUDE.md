@@ -2,7 +2,61 @@
 
 Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief - read it when detail is needed). This file carries the same rules.
 
-## Current state & roadmap (updated 2026-08-06)
+## Current state & roadmap (updated 2026-08-12)
+
+**T2 WIRED + T5 UI perf + T8 diarisation measured (2026-08-12):** 1,807 tests green.
+**T2 is live on BOTH paths** — it was complete-but-dead because the LIVE transcription path skips
+`TranscriptionService.Process` and correction only lived there; the fallback worked so tests passed while
+the common path did nothing. Lexicon tiers: **trusted** (`AppSettings.UserName`, calendar attendee
+DisplayNames, new `AppSettings.PinnedNames`) wins outright + wider match; **corpus** (all transcripts +
+titles + summaries + action owners x3) settles ties.
+**T5 UI — full write-up `docs/ui-performance.md`.** `Select()` called `LoadList()` to move one highlight:
+**424ms → 0.4ms**. `OnSearch` rebuilt per keystroke → 180ms debounce. New **`--uitest`** measures against
+the REAL db with budgets (16ms selection / 250ms build / 400ms note). Build still FAILS at 424ms for 54
+meetings, **~343ms of it WPF arranging off-screen cards** → virtualization justified by measurement.
+**Risk: drag-reorder walks `Cards.Children` BY INDEX** — the one thing virtualization silently breaks.
+**T8 diarisation — new `--diartest`.** Measured on real audio (8.4 min `them.wav`): textbook route 59.6s
+(RTF 0.119) vs **ASR-guided 7.1s (RTF 0.014)** = 10x, ~50s for a 60-min meeting. ASR-guided = one
+embedding per utterance Toki ALREADY has bounds for; published as Turn-to-Diarize (ICASSP 2022, 31x less
+compute AND lower DER). Also sidesteps sherpa issue #3253, an **uncatchable** .NET AccessViolationException
+on multi-chunk audio. **Use AVERAGE linkage, not complete** (complete split ONE speaker into 5, never
+below 2 even at 0.95). **No single threshold works**: 0.80 → correct 1 for a 1:1 but collapses an 11-person
+call to 2; 0.55 → 7 for the team call but shatters the 1:1 into 5. Design: calendar attendee count as
+prior, conservative default (under-split = status quo; over-split invents people), user-settable count
+(re-clustering ~5s). **GPU rejected** (shipped NuGet is CPU-only, `cuda` silently falls back, measured
+RTF 0.24 even on a 3090). **LICENCE TRAP: `sherpa-onnx-reverb-diarization-v1/v2` are in the SAME release
+and are non-production** — safe names pinned in `ModelManager`.
+**BLOCKED on owner:** persistent voiceprints yes/no; when diarisation runs.
+
+## Current state & roadmap (updated 2026-08-11)
+
+**T1-T8 "the first real meetings" IN PROGRESS (2026-08-11):** 1,807 tests green. Two real recordings (an
+8-min 2-person call, a 6-min 11-person team call) found failures **every one of which was invisible to the
+1,800-test suite** - the suite tested the layers, not the artifact a person reads. FULL ANALYSIS:
+`docs/real-meeting-findings.md` (read this before touching ASR/notes).
+**DONE:** **T1** transcript was shredded - 182 segments in 8 min, backchannels spliced mid-sentence;
+`TranscriptMerger` only echo-deduped then sorted by time, **no same-speaker merge existed**. Now joins
+turns (1.5s gap, 700-char cap) + displaces backchannels. **T2** `Transcription/NameCorrector.cs` - names
+that sound alike cluster (compact Metaphone + edit distance) and collapse to a **trusted** spelling (user's
+own name / calendar attendee / pinned) else the **most frequent across the WHOLE library**. Craig/Greg is
+a dead tie in one meeting, not close across the library. Guards: ordinary words excluded ("Great" can
+never become "Craig"), sentence-initial excluded, two trusted spellings = two real people, dead ties left
+alone. **T3** Summary was RAW TRANSCRIPT twice - model skipped SUMMARY and the writer substituted
+`NoteExtractor.Tldr` (first ~140 chars of transcript); now retries summary-only, else emits NOTHING. This
+also poisoned the TITLE. **T7** a roll-call became 11 to-dos; a task must contain an action, near-dupes
+collapse.
+**Chosen after research:** post-ASR correction, NOT decode-time hotwords - sherpa-onnx supports them for
+Parakeet TDT but the shipped archive has **no `bpe.vocab`**, and it would force beam search over greedy;
+post-correction is also **retroactive** over saved meetings.
+**IN PROGRESS: T8 diarisation.** 11 people collapse into "Them". Two-stream design helps: `you.wav` means
+the local user is ALREADY separated, so only `them.wav` needs splitting. sherpa-onnx 1.13.4 already
+exposes `OfflineSpeakerDiarization`, pyannote segmentation, `SpeakerEmbeddingExtractor`,
+`FastClusteringConfig` and **`SpeakerEmbeddingManager`** (Add/Search/Verify = voice enrollment). No new
+dependency, 2 small model downloads. Licence/size/CPU under research.
+**TODO:** T4 action-item owners; T5 UI (`Select()` rebuilds all 52 cards for one highlight, `OnSearch`
+rebuilds per keystroke, `Cards` is a non-virtualizing StackPanel); wire T1/T2 into the save path; Settings
+names list; "Re-clean saved transcripts"; underline corrected words. Both meetings were mis-classified
+"Decision log" when neither made a decision.
 
 **S8 polish pass DONE (2026-08-06):** 1,774 tests green, published, still NOT owner-bug-tested with real
 meetings. (a) **"Mosquito text" was DATA LOSS, not cosmetics** — a blank spacing line was drawn at

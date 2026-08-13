@@ -44,8 +44,17 @@ public static class ThemeManager
         ("NotchBorder",      "#40FFFFFF", "#33000000"),  // a soft rim so the glassy edge reads
         ("WhiteBtn",         "#F2F2F2", "#1D1D1F"),  // primary CTA button fill (inverts to near-black)
         ("CtaText",          "#161618", "#FCFCFE"),  // text on the CTA
-        ("HoverOverlay",     "#1FFFFFFF", "#14000000"),
-        ("PressOverlay",     "#33FFFFFF", "#24000000"),
+        // Hover / press feedback. These are the ONLY thing that tells you a button is a button before
+        // you click it, and they were far too weak to do that job on the notch.
+        //
+        // The notch is deliberately PITCH BLACK. White at 12% over #000 lands at RGB ~31 - a contrast
+        // ratio of about 1.15:1, which is invisible. The button was highlighting correctly across its
+        // whole box the whole time; there was simply nothing to see, so it read as "hover only works on
+        // the text" - the glyphs being the only thing with enough contrast to give the eye a reference.
+        // Diagnosed 2026-08-12 after instrumenting the live window proved IsMouseOver was already true
+        // across the full box. A visual bug wearing the costume of an input bug.
+        ("HoverOverlay",     "#38FFFFFF", "#1F000000"),   // dark: 22% white (~RGB 56 on black) · light: 12% black
+        ("PressOverlay",     "#57FFFFFF", "#33000000"),   // press is clearly deeper than hover, both ways
         ("Hairline",         "#18FFFFFF", "#16000000"),
         ("SelectionBorder",  "#66FFFFFF", "#33000000"),
         ("CheckBorder",      "#55FFFFFF", "#55000000"),

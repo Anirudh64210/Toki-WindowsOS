@@ -83,6 +83,19 @@ public sealed class MeetingStickyView : Border
         Margin = new Thickness(0, 6, 0, 6);
         Child = stack;
         Visibility = Visibility.Collapsed;
+        // Transparent, not unset: a null-background Border is invisible to hit testing, so a click in the
+        // panel's padding would fall through to the read-only document behind it and take focus away.
+        Background = Brushes.Transparent;
+
+        // Clicking anywhere in the panel puts the caret in the note. Belt and braces alongside the
+        // focus-after-layout fix in Reveal: this panel is hosted INSIDE a read-only RichTextBox, which is
+        // a control that very much wants keyboard focus back, and a click that lands on the panel's
+        // padding or its header would otherwise leave you typing into something that eats keystrokes.
+        PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            if (_editor is null || e.OriginalSource is DependencyObject src && IsInside(src, _delete)) return;
+            Dispatcher.BeginInvoke(new Action(FocusEditorNow), System.Windows.Threading.DispatcherPriority.Input);
+        };
 
         _save.Tick += (_, _) => { _save.Stop(); Flush(); };
     }
@@ -162,10 +175,38 @@ public sealed class MeetingStickyView : Border
         BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Enter))
         { EasingFunction = Theme.Motion.EaseOut });
         BringIntoView();
+
+        // Focus AFTER layout, never in the same breath as adding the editor.
+        //
+        // This was the "I click Add a sticky note and typing does nothing" bug. `Focus()` on a control
+        // that is not yet in a laid-out visual tree returns false and does nothing - silently. Keyboard
+        // focus therefore stayed on the read-only RichTextBox that HOSTS this panel, and a read-only
+        // RichTextBox swallows every keystroke without a sound. The editor itself was fine the whole
+        // time, which is why `--notetest` passed 20 checks while the feature was unusable: the defect
+        // was in the hosting, not the control. `--stickytest` drives it where it actually lives.
+        Dispatcher.BeginInvoke(new Action(FocusEditorNow), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Put the caret in the note. Safe to call repeatedly.</summary>
+    void FocusEditorNow()
+    {
+        if (_editor is null || Visibility != Visibility.Visible) return;
         _editor.FocusEditor();
     }
 
+    static bool IsInside(DependencyObject node, DependencyObject root)
+    {
+        for (var p = node; p is not null; p = VisualTreeHelper.GetParent(p))
+            if (ReferenceEquals(p, root)) return true;
+        return false;
+    }
+
     public void Hide() { Flush(); Visibility = Visibility.Collapsed; }
+
+    /// <summary>Self-test seams: open the panel the way the button does, and reach the editor inside it,
+    /// so `--stickytest` can drive the sticky note where it really lives - inside the meeting document.</summary>
+    internal void DebugReveal() { _stickyId ??= DebugId; Reveal(); }
+    internal NoteEditor? DebugEditor => _editor;
 
     /// <summary>Render harness only: show the panel with planted text and NO database row behind it, so
     /// taking a screenshot can never write into the user's real notes.</summary>

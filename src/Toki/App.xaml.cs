@@ -45,7 +45,7 @@ public partial class App : Application
 
     /// <summary>True in the offscreen PNG render harness (--render). Views must not hit the
     /// network or persist settings in this mode - it runs against the user's real settings file.</summary>
-    public static bool Headless { get; private set; }
+    public static bool Headless { get; internal set; }
 
     /// <summary>The merged transcript of the most recent recording (null until transcribed).</summary>
     public static IReadOnlyList<TranscriptSegment>? LastTranscript { get; private set; }
@@ -202,7 +202,7 @@ public partial class App : Application
         catch (Exception ex) { Log($"native lib config (non-fatal): {ex.Message}"); }
 
         // Headless self-tests (brief §10): attach a console, run, exit. No UI.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--makeicon");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--uitest" or "--diartest" or "--speakertest" or "--hittest" or "--stickytest" or "--hovershot" or "--makeicon");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -574,6 +574,91 @@ public partial class App : Application
         State.TryGo(PillState.Home);
     }
 
+    /// <summary>
+    /// Work out which remote person said each line, then write the names onto the saved transcript.
+    ///
+    /// Runs AFTER the notes are written, on the same background thread, because the owner's call was
+    /// that nothing may delay the notes. It is cheap either way - the ASR-guided route measured 7.1s on
+    /// a real 8.4-minute recording, about 50s for an hour - but "cheap" is not "free" and the notes are
+    /// what the user is standing there waiting for.
+    ///
+    /// Nothing about anyone's VOICE is stored. The clusters live and die inside <see cref="SpeakerResolver"/>;
+    /// what lands in the database is text the user can rename or delete. That is the whole design: Toki
+    /// can tell you Priya said something in THIS meeting, and has no way to recognise her in the next one.
+    /// </summary>
+    static readonly HashSet<long> Resolving = new();
+
+    /// <summary>Is this meeting still having its speakers worked out? The note shows a loader for the
+    /// parts that are about to change, rather than letting them silently rewrite themselves under the
+    /// reader - a note that changes while you look at it is unsettling in a way a slower note is not.</summary>
+    public static bool IsResolvingSpeakers(long meetingId)
+    {
+        lock (Resolving) return Resolving.Contains(meetingId);
+    }
+
+    /// <summary>Raised (on the UI thread) when a meeting's speakers are settled and its note should be
+    /// re-read from the store.</summary>
+    public static event Action<long>? SpeakersResolved;
+
+    static void ResolveSpeakers(MeetingRecord meeting, List<string>? attendeeNames)
+    {
+        if (meeting.Transcript.Count == 0 || string.IsNullOrWhiteSpace(meeting.Folder)) return;
+        if (!SpeakerDiariser.Available) return;
+
+        lock (Resolving) Resolving.Add(meeting.Id);
+        try
+        {
+            var themWav = Path.Combine(meeting.Folder, "them.wav");
+            // The roster is everything a HUMAN asserted: who was on the invite, plus the pinned names
+            // (and the user's own, which the namer then refuses to hand to a remote voice). A name from
+            // here is trusted; a name only the recogniser produced has to earn its place by repetition.
+            var roster = NameLexicon.Trusted(attendeeNames);
+
+            // The attendee count is the single most useful prior: no threshold serves both a one-to-one
+            // and an eleven-person call, and asking for the right number gets the right answer.
+            var expected = attendeeNames is { Count: > 1 } ? attendeeNames.Count - 1 : -1;
+
+            var result = SpeakerResolver.Resolve(
+                meeting.Transcript, themWav, roster, AppSettings.Current.UserName, expected);
+
+            if (!result.Ran) { Log($"speakers not resolved for meeting {meeting.Id}: {result.Skipped}"); return; }
+
+            // The meeting may have been deleted while this ran - never resurrect a discarded row.
+            if (Store.Get(meeting.Id) is null) { Log($"meeting {meeting.Id} gone - dropping speaker tags"); return; }
+
+            Store.SetSpeakerTags(meeting.Id, result.Tags);
+            for (var i = 0; i < meeting.Transcript.Count && i < result.Tags.Count; i++)
+                meeting.Transcript[i] = meeting.Transcript[i] with { Tag = result.Tags[i] };
+
+            // Now that each line knows who said it, a to-do somebody VOLUNTEERED for can be attributed
+            // for free - its evidence link already points at the line, and no second model pass is
+            // needed. This is why the notes did not have to wait: the expensive half was already done.
+            var owners = ActionOwners.Infer(meeting.Notes.Actions, meeting.Transcript);
+            if (owners.Count > 0)
+            {
+                Store.SetActionOwners(meeting.Id, owners);
+                foreach (var (index, owner) in owners)
+                    if (index < meeting.Notes.Actions.Count) meeting.Notes.Actions[index].Owner = owner;
+                Log($"attributed {owners.Count} to-do(s) from the transcript");
+            }
+
+            MarkdownMirror.Write(meeting);
+            LibraryWindow.MarkDirty();
+
+            var named = string.Join(", ", result.Named.Select(n => n.Name));
+            Log($"speakers resolved for meeting {meeting.Id}: {result.Speakers} voices in {result.Took.TotalSeconds:F1}s"
+                + (named.Length > 0 ? $" - named {named}" : " - none named"));
+        }
+        catch (Exception ex) { Log($"speaker resolution failed (non-fatal): {ex.Message}"); }
+        finally
+        {
+            lock (Resolving) Resolving.Remove(meeting.Id);
+            // Tell whoever is looking at this note to re-read it. Always raised, even on failure, so a
+            // loader can never be left spinning over work that has stopped.
+            try { Current?.Dispatcher.BeginInvoke(() => SpeakersResolved?.Invoke(meeting.Id)); } catch { }
+        }
+    }
+
     public static void StopRecording()
     {
         var session = _session;
@@ -584,6 +669,14 @@ public partial class App : Application
         // clear CurrentPrep, and attached to the saved meeting further down - that link is the whole
         // reason the note turns up inside the meeting's own note afterwards.
         var stickyId = CurrentPrep is { } endedPrep ? Store.StickyForEvent(endedPrep.Event.Id) : null;
+
+        // Attendee display names are typed by a human in a calendar invite, so they outrank anything
+        // Toki counted from past transcripts when repairing a mis-heard name. Grabbed here, with the
+        // sticky id, before anything can clear CurrentPrep.
+        var attendeeNames = CurrentPrep?.Event.Attendees
+            .Where(a => !string.IsNullOrWhiteSpace(a.DisplayName))
+            .Select(a => a.DisplayName!)
+            .ToList();
         LastRecordingSilent = Math.Max(session?.YouPeak ?? 0, session?.ThemPeak ?? 0) < 0.01f;
         LastTranscript = null;
         CurrentMeeting = null;
@@ -615,12 +708,15 @@ public partial class App : Application
                 // nothing - that pass is fast on true silence and correct if the live path glitched.
                 if (live is { Count: > 0 })
                 {
-                    transcript = live;
+                    // The live path already merged turns inside LiveTranscriber.Stop, but it never went
+                    // through Process, so it still needs its names repaired. This is the fast path and
+                    // therefore the one most meetings take - it cannot be the one that misses out.
+                    transcript = TranscriptionService.Instance.PolishNames(live, attendeeNames);
                     Log($"using live transcript ({live.Count} segments) - no stop-time ASR");
                 }
                 else if (folder.Length > 0)
                 {
-                    transcript = TranscriptionService.Instance.Process(folder);
+                    transcript = TranscriptionService.Instance.Process(folder, attendeeNames);
                 }
             }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
@@ -709,6 +805,11 @@ public partial class App : Application
                     }
                 }
                 catch (Exception ex) { Log($"LLM notes failed (kept heuristic): {ex.Message}"); }
+
+                // Tell the remote speakers apart, AFTER the notes (owner decision): the notes are what
+                // the user is waiting for, and this must never add a second to that wait. It updates
+                // the transcript in place once it lands.
+                ResolveSpeakers(meeting, attendeeNames);
 
                 // Low-memory: don't leave the 2.5GB model sitting resident while the user
                 // reads their notes and goes back to work. Drop it and re-warm the small

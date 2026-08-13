@@ -50,6 +50,14 @@ static class SelfTests
                 "--measuretest" => MeasureTest(),
                 "--notetest" => NoteEditorTest(),
                 "--dumpnote" => DumpNote(args),
+                "--uitest" => UiPerfTest(),
+                "--diartest" => DiarTest(args),
+                "--speakertest" => SpeakerTest(args),
+                "--hittest" => HitTargets.Run(),
+                "--stickytest" => StickyTest(),
+                "--hovershot" => HitTargets.Shot(
+                    args.Skip(1).FirstOrDefault(a => !a.StartsWith("--") && a != "dark") ?? ".",
+                    args.Contains("dark")),
                 "--makeicon" => MakeIcon(args),
                 "--copytest" => CopyTest(),
                 "--asktest" => AskTest(args),
@@ -730,6 +738,252 @@ static class SelfTests
     }
 
     /// <summary>
+    /// Measure speaker separation on REAL meeting audio, both ways, on THIS machine.
+    ///
+    /// The published benchmarks are macOS arm64 and predict 6-9 minutes for an hour-long meeting, which
+    /// the owner rightly called unacceptable. Rather than argue with a number from someone else's
+    /// hardware, this runs both routes on a real `them.wav` and prints the wall clock.
+    ///
+    /// Run: Toki.exe --diartest "%APPDATA%\Toki\Recordings\&lt;folder&gt;\them.wav" [speakers]
+    /// </summary>
+    static int DiarTest(string[] args)
+    {
+        var wav = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+        if (string.IsNullOrWhiteSpace(wav) || !File.Exists(wav))
+            return Fail("usage: --diartest <path to them.wav> [expected speakers]");
+        var expected = args.Skip(2).Select(a => int.TryParse(a, out var n) ? n : -1).FirstOrDefault(n => n > 0);
+        if (expected == 0) expected = -1;
+
+        if (!ModelManager.DiarisationInstalled)
+        {
+            Console.WriteLine("[--diartest] downloading the two diarisation models (~34 MB, one time)...");
+            var p = new Progress<double>(f => Console.Write($"\r  {f * 100,5:F1}%"));
+            ModelManager.EnsureAsync(ModelManager.Segmentation, p).GetAwaiter().GetResult();
+            ModelManager.EnsureSpeakerEmbedAsync(p).GetAwaiter().GetResult();
+            Console.WriteLine("\r  done.        ");
+        }
+
+        var sweep = args.Any(a => a == "sweep");
+
+        Console.WriteLine($"[--diartest] {Path.GetFileName(wav)}");
+        var samples = AudioLoader.To16kMono(wav);
+        var audioSec = samples.Length / (double)SpeakerDiariser.SampleRate;
+        Console.WriteLine($"  audio      : {audioSec / 60:F1} min ({samples.Length:N0} samples)");
+        Console.WriteLine($"  speakers   : {(expected > 0 ? expected.ToString() : "estimate")}");
+        Console.WriteLine();
+
+        // Sweep mode: the clustering threshold is model- and audio-dependent, and the published default
+        // (0.5) put ONE remote person into five clusters on this recording. So measure it rather than
+        // trust it - print how many speakers each threshold yields, and pick from real audio.
+        if (sweep)
+        {
+            var scribeS = new Transcriber();
+            var asrS = scribeS.Transcribe(samples, Toki.Transcription.Speaker.Them);
+            scribeS.Dispose();
+            var uttS = asrS.Select(s => (s.StartMs / 1000f, s.EndMs / 1000f)).ToList();
+            Console.WriteLine($"  {uttS.Count} utterances from ASR");
+            Console.WriteLine();
+            Console.WriteLine("  threshold   speakers   biggest cluster share");
+            foreach (var t in new[] { 0.30, 0.40, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95 })
+            {
+                var (sp, _) = SpeakerDiariser.ByUtterance(samples, uttS, -1, 4, t);
+                var groups = sp.GroupBy(s => s.Speaker).ToList();
+                var total = sp.Sum(s => s.EndSec - s.StartSec);
+                var biggest = groups.Count == 0 ? 0 : groups.Max(g => g.Sum(s => s.EndSec - s.StartSec)) / Math.Max(0.01, total);
+                Console.WriteLine($"  {t,9:F2}   {groups.Count,8}   {biggest * 100,6:F0}%");
+            }
+            return 0;
+        }
+
+        // Route A: the textbook pipeline.
+        var (fullSpans, fullTook) = SpeakerDiariser.Full(samples, expected);
+        Report("FULL   (segmentation sweep + per-hop embeddings)", fullSpans, fullTook, audioSec);
+
+        // Route B: reuse the ASR boundaries we already have. Approximate them here by asking the real
+        // recognizer for its segments, so the comparison is honest about total cost.
+        var asrSw = Stopwatch.StartNew();
+        using var scribe = new Transcriber();
+        var asr = scribe.Transcribe(samples, Toki.Transcription.Speaker.Them);
+        asrSw.Stop();
+        var utterances = asr.Select(s => (s.StartMs / 1000f, s.EndMs / 1000f)).ToList();
+        Console.WriteLine($"  (ASR produced {utterances.Count} utterances in {asrSw.Elapsed.TotalSeconds:F1}s - already paid for today)");
+
+        var (utSpans, utTook) = SpeakerDiariser.ByUtterance(samples, utterances, expected);
+        Report("BY UTTERANCE (one embedding per line Toki already found)", utSpans, utTook, audioSec);
+
+        Console.WriteLine();
+        var speedup = fullTook.TotalSeconds / Math.Max(0.001, utTook.TotalSeconds);
+        Console.WriteLine($"RESULT: by-utterance is {speedup:F1}x faster. "
+            + $"A 60-minute meeting would take ~{utTook.TotalSeconds * (3600 / audioSec) / 60:F1} min "
+            + $"instead of ~{fullTook.TotalSeconds * (3600 / audioSec) / 60:F1} min.");
+        return 0;
+
+        static void Report(string what, IReadOnlyList<SpeakerSpan> spans, TimeSpan took, double audioSec)
+        {
+            var speakers = spans.Select(s => s.Speaker).Distinct().Count();
+            Console.WriteLine($"{what}");
+            Console.WriteLine($"    took     : {took.TotalSeconds,7:F1} s   (RTF {took.TotalSeconds / audioSec:F3})");
+            Console.WriteLine($"    speakers : {speakers}");
+            Console.WriteLine($"    segments : {spans.Count}");
+            foreach (var g in spans.GroupBy(s => s.Speaker).OrderBy(g => g.Key))
+                Console.WriteLine($"      speaker {g.Key}: {g.Sum(s => s.EndSec - s.StartSec),6:F1}s over {g.Count()} turns");
+            Console.WriteLine();
+        }
+    }
+
+    /// <summary>
+    /// Run the WHOLE speaker chain on a real saved meeting and print what it concluded. READ-ONLY -
+    /// nothing is written to the database, so this can be run on the owner's real library safely.
+    ///
+    /// This is the test that matters, because every part of T8 is only as good as what it does to an
+    /// actual recording: how many voices it finds, which of them it can put a name to, and - the part
+    /// worth staring at - which lines each name ended up on. Run:
+    /// <c>Toki.exe --speakertest [meeting id]</c> (defaults to the most recent meeting with audio).
+    /// </summary>
+    static int SpeakerTest(string[] args)
+    {
+        var wanted = args.Skip(1).Select(a => long.TryParse(a, out var n) ? n : -1).FirstOrDefault(n => n > 0);
+
+        var candidates = App.Store.List()
+            .Where(s => s.Kind == MeetingKind.Meeting)
+            .Select(s => App.Store.Get(s.Id))
+            .Where(m => m is not null && !string.IsNullOrWhiteSpace(m.Folder) && m.Transcript.Count > 0)
+            .Select(m => m!)
+            .ToList();
+
+        var meeting = wanted > 0
+            ? candidates.FirstOrDefault(m => m.Id == wanted)
+            : candidates.FirstOrDefault(m => File.Exists(Path.Combine(m.Folder!, "them.wav")));
+
+        if (meeting is null) return Fail("no saved meeting with audio to test (pass a meeting id?)");
+
+        var themWav = Path.Combine(meeting.Folder!, "them.wav");
+        if (!File.Exists(themWav)) return Fail($"meeting {meeting.Id} has no them.wav at {themWav}");
+
+        if (!ModelManager.DiarisationInstalled)
+        {
+            Console.WriteLine("[--speakertest] downloading the two diarisation models (~34 MB, one time)...");
+            var p = new Progress<double>(f => Console.Write($"\r  {f * 100,5:F1}%"));
+            ModelManager.EnsureAsync(ModelManager.Segmentation, p).GetAwaiter().GetResult();
+            ModelManager.EnsureSpeakerEmbedAsync(p).GetAwaiter().GetResult();
+            Console.WriteLine("\r  done.        ");
+        }
+
+        Console.WriteLine($"[--speakertest] meeting {meeting.Id}: \"{meeting.Title}\"");
+        Console.WriteLine($"  transcript : {meeting.Transcript.Count} lines "
+            + $"({meeting.Transcript.Count(s => s.Speaker == Toki.Transcription.Speaker.Them)} from them)");
+
+        // Extra names for THIS RUN only, so the value of a roster can be measured without writing
+        // anything to settings: --speakertest 76 +Craig +Yashtren
+        var extra = args.Where(a => a.StartsWith('+')).Select(a => a[1..]).Where(a => a.Length > 0).ToList();
+        var roster = NameLexicon.Trusted(extra);
+        Console.WriteLine($"  roster     : {(roster.Count > 0 ? string.Join(", ", roster) : "(nobody pinned, no calendar)")}"
+            + (extra.Count > 0 ? "   [+ supplied for this run only, nothing saved]" : ""));
+        Console.WriteLine();
+
+        var result = SpeakerResolver.Resolve(
+            meeting.Transcript, themWav, roster, Llm.AppSettings.Current.UserName);
+
+        if (!result.Ran)
+        {
+            Console.WriteLine($"RESULT: did not run - {result.Skipped}");
+            return 0;   // a deliberate skip is not a failure
+        }
+
+        Console.WriteLine($"  voices     : {result.Speakers}");
+        Console.WriteLine($"  took       : {result.Took.TotalSeconds:F1} s");
+        Console.WriteLine();
+        if (result.Named.Count == 0)
+        {
+            Console.WriteLine("  nobody could be named from the conversation - every voice keeps its number.");
+        }
+        else
+        {
+            Console.WriteLine("  named from the conversation alone (no voiceprints):");
+            foreach (var n in result.Named)
+                Console.WriteLine($"    {SpeakerNamer.Fallback(n.Cluster),-10} -> {n.Name,-14} score {n.Score,4:F1}   {n.Evidence}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("  first 25 lines as they would now read:");
+        var shown = 0;
+        for (var i = 0; i < meeting.Transcript.Count && shown < 25; i++, shown++)
+        {
+            var seg = meeting.Transcript[i];
+            var tag = result.Tags[i] ?? (seg.Speaker == Toki.Transcription.Speaker.You ? "You" : "Them");
+            var text = seg.Text.Length <= 78 ? seg.Text : seg.Text[..75] + "...";
+            Console.WriteLine($"    {tag,-12} {text}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("RESULT: read-only. Nothing was written; no voice data was stored anywhere.");
+        return 0;
+    }
+
+    /// <summary>
+    /// Time the Library's real work against the REAL database, so "slow and clunky" becomes a number.
+    ///
+    /// The three costs that matter are the ones that fire constantly: building the note list, moving the
+    /// selection highlight, and rendering an open note. Run: Toki.exe --uitest
+    /// </summary>
+    static int UiPerfTest()
+    {
+        App.Headless = true;
+        var w = LibraryWindow.PerfHarness();
+        var sw = new Stopwatch();
+
+        double Time(string what, int runs, Action act)
+        {
+            act();                                   // warm: first call pays JIT + resource lookups
+            sw.Restart();
+            for (var i = 0; i < runs; i++) act();
+            sw.Stop();
+            var each = sw.Elapsed.TotalMilliseconds / runs;
+            Console.WriteLine($"{what,-42} {each,8:F1} ms   (x{runs})");
+            return each;
+        }
+
+        var ids = App.Store.List().Select(m => m.Id).ToList();
+        Console.WriteLine($"[--uitest] {ids.Count} meetings in the library");
+        Console.WriteLine();
+
+        // Split it: querying is SQLite, handing the list over is ours, realising and arranging the
+        // visible rows is WPF's. The list virtualizes, so "build" should now barely move as the
+        // library grows - if it starts tracking the meeting count again, virtualization has been
+        // defeated (the usual cause: an ItemsControl wrapped in an outer ScrollViewer, which measures
+        // it with infinite height and realises every row).
+        Time("  ...of which: query the store", 5, () => w.PerfQueryOnly());
+        Time("  ...of which: hand the list over", 5, () => w.PerfBuildOnly());
+        var build = Time("build the whole list (create + lay out)", 5, () => w.PerfLoadList());
+        var pick = Time("move the selection highlight", 50, () =>
+        {
+            for (var i = 0; i < ids.Count && i < 4; i++) w.PerfHighlight(ids[i]);
+        });
+        var render = ids.Count > 0
+            ? Time("render an open meeting note", 3, () => w.PerfRenderMeeting(ids[0]))
+            : 0;
+
+        Console.WriteLine();
+        // A click must feel instant. Selection used to rebuild the list, so it cost a full build.
+        var ok = true;
+        void Check(string what, double ms, double budget)
+        {
+            var pass = ms <= budget;
+            if (!pass) ok = false;
+            Console.WriteLine($"{(pass ? "PASS" : "FAIL")}  {what} {ms:F1} ms (budget {budget:F0} ms)");
+        }
+        Check("clicking a note stays under budget:", pick, 16);
+        Check("a full list build stays under budget:", build, 250);
+        if (render > 0) Check("opening a note stays under budget:", render, 400);
+
+        Console.WriteLine();
+        Console.WriteLine(ok
+            ? "RESULT: the Library is within budget."
+            : "RESULT: over budget - check that the list is still virtualizing (Views/MeetingList.cs).");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>
     /// Print a note's RAW stored text, with every character visible. READ-ONLY.
     ///
     /// Exists because "what does the screen show?" and "what is actually saved?" are different questions,
@@ -774,6 +1028,96 @@ static class SelfTests
     /// pure round-trip test could never have caught: the fault lived in the document structure, not the
     /// text format. Run: Toki.exe --notetest
     /// </summary>
+    /// <summary>
+    /// Drive the sticky note WHERE IT ACTUALLY LIVES - inside the meeting note's read-only RichTextBox.
+    ///
+    /// The owner reported that "Add a sticky note" opens the panel and then typing does nothing. The
+    /// editor works perfectly on its own (`--notetest`, 20 checks), which is exactly why this test has to
+    /// build the real document around it: the defect is in the HOSTING, not the control. Run:
+    /// <c>Toki.exe --stickytest</c>. READ-ONLY - it uses a debug-seeded panel with no database row.
+    /// </summary>
+    static int StickyTest()
+    {
+        App.Headless = true;
+        var pass = 0; var fail = 0;
+        void Check(string what, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}{(detail.Length > 0 ? $"   {detail}" : "")}");
+        }
+
+        // A real meeting note, with the sticky panel inside it, in a live offscreen window.
+        var meeting = new MeetingRecord
+        {
+            Id = -1, Kind = MeetingKind.Meeting, Title = "Sticky host", App = "Test",
+            StartedAt = DateTimeOffset.Now, DurationMs = 60000,
+            Notes = new NoteSet { Tldr = "A short summary so the document has content above the note." },
+            Transcript = [new Toki.Transcription.TranscriptSegment(Toki.Transcription.Speaker.Them, 0, 2000, "hello there")],
+        };
+
+        var sticky = new Views.MeetingStickyView(-1, null);
+        var doc = Views.NoteRenderer.MeetingDocument(meeting, spacious: true, sticky: sticky);
+        var win = new System.Windows.Window
+        {
+            Width = 720, Height = 800, Left = -4000, Top = -4000,
+            WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+            Content = doc,
+        };
+        win.Show();
+        win.UpdateLayout();
+
+        // Open it exactly as the button does.
+        sticky.DebugReveal();
+        win.UpdateLayout();
+        // Let the dispatcher run. The fix focuses at Loaded priority - deliberately AFTER layout, since
+        // focusing a control that is not yet laid out fails silently - so a test that never pumps would
+        // report the bug as unfixed forever. (It did, once.)
+        Pump();
+
+        var editor = sticky.DebugEditor;
+        Check("the panel opens and has an editor", editor is not null);
+        if (editor is null) { Console.WriteLine("\nRESULT: cannot continue."); win.Close(); return 1; }
+
+        // THE REPORTED BUG: does focus actually land in the editor? If not, every keystroke goes to the
+        // read-only RichTextBox hosting it, which silently swallows the lot.
+        //
+        // LOGICAL focus, not Keyboard.FocusedElement: an offscreen window with ShowActivated=false is
+        // never the active window, so it has no keyboard focus to give and the keyboard check would fail
+        // for a reason that has nothing to do with the bug.
+        var focused = System.Windows.Input.FocusManager.GetFocusedElement(win);
+        var hasFocus = focused is System.Windows.DependencyObject d && IsWithin(d, editor);
+        Check("focus lands in the editor when the panel opens", hasFocus,
+            hasFocus ? "" : $"focus is on {focused?.GetType().Name ?? "nothing"}");
+
+        // And the thing the owner actually did: type.
+        editor.DebugType("pricing call notes");
+        win.UpdateLayout();
+        var landed = editor.Markdown.Contains("pricing call notes");
+        Check("typed text lands in the note", landed, landed ? "" : $"markdown is «{editor.Markdown}»");
+
+        win.Close();
+        Console.WriteLine();
+        Console.WriteLine($"RESULT: {pass} passed, {fail} failed");
+        return fail == 0 ? 0 : 1;
+
+        static bool IsWithin(System.Windows.DependencyObject node, System.Windows.DependencyObject root)
+        {
+            for (var p = node; p is not null; p = System.Windows.Media.VisualTreeHelper.GetParent(p))
+                if (ReferenceEquals(p, root)) return true;
+            return false;
+        }
+
+        // Run everything the dispatcher has queued up to Loaded priority, then return.
+        static void Pump()
+        {
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(() => frame.Continue = false));
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+        }
+    }
+
     static int NoteEditorTest()
     {
         var pass = 0; var fail = 0;

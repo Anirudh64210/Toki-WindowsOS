@@ -205,6 +205,10 @@ static class CalendarRows
             strip.Children.Add(CopyLink(meetUrl));
         strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
         strip.Children.Add(ActionLink("Delete", true, onDelete));
+        // The last link's trailing margin would push its own right edge past the strip, where the row
+        // clips it - so the right third of "Delete" looked pressable and was not.
+        if (strip.Children[^1] is FrameworkElement last)
+            last.Margin = new Thickness(0);
 
         return HoverRevealRow(grid, strip);
     }
@@ -267,19 +271,24 @@ static class CalendarRows
     }
 
     // A text-link action (brightens on hover) - the strip's buttons.
+    //
+    // The label lives inside a HitTarget box. It used to BE the TextBlock, with the click handler on the
+    // text itself, which meant only the glyphs responded: you had to aim between the letters of "Delete".
+    // The box is the button.
     static FrameworkElement ActionLink(string label, bool danger, Action action)
     {
         var restKey = danger ? "Danger" : "TextDim";
         var tb = new TextBlock
         {
             Text = label, FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
-            Foreground = Br(restKey), Cursor = System.Windows.Input.Cursors.Hand,
-            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Br(restKey),
         };
-        tb.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
-        tb.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
-        tb.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
-        return tb;
+        var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
+        box.Margin = new Thickness(0, 0, 6, 0);
+        box.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
+        box.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
+        box.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
+        return box;
     }
 
     // "Copy link" → puts the meeting URL on the clipboard, then flips to "Copied ✓" (green) for a beat so
@@ -288,14 +297,18 @@ static class CalendarRows
     {
         var tb = new TextBlock
         {
-            Text = "Copy Meet link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
-            Foreground = Br("TextDim"), Cursor = System.Windows.Input.Cursors.Hand,
-            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+            // "Copy link", not "Copy Meet link": the four links plus their new hit-target padding no
+            // longer fit the 360px notch, and a clipped "Dele" is worse than a shorter word. The row
+            // only ever offers this when there IS a Meet link, so "Meet" was never carrying meaning.
+            Text = "Copy link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Foreground = Br("TextDim"),
         };
+        var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
+        box.Margin = new Thickness(0, 0, 6, 0);
         var copied = false;
-        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
-        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
-        tb.MouseLeftButtonUp += (_, ev) =>
+        box.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        box.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        box.MouseLeftButtonUp += (_, ev) =>
         {
             ev.Handled = true;
             var ok = false;
@@ -304,10 +317,10 @@ static class CalendarRows
             copied = true;
             tb.Text = "Copied ✓"; tb.Foreground = Br("Green");
             var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
-            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = "Copy Meet link"; tb.Foreground = Br("TextDim"); };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = "Copy link"; tb.Foreground = Br("TextDim"); };
             t.Start();
         };
-        return tb;
+        return box;
     }
 
     // The ALWAYS-VISIBLE share affordance: a small copy glyph beside Join on rows that have a Meet
@@ -319,26 +332,27 @@ static class CalendarRows
         {
             Text = "",   // Fluent: Copy
             FontFamily = Icons, FontSize = 12, Foreground = Br("TextDim"),
-            Cursor = System.Windows.Input.Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0), Padding = new Thickness(3),
-            ToolTip = "Copy Meet link",
         };
+        // A 12px glyph is a very small thing to aim at. The box around it is the button.
+        var box = HitTarget.Wrap(tb, corner: 8, padX: 7, padY: 5, tooltip: "Copy Meet link");
+        box.MinWidth = HitTarget.MinSide;
+        box.Margin = new Thickness(0, 0, 6, 0);
         var copied = false;
-        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
-        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
-        tb.MouseLeftButtonUp += (_, ev) =>
+        box.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        box.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        box.MouseLeftButtonUp += (_, ev) =>
         {
             ev.Handled = true;
             var ok = false;
             try { System.Windows.Clipboard.SetText(url); ok = true; } catch { }   // clipboard can be locked
             if (!ok) return;
             copied = true;
-            tb.Text = ""; tb.Foreground = Br("Green"); tb.ToolTip = "Copied";   // Fluent: CheckMark
+            tb.Text = ""; tb.Foreground = Br("Green"); box.ToolTip = "Copied";   // Fluent: CheckMark
             var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
-            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = ""; tb.Foreground = Br("TextDim"); tb.ToolTip = "Copy Meet link"; };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = ""; tb.Foreground = Br("TextDim"); box.ToolTip = "Copy Meet link"; };
             t.Start();
         };
-        return tb;
+        return box;
     }
 
     public static FrameworkElement SkeletonRow()

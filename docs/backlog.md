@@ -6,6 +6,65 @@ top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*
 
 ---
 
+## 🔴 T1-T8 "the first real meetings" - IN PROGRESS 2026-08-11
+
+Two real recordings found what 1,800 tests could not. **Full analysis: `docs/real-meeting-findings.md`.**
+
+**Done:** T1 transcript turn-merging + backchannel de-interleaving · T2 `NameCorrector` (corpus-wide
+phonetic clustering, trusted-name override, conservative guards) · T3 summary never falls back to raw
+transcript (and no longer poisons the title) · T7 a bare name is not a to-do, near-dupes collapse.
+
+**Update 2026-08-12.** T2 is now WIRED (both the `Process` path and the LIVE path, which skips `Process`
+and would otherwise have silently done nothing). T5's two constant costs are fixed and measured. T8 is
+measured and blocked on two owner decisions. Details: `docs/ui-performance.md`,
+`docs/real-meeting-findings.md`.
+
+**T5 UI — decided by measurement, not opinion:**
+- ✅ `Select()` no longer rebuilds the list to move a highlight: **424 ms → 0.4 ms**.
+- ✅ Search debounced 180 ms: typing "pricing" costs 1 rebuild, not 7.
+- ✅ New `--uitest` asserts budgets against the real database.
+- ⬜ **Virtualization — now justified**: a build is 424 ms at 54 meetings and ~343 ms of that is WPF
+  arranging cards nobody can see; it grows linearly (≈3.9 s at 500 meetings) while the visible portion
+  stays at ~6 rows. Approach: `ItemsControl` subclass overriding `PrepareContainerForItemOverride` so the
+  existing code-built `Card(m)` is reused, plus `VirtualizingStackPanel` with recycling. **Main risk:
+  drag-reorder walks `Cards.Children` BY INDEX** — indices become positions in the realised window, not
+  the list. Five other `Cards.Children` sites also need rework (see the table in `docs/ui-performance.md`).
+
+**T8 diarisation — blocked on two owner decisions:**
+1. **Persistent voiceprints?** Owner leaned toward "only people you name" (the Circleback model, plus an
+   Otter-style "Rematch" over old meetings). Not yet confirmed explicitly, and it stores biometric data
+   for colleagues who did not consent. Transient-only is the zero-exposure alternative.
+2. **When does it run?** Now that it is ~50 s/hour rather than ~7 min, running it BEFORE the notes is
+   affordable and is what would stop a roll-call becoming to-dos.
+
+Everything else for T8 is measured and designed: ASR-guided clustering (10x, published as
+Turn-to-Diarize), average linkage, calendar count as prior, conservative default, user-settable count.
+
+**Still to do, in the order they matter:**
+1. **T8 diarisation** - 11 people collapse into "Them". sherpa-onnx 1.13.4 already ships the whole
+   toolkit in its .NET binding (`OfflineSpeakerDiarization`, pyannote segmentation,
+   `SpeakerEmbeddingExtractor`, `FastClusteringConfig`, `SpeakerEmbeddingManager` for voice enrollment).
+   Blocking unknowns: model licences for commercial redistribution, model sizes, CPU cost on a 30-60 min
+   WAV, and the naming UX. Under research.
+2. **T4 action-item owners** - all four of meeting 75's to-dos belonged to the owner and none said so.
+3. **T5 UI rebuilds** - `Select()` rebuilds all 52 cards to move one highlight; `OnSearch` re-queries and
+   rebuilds per keystroke; `Cards` is a non-virtualizing `StackPanel`. Fix the first two, MEASURE, then
+   decide on virtualization (it is the riskiest: drag-reorder depends on child indices).
+4. **Wire T1/T2 into the save path** - both are built and tested but not yet called when a meeting saves.
+5. **Settings: pinned names** ("Names & terms Toki should get right") - the escape hatch for what
+   corpus frequency cannot decide, e.g. "Yashtren".
+6. **"Re-clean saved transcripts"** button - owner chose OFFER, never automatic. Re-merges turns and
+   re-runs name correction over saved meetings; summaries are NOT rewritten.
+7. **Underline corrected words** in the transcript, original on hover - owner chose marked-in-transcript
+   only, notes stay clean.
+
+**Known and deliberately unfixed:** "Yashtren" -> "Yashina" (4 edits, different phonetic keys - widening
+the thresholds would start merging genuinely different people; the pinned list is the answer). Template
+misfit: both meetings were classified "Decision log" when neither made a decision, so Rationale reads as
+invented justification. Self-corrections ("educative... oh, executive") are ignored.
+
+---
+
 ## ✅ S8 "polish pass" - BUILT 2026-08-06
 
 **1,774 tests green.** Em dashes gone project-wide (3,089 across 188 files; 3 functional exceptions

@@ -28,7 +28,9 @@ public sealed class TranscriptionService
     /// so correctness wins over the ~15% wall-clock a parallel run would save) and
     /// merge them. Returns null if the model isn't available. Background-thread safe.
     /// </summary>
-    public IReadOnlyList<TranscriptSegment>? Process(string sessionFolder)
+    /// <param name="attendees">Display names from the calendar event, when this meeting has one. These
+    /// are typed by a human, so they outrank anything counted from past transcripts.</param>
+    public IReadOnlyList<TranscriptSegment>? Process(string sessionFolder, IEnumerable<string>? attendees = null)
     {
         if (!ModelReady)
         {
@@ -49,9 +51,49 @@ public sealed class TranscriptionService
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var you = TranscribeStream(Path.Combine(sessionFolder, "you.wav"), Speaker.You);
             var them = TranscribeStream(Path.Combine(sessionFolder, "them.wav"), Speaker.Them);
+
+            // Merge joins each person's consecutive lines into turns and lifts short backchannels out
+            // of the middle of someone else's sentence. Before this, a real 8-minute meeting produced
+            // 182 fragments (see docs/real-meeting-findings.md).
             var merged = TranscriptMerger.Merge(you, them);
+
+            // Then repair mis-heard names against the user's own history. Runs LAST so it sees whole
+            // turns rather than fragments, and so a name split across two fragments is one word by the
+            // time it is judged.
+            merged = CorrectNames(merged, attendees);
+
             App.Log($"transcribed in {sw.ElapsedMilliseconds} ms: you={you.Count} them={them.Count} -> merged {merged.Count} segments");
             return merged;
+        }
+    }
+
+    /// <summary>
+    /// Repair names on an ALREADY-merged transcript - the live path, which decodes during the meeting
+    /// and so never goes through <see cref="Process"/>. Both routes must get this: the live one is the
+    /// fast path and therefore the one most meetings actually take.
+    /// </summary>
+    public IReadOnlyList<TranscriptSegment> PolishNames(
+        IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees = null) =>
+        CorrectNames(segments, attendees);
+
+    /// <summary>Apply <see cref="NameCorrector"/> using the library as the authority. Never fatal: a
+    /// transcript with a mis-heard name is far better than no transcript.</summary>
+    static IReadOnlyList<TranscriptSegment> CorrectNames(
+        IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees)
+    {
+        try
+        {
+            var trusted = NameLexicon.Trusted(attendees);
+            var corpus = NameLexicon.Corpus(App.Store);
+            var (fixedUp, fixes) = NameCorrector.Correct(segments, trusted, corpus);
+            if (fixes.Count > 0)
+                App.Log("names corrected: " + string.Join(", ", fixes.Select(f => $"{f.From}->{f.To}")));
+            return fixedUp;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"name correction skipped (non-fatal): {ex.Message}");
+            return segments;
         }
     }
 

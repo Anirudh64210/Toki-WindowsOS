@@ -140,7 +140,10 @@ public partial class AboutView : UserControl
 
         var row = new Border
         {
-            Child = grid, Padding = new Thickness(8, 9, 8, 9), Margin = new Thickness(-6, 2, -6, 0),
+            // No negative side margins. They bled the row 6px past its parent on each side, and the
+            // parent clipped it - so those 6px looked like part of the button and were dead to clicks.
+            // Measured by the hittest self-test as "dead at left edge, right edge".
+            Child = grid, Padding = new Thickness(8, 9, 8, 9), Margin = new Thickness(0, 2, 0, 0),
             CornerRadius = new CornerRadius(10), Background = Brushes.Transparent,
             Cursor = Cursors.Hand, ToolTip = c.Url,
         };

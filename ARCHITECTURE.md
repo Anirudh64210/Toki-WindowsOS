@@ -1052,3 +1052,330 @@ to popup menus (a Border's mouse-up is swallowed by a closing popup).
 **Verifying hover needs its own frame.** Hover is invisible to a headless render, so `--libshot` now
 emits `hub-nav-hover.png` with the state set directly. Otherwise "the whole row is clickable" is a claim
 nobody can check - the same reason `--notetest` types instead of asserting on the serializer.
+
+## T1-T8 - decisions from the first real meetings (2026-08-11)
+
+**Two parallel transcript streams must be RE-ASSEMBLED, not just interleaved.** Toki records the mic and
+the loopback separately, transcribes each, and merged them by sorting on start time. That is correct as
+an ordering and wrong as a transcript: a listener's "yeah" lands between two halves of the speaker's
+sentence, and the recogniser's per-breath segmentation turns one explanation into twelve paragraphs. The
+merge now joins consecutive same-speaker segments into turns and displaces short backchannels out of the
+middle of a sentence. *The general lesson: when two sources describe one conversation, ordering them is
+only the first half of merging them.*
+
+**Where the fix goes is a product decision, not only a technical one.** For mis-heard names the textbook
+answer is contextual biasing in the DECODER, and sherpa-onnx supports it for Parakeet TDT. It was
+rejected on two facts: the shipped model archive has no `bpe.vocab` (hotwords on a BPE model need one),
+and it would force `modified_beam_search` over greedy at real CPU cost. Post-ASR correction wins on a
+third argument that had nothing to do with accuracy: it can repair meetings that are **already saved**.
+A late fix that is retroactive can beat an early fix that is not.
+
+**Count across the corpus, not the sample.** The same person came out "Craig" on one stream and "Greg" on
+the other - one occurrence each, undecidable within the meeting. Across the library it is not close.
+Toki's authority for a name is therefore the whole history, overridden only by something a human typed
+(the user's own name, a calendar attendee, a pinned term). The sticky-note linking decision has the same
+shape: local evidence ties, global evidence settles.
+
+**Asymmetric costs set the thresholds.** Missing a name correction leaves a slightly wrong transcript.
+Making a wrong one rewrites what somebody said into somebody else's name. Because those costs are nowhere
+near equal, the matching is tuned conservative and refuses dead ties, "Yashtren" is knowingly left
+uncorrected, and the escape hatch is a name the user pins - at which point the thresholds widen, because
+the risk is now bounded by a human assertion. *Tune to the cost of being wrong, not to recall.*
+
+**A fallback reachable in a state its author did not intend is a bug waiting.** `NoteExtractor.Tldr` -
+the first ~140 characters of raw transcript - is a sound floor for a user with no model. It was also
+silently used when the model DID answer but skipped the summary, so two consecutive real meetings opened
+with "Hello. Uh hi Sai, you are actually on mute." under otherwise good AI sections. The writer now
+retries with a summary-only prompt and, failing that, emits **nothing**. An absent section is honest; a
+mislabelled one is not.
+
+**Downstream text inherits upstream mistakes silently.** The bad summary produced a bad TITLE, because
+the title is generated from the summary. Nothing logged an error; the note simply claimed a 6-person
+meeting about report tracking was called "Evacuate Immediate Action Required". When output B is derived
+from output A, A's failure mode is B's failure mode.
+
+**A model will format anything you ask it to, including nonsense.** Asked for action items, it turned a
+chairperson's register ("Anirud, Bindu.", "Dakshita, Ganesh.") into eleven to-dos that were only names.
+The prompt cannot be the only defence; the parser now requires a task to contain an action, and drops
+near-duplicates. *Validate the SHAPE of model output, not just its presence.*
+
+**Speaker separation is partly free here, and that changes the design.** Because the mic is its own
+stream, the local user is already perfectly diarised - better than general diarisation achieves. Only the
+loopback needs splitting, and it arrives with a labelled sample of the owner's voice for reference. That
+makes diarisation a smaller problem for Toki than for a single-stream recorder, and it is why
+`SpeakerEmbeddingManager` (enroll a voice once, recognise it later) is the piece that matters rather than
+clustering quality alone.
+
+**One cause can explain several symptoms.** Segment fragmentation made the transcript unreadable, bloated
+the note document to 182 paragraphs, and gave the note writer bad chunk boundaries. Three complaints, one
+fix. Worth asking, before building three, whether one thing upstream explains them all.
+
+## UI performance and diarisation - decisions (2026-08-12)
+
+**Fix what fires constantly before what is merely large.** The Library felt slow because `Select()`
+rebuilt all 54 cards to move one highlight and `OnSearch` rebuilt per keystroke - dozens of rebuilds a
+minute. Virtualization, the textbook answer, would have made ONE rebuild cheaper while leaving the
+frequency untouched. Fixing frequency first took a click from 424 ms to 0.4 ms; virtualization was then
+justified by a measurement (a build is 424 ms, 81% of it WPF arranging cards nobody can see) rather than
+by reputation. Full analysis in `docs/ui-performance.md`.
+
+**A performance claim needs a harness, like any other claim.** `--uitest` runs the Library's real work
+against the real database and asserts budgets (16 ms to move a selection - one frame at 60 Hz; 250 ms to
+build the list; 400 ms to open a note). "Slow and clunky" became three numbers and a pass/fail, which is
+what makes it possible to decide about virtualization at all instead of arguing about it.
+
+**Wiring is part of building.** `NameCorrector` was complete and tested while doing nothing, because the
+LIVE transcription path skips `TranscriptionService.Process` and correction lived only inside `Process`.
+The fallback path did work, so a test would have passed and the fast path - the one most meetings take -
+would have silently done nothing. *When a system has a fast path and a fallback, verify the fast path
+first: it is both the common case and the one that hides failures.*
+
+**Reuse the information you already computed.** Standard diarisation sweeps a segmentation model across
+the whole file in one-second hops and produces thousands of embeddings. Toki already knows exactly when
+every utterance starts and ends, from ASR timestamps - information the textbook pipeline discards and
+recomputes. Embedding once per utterance measured **10x faster** on real audio (7.1 s versus 59.6 s for
+8.4 minutes) and is published prior art (Turn-to-Diarize, ICASSP 2022), which reports it is also *more*
+accurate, because a fixed window straddles speaker boundaries and manufactures confusion errors.
+
+**Complete linkage is the wrong question for "is this the same voice".** It requires every pair in a
+cluster to be close, so one degraded moment splits a person permanently: measured, a single remote
+speaker became 5 clusters and never fewer than 2 even at a 0.95 threshold. Average linkage asks whether a
+cluster is close *on the whole*, and reaches the correct answer of 1.
+
+**Some parameters cannot be tuned to a single value, and that is a design input.** No clustering threshold
+serves both a two-person call and an eleven-person one: 0.80 gets the first exactly right and collapses
+the second to 2; 0.55 gets the second roughly right and shatters the first into 5. So the design stops
+trying: use the calendar attendee count as a prior when it exists, default conservative when it does not
+(under-splitting is the status quo, over-splitting invents people who were never there), and expose the
+count to the user - affordable only because re-clustering takes about five seconds. *When estimation is
+genuinely unreliable, make correction cheap instead of making estimation confident.*
+
+**Check the whole release before copying a model URL.** `sherpa-onnx-reverb-diarization-v1/v2` sit in the
+same GitHub release as the safe segmentation model, one line away in any copy-paste, under Rev's
+non-production licence. The safe filenames are pinned in `ModelManager` with a comment saying why, so the
+next person to add a model does not reach for the neighbouring one.
+
+## T8 decisions - speaker naming without voiceprints (2026-08-12)
+
+Full reasoning and measurements: [`docs/speaker-naming.md`](docs/speaker-naming.md).
+
+**Decision: transient only. No stored voiceprints, ever.** Voice enrollment - keep a fingerprint, name a
+person once, recognise them next time - is the obvious design and is what Circleback ships. It was
+rejected by the owner. Two reasons carried it. First, it stores biometric data for colleagues who never
+agreed to it, which is the fact pattern in *In re Otter.AI* and *Cruz v. Fireflies.AI*. Second, and more
+persuasive: **Wispr Flow shipped a bot-free notetaker in August 2026 and made "does not create voiceprints
+or biometric profiles" a product promise**, naming speakers from calendar attendees, a saved vocabulary
+and conversational context instead. A company with servers and an enterprise pitch decided the trade was
+not worth it. Toki already had every signal they use.
+
+Consequence, accepted knowingly: a recurring participant who is not on the invite is renamed each time.
+`AppSettings.PinnedNames` covers the people who actually recur.
+
+**Decision: `Speaker` stays a two-value enum; identity lives in `TranscriptSegment.Tag`.** The enum is
+which STREAM the bytes came from, which is a fact and is what the `you:`/`them:` search prefixes and
+`COUNT(DISTINCT speaker)` depend on. Who spoke is an inference: it can be absent, wrong, or renamed by
+the user, so it gets its own nullable column (`transcript.speaker_tag`) and a `Label` property that falls
+back to You/Them. Conflating the two would have made a guess look like a fact in the search index.
+
+**Decision: `TranscriptMerger` keys on resolved identity, not the enum.** `SameVoice(a, b)` compares the
+tag as well. This is the highest-risk line in the change: every remote participant answers to "Them", so
+without it two different people talking back to back with a short gap - the most ordinary thing in a
+group call - are welded into one turn attributed to whoever spoke first.
+
+**Decision: the clustering threshold leans conservative (0.80, was 0.55).** Measured, no single value
+serves both a one-to-one and an eleven-person call. Under-splitting merges quiet people into one label
+and reads as coarse; over-splitting invents colleagues who were never in the room and puts words in their
+mouths. 0.55 turned one person reading announcements into six speakers on a real recording. The attendee
+count from the calendar overrides the threshold entirely when it is known, which is the real fix.
+
+**Decision: naming is pure text, in its own class.** `SpeakerNamer` takes turns and a roster and returns
+labels. No audio, no model, no state. That is what makes it testable against real transcripts, and it is
+also the structural guarantee behind the privacy claim - there is nowhere for a voiceprint to live.
+
+**The guard that generalised.** The first real run named participants "Please" and "Otherwise". Rather
+than extend the stopword list, the fix is: **a word that appears in lowercase anywhere in the same
+meeting is not a name.** An ordinary word always does; a real name essentially never does. It caught two
+of three. The third needed a specific rule - the bare vocative is indistinguishable from a discourse
+marker, so it only counts for a human-supplied name. Both layers are needed; the principled fix alone was
+not enough, and that is worth remembering rather than tidying away.
+
+**Decision: it runs AFTER the notes.** The notes are what the user waits for. Cost is ~7s on an
+8-minute recording, ~50s for an hour. The price is that the note writer does not see the names on a fresh
+meeting (it does on a rewrite, since `LlmNoteWriter.Chunk` now feeds it `seg.Label`). Getting names into
+first-pass notes would require running diarisation before them - open, flagged for the owner.
+
+## T5 decision - virtualizing the Library list (2026-08-12)
+
+`Views/MeetingList.cs`: an `ItemsControl` subclass whose `PrepareContainerForItemOverride` calls the
+existing code-built `Card(MeetingSummary)`, so the row-building code is reused untouched - a
+`DataTemplate` could not have called it. Measured 424.2 ms -> 46.1 ms at 54 meetings, and the cost no
+longer grows with the library.
+
+**The ScrollViewer must live INSIDE the control's template.** An `ItemsControl` wrapped in an outer
+`ScrollViewer` is measured with infinite height, every row is realised, and virtualization silently does
+nothing at all - the failure mode here is not an error, it is a number that quietly stops improving.
+`ScrollUnit=Pixel` keeps `SmoothScroll`'s per-pixel glide; item-unit scrolling would jump a whole card
+per notch.
+
+**Drag-reorder was removed to make this safe.** It walked `Cards.Children` BY INDEX, and under
+virtualization those are positions in the realised window rather than in the list - the one feature
+virtualization breaks without any visible symptom. The owner's call ("it does not add much productivity
+as I thought it would") turned a hazard into a deletion. The `sort_order` column and `MeetingStore.Reorder`
+are left in place; nothing writes them now, and the "Manual (drag order)" sort mode went with the feature.
+
+## Two-wave notes (2026-08-12)
+
+**Decision: the notes never wait for diarisation; they gain names in place instead.** Owner: *"I don't
+like the idea of increasing the wait time, it is already taking a while. Instead, to-do has a loading as
+well, and shows up in the window."*
+
+The note is written and shown at the usual speed with "You"/"Them", then a few seconds later the speakers
+resolve and the transcript and to-do owners update in place. `App.SpeakersResolved` fires on the UI
+thread; the notch's `NotesView` and the Library both re-read the meeting and re-render.
+
+**The loader is load-bearing, not decoration.** While wave two is pending, the two sections that are
+about to change show `Views/ThinkingDots` (the same three-dot pulse the notch's Ask view already used,
+extracted so there is only one loading language in the product). Without it the note appears to rewrite
+itself under the reader, which is more alarming than a slower note - the change needs to be expected
+before it happens.
+
+**Decision: to-do owners are derived, not generated.** `Llm/ActionOwners.cs` reads the owner off the
+transcript line the to-do's evidence link already points at. No second LLM pass, no added wait, and
+deterministic - which matters for something that puts a person's name against a commitment. Only a
+first-person commitment names its speaker ("I'll send the deck" -> the speaker; "Craig will send the
+deck" -> nobody), because attributing someone else's work to whoever mentioned it produces a to-do that
+looks finished and is quietly false. The `UPDATE` is guarded on `owner IS NULL OR owner=''` so it can
+never overwrite the model's answer or the user's.
+
+This closed **T4** as a side effect of T8. The generalisation worth keeping: **when a slow step would
+delay a fast one, look at what the fast result already knows.** The evidence links had held the answer
+since N7.
+
+## Button fundamentals (2026-08-12)
+
+Full write-up: [`docs/button-fundamentals.md`](docs/button-fundamentals.md). Scoped deliberately to
+fundamentals - a full design and haptics revamp is coming, so look is throwaway work while hit targets,
+centring and clipping are inherited by whatever replaces the styling.
+
+**Decision: `Transparent` is not `null`, and this is now enforced by a test.** A `Background` left unset
+is null, and a null-background element is invisible to hit testing. A `TextBlock` with a click handler
+paints only its glyphs, so only the glyphs respond - while a parent drawing a hover fill lights the whole
+box. Hover looks right, clicking does not, and the highlight becomes a lie about where the button is.
+`Views/HitTarget.cs` is the one wrapper for this, and it also clears the cursor on the wrapped content so
+the inner element cannot become a second, smaller button inside the real one.
+
+**Decision: no negative side margins on anything clickable.** The About credit rows used
+`Margin="-6,2,-6,0"` to bleed their hover fill to the panel edges; the parent clipped it, so 6px on each
+side of every row looked pressable and was dead.
+
+**Decision: centre labels on cap height, computed from font metrics** (`Theme/OpticalCenter.cs`). WPF
+centres the *line box*, which reserves asymmetric descender space, so a label centred by layout sits low.
+The previous fix clamped `LineHeight` to `FontSize` and applied a hard-coded `TranslateTransform Y="-1"`.
+That fights the font rather than measuring it, and a constant cannot be right at more than one type size:
+measured, every pill label still sat 1.7px low and the smaller calendar buttons 1.5px. The replacement
+reads `FontFamily.LineSpacing`, `FontFamily.Baseline` and `GlyphTypeface.CapsHeight`, so the correction
+scales with the em and survives a font change.
+
+**Decision: `--hittest` interrogates the live visual tree, not a picture of it.** Both defects are
+invisible in a screenshot. The test walks every notch state, collects every `ButtonBase` plus everything
+wearing the hand cursor (the cursor is the promise made to the user), and asks
+`VisualTreeHelper.HitTest` what would receive a click at nine points inside each one.
+
+**Its own first version was wrong three ways, each worth remembering.** It probed literal corners, which
+fall outside a 13px corner radius and reported every healthy pill as broken. It measured centring on
+composite rows, where the first TextBlock is a date badge rather than a label. And it judged controls
+inside collapsed or clipped containers, which says something about the container. A test that does not
+know the shape of what it measures produces confident nonsense - the findings had to be triaged before
+any of them could be trusted.
+
+## Claim-by-rename: the sticky migration (2026-08-13)
+
+**Decision: a one-shot migration claims its input file by RENAMING it before reading a byte.**
+
+The old order was read, migrate, rename. That is check-then-act, and it is not atomic across processes.
+Toki's single-instance guard stops a second window, but `StickyMigration.RunOnce` executes on a
+background thread three seconds after startup - so two launches in quick succession really did overlap.
+Both saw the file, both parsed it, both wrote the same note. The owner's log showed
+`sticky: migrated 1 prep-card note(s)` three times in under a second: three copies of one note.
+`StickyForEvent` cannot prevent that; it is the check half of the very race it is trying to stop.
+
+Renaming is the one operation the filesystem makes atomic. Whoever wins `File.Move(path, path +
+".migrating", overwrite: false)` owns the migration; every loser gets `IOException` and returns having
+done nothing. The generalisation: **to make a one-shot job idempotent across processes, claim the input
+atomically rather than checking whether the work was already done.**
+
+**Decision: an input that can never be parsed is PARKED, not retried.** The old catch left an
+unparseable file in place "to be retried next launch", which sounds careful and is actually a permanent
+error: a malformed file will still be malformed tomorrow. It logged
+`'t' is an invalid start of a property name` on every launch, forever, with no path to success. Now it
+moves to `.unreadable` with a log line saying where the text went. Distinguish a **transient** failure
+(a locked database - put the file back, retry later) from a **permanent** one (bad bytes - stop trying
+and say so). Treating the second as the first produces log noise that trains everyone to ignore the log.
+
+## Pinned names get a UI (2026-08-13)
+
+`AppSettings.PinnedNames` was read by `NameLexicon.Trusted` from the day T2 shipped, and no code path
+could write it. A trusted-names roster that only a JSON editor can fill is not a feature. It now has a
+multi-line box in Library → Settings, beside the user's own name, sharing that section's
+Save/Cancel/confirmation pattern. The confirmation counts what `NameLexicon` actually **parses**, not
+what was typed, so a trailing comma or a blank line shows up as the wrong number rather than silently
+doing nothing.
+
+Worth noting as a smell: a setting that is read but never written is dead weight that looks like a
+feature. It was in the handoff notes as "exists and is already read - there is no UI" for two sessions
+before anybody could use it.
+
+## Focus after layout: the sticky note that ate keystrokes (2026-08-13)
+
+**Decision: never call `Focus()` in the same breath as adding a control to the tree.**
+
+`MeetingStickyView.Reveal` created the editor, assigned it to the panel's slot, and immediately called
+`FocusEditor()`. WPF's `Focus()` on a control that is not yet in a laid-out visual tree returns false and
+does nothing - **silently, with no exception and no log**. Keyboard focus therefore stayed on the
+read-only `RichTextBox` that HOSTS the sticky panel, and a read-only RichTextBox swallows every keystroke
+without a sound. The user clicked "Add a sticky note", the panel opened, and typing went nowhere.
+
+Focus now happens at `DispatcherPriority.Loaded`, and a `PreviewMouseLeftButtonDown` on the panel puts the
+caret back in the note - the host RichTextBox wants focus back and will take it on any click that lands
+on the panel's padding or header. The panel's `Background` is `Transparent` rather than unset for the
+same reason as every other clickable surface: unset is null and null is invisible to hit testing.
+
+**The generalisable part is about the TEST, not the fix.** `--notetest` drives the note editor through 20
+checks and passed every one of them while this feature was unusable, because it builds the editor
+standalone. The editor was never broken - the HOSTING was. New `--stickytest` builds a real meeting
+document, puts the sticky panel inside it, opens it the way the button does, and asserts that focus
+actually lands in the editor. It reproduced the bug on its first run. **When a control works in isolation
+and fails in the product, test it in the product.** Same lesson as the hover-contrast bug the day before,
+and the third time this month that a green test was measuring a model rather than the thing.
+
+## A choice from a set belongs in a list (2026-08-13)
+
+The calendar's meeting-length control was a chip that CYCLED `30 -> 60 -> 90 -> 30`. Two consequences,
+both reported by the owner as "impractical": **15 and 45 minutes were unreachable** no matter how many
+times you clicked, and reaching a length you wanted meant clicking through lengths you did not. It is now
+a dropdown of 15 / 30 / 45 / 1 hour / 1 h 30 m / 2 hours, with a chevron so the control reads as a choice
+rather than a toggle.
+
+The same reasoning collapsed the note editor's three Title / Heading / Body chips into one "Aa" size
+picker: three chips spent the toolbar's whole width and still read as three unrelated buttons rather than
+one property with three values.
+
+**Rule: if a control has more than about three values, or any value it cannot reach, it is a list - not a
+button that advances.** A cycling control also hides its own options, which is how four of six lengths
+went missing in plain sight.
+
+## Why Bold / Italic was NOT added (2026-08-13)
+
+Requested, and deliberately deferred - recorded here because "we didn't get to it" and "this is dangerous
+to rush" are different things and the difference matters next time.
+
+`NoteMarkdown` has no inline formatting at all, so bold needs a `**` round-trip through save and reload as
+well as toolbar buttons. More importantly it collides head-on with an existing fix: `ApplyStyle` clears
+`FontWeight` on every Run, deliberately, because WPF stamps the caret's formatting onto typed Runs and the
+resulting rule was "the LINE decides how its text looks, always". That clear would wipe user-intended bold
+on every restyle, so shipping bold means first teaching the editor to tell deliberate formatting from
+stamped formatting.
+
+Both previous defects in this control were DATA LOSS (bullets multiplying on every save; blank lines
+eating a typed sentence). It holds the user's own words. That is a control where a half-finished feature
+costs more than a missing one.

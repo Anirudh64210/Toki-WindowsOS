@@ -27,12 +27,42 @@ public static class StickyMigration
 
     public static void RunOnce(MeetingStore store)
     {
+        if (!File.Exists(LegacyPath)) return;
+
+        // CLAIM the file by renaming it BEFORE reading a byte of it.
+        //
+        // The old order was read-migrate-rename, which is not atomic. Toki's single-instance guard stops
+        // a second window, but the migration runs on a background thread 3 seconds after start, so two
+        // launches in quick succession genuinely overlapped: both saw the file, both read it, both wrote
+        // the same note. The owner's log showed "migrated 1 prep-card note(s)" three times in under a
+        // second - three copies of one note. `StickyForEvent` cannot prevent that; it is a check-then-act
+        // across processes.
+        //
+        // Renaming is the one operation the filesystem makes atomic. Whoever wins owns the migration;
+        // everyone else finds nothing and leaves.
+        var claimed = LegacyPath + ".migrating";
+        try { File.Move(LegacyPath, claimed, overwrite: false); }
+        catch (IOException) { return; }          // someone else claimed it, or it vanished
+        catch (UnauthorizedAccessException) { return; }
+
         try
         {
-            if (!File.Exists(LegacyPath)) return;
+            List<(string EventId, string Title, string Body)> notes;
+            try { notes = ReadLegacy(File.ReadAllText(claimed)); }
+            catch (Exception ex)
+            {
+                // Unreadable in BOTH shapes. The old code left it in place "to be retried next launch",
+                // but a file that cannot be parsed will never parse - so that was an error logged on
+                // every single launch, forever, with no path to success. Park it under a name that says
+                // what happened. The text is still on disk, in plain JSON, for a person to read.
+                Move(claimed, LegacyPath + ".unreadable");
+                App.Log($"sticky migration: prep-scratch.json could not be read ({ex.Message}) - "
+                    + "parked as prep-scratch.json.unreadable and NOT retried; your text is still in that file");
+                return;
+            }
 
             var moved = 0;
-            foreach (var (eventId, title, body) in ReadLegacy(File.ReadAllText(LegacyPath)))
+            foreach (var (eventId, title, body) in notes)
             {
                 if (string.IsNullOrWhiteSpace(body)) continue;
                 if (store.StickyForEvent(eventId) is not null) continue;   // already carried across
@@ -42,13 +72,21 @@ public static class StickyMigration
 
             // Renamed, never deleted: if anything about this went wrong the user's words are still on
             // disk, in plain JSON, where a person can read them.
-            File.Move(LegacyPath, LegacyPath + ".migrated", overwrite: true);
-            App.Log($"sticky: migrated {moved} prep-card note(s) from prep-scratch.json");
+            Move(claimed, LegacyPath + ".migrated");
+            if (moved > 0) App.Log($"sticky: migrated {moved} prep-card note(s) from prep-scratch.json");
         }
         catch (Exception ex)
         {
-            App.Log($"sticky migration failed (non-fatal - file left in place, retried next launch): {ex.Message}");
+            // Something unexpected (a locked database, a disk error). Put the file BACK so the next
+            // launch can try again - unlike an unreadable file, this really might succeed later.
+            try { Move(claimed, LegacyPath); } catch { }
+            App.Log($"sticky migration failed (non-fatal - file restored, retried next launch): {ex.Message}");
         }
+    }
+
+    static void Move(string from, string to)
+    {
+        if (File.Exists(from)) File.Move(from, to, overwrite: true);
     }
 
     /// <summary>Both shipped shapes: the v2 record, and the v1 bare string per event.</summary>

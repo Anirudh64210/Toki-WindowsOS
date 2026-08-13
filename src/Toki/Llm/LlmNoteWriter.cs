@@ -81,17 +81,53 @@ public sealed class LlmNoteWriter
         if (IsNothing(note.Summary) && note.Sections.Count == 0 && note.Actions.Count == 0)
             return LowSubstanceNote();                       // model judged it low-substance
 
+        // The model sometimes returns good sections and simply skips SUMMARY. This used to fall back to
+        // the HEURISTIC's summary, which is the first ~140 characters of the raw transcript - so a real
+        // meeting's note opened with "Hello. Uh hi Sai, you are actually on mute. Hello." under a set of
+        // perfectly good AI sections. Twice, in two consecutive real meetings.
+        //
+        // The heuristic summary exists for people with no model at all; it is not a patch for a model
+        // that answered. So: ask again, just for the summary. If that fails too, leave it EMPTY - the
+        // renderer drops the section, and a note with no summary is honest where raw transcript is not.
+        var summary = note.Summary;
+        if (string.IsNullOrWhiteSpace(summary) || IsNothing(summary))
+            summary = await SummaryPass(source, sourceIsDigests, ct) ?? "";
+
         var result = new NoteSet
         {
             Template = template.Name,
-            Tldr = string.IsNullOrWhiteSpace(note.Summary) ? heuristic.Tldr : note.Summary,
+            Tldr = summary,
             Sections = note.Sections,     // template middle sections (empty ones already dropped)
             Actions = note.Actions,       // empty → section dropped
         };
         // The combined pass already produced the title in the SAME call - only fall back to a
-        // separate title generation (an extra ~round-trip) if it somehow didn't.
-        result.Title = !string.IsNullOrWhiteSpace(note.Title) ? note.Title : await TitlePass(result.Tldr, ct);
+        // separate title generation (an extra ~round-trip) if it somehow didn't. Titling from the
+        // SUMMARY matters: when the summary was raw transcript, the title came out as "Evacuate
+        // Immediate Action Required" for a meeting about centralising team reports - the opening words
+        // of the call, not its subject. With no summary, title from the sections instead.
+        result.Title = !string.IsNullOrWhiteSpace(note.Title) ? note.Title
+            : await TitlePass(summary.Length > 0 ? summary : SectionDigest(result), ct);
         return result;
+    }
+
+    /// <summary>A second, narrower ask for just the summary, used when the combined pass skipped it.</summary>
+    async Task<string?> SummaryPass(string content, bool contentIsDigests, CancellationToken ct)
+    {
+        var raw = await TextPass(
+            "In 2 to 4 dense, plain-English sentences, say what this meeting was about and what came of "
+            + "it. Capture real content from informal or wandering talk, but cut ALL filler, greetings "
+            + "and logistics. Reply with the sentences only - no heading, no bullets, no preamble.\n\n"
+            + (contentIsDigests ? "Notes:\n" : "Transcript:\n") + content, 200, ct);
+        return raw is null || IsNothing(raw) ? null : raw.Trim();
+    }
+
+    /// <summary>What the note managed to say, for titling when there is no summary to title from.</summary>
+    static string SectionDigest(NoteSet note)
+    {
+        var bits = note.Sections.SelectMany(s => s.Bullets)
+            .Concat(note.Actions.Select(a => a.Text))
+            .Take(8);
+        return string.Join(". ", bits);
     }
 
     // ── MAP: one window → a compact factual digest (or NOTHING) ──
@@ -237,7 +273,10 @@ public sealed class LlmNoteWriter
         var sb = new StringBuilder();
         foreach (var seg in transcript)
         {
-            var line = $"{(seg.Speaker == Speaker.You ? "You" : "Them")}: {seg.Text}";
+            // Label, not the raw stream: once the speakers have been told apart the writer sees real
+            // names, which is what lets it attribute a to-do instead of guessing. On a fresh meeting
+            // diarisation has not run yet, so this is still "You"/"Them" - the names arrive on a rewrite.
+            var line = $"{seg.Label}: {seg.Text}";
             if (sb.Length > 0 && sb.Length + line.Length + 1 > maxChars)
             {
                 chunks.Add(sb.ToString());
@@ -319,10 +358,49 @@ public sealed class LlmNoteWriter
                 if (key == "owner") item.Owner = val;
                 else if (key == "due") item.Due = val;
             }
-            if (item.Text.Length > 1) actions.Add(item);
+            if (!IsRealTask(item.Text)) continue;
+            if (actions.Any(a => SameTask(a.Text, item.Text))) continue;   // said twice, not two tasks
+            actions.Add(item);
         }
         return actions;
     }
+
+    /// <summary>
+    /// Is this actually something to DO?
+    ///
+    /// A real meeting (2026-08-11) was a team call where the chair read out a register - "Anirud, Bindu.",
+    /// "Dakshita, Ganesh." - and the note came back with eleven to-dos that were nothing but people's
+    /// names. A task needs an action in it; a name on its own is a person, not a job.
+    /// </summary>
+    static bool IsRealTask(string text)
+    {
+        var t = (text ?? "").Trim();
+        if (t.Length < 4) return false;
+
+        var words = t.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return false;
+
+        // One or two words, every one of them capitalised -> a name, or a pair of names.
+        if (words.Length <= 2 && words.All(w => char.IsUpper(w[0]))) return false;
+
+        // Nothing but names, however many: still a register, not a task.
+        return !words.All(w => char.IsUpper(w[0]) && w.All(char.IsLetter));
+    }
+
+    /// <summary>The same job written twice ("connect Abhishek with the team member" / "connect Abhishek
+    /// with the person responsible") should be one line, not two.</summary>
+    static bool SameTask(string a, string b)
+    {
+        var wa = Words(a);
+        var wb = Words(b);
+        if (wa.Count == 0 || wb.Count == 0) return false;
+        var shared = wa.Count(wb.Contains);
+        return (double)shared / Math.Min(wa.Count, wb.Count) >= 0.75;
+    }
+
+    static HashSet<string> Words(string s) =>
+        new(s.ToLowerInvariant().Split(new[] { ' ', ',', '.', ';', ':' }, StringSplitOptions.RemoveEmptyEntries)
+             .Where(w => w.Length > 2), StringComparer.OrdinalIgnoreCase);
 
     // ── passes (validated, retried once, else null → caller falls back) ──
 

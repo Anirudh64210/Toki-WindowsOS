@@ -12,7 +12,7 @@ using Toki.Views;
 namespace Toki;
 
 /// <summary>How the Library list is ordered. Manual = the drag-reorder order stored in the DB.</summary>
-public enum LibrarySort { Newest, Oldest, Longest, Shortest, OpenTasks, Manual }
+public enum LibrarySort { Newest, Oldest, Longest, Shortest, OpenTasks }
 
 /// <summary>
 /// Resizable window showing the whole Library (list) beside the selected note's
@@ -352,11 +352,25 @@ public partial class LibraryWindow : Window
             if (_page == "settings") LoadLibrarySettings(refreshModels: false);   // recolour only - no network fetch on a theme flip
         });
         _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
+        _searchDebounce.Tick += (_, _) => { _searchDebounce.Stop(); LoadList(); };
         // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
         // already call Reload() explicitly - a Loaded handler here made every open rebuild
         // the whole list+detail TWICE.
 
-        // Restore the saved list sort.
+        // The list builds its rows with our own Card(), one at a time, only for rows it realises.
+        Cards.Build = o => Card((MeetingSummary)o);
+
+        // Notes arrive in two waves: the summary and to-dos as soon as the model has written them, then
+        // the speaker names a few seconds later. When the second wave lands for the note that is OPEN,
+        // re-read it from the store so the loader is replaced by the real thing in place.
+        App.SpeakersResolved += id =>
+        {
+            if (_selected != id || _page != "library") return;
+            if (App.Store.Get(id) is { } fresh) RenderMeeting(fresh);
+        };
+
+        // Restore the saved list sort. (A settings file still saying "Manual" from before drag-reorder
+        // was removed simply fails to parse and lands on Newest, which is what we want.)
         if (Enum.TryParse<LibrarySort>(Llm.AppSettings.Current.LibrarySort, out var savedSort)) _sort = savedSort;
         UpdateSortButton();
 
@@ -404,16 +418,19 @@ public partial class LibraryWindow : Window
         // An explicit focus (e.g. "open this note") counts as user intent; re-selecting the previous
         // note keeps its sticky user/auto status; the silent first-card fallback is NOT user-viewed.
         if (toSelect is long id && App.Store.Get(id) is not null) Select(id, byUser: focus is not null);
-        else if (Cards.Children.Count > 0 && Cards.Children[0] is Border first && first.Tag is long fid) Select(fid, byUser: false);
+        else if (_items.Count > 0) Select(_items[0].Id, byUser: false);
         else DetailBody.Content = Placeholder("Select a meeting or note, or make a new one.");
     }
 
     // ══════════════════════ Hub: sidebar nav · Ask landing · Templates · mascot ══════════════════════
 
     string _page = "ask";
-    bool _dragEnabled;                       // drag-reorder is OFF by default (no accidental moves)
     bool _myNotesOnly;                       // book filter: show only hand-written (manual) notes
     LibrarySort _sort = LibrarySort.Newest;  // list ordering (persisted)
+    // What the list currently shows. Under virtualization most rows have no visual, so this - not
+    // Cards.Children - is the answer to "what's in the Library" and "which one is first".
+    IReadOnlyList<MeetingSummary> _items = [];
+    bool _listLoaded;                        // has LoadList run? (was "are there any card visuals?")
     readonly Dictionary<string, Border> _navButtons = new();
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
@@ -431,7 +448,6 @@ public partial class LibraryWindow : Window
         BuildNav();
         BuildSuggestions();
         BuildTemplatesPage();
-        UpdateDragToggle();
         UpdateMyNotesToggle();
         HighlightNav();
     }
@@ -533,8 +549,8 @@ public partial class LibraryWindow : Window
         UIElement page = key switch { "ask" => AskPage, "library" => LibraryPage, "templates" => TemplatesPage, _ => SettingsPage };
         if (animate && !App.Headless) FadePage(page);
         if (key == "ask") RefreshGreeting();
-        if (key == "settings") { LoadNameSettings(); LoadLibrarySettings(); }
-        if (key == "library" && Cards.Children.Count == 0) LoadList();
+        if (key == "settings") { LoadNameSettings(); LoadPinnedSettings(); LoadLibrarySettings(); }
+        if (key == "library" && !_listLoaded) LoadList();
     }
 
     static void FadePage(UIElement e)
@@ -587,6 +603,61 @@ public partial class LibraryWindow : Window
     {
         LoadNameSettings();   // revert to the stored value, hide the actions
     }
+
+    // ── Settings page: pinned names ──
+    //
+    // The roster behind speaker naming (T8) and name correction (T2). `AppSettings.PinnedNames` has been
+    // READ by NameLexicon since T2, but nothing could write it - the escape hatch existed with no handle
+    // on it, so the one fix for a name the library cannot settle by frequency was hand-editing a JSON
+    // file. A name typed here is TRUSTED: correction may reach further towards it, and the namer will
+    // attach it to a voice on evidence that would not be enough for a name nobody vouched for.
+    //
+    // Stored verbatim as typed; NameLexicon.Trusted splits on commas, semicolons and newlines.
+
+    void LoadPinnedSettings()
+    {
+        _nameLoading = true;
+        LibPinnedBox.Text = Llm.AppSettings.Current.PinnedNames ?? "";
+        LibPinnedActions.Visibility = Visibility.Collapsed;
+        LibPinnedSaved.Visibility = Visibility.Collapsed;
+        _nameLoading = false;
+    }
+
+    void OnLibPinnedChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_nameLoading) return;
+        var changed = (LibPinnedBox.Text ?? "") != (Llm.AppSettings.Current.PinnedNames ?? "");
+        LibPinnedActions.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+        if (changed) LibPinnedSaved.Visibility = Visibility.Collapsed;
+    }
+
+    void OnLibPinnedSave(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var s = Llm.AppSettings.Current;
+            var typed = LibPinnedBox.Text ?? "";
+            s.PinnedNames = string.IsNullOrWhiteSpace(typed) ? null : typed.Trim();
+            s.Save();
+        }
+        catch (Exception ex) { App.Log($"save pinned names: {ex.Message}"); }
+
+        LibPinnedActions.Visibility = Visibility.Collapsed;
+        // Count what Toki will actually use, not what was typed - trailing commas and blank lines are
+        // easy to leave behind, and "3 names" confirms the parse as well as the save.
+        var n = Transcription.NameLexicon.Trusted().Count;
+        LibPinnedSavedText.Text = n switch
+        {
+            0 => "Saved.",
+            1 => "Saved - 1 name Toki will always spell right.",
+            _ => $"Saved - {n} names Toki will always spell right.",
+        };
+        LibPinnedSaved.Visibility = Visibility.Visible;
+        if (!App.Headless)
+            LibPinnedSaved.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)));
+    }
+
+    void OnLibPinnedCancel(object sender, RoutedEventArgs e) => LoadPinnedSettings();
 
     // ── Settings page: everything else (the notch-settings consolidation - DONE 2026-08-04) ──
     //
@@ -1352,26 +1423,6 @@ public partial class LibraryWindow : Window
         MyNotesToggle.ToolTip = _myNotesOnly ? "Showing your notes only - tap to show everything" : "Show only my hand-written notes";
     }
 
-    // ── drag-reorder on/off toggle ──
-    void OnToggleDrag(object sender, RoutedEventArgs e)
-    {
-        _dragEnabled = !_dragEnabled;
-        // Drag reorders the STORED manual order - switch the view to Manual when enabling it, else
-        // the cards you drag wouldn't be in the order the drag renumbers.
-        if (_dragEnabled && _sort != LibrarySort.Manual) SetSort(LibrarySort.Manual);
-        UpdateDragToggle();
-    }
-
-    void UpdateDragToggle()
-    {
-        DragToggle.Content = ((char)0xE76F).ToString();   // Fluent: GripperBarHorizontal (drag handle)
-        if (_dragEnabled) DragToggle.Foreground = (Brush)FindResource("Coral");
-        else DragToggle.ClearValue(ForegroundProperty);
-        DragToggle.ToolTip = _dragEnabled
-            ? "Reordering ON - drag cards to rearrange them"
-            : "Reordering off - tap to drag-reorder your notes";
-    }
-
     // ── Templates page ──
     void BuildTemplatesPage()
     {
@@ -1465,7 +1516,6 @@ public partial class LibraryWindow : Window
 
     void LoadList()
     {
-        Cards.Children.Clear();
         IReadOnlyList<MeetingSummary> items;
         try { items = App.Store.List(string.IsNullOrWhiteSpace(SearchBox.Text) ? null : SearchBox.Text); }
         catch (Exception ex) { App.Log($"library window load: {ex.Message}"); items = []; }
@@ -1478,26 +1528,31 @@ public partial class LibraryWindow : Window
         // (A sticky note used to appear here as its own Keep/Discard card. The owner's verdict was that
         // a row you can't open, sitting among meetings it isn't one of, is just confusing - so a sticky
         // note now lives INSIDE its meeting's note, behind the "Sticky note" button. See RenderMeeting.)
-        foreach (var m in items) Cards.Children.Add(Card(m));
-        if (items.Count == 0)
-            Cards.Children.Add(Placeholder(
-                _myNotesOnly ? "No hand-written notes yet - tap + to write one."
-                : _sort == LibrarySort.OpenTasks ? "No meetings with open tasks."
-                : string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches."));
+        //
+        // Handing the list over is the whole "build" now: MeetingList calls Card() only for the rows it
+        // actually realises. The list is kept in _items because the visuals are no longer a reliable
+        // census of what's in the Library - most rows have none.
+        _items = items;
+        _listLoaded = true;
+        Cards.ItemsSource = items;
+
+        CardsEmpty.Text =
+            _myNotesOnly ? "No hand-written notes yet - tap + to write one."
+            : _sort == LibrarySort.OpenTasks ? "No meetings with open tasks."
+            : string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches.";
+        CardsEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // Sort the list per the chosen mode. Manual = the drag-reorder order (App.Store.List already
-    // returns it - sort_order ASC then newest), so it's a pass-through. OpenTasks filters to
-    // meetings that HAVE open tasks and ranks by how many.
+    // Sort the list per the chosen mode. OpenTasks filters to meetings that HAVE open tasks and ranks
+    // by how many. (There was a "Manual" mode holding the drag-reorder order; it went with drag.)
     IReadOnlyList<MeetingSummary> SortItems(IReadOnlyList<MeetingSummary> items) => _sort switch
     {
-        LibrarySort.Newest => items.OrderByDescending(m => m.StartedAt).ToList(),
         LibrarySort.Oldest => items.OrderBy(m => m.StartedAt).ToList(),
         LibrarySort.Longest => items.OrderByDescending(m => m.DurationMs).ThenByDescending(m => m.StartedAt).ToList(),
         LibrarySort.Shortest => items.OrderBy(m => m.DurationMs).ThenByDescending(m => m.StartedAt).ToList(),
         LibrarySort.OpenTasks => items.Where(m => m.OpenActions > 0)
             .OrderByDescending(m => m.OpenActions).ThenByDescending(m => m.StartedAt).ToList(),
-        _ => items,   // Manual - keep the store's drag-reorder order
+        _ => items.OrderByDescending(m => m.StartedAt).ToList(),   // Newest, and the fallback
     };
 
     static readonly (string Label, LibrarySort Mode)[] SortModes =
@@ -1507,7 +1562,6 @@ public partial class LibraryWindow : Window
         ("Longest first", LibrarySort.Longest),
         ("Shortest first", LibrarySort.Shortest),
         ("Most open tasks", LibrarySort.OpenTasks),
-        ("Manual (drag order)", LibrarySort.Manual),
     };
 
     // Toki's own themed popup (never the Win32 ContextMenu chrome) - same surface as the Copy menu,
@@ -1524,9 +1578,6 @@ public partial class LibraryWindow : Window
     {
         _sort = mode;
         try { var s = Llm.AppSettings.Current; s.LibrarySort = mode.ToString(); s.Save(); } catch { }
-        // Drag-reorder only makes sense in Manual order - turn it off when another sort is active so
-        // a drag can't renumber a view whose order isn't the stored one.
-        if (mode != LibrarySort.Manual && _dragEnabled) { _dragEnabled = false; UpdateDragToggle(); }
         UpdateSortButton();
         LoadList();
     }
@@ -1543,8 +1594,44 @@ public partial class LibraryWindow : Window
             LibrarySort.Longest => "longest first",
             LibrarySort.Shortest => "shortest first",
             LibrarySort.OpenTasks => "most open tasks",
-            _ => "manual order",
+            _ => "newest first",
         };
+    }
+
+    // ── perf harness seams (--uitest only; never used by the app) ──
+
+    /// <summary>An offscreen Library wired to the REAL store, for timing the work a click actually does.</summary>
+    internal static LibraryWindow PerfHarness()
+    {
+        var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
+        w.Show();
+        w.ShowPage("library", animate: false);
+        return w;
+    }
+
+    internal void PerfShowPage(string key) => ShowPage(key, animate: false);
+    internal void PerfLoadList() { LoadList(); UpdateLayout(); }
+    internal void PerfQueryOnly() { _ = App.Store.List(null); }
+    internal void PerfBuildOnly() { LoadList(); }   // no UpdateLayout: creation cost only
+    internal void PerfHighlight(long id) { _selected = id; HighlightSelectedCard(); UpdateLayout(); }
+    internal void PerfRenderMeeting(long id)
+    {
+        if (App.Store.Get(id) is { } m) { RenderMeeting(m); UpdateLayout(); }
+    }
+
+    /// <summary>Repaint just the selection, by walking the cards already on screen (each carries its
+    /// meeting id in Tag). O(visible rows) brush assignments instead of a full rebuild.
+    ///
+    /// Only REALISED rows are touched, because off-screen meetings have no visual to paint. That is why
+    /// the selected id lives in <c>_selected</c> and <see cref="Card"/> reads it when a row is built:
+    /// scrolling the selected meeting back into view rebuilds it already highlighted.</summary>
+    void HighlightSelectedCard()
+    {
+        foreach (var row in Cards.Realised())
+        {
+            if (row is not Border card || card.Tag is not long id) continue;
+            card.Background = id == _selected ? (Brush)FindResource("Chip") : Brushes.Transparent;
+        }
     }
 
     Border Card(MeetingSummary m)
@@ -1594,133 +1681,15 @@ public partial class LibraryWindow : Window
         };
         card.MouseEnter += (_, _) => { if (_selected != m.Id) card.Background = (Brush)FindResource("SurfaceHi"); };
         card.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
-        card.PreviewMouseLeftButtonDown += (_, e) => OnCardDown(card, e);
-        card.PreviewMouseMove += (_, e) => OnCardMove(e);
-        card.PreviewMouseLeftButtonUp += (_, e) => OnCardUp(card, m.Id);
+        card.PreviewMouseLeftButtonUp += (_, _) => Select(m.Id);
         return card;
     }
 
-    // ---- drag-to-reorder (iPhone-home-screen style: pick up, others slide to make space,
-    //      release snaps cleanly into the nearest slot - a card never sits between two) ----
-    Border? _drag;
-    int _dragFrom;
-    double _dragStartY;
-    bool _dragMoved;
-    readonly List<Border> _cards = new();
-    readonly List<double> _cardTops = new();
-    readonly List<double> _cardHeights = new();
-
-    void OnCardDown(Border card, MouseButtonEventArgs e)
-    {
-        _drag = card;
-        _dragMoved = false;
-        _dragStartY = e.GetPosition(Cards).Y;
-
-        // Snapshot cards + their tops/heights so we can compute slots + shifts during the drag.
-        Cards.UpdateLayout();
-        _cards.Clear(); _cardTops.Clear(); _cardHeights.Clear();
-        double top = 0;
-        foreach (var child in Cards.Children)
-        {
-            if (child is not Border b) continue;
-            var t = Translate(b);
-            t.BeginAnimation(TranslateTransform.YProperty, null);
-            t.Y = 0;
-            var h = b.ActualHeight + 8; // + bottom margin
-            _cards.Add(b); _cardTops.Add(top); _cardHeights.Add(h); top += h;
-        }
-        _dragFrom = _cards.IndexOf(card);
-        card.CaptureMouse();
-    }
-
-    void OnCardMove(MouseEventArgs e)
-    {
-        if (!_dragEnabled) return;   // reordering is opt-in - a plain click still selects (no move)
-        // Reordering only makes sense on the FULL list - a filtered view would renumber just the
-        // visible subset and scramble the global order. Under a search, a drag is treated as a click.
-        if (!string.IsNullOrWhiteSpace(SearchBox.Text)) return;
-        if (_drag is null || e.LeftButton != MouseButtonState.Pressed || _dragFrom < 0) return;
-        var dy = e.GetPosition(Cards).Y - _dragStartY;
-        if (!_dragMoved && Math.Abs(dy) < 4) return;
-        if (!_dragMoved) { _dragMoved = true; _drag.Opacity = 0.9; Panel.SetZIndex(_drag, 30); }
-
-        Translate(_drag).Y = dy;
-
-        var ins = InsertionIndex(_cardTops[_dragFrom] + _cardHeights[_dragFrom] / 2 + dy);
-        var dh = _cardHeights[_dragFrom];
-        for (var i = 0; i < _cards.Count; i++)
-        {
-            if (i == _dragFrom) continue;
-            var oi = i < _dragFrom ? i : i - 1;                       // its index among the "others"
-            var shift = (i > _dragFrom ? -dh : 0) + (oi >= ins ? dh : 0);
-            SlideTo(_cards[i], shift);
-        }
-    }
-
-    void OnCardUp(Border card, long id)
-    {
-        if (_drag is null) return;
-        card.ReleaseMouseCapture();
-        if (!_dragMoved) { _drag = null; Select(id); return; } // a click, not a drag
-
-        var center = _cardTops[_dragFrom] + _cardHeights[_dragFrom] / 2 + Translate(card).Y;
-        var ins = InsertionIndex(center);
-
-        // Settle: glide the dragged card into its final slot, THEN commit + rebuild. This is
-        // what stops it sitting awkwardly between two rows on release.
-        double slotTop = 0; var counted = 0;
-        for (var i = 0; i < _cards.Count && counted < ins; i++) { if (i == _dragFrom) continue; slotTop += _cardHeights[i]; counted++; }
-        var target = slotTop - _cardTops[_dragFrom];
-
-        var from = _dragFrom;
-        _drag = null;
-        var settle = new DoubleAnimation(target, TimeSpan.FromMilliseconds(160)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-        settle.Completed += (_, _) =>
-        {
-            card.Opacity = 1; Panel.SetZIndex(card, 0);
-            CommitReorder(from, ins);
-        };
-        Translate(card).BeginAnimation(TranslateTransform.YProperty, settle);
-    }
-
-    // Where the dragged card would insert among the OTHER cards (0..n-1), by comparing its
-    // centre to the others' closed-up mid-points (dragged card excluded).
-    int InsertionIndex(double centerY)
-    {
-        var idx = 0; double top = 0;
-        for (var i = 0; i < _cards.Count; i++)
-        {
-            if (i == _dragFrom) continue;
-            var h = _cardHeights[i];
-            if (centerY > top + h / 2) idx++;
-            top += h;
-        }
-        return idx;
-    }
-
-    void CommitReorder(int from, int ins)
-    {
-        var ids = new List<long>();
-        foreach (var b in _cards) if (b.Tag is long id) ids.Add(id);
-        if (from < 0 || from >= ids.Count) { LoadList(); return; }
-        var moved = ids[from];
-        ids.RemoveAt(from);
-        ids.Insert(Math.Clamp(ins, 0, ids.Count), moved);
-        try { App.Store.Reorder(ids); } catch (Exception ex) { App.Log($"reorder persist failed: {ex.Message}"); }
-        LoadList(); // rebuild in the new order (always resets every drag transform)
-    }
-
-    static TranslateTransform Translate(UIElement el)
-    {
-        if (el.RenderTransform is TranslateTransform t) return t;
-        var nt = new TranslateTransform();
-        el.RenderTransform = nt;
-        return nt;
-    }
-
-    static void SlideTo(UIElement el, double y) =>
-        Translate(el).BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(y, TimeSpan.FromMilliseconds(150)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    // (Drag-to-reorder lived here. Removed 2026-08-12 - owner: "it does not add much productivity as I
+    //  thought it would". It was also the one feature virtualization silently breaks, because it walked
+    //  Cards.Children BY INDEX, and under virtualization those are positions in the realised window
+    //  rather than in the list. The stored `sort_order` column and MeetingStore.Reorder are left alone;
+    //  nothing writes them now, and the "Manual (drag order)" sort mode went with the feature.)
 
     Border Chip(string text, string fgKey, string bgKey) => new()
     {
@@ -1767,7 +1736,11 @@ public partial class LibraryWindow : Window
         // demote a note the user genuinely opened.
         _viewedByUser = byUser || (_viewedByUser && _viewedRecord?.Id == id);
         _selected = id;
-        LoadList(); // refresh selection highlight
+        // Move the highlight, do NOT rebuild the list. This used to call LoadList(), so every click on a
+        // note re-queried the store and re-created ~500 visual elements for 52 meetings in order to
+        // change one background brush. That single line was most of the "slow and clunky" the owner
+        // reported (2026-08-11).
+        HighlightSelectedCard();
         var m = App.Store.Get(id);
         if (m is null) { _viewedRecord = null; return; }
         _viewedRecord = m;
@@ -1814,7 +1787,15 @@ public partial class LibraryWindow : Window
         toolbar.Children.Add(row);
         toolbar.Children.Add(status);
 
-        var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar, sticky: _sticky);
+        var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar, sticky: _sticky,
+            resolving: App.IsResolvingSpeakers(m.Id),
+            renameSpeaker: (from, to) =>
+            {
+                // One rename, every line that voice said. Re-read from the store rather than patching
+                // the in-memory copy, so what is on screen is what was actually written.
+                App.Store.RenameSpeaker(m.Id, from, to);
+                if (App.Store.Get(m.Id) is { } fresh) { MarkdownMirror.Write(fresh); RenderMeeting(fresh); }
+            });
         DetailBody.Content = body;
         // Start at the very TOP once laid out (a fresh RichTextBox occasionally came up scrolled down).
         if (body is RichTextBox rtb)
@@ -1886,7 +1867,17 @@ public partial class LibraryWindow : Window
         Reload(id);
     }
 
-    void OnSearch(object sender, TextChangedEventArgs e) => LoadList();
+    // Typing "pricing" used to run SEVEN full-text queries and seven complete list rebuilds, one per
+    // letter, each one throwing away the visual tree it had just built. Now the keystrokes settle first.
+    // 180ms is under the ~200ms that reads as instant, and above a fast typist's inter-key gap.
+    readonly System.Windows.Threading.DispatcherTimer _searchDebounce =
+        new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(180) };
+
+    void OnSearch(object sender, TextChangedEventArgs e)
+    {
+        _searchDebounce.Stop();
+        _searchDebounce.Start();
+    }
 
     void CopyTranscript(MeetingRecord m)
     {

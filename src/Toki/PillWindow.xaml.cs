@@ -95,6 +95,7 @@ public partial class PillWindow : Window
     {
         InitializeComponent();
         _state = state;
+        LogClicksThatMissAButton();
         // Clicking the Toki peek opens the remembered page (Home by default).
         App.OpenPeek = () => { if (_state.Current == PillState.Collapsed) _state.ForceForDemo(_context); };
         // A summarize that finished while the pill was forced elsewhere: retarget the remembered
@@ -117,6 +118,110 @@ public partial class PillWindow : Window
         // click on a button lands (and subsequent wheel/keys route here). Tunnels so it fires before
         // the click reaches the button - activation happens, then the button gets its click.
         PreviewMouseDown += (_, _) => { if (NeedsInput(_state.Current)) TryActivateNotch(); };
+    }
+
+    /// <summary>
+    /// Log every click on the notch that does NOT land on a button, together with what it hit instead
+    /// and whether a button was sitting within a few pixels.
+    ///
+    /// Why this exists: the owner reported that notch buttons only respond on their text, and three
+    /// successive offline harnesses all said the buttons were fine. Each harness turned out to be an
+    /// unfaithful model of the real thing - a plain host window, then one without the reveal transform,
+    /// then one auditing mid-animation. Rather than build a fourth model, this measures the real window
+    /// on the real machine at the moment the real click happens. One line in %TEMP%\toki-m1.log per
+    /// missed click, nothing at all when buttons behave.
+    /// </summary>
+    void LogClicksThatMissAButton()
+    {
+        PreviewMouseDown += (_, e) =>
+        {
+            try
+            {
+                var p = e.GetPosition(this);
+                var hit = System.Windows.Media.VisualTreeHelper.HitTest(this, p)?.VisualHit;
+
+                // Did the click land inside a button (or anything else that handles a click)?
+                for (var q = hit; q is not null; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
+                    if (q is System.Windows.Controls.Primitives.ButtonBase) return;
+
+                var chain = new List<string>();
+                for (var q = hit; q is not null && chain.Count < 5; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
+                    chain.Add(q is FrameworkElement { Name.Length: > 0 } fe ? $"{q.GetType().Name}:{fe.Name}" : q.GetType().Name);
+
+                // Was a button NEARBY? If so the click was in a button's box but missed its hit area,
+                // which is exactly the reported symptom - and names the culprit.
+                var near = NearestButton(p);
+                App.Log($"click miss at ({p.X:F0},{p.Y:F0}) state={_state.Current} "
+                    + $"hit=[{(chain.Count > 0 ? string.Join(" < ", chain) : "nothing")}]"
+                    + (near is null ? "" : $" NEAR={near}"));
+            }
+            catch { /* diagnostics must never break a click */ }
+        };
+
+        // And the same for HOVER, which is the current report: the click lands anywhere in the grey box
+        // but the box only LIGHTS UP over the glyphs. For a real WPF Button those two cannot differ -
+        // hover and click share one hit test - so either something other than the button is drawing that
+        // highlight, or the control is not the button it appears to be. This says which, from the real
+        // window, instead of another round of reasoning about templates.
+        long lastHoverLog = 0;
+        string? lastHoverKey = null;
+        PreviewMouseMove += (_, e) =>
+        {
+            try
+            {
+                var p = e.GetPosition(this);
+                foreach (var b in Descendants(this).OfType<System.Windows.Controls.Primitives.ButtonBase>())
+                {
+                    if (!b.IsVisible || b.ActualWidth <= 0) continue;
+                    Point local;
+                    try { local = TranslatePoint(p, b); } catch { continue; }
+                    var inside = local.X >= 0 && local.Y >= 0 && local.X <= b.ActualWidth && local.Y <= b.ActualHeight;
+                    if (!inside) continue;
+
+                    // Inside the button's box. Is the button itself aware of it? If not, the highlight
+                    // cannot be coming from this button, and THAT is the bug.
+                    if (b.IsMouseOver) return;
+
+                    var key = $"{b.Name}|{b.Content as string}";
+                    var now = Environment.TickCount64;
+                    if (key == lastHoverKey && now - lastHoverLog < 1000) return;
+                    lastHoverKey = key; lastHoverLog = now;
+
+                    App.Log($"hover miss: inside {b.GetType().Name}:{(b.Name.Length > 0 ? b.Name : b.Content as string ?? "?")} "
+                        + $"({b.ActualWidth:F0}x{b.ActualHeight:F0}) at local ({local.X:F0},{local.Y:F0}) "
+                        + $"but IsMouseOver=false, IsHitTestVisible={b.IsHitTestVisible}, "
+                        + $"DirectlyOver={(Mouse.DirectlyOver?.GetType().Name ?? "null")}");
+                    return;
+                }
+            }
+            catch { /* diagnostics must never break the pointer */ }
+        };
+    }
+
+    /// <summary>Name of the closest button whose box contains this point, if any.</summary>
+    string? NearestButton(Point p)
+    {
+        foreach (var b in Descendants(this).OfType<System.Windows.Controls.Primitives.ButtonBase>())
+        {
+            if (!b.IsVisible || b.ActualWidth <= 0) continue;
+            Point local;
+            try { local = TranslatePoint(p, b); } catch { continue; }
+            if (local.X >= 0 && local.Y >= 0 && local.X <= b.ActualWidth && local.Y <= b.ActualHeight)
+                return $"{b.GetType().Name}:{(b.Name.Length > 0 ? b.Name : b.Content as string ?? "?")} "
+                     + $"({b.ActualWidth:F0}x{b.ActualHeight:F0}) at local ({local.X:F0},{local.Y:F0})";
+        }
+        return null;
+    }
+
+    static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        var n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < n; i++)
+        {
+            var c = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            yield return c;
+            foreach (var d in Descendants(c)) yield return d;
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
