@@ -1,288 +1,145 @@
 # CLAUDE.md - Toki for Windows
 
-Condensed from `WINDOWS-BUILD-PROMPT.md` (the full brief - read it when detail is needed). This file carries the same rules.
-
-## Current state & roadmap (updated 2026-08-12)
-
-**T2 WIRED + T5 UI perf + T8 diarisation measured (2026-08-12):** 1,807 tests green.
-**T2 is live on BOTH paths** — it was complete-but-dead because the LIVE transcription path skips
-`TranscriptionService.Process` and correction only lived there; the fallback worked so tests passed while
-the common path did nothing. Lexicon tiers: **trusted** (`AppSettings.UserName`, calendar attendee
-DisplayNames, new `AppSettings.PinnedNames`) wins outright + wider match; **corpus** (all transcripts +
-titles + summaries + action owners x3) settles ties.
-**T5 UI — full write-up `docs/ui-performance.md`.** `Select()` called `LoadList()` to move one highlight:
-**424ms → 0.4ms**. `OnSearch` rebuilt per keystroke → 180ms debounce. New **`--uitest`** measures against
-the REAL db with budgets (16ms selection / 250ms build / 400ms note). Build still FAILS at 424ms for 54
-meetings, **~343ms of it WPF arranging off-screen cards** → virtualization justified by measurement.
-**Risk: drag-reorder walks `Cards.Children` BY INDEX** — the one thing virtualization silently breaks.
-**T8 diarisation — new `--diartest`.** Measured on real audio (8.4 min `them.wav`): textbook route 59.6s
-(RTF 0.119) vs **ASR-guided 7.1s (RTF 0.014)** = 10x, ~50s for a 60-min meeting. ASR-guided = one
-embedding per utterance Toki ALREADY has bounds for; published as Turn-to-Diarize (ICASSP 2022, 31x less
-compute AND lower DER). Also sidesteps sherpa issue #3253, an **uncatchable** .NET AccessViolationException
-on multi-chunk audio. **Use AVERAGE linkage, not complete** (complete split ONE speaker into 5, never
-below 2 even at 0.95). **No single threshold works**: 0.80 → correct 1 for a 1:1 but collapses an 11-person
-call to 2; 0.55 → 7 for the team call but shatters the 1:1 into 5. Design: calendar attendee count as
-prior, conservative default (under-split = status quo; over-split invents people), user-settable count
-(re-clustering ~5s). **GPU rejected** (shipped NuGet is CPU-only, `cuda` silently falls back, measured
-RTF 0.24 even on a 3090). **LICENCE TRAP: `sherpa-onnx-reverb-diarization-v1/v2` are in the SAME release
-and are non-production** — safe names pinned in `ModelManager`.
-**BLOCKED on owner:** persistent voiceprints yes/no; when diarisation runs.
-
-## Current state & roadmap (updated 2026-08-11)
-
-**T1-T8 "the first real meetings" IN PROGRESS (2026-08-11):** 1,807 tests green. Two real recordings (an
-8-min 2-person call, a 6-min 11-person team call) found failures **every one of which was invisible to the
-1,800-test suite** - the suite tested the layers, not the artifact a person reads. FULL ANALYSIS:
-`docs/real-meeting-findings.md` (read this before touching ASR/notes).
-**DONE:** **T1** transcript was shredded - 182 segments in 8 min, backchannels spliced mid-sentence;
-`TranscriptMerger` only echo-deduped then sorted by time, **no same-speaker merge existed**. Now joins
-turns (1.5s gap, 700-char cap) + displaces backchannels. **T2** `Transcription/NameCorrector.cs` - names
-that sound alike cluster (compact Metaphone + edit distance) and collapse to a **trusted** spelling (user's
-own name / calendar attendee / pinned) else the **most frequent across the WHOLE library**. Craig/Greg is
-a dead tie in one meeting, not close across the library. Guards: ordinary words excluded ("Great" can
-never become "Craig"), sentence-initial excluded, two trusted spellings = two real people, dead ties left
-alone. **T3** Summary was RAW TRANSCRIPT twice - model skipped SUMMARY and the writer substituted
-`NoteExtractor.Tldr` (first ~140 chars of transcript); now retries summary-only, else emits NOTHING. This
-also poisoned the TITLE. **T7** a roll-call became 11 to-dos; a task must contain an action, near-dupes
-collapse.
-**Chosen after research:** post-ASR correction, NOT decode-time hotwords - sherpa-onnx supports them for
-Parakeet TDT but the shipped archive has **no `bpe.vocab`**, and it would force beam search over greedy;
-post-correction is also **retroactive** over saved meetings.
-**IN PROGRESS: T8 diarisation.** 11 people collapse into "Them". Two-stream design helps: `you.wav` means
-the local user is ALREADY separated, so only `them.wav` needs splitting. sherpa-onnx 1.13.4 already
-exposes `OfflineSpeakerDiarization`, pyannote segmentation, `SpeakerEmbeddingExtractor`,
-`FastClusteringConfig` and **`SpeakerEmbeddingManager`** (Add/Search/Verify = voice enrollment). No new
-dependency, 2 small model downloads. Licence/size/CPU under research.
-**TODO:** T4 action-item owners; T5 UI (`Select()` rebuilds all 52 cards for one highlight, `OnSearch`
-rebuilds per keystroke, `Cards` is a non-virtualizing StackPanel); wire T1/T2 into the save path; Settings
-names list; "Re-clean saved transcripts"; underline corrected words. Both meetings were mis-classified
-"Decision log" when neither made a decision.
-
-**S8 polish pass DONE (2026-08-06):** 1,774 tests green, published, still NOT owner-bug-tested with real
-meetings. (a) **"Mosquito text" was DATA LOSS, not cosmetics** — a blank spacing line was drawn at
-`FontSize=6`; typing on it gave 6px text AND the line stayed tagged `Blank`, and `NoteMarkdown.Write`
-emits nothing for a Blank block, so the sentence was **deleted on the next save**. Fixed three ways:
-`LineHeight` (never FontSize) shortens a line, a blank line with text re-derives as Body, and restyling
-clears per-Run FontSize/FontWeight (WPF stamps the caret's formatting onto typed Runs) + stale LineHeight.
-`--notetest` now 20 checks. (b) **No em dashes anywhere** — 3,089 replaced across 188 files; exactly 3
-functional ones survive, each named in `NoEmDashTests` (Evidence separator, LlmNoteWriter empty-marker,
-GeneralChat.PlainDashes). Model output is scrubbed at the note writer, at every reply, and **per streamed
-token**. EN dashes stay in ranges. (c) **One type ramp, SETTINGS is the reference** —
-`PageTitle`/`PageSubtitle`/`SectionTitle`/`PanelTitle`/`NoteTitle`; SemiBold everywhere, Bold only for
-micro-elements; Templates left-aligned like every other page. (d) **The box is the button** — `PillButton`
-hover was an *opacity* change, invisible on `Background="Transparent"` buttons, so they had no hover at
-all; the template now has a hover OVERLAY layer. Size floors (PillButton 32×34, IconButton 34×34, editor
-chips 32×30). An **unset** Background is `null` and a null-background Border is invisible to hit testing.
-New shared `RowButton`; Copy is one split pill; sidebar nav rows light on hover. See README "S8",
-ARCHITECTURE "S8 decisions".
-
-**S1–S7 "sticky notes, done properly" DONE (2026-08-06):** 1,759 tests green, published, NOT yet
-owner-bug-tested with real meetings. Fixes the first owner test of N1–N7.
-**S1 - the "bullets create themselves" bug, root-caused.** WPF's native `List`/`ListItem` was the cause,
-three ways: a paragraph inside a `ListItem` isn't a child of `Document.Blocks` (Enter threw; the Body
-button couldn't leave a list), the list marker was invisible to the text model so a **typed** "- " was
-saved *on top of* the kind's own marker (`- - two`, +1 dash per save), and a blank line restarted
-numbering. Rewritten to **flat paragraphs**, marker in a non-text `InlineUIContainer`, positional
-renumbering, typed markers auto-promoted and eaten. `NoteMarkdown.TryMarker` is now the ONE definition of
-a marker (parser / writer / editor). New **`--notetest`** drives the real control (types, Enter, toolbar,
-ticks) - 13 checks incl. ten save/reload cycles. **S2 - typed notes no longer steer the summary** (N6
-reverted by owner: a summary you can't check against the room is worse than a plain one). **S3 - sticky
-notes are real rows** (`sticky_notes` + `sticky_event` + `sticky_meeting` in `toki.db`); `prep-scratch.json`
-migrated once then renamed, `Storage/PrepScratch.cs` deleted. **S4 - which note a meeting uses is the
-USER'S CHOICE, by id, never by title match** (picker on the prep card; one note can run across many
-meetings). **S5 - the pre-meeting nudge is back**, but surfaces only when the notch is idle and nothing is
-fullscreen. **S6 - the sticky note lives INSIDE the meeting note** ("My sticky note" button under the
-title; opens between the notes and the transcript; edit/auto-save/two-step-delete). The separate Library
-Keep/Discard card is **gone** (owner: "does not even open, confusing as f"). **S7 - action items get ↳
-evidence links too.** Deliberate non-goals, each test-guarded: sticky notes are NOT in the meetings table,
-NOT in FTS/Ask, NOT an input to the note writer. Also fixed: the note editor's dropdown rows were
-`Border`+`MouseLeftButtonUp` inside a `StaysOpen=false` popup - silently dead; both notch pickers now share
-`Views/NotePicker.cs`. See README "S1–S7", ARCHITECTURE "S1–S7 decisions", `docs/backlog.md`.
-
-
-**N1–N7 "notes you can actually write in" DONE (2026-08-05):** 1,738 tests green, published, NOT yet
-owner-bug-tested with real meetings (owner is holding the git push until they do). N1 **`Views/NoteEditor`**
-- one Markdown-backed editable surface (3 sizes, tickable to-dos, lists, spacing, template insertion;
-**no font family, no colour**; `Compact` glyph toolbar for the 356px notch) → N2 **Library manual notes**
-use it (were a bare TextBox) → N3 **Edit turns the prep card ITSELF into the note** (`PrepBuilder.ToMarkdown`
-- recap as text, open items as tick boxes, agenda as bullets) → N4 **prep card never auto-surfaces**;
-`PrepWatcher` only ARMS it, reached by hovering the peek or the **"Prep card" button on the recording
-page** (PrepCard is now stayable + always has Back) → N5 **Keep/Discard on the Library note list** when a
-recording stops (`Storage/PrepScratch.cs`, atomic JSON outside the DB - nothing auto-saved) → N6 **typed
-notes STEER the summary** (injected before the transcript as a hard constraint; tick state as
-`[task]`/`[done]`; re-attached as a "Your notes" section on EVERY failure path) → N7 **evidence links**
-(`Storage/Evidence.cs` - ↳ jumps to the transcript line; silent when below the match floor, because a
-wrong link is worse than none; computed at render time so it works retroactively).
-**Bug fixed en route:** `JoinAndRecord` was discarding `CurrentPrep`, so the card vanished during the very
-meeting it was built for. **Open by design:** prep auto-surface removal is logged for revisit (task #58);
-prep notes for un-recorded meetings stay invisible (#59); re-writing a note with another template loses
-the typed steering. See README "N1–N7", ARCHITECTURE "N1–N7 decisions", `docs/backlog.md`.
-
-**v1-iter3 premium UI + settings-move DONE (2026-08-04/05):** 1,682 tests green, published. Task-count-per-
-date fix (count words leaked into task topic). Acknowledgements ("okay cool")→small-talk. AI/API settings
-moved to a reusable `AiSummariesSection` on the Library Settings page → **notch Settings is UI/visibility
-only**. Recording page compacted (~93×268). **Ghost mode re-asserted on every notch state** (acrylic/region
-re-composition was shedding WDA_EXCLUDEFROMCAPTURE). Luma-style Ask landing + assistant self-awareness in
-prompts + copy trim. Library sort menu → in-house themed popup; Library jump-pill. **Calendar/COMING-UP/
-PrepCard premium redesign** (accent bars, attendee avatars, amber countdowns, Join; PrepCard="Coming Up"
-card). **New mascot**: `TokiBlob` redrawn brighter+black-eyes; `--makeicon` renders it to `Assets/toki.ico`
-as a **7-frame icon (16→256px)** - a single 256px frame downscales badly, which is why the taskbar/shortcut
-looked un-updated (Windows also caches those: unpin/re-pin or `ie4uinit.exe -show`). Ask landing example-
-question **chips removed** (owner: "never encourage"). Motion tokens (`Theme/Motion.cs`) drive it all. See
-README v1-iter3 + ARCHITECTURE "v1-iter3 decisions". Built largely via partitioned Fable agents (parent
-builds/tests/publishes/verifies).
-
-**v1-iter2 owner fix+feature+polish sweep DONE (2026-08-04):** long live-test session, 1,657 tests green,
-all owner-verified on the real PC. Notch: **stick-to-bottom scroll** (no more yank-down), **text cut-off +
-open/close stability** (14px bottom breathing pad + clip-generation guard; root-caused via new headless
-`--measuretest` that measures true arranged height without RenderTargetBitmap). **First-run onboarding**
-(`PillState.Onboarding`, gated on `AppSettings.OnboardingComplete`) + **name moved to a Library-window
-Settings page** (4th nav tab, Confirm/Cancel/✓Saved, live greeting refresh - HomeView.RefreshGreeting on
-show). Voice: **misheard→clarify** (auto-re-listen REMOVED - a 2nd mic starved push-to-talk; the endless
-"I didn't catch that" was that + a MUTED Windows mic, not a Toki bug), **multi-turn meeting create**
-(`CalendarCommand.ApplyUpdate` slot-fill), **reply hygiene** (blank-answer `"\n\n"` stop removed;
-`GeneralChat.Sanitize()` strips leading "Toki:" label + emojis; prompt bans labels/emojis/date-echo, ends
-"Reply:"). Calendar: **structured Title/Day/Time create form**, **Copy Meet link** (joinable link only),
-**"meeting on now - Join?"** both-smart prompt (calendar Join-call + Record, or ad-hoc Join&take-notes;
-re-surfaces after snooze - `MeetingDetector.Snooze` clears `_prompted`). **PTT hook:** ends on SPACE-up
-only (relaxing Ctrl/Alt no longer cuts the mic - the "waveform disappears while listening" bug). **UI
-revamp #39 STARTED:** central motion tokens (`Theme/Motion.cs`, ease-OUT morph), message fade-up, notch
-**"↓ Latest" jump pill** + **3-dot thinking indicator**. See README v1-iter2, `docs/backlog.md`, and the
-`asr-and-notch-reply-quality` memory. **PARKED (owner): ASR model quality** on short push-to-talk (resume
-plan in memory). **#39 next passes:** empty-state control, layout-stability sweep, hover-expand section
-pills, Library jump-pill.
-
-**H3 assistant-brain rework DONE (2026-08-04):** stress-test-driven rework of the Ask brain - 1,155-case
-deterministic prompt-test golden set (`tests/Toki.Tests/Brain/`, fixture + frozen clock + RouteOf), total
-1,636 tests green. Fixed: task provenance-vs-due-date (`TaskScheduling.ModeFor` - "what tasks did I have
-on Aug 2" no longer dumps overdue), accurate Persona privacy responder (was falling through to retrieval),
-general-knowledge routing override, wider phrasing coverage. Brain-only. See README H3, ARCHITECTURE
-"The assistant brain", `mansplain/31`, backlog H3 (deferred: content-word ASR/typo tolerance, fuzzy names).
-
-**H1 hardening pass DONE (2026-08-04):** full multi-agent audit (67 verified findings - all 14 high +
-21 medium fixed), recording-lifecycle integrity (a live mic can never be hidden; session is the truth),
-delete-removes-audio, crash/quit recovery (`RecordingRecovery` startup sweep + periodic WAV-header
-flush), mic device-change rebuild (`IMMNotificationClient` + `BufferConverter`), denylist/new-Teams
-detection fixes, LLM dispose race, ApiLlm streaming timeouts, calendar pagination/timeout contracts +
-OAuth listener resilience, atomic settings writes, fullscreen prompt suppression, notes-prompt quality
-rules, API→local notes fallback, SharpCompress CVE bump. See README H1, ARCHITECTURE "The hardening
-pass", `mansplain/29`, and `docs/backlog.md` (research-derived opportunities + deliberate deferrals).
-
-**Shipped:** M0–M6 (pill shell, audio, detection, transcription+echo-dedup, storage+heuristic notes+Library, LLM notes). Plus: theme toggle, 8 note templates, cloud mascot, tinted-mirror notch, the Library **hub** (Ask / Library / Templates), whole-note copy/select, BYO API key, and the **Ask chatbot** - streaming answers, FTS5 retrieval, a deterministic **understand-first** layer (temporal + intent parse → SQL resolution) with **conversation memory** (follow-ups), and (P10) a **dialogue brain**: turn-type routing (command / small-talk / persona / **user-fact & identity** / misheard-command clarification / meeting-QA / **general conversation**), a persisted user profile ("call me Anirudh" → remembered, used by the greeting and prompts), RAG-vs-parametric routing (general turns answered from the model's own knowledge - no forced retrieval), and anti-fabrication rails (relevance floor; no citations on a miss). Detail: `ARCHITECTURE.md`, `docs/ask-toki-brain.md`, and the `notes-and-chatbot-plan` / `build-and-run` memories.
-
-**Not yet done (roadmap) - see the fuller list below in this file's history or ask):**
-1. **On-device meaning-search (embeddings/hybrid/reranker)** - BLOCKED by a native backend conflict; fix = out-of-process CPU embedder (see ARCHITECTURE "Why on-device embeddings are deferred").
-2. ✅ **DONE - voice.** Ask-bar mic (click → speak → fills the box; auto-stop + loader) AND **push-to-talk on the notch**: `Ctrl+Alt+Space` = hold-to-talk (Wispr-Flow style) → notch drops down, listens (waveform), release → thinks → answer streams on the notch (`PushToTalkHook` + `AskView`). Mic runs ONLY while held.
-3. ~~"Hey Toki" wake word~~ - **DROPPED by owner (2026-08-02).** Owner chose **push-to-talk only, no always-listening**: the hotkey is hold-to-talk; there is **NO always-on mic and NO wake word**. Keeps Hard Constraint #3 fully intact. Do NOT rebuild the wake word unless the owner reverses this. (Polished conversational Q&A-on-the-notch is a future refinement of the P6 push-to-talk.)
-4. **Toki animation in the Library/hub** - ✅ mascot redesigned (soft gradient cloud, matches the product design) + a click-reaction vocabulary (squish/hop/wobble/wink/spin/big-eyes/nod) in `TokiBlob`. (Idle breathing/blink already existed.)
-5. ✅ **DONE - Library filter/sort menu** (Newest/Oldest/Longest/Manual-notes-only), shipped in H2 and restyled in v1-iter3 to the **in-house themed popup** (no native Windows menu; pink check on the active mode).
-6. **Manual/custom notes**: separate left-panel section vs a "Manual notes" filter - owner decision pending.
-7. ✅ **DONE - notch glassy/acrylic toggle** (M9.0): Settings → Appearance → "Glassy notch", a real DWM acrylic blur-behind, theme-aware, off by default. See ARCHITECTURE "the glassy-notch blur".
-8. **Speaker diarisation** (named speakers, not just YOU/THEM) - task name-tags done; transcript diarisation not.
-9. **M7 Calendar** - ✅ **foundation + UI DONE (2026-08-03, live-verified):** OAuth (loopback+PKCE), DPAPI token, raw-HTTP `Calendar/` module, `CalendarService` facade; connected Home "COMING UP", `PillState.Calendar` agenda week view, natural-language create, edit (`events.patch`), delete (undo/confirm); **prep cards** (M7.2 - `PrepWatcher` auto-surfaces a deterministic before-meeting card: LAST TIME recap + STILL OPEN + AGENDA + Join-and-record). `--caltest …|parse`, `--preptest`, `--state PrepCard`, `docs/google-setup.md`, design = `Toki-ProductDesign/③ Home` + `④ prep card`. **voice-create** (M7.3 - "schedule a call with Ana tomorrow at 3" on push-to-talk, confirm-gated, `Llm/CalendarCommand.cs`, `--voicecreatetest`). **Still to build:** owner-confirm prep auto-vs-hover. Outlook post-v1 (UI provider-neutral); Google scope verification → M8. See `calendar-foundation` memory.
-10. **M8 Ship shape** - ✅ **Attribution/"Built with" screen DONE (2026-08-04):** `AboutView` (`PillState.About`), reached from the **Library window's Settings page → "Built with - open source & licences"** (moved there in v1-iter3 with the rest of the settings); scrollable credits list (MODELS + ENGINES & LIBRARIES), each row opens its upstream source; attribution-required licences (Parakeet **CC-BY-4.0** with an "int8 quantised" modification note, Qwen **Apache-2.0**, sherpa-onnx Apache-2.0) get amber chips, MIT stays neutral; Whisper deliberately **omitted** (stubbed fallback, not shipped); repo `THIRD-PARTY-NOTICES.md` holds the full attributions. **Still to build:** signed installer + Velopack auto-update, Gumroad/Lemon-Squeezy key gate, onboarding download polish.
-11. **M9** character & polish - largely delivered across M9.0/M9.1 + v1-iter2/iter3 (premium redesign, motion tokens, mascot redraw, calendar/prep/recording/Ask redesigns). **Remaining #39 passes:** shared empty-state control, layout-stability/text-trim sweep, hover-expand "section pills". (Live transcription preview is parked - owner deprioritized.)
-12. **Graduated adaptive-resource scaling (RAM tiers)** - TODAY'S IDEA, not built. Resource adaptation is coarse: RAM = a single binary switch (`App.LowMemoryMode`, <8GB), VRAM = 3 GPU tiers (`LlmRuntime`), context follows VRAM not RAM, model always Qwen3-4B. Proposed: RAM tiers (16GB+ → bigger context/history; 6–8 → low-memory; <~6 → heuristic-only floor), maybe a 1–2B fallback model on tiny machines. See `docs/backlog.md`.
-13. **BYO-API "sharp brain" lever** - the P10 dialogue brain drives EITHER backend identically; on-device general chat is competent-but-modest (4-bit 4B ceiling), so the API key is the real sharpness upgrade. Not-yet-built: surface/encourage it better while keeping on-device the $0 default. See `docs/backlog.md`.
-
-**Full backlog with reasoning: `docs/backlog.md`.**
-
+This file is the CONSTITUTION: the rules, constraints and expectations that govern every session.
+It holds no state and no history. **Never append build-log entries, milestone summaries, or
+"current state" sections here** - that is how the last version of this file rotted into 300 lines
+of stale changelog. State lives where state belongs (see "Where the truth lives", bottom).
+Rewritten fresh 2026-08-14 at the owner's ask; the old file is archived at
+`docs/claude-md-archive-2026-08-14.md`.
 
 ## What Toki is
 
-A meeting assistant that lives quietly at the edge of the screen. Detects when you're in a meeting, offers to record, transcribes and summarizes **entirely on-device**, and keeps every meeting in a searchable local Library. One-time $20, no subscription, nothing leaves the laptop.
+A meeting assistant that lives at the TOP edge of the screen as a hovering glass card (a "virtual
+notch") plus one Library window. It detects when you're in a meeting, offers to record,
+transcribes and summarizes entirely on-device, and keeps every meeting in a searchable local
+Library. One-time $20, no subscription, nothing leaves the laptop. Restraint is the design.
 
 ## Hard constraints - every decision filters through these
 
-1. **$0 monthly upkeep, forever.** No servers, no cloud costs. On-device ASR + LLM. Optional BYO API key = user's cost.
-2. **All data local.** SQLite + files under `%APPDATA%\Toki\`. No account, backend, telemetry, or sync.
-3. **Toki only activates for meetings.** Never taps system audio globally. Detects a call, asks the user, taps only that app's process tree. Human in the loop unless the user chose "always record". Owner decision - do not relax.
-4. **Minimal permissions.** Loopback needs no prompt on Windows; keep it that way. Never add anything that triggers a scary system prompt.
+1. **$0 monthly upkeep, forever.** No servers, no cloud costs. On-device ASR + LLM. Optional BYO
+   API key = the user's cost, never ours.
+2. **All data local.** SQLite + files under `%APPDATA%\Toki\`. No account, backend, telemetry, sync.
+3. **Toki only activates for meetings.** Never taps system audio globally; detects a call, asks,
+   taps only that app's process tree. Human in the loop. Owner decision - do not relax.
+4. **Minimal permissions.** Nothing that triggers a scary system prompt.
 5. **Restraint is the design.** Appear only with something worth showing.
 
 ## Working with the owner
 
-The owner (Sid, they/them) is **non-technical**.
+The owner (Sid, they/them) is **non-technical**. Most past friction has been alignment friction -
+these rules are how we stay aligned:
 
-- Explain plans in plain language before big changes. Recommend, don't assume; ask before product decisions.
-- **Verify by running the app and watching real output appear - never by describing what code should do.** We build on the target OS; run everything, every time.
-- Never run `git` commands unless asked.
-- Small milestones, each verified before the next.
-- After every milestone update: `README.md` (build log), `ARCHITECTURE.md` (decisions + rationale), `mansplain/` (plain-language story).
+- **Explain plans in plain language before big changes.** Recommend, don't assume; ask before
+  product decisions. Do exactly what was asked; never spread a change to other components "for
+  consistency" without approval.
+- **Verify by RUNNING the app and watching real output appear** - never by describing what code
+  should do. A green test suite has repeatedly missed bugs the owner saw in one glance; for
+  anything visual, the owner's eyes are the final gate. Self-tests measure a model of the product;
+  when they disagree with the owner, the owner is right.
+- **Never run git commands.** The owner does ALL git, including staging. My job ends at "safe to
+  commit" plus a list of what changed.
+- **Never touch `%APPDATA%\Toki\settings.json`** (DPAPI-protected API key and calendar tokens;
+  corruption is irrecoverable). Harnesses and tests must never touch the real note store.
+- **No em dashes, anywhere** - code, comments, docs, UI, prompts. Hyphen, comma, or a new
+  sentence. Guarded by `NoEmDashTests` (3 named functional exceptions). En dashes in ranges stay.
+- **A clickable thing is a Button.** Never a Border with a mouse handler (this bug shipped three
+  times). The box IS the button: hit target = hover highlight = visible box.
+- **A control wired to nothing is worse than no control.** Never ship UI for a feature that
+  doesn't exist yet, even if the design frame draws it.
+- **One Toki per surface.** On any panel or window there is exactly one mascot (the floating
+  bubble beside the notch card; peeks carry their own tiny one because the bubble hides there).
+- **Small milestones**, each verified before the next. After every milestone: update `README.md`
+  (build log), `ARCHITECTURE.md` (decisions + rationale), `mansplain/` (plain-language story).
+- Never add `Microsoft.ML.OnnxRuntime` (native backend conflict with sherpa-onnx).
+
+## Design - the Figma file is the boss
+
+- **Reference**: Figma file `Udtb5KHB2iTLIVP5FhKaSl`, node `288:4` ("Redesign by SKz") - THE
+  design. When building any screen, fetch the frame and replicate it; approximations get rejected.
+  Adopted screens are implemented in WPF from the FRAME (never ported from generated HTML).
+- **The material**: warm dark glass rgba(33,30,30,0.5) (opaque stand-in #2B2828), radius 24 cards
+  with a 1px white-10% rim, text as WHITE OPACITIES (90/50/25), Segoe UI Variable. Radii are
+  concentric: card 24 > inner 16 > capsule 12 > pill 999. One meaning one colour: amber=time/counts,
+  teal=actions, blue=people, green=decisions, pink=questions, coral=record CTA, #FF2D55=Stop only.
+  Tokens live in `Theme/Theme.xaml` + `Theme/ThemeManager.cs` (Color+brush pairs, theme-swapped).
+- **Motion & feel**: apply `.claude/skills/motion-and-feel/SKILL.md` on EVERY visual change. The
+  short version: animate only transforms/opacity/clip; no Effect inside an animated subtree;
+  curves from `Theme/Motion.cs`; every button compresses on press; exits ~70% of enters.
+- **The notch architecture**: the window is BIGGER than the card (mascot gutter left, shadow pads
+  right/bottom, all in `PillWindow` CardPad constants); the card hovers below the top edge except
+  recording (flush-ish) and the collapsed summon peek (flush). Toki's bubble position is per-state
+  (`PlaceMascot`). Ghost mode (WDA_EXCLUDEFROMCAPTURE) must be re-asserted after every
+  composition write (`ApplyGhost()`).
+- A web mirror of the design system lives in `design-web/` and syncs to claude.ai/design
+  (see `.design-sync/NOTES.md`). It drifts when the theme changes; port token changes by hand.
 
 ## Tech stack (owner-confirmed - do not re-litigate)
 
 | Concern | Decision |
 |---|---|
-| Framework | C# / .NET 8 + WPF |
-| UI | Single morphing pill overlay, bottom-center (see Design) |
-| "Them" audio | WASAPI Application Loopback, per-process-tree (`AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`, include-tree), Win 10 2004+ |
+| Framework | C# / .NET 8 + WPF, `net8.0-windows10.0.19041` |
+| Overlay | ONE morphing window, TOP-center hovering notch (state machine in `AppState`; views only read it) |
+| "Them" audio | WASAPI Application Loopback, per-process-tree, Win 10 2004+ |
 | "You" audio | WASAPI mic capture via NAudio |
-| Detection | Registry mic-in-use poll (`CapabilityAccessManager\ConsentStore\microphone`), 2.5s |
+| Detection | Registry mic-consent-store poll, 2.5s; DENYLIST not allowlist; debounce 2 polls |
 | Final ASR | Parakeet TDT 0.6b v2 (ONNX int8) via sherpa-onnx, whole-file per stream |
-| Live preview | sherpa-onnx streaming Zipformer (preview only, never saved) |
-| ASR fallback | whisper.cpp `small.en` - **only on error, never on silence** |
-| Notes LLM | Qwen3-4B-Instruct-2507 Q4_K_M via LLamaSharp, Vulkan backend, CPU fallback |
-| Notes floor | Deterministic heuristic extraction, always available |
-| Storage | SQLite (`Microsoft.Data.Sqlite`) at `%APPDATA%\Toki\toki.db` + Markdown mirror in `%APPDATA%\Toki\Notes\` |
-| Calendar | Google OAuth loopback redirect, DPAPI-encrypted tokens; Outlook is post-v1 |
-| Hotkey | `RegisterHotKey`, default Ctrl+Alt+Space, configurable |
-| Tray | `H.NotifyIcon.Wpf` |
-| Distribution | Signed installer + Velopack updates from GitHub Releases; Gumroad/Lemon Squeezy key |
-| Models | Downloaded during onboarding with progress UI, re-warmed every launch - a meeting never waits on a download |
+| ASR fallback | whisper.cpp small.en - only on ERROR, never on silence |
+| Name repair | Post-ASR correction (`NameCorrector`, corpus-wide + trusted names), never decode-time hotwords |
+| Diarisation | ASR-guided (one embedding per utterance), AVERAGE linkage, threshold 0.80, attendee-count prior; NO persistent voiceprints (owner decision) |
+| Notes LLM | Qwen3-4B-Instruct Q4_K_M via LLamaSharp, Vulkan, VRAM-auto GPU offload; heuristic extraction always available as the floor |
+| Storage | SQLite at `%APPDATA%\Toki\toki.db` + Markdown mirror in `Notes\` |
+| Calendars | Google AND Outlook, both connectable at once, loopback+PKCE, DPAPI tokens, merged agenda |
+| Voice | Push-to-talk ONLY (Ctrl+Alt+Space hold). NO wake word, NO always-on mic (owner decision) |
+| Echo fix | Cross-stream text de-dup post-ASR (±4s window); OS AEC opt-in only |
+| Distribution | `dist\Toki.exe` self-contained single-file test build; signed installer + Velopack = M8, PARKED until product final |
 
-## Design - notch → pill
+## Lessons paid for - do NOT relearn
 
-Reference designs: `Toki-ProductDesign/` (PNG exports of the macOS design). The Mac version hangs from the notch, top-center; **Windows uses a pill at bottom-center that expands upward.** Same design language: near-black surfaces, large corner radii, pink Toki character, coral record button, white pill buttons. SF Pro Rounded on Mac → Segoe UI Variable on Windows.
+1. Garbage in, garbage out - check what the LLM is fed before tuning prompts.
+2. A meeting never waits on a download. Download at onboarding, warm at launch, degrade to heuristic.
+3. Never hand-chunk audio. One whole-file ASR call per stream.
+4. Silence is not failure. Empty Parakeet result = nobody spoke; Whisper only on actual error.
+5. Reset recognizer state between meetings.
+6. OS echo-cancel is fragile; opt-in only.
+7. A silent meeting saves nothing - no hollow Library entries.
+8. Sampler params over prompts (Qwen3: temp 0.7, topP 0.8, topK 20, presence ~0.5, never greedy;
+   validate output, retry once, fall back to heuristic).
+9. Titles from the summary, heuristically, with validation and a plain fallback.
+10. Duration is wall-clock, not UI ticks.
+11. Attribution is a licence obligation (Parakeet CC-BY-4.0, Qwen Apache-2.0) - the "Built with"
+    screen ships or we're in breach.
+12. A self-test that never produced its real artifact is not a test.
+13. Test the packaged artifact, not just the dev build.
+14. (Windows additions) A summary the user can't check against the room is worse than a plain
+    one - the transcript alone writes the notes. A template is a claim: the transcript must
+    confirm a structure or it gets filled with invention. Wrong evidence links are worse than
+    none - stay silent below the match floor.
 
-One window that morphs width/height between states - never multiple overlay windows. State machine (port exactly):
-`hidden → meetingPrompt → recordingBar ⇄ recordingOpen → summarizing → notes | noSpeech`, plus `home`, `library`, `settings`. One `AppState` class owns it; views only read it.
-
-State sizes from the design (logical px): collapsed 200×36 · record prompt 300×74 · recording 236×52 · recording expanded 372×234 · summarizing 340×164 · ready pill 244×52 · home 344×232 (344×320 connected) · prep card 356×306 · notes 424×438 · library/settings 404×440. Library also opens as a separate resizable window.
-
-WPF: `WindowStyle=None`, `AllowsTransparency=True`, `Topmost=True`, `ShowInTaskbar=False`, per-monitor-DPI aware.
-
-## Meeting detection
-
-- Poll the mic consent-store registry key every 2.5s; `LastUsedTimeStop == 0` = app using mic now. Classic apps under `NonPackaged` with `#`-encoded paths.
-- **Denylist, not allowlist** (dictation, screen recorders, audio tools, AI IDEs, Toki itself). Conservative: a spurious prompt is dismissible; a missed meeting is lost forever.
-- Debounce 2 polls (~5s) before prompting. Dismiss = 10-min cooldown per app. Auto-stop when target releases mic ~3 polls (~7.5s).
-- Log every change in the mic-using-app set. Never prompt while busy.
-
-## Audio & echo
-
-- Each stream to its own WAV, meeting-relative timestamps. Rebuild capture on process-tree changes and default-device changes (`IMMNotificationClient`).
-- Echo fix is **cross-stream text de-dup post-ASR**: ±4s window, drop `you` line matching a `them` line; lines under 3 significant words require exact normalized match. Windows AEC is an opt-in toggle, off by default (fragile on macOS; assume the same).
-
-## Lessons paid for on macOS - do NOT relearn
-
-1. **Garbage in, garbage out** - check what the LLM is fed before tuning prompts. Hence Parakeet + `--asrtest`.
-2. **A meeting never waits on a download.** Download at onboarding, warm engines at launch, degrade to heuristic notes.
-3. **Never hand-chunk audio.** One whole-file ASR call per stream; use the toolkit's long-audio path if needed.
-4. **Silence is not failure.** Empty Parakeet result = nobody spoke. Whisper fallback only on actual error.
-5. **Reset recognizer state between meetings.** Fresh state per call, always.
-6. **OS echo-cancel is fragile; opt-in only.** Never re-bind devices on a voice-processing node.
-7. **A silent meeting saves nothing.** Null + friendly empty state; no hollow Library entries.
-8. **Sampler params over prompts.** Qwen3: temp 0.7, topP 0.8, topK 20, presence ~0.5, never greedy. "Respond in English only." Validate output (no CJK/kana/Hangul, no 6+ char repeats); retry once; fall back to heuristic.
-9. **Titles from the summary, heuristically** - validate (≥3 letters, mostly ASCII, no `!!!` runs); fallback "`<app>` - `<date>`".
-10. **Duration is wall-clock** (end − start), not UI ticks.
-11. **Attribution is a licence obligation.** Parakeet is CC-BY-4.0; Qwen3 Apache-2.0; Whisper MIT. Ship the "Built with" screen or we're in breach.
-12. **A self-test that never produced its real artifact is not a test.** Verify by watching the WAV/transcript/note appear.
-13. **Test the packaged artifact, not just `dotnet run`.** The installed app is part of verification.
-
-## Self-test CLI flags (build as you go; headless, exit pass/fail)
-
-`--detecttest` · `--loopbacktest` · `--mictest` · `--asrtest <file>` (print head **and tail**) · `--notestest` (planted echo/decisions/actions) · `--llmtest` (degeneration validator) · `--dbtest` (round-trip incl. manual note)
-
-## Milestones
-
-M0 scaffold ✓ · M1 pill shell + state machine + tray + hotkey · M2 **audio spike (de-risk; nothing proceeds until verified by ear)** · M3 detection · M4 transcription + echo de-dup · M5 storage + heuristic notes + Library + manual notes (`kind` column) · M6 LLM notes (three passes, TL;DR last) · M7 calendar · M8 ship shape (onboarding, packaging, attribution, license) · M9 character & polish
-
-## Build & test
+## Build, test, verify
 
 ```
-dotnet build Toki.sln
-dotnet test Toki.sln
+"C:\Program Files\dotnet\dotnet.exe" build Toki.sln
+"C:\Program Files\dotnet\dotnet.exe" test Toki.sln
+# publish the owner's test build (close the running Toki first - check for a live recording):
+dotnet publish src/Toki/Toki.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
 ```
 
-Solution: `src/Toki` (WPF app, `net8.0-windows`) + `tests/Toki.Tests` (xUnit, must also target `net8.0-windows`). CI can never verify GPU/model/audio paths - those are run-on-a-real-PC jobs forever.
+Self-test flags on the built exe (headless, exit pass/fail) - run the relevant ones after every
+change, and ALL of the UI ones after visual work:
+`--hittest` (every clickable box, label centering) · `--uitest` (Library perf budgets vs the REAL
+db) · `--notetest` (note editor, 23 checks) · `--measuretest` (arranged heights) · `--stickytest`
+· `--render <dir>` / `--libshot <dir>` (PNG the views; the transparent overlay can't be
+screenshotted) · `--asrtest <file>` · `--notestest` · `--llmtest` · `--dbtest` · `--caltest` ·
+`--preptest` · `--diartest` · `--makeicon`. CI can never verify GPU/model/audio paths - those are
+run-on-a-real-PC jobs forever.
+
+## Where the truth lives (read these, not this file, for state)
+
+- **`README.md`** - the build log, newest entry first. The top entry IS the current state.
+- **`ARCHITECTURE.md`** - every decision with its rationale, append-only.
+- **`docs/backlog.md`** - the roadmap and everything parked, with reasons.
+- **`mansplain/`** - the plain-language story per milestone, for the owner.
+- **Memory** (`MEMORY.md` index) - cross-session lessons, gotchas, owner preferences.
+- **The task list** - live work items (#93/#94 Figma revamp remainders are the open front).
+- `WINDOWS-BUILD-PROMPT.md` - the original full brief (historical; this file supersedes where
+  they conflict).
