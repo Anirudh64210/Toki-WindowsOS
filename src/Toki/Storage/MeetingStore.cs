@@ -87,7 +87,10 @@ public sealed partial class MeetingStore
 
         // Migration: template name + its flexible sections (JSON). Older rows have neither and fall
         // back to the legacy decisions/questions tables via NoteSet.EffectiveSections.
-        foreach (var col in new[] { "template", "sections_json" })
+        // Migration: what Toki rewrote in this transcript (mis-heard names it unified, self-repairs it
+        // dropped), so the transcript can show the edit instead of quietly disagreeing with the room.
+        // NULL on every older row, which reads as "nothing was marked" and renders exactly as before.
+        foreach (var col in new[] { "template", "sections_json", "corrections_json" })
             if (!ColumnExists(c, "meetings", col))
             {
                 using var alter2 = c.CreateCommand();
@@ -375,6 +378,18 @@ public sealed partial class MeetingStore
         catch { return []; }
     }
 
+    // Same shape for the transcript's edit record. A meeting Toki did not change stores NULL rather
+    // than an empty array, so "never marked" and "marked nothing" look identical to every older row.
+    static string? SerializeCorrections(IReadOnlyList<TextFix> f) =>
+        f.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(f);
+
+    static List<TextFix> DeserializeCorrections(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<TextFix>>(json) ?? []; }
+        catch { return []; }
+    }
+
     static bool ColumnExists(SqliteConnection c, string table, string column)
     {
         using var cmd = c.CreateCommand();
@@ -410,8 +425,8 @@ public sealed partial class MeetingStore
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = """
-                INSERT INTO meetings (kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json)
-                VALUES ($kind, $title, $app, $started, $dur, $folder, $body, $tldr, $template, $sections);
+                INSERT INTO meetings (kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json, corrections_json)
+                VALUES ($kind, $title, $app, $started, $dur, $folder, $body, $tldr, $template, $sections, $corrections);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$kind", m.Kind.ToString());
@@ -424,6 +439,7 @@ public sealed partial class MeetingStore
             cmd.Parameters.AddWithValue("$tldr", m.Notes.Tldr);
             cmd.Parameters.AddWithValue("$template", (object?)m.Notes.Template ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$sections", (object?)SerializeSections(m.Notes.Sections) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$corrections", (object?)SerializeCorrections(m.Corrections) ?? DBNull.Value);
             id = (long)cmd.ExecuteScalar()!;
         }
 
@@ -509,7 +525,7 @@ public sealed partial class MeetingStore
         var m = new MeetingRecord { Id = id };
         using (var cmd = c.CreateCommand())
         {
-            cmd.CommandText = "SELECT kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json FROM meetings WHERE id=$id";
+            cmd.CommandText = "SELECT kind, title, app, started_at, duration_ms, folder, body, tldr, template, sections_json, corrections_json FROM meetings WHERE id=$id";
             cmd.Parameters.AddWithValue("$id", id);
             using var r = cmd.ExecuteReader();
             if (!r.Read()) return null;
@@ -523,6 +539,7 @@ public sealed partial class MeetingStore
             m.Notes.Tldr = r.IsDBNull(7) ? "" : r.GetString(7);
             m.Notes.Template = r.IsDBNull(8) ? null : r.GetString(8);
             m.Notes.Sections = DeserializeSections(r.IsDBNull(9) ? null : r.GetString(9));
+            m.Corrections = DeserializeCorrections(r.IsDBNull(10) ? null : r.GetString(10));
         }
         m.Transcript = ReadTranscript(c, id);
         m.Notes.Decisions = ReadSimple(c, "decisions", id);   // legacy notes surface via EffectiveSections
@@ -705,6 +722,39 @@ public sealed partial class MeetingStore
             tx.Commit();
         }
         catch (Exception ex) { App.Log($"set speaker tags: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Replace a saved meeting's transcript and its record of what Toki rewrote.
+    ///
+    /// The re-clean pass ("Re-clean saved transcripts") is the only caller. It rewrites the TRANSCRIPT
+    /// and nothing else: the summary, the sections and the to-dos a person may have ticked, edited or
+    /// come to rely on are left exactly as they are. That is the owner's rule and it is the reason
+    /// re-cleaning is safe to offer - it can improve a transcript and cannot damage a note.
+    /// </summary>
+    public void ReplaceTranscript(long meetingId, IReadOnlyList<TranscriptSegment> segments,
+        IReadOnlyList<TextFix> corrections)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        using (var del = c.CreateCommand())
+        {
+            del.CommandText = "DELETE FROM transcript WHERE meeting_id=$id";
+            del.Parameters.AddWithValue("$id", meetingId);
+            del.ExecuteNonQuery();
+        }
+        InsertLines(c, "transcript", meetingId, segments.Select((s, i) =>
+            (object[])[s.Speaker.ToString(), s.StartMs, s.EndMs, s.Text, i, (object?)s.Tag ?? DBNull.Value]),
+            "speaker, start_ms, end_ms, text, ord, speaker_tag", "$speaker, $start_ms, $end_ms, $text, $ord, $speaker_tag");
+        using (var upd = c.CreateCommand())
+        {
+            upd.CommandText = "UPDATE meetings SET corrections_json=$c WHERE id=$id";
+            upd.Parameters.AddWithValue("$c", (object?)SerializeCorrections(corrections) ?? DBNull.Value);
+            upd.Parameters.AddWithValue("$id", meetingId);
+            upd.ExecuteNonQuery();
+        }
+        ReindexFts(c, meetingId);   // search must match the words the transcript now contains
+        tx.Commit();
     }
 
     /// <summary>Fill in a to-do's owner, by position, without touching its text or done state.</summary>

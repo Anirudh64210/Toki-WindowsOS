@@ -19,12 +19,19 @@ namespace Toki.Views;
 /// </summary>
 public static class NotePicker
 {
-    public static void Show(FrameworkElement anchor, IReadOnlyList<(string Label, Action Pick)> items,
+    /// <summary>
+    /// Show a dropdown under <paramref name="anchor"/>. An item with a NULL action is a group heading
+    /// rather than a choice: it draws as a quiet label (with a hairline above it, unless it is first)
+    /// and cannot be clicked. That is how one button can hold two different questions - "what is this
+    /// line" and "how big is the text" - without the two sets of answers running together.
+    /// </summary>
+    public static void Show(FrameworkElement anchor, IReadOnlyList<(string Label, Action? Pick)> items,
         string? selected = null)
     {
         if (items.Count == 0) return;
 
         var stack = new StackPanel();
+        FrameworkElement? selectedRow = null;
         var popup = new Popup
         {
             PlacementTarget = anchor, Placement = PlacementMode.Bottom,
@@ -34,6 +41,25 @@ public static class NotePicker
 
         foreach (var (label, pick) in items)
         {
+            if (pick is null)
+            {
+                if (stack.Children.Count > 0)
+                {
+                    var rule = new Border { Height = 1, Margin = new Thickness(11, 5, 11, 4) };
+                    rule.SetResourceReference(Border.BackgroundProperty, "Hairline");
+                    stack.Children.Add(rule);
+                }
+                var heading = new TextBlock
+                {
+                    Text = label, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(11, 3, 11, 4), IsHitTestVisible = false,
+                };
+                heading.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
+                heading.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+                stack.Children.Add(heading);
+                continue;
+            }
+
             var text = new TextBlock
             {
                 Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
@@ -76,13 +102,28 @@ public static class NotePicker
             button.MouseLeave += (_, _) => surface.Background = Brushes.Transparent;
             var act = pick;
             button.Click += (_, _) => { popup.IsOpen = false; act(); };
+            if (selected is not null && label == selected) selectedRow = button;
             stack.Children.Add(button);
         }
 
+        // A long list (every half hour of a whole day) has to scroll rather than run off the screen.
+        // Short lists are unaffected: the ScrollViewer sizes to its content until it hits the cap.
+        var scroll = new ScrollViewer
+        {
+            Content = stack, MaxHeight = 320,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+
+        // Open ON the current value, not at the top. A 48-row time list that always opens at midnight
+        // makes the user scroll to where they already are before they can change anything - which is
+        // most of why a long dropdown feels worse than a short one.
+        if (selectedRow is not null)
+            scroll.Loaded += (_, _) => selectedRow.BringIntoView();
         var box = new Border
         {
             CornerRadius = new CornerRadius(10), Padding = new Thickness(5),
-            BorderThickness = new Thickness(1), MinWidth = 176, Child = stack,
+            BorderThickness = new Thickness(1), MinWidth = 176, Child = scroll,
         };
         box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
         box.SetResourceReference(Border.BorderBrushProperty, "Hairline");

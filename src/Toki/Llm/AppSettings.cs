@@ -38,6 +38,21 @@ public sealed class AppSettings
     /// </summary>
     public string? PinnedNames { get; set; }
 
+    /// <summary>
+    /// How big note text is drawn, 1 to 12. A comfort setting that belongs to the person rather than
+    /// to any one note - somebody who wants larger text wants it everywhere, and per-note sizing would
+    /// mean setting it again on each new note. 0 or out of range means "never chosen" and falls back to
+    /// the editor's default, so an existing install is pixel-identical until the dial is moved.
+    /// </summary>
+    public int NoteTextSize { get; set; }
+
+    /// <summary>
+    /// True once the user has been told, once, that saving an evidence clip puts other people's voices
+    /// in a file Toki can no longer reach. Playing a clip never asks - that is between the user and
+    /// their own disk. See <see cref="Toki.Storage.EvidenceAudio"/>.
+    /// </summary>
+    public bool AudioSharingAcknowledged { get; set; }
+
     /// <summary>True once the user has been through the first-run onboarding (name + privacy + done).
     /// Defaults false so EVERY existing install sees it once - which is also how a stale/wrong stored
     /// name gets corrected. Set true only when the user finishes (or skips) onboarding.</summary>
@@ -124,6 +139,34 @@ public sealed class AppSettings
     /// <summary>The connected Google account's email (from the id_token) - display only
     /// ("Connected as sid@…"). Null when not connected.</summary>
     public string? GoogleAccountEmail { get; set; }
+
+    // ---- Outlook / Microsoft 365 (2026-08-13) ----
+    //
+    // A SECOND, INDEPENDENT connection, deliberately not a replacement. Plenty of people have a work
+    // Outlook calendar and a personal Google one, and asking them to pick would mean Toki misses half
+    // their meetings. Both can be connected at once and the agenda is merged.
+    //
+    // Same storage shape as the Google grant: the long-lived refresh token DPAPI-encrypted at rest,
+    // the short-lived access token never persisted.
+
+    /// <summary>DPAPI-encrypted Microsoft OAuth refresh token (base64). Use
+    /// <see cref="OutlookRefreshToken"/> to read/write in the clear.</summary>
+    public string? OutlookRefreshTokenProtected { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? OutlookRefreshToken
+    {
+        get => Unprotect(OutlookRefreshTokenProtected);
+        set => OutlookRefreshTokenProtected = Protect(value?.Trim());
+    }
+
+    /// <summary>The connected Outlook account's address - display only, and the only way to know which
+    /// attendee on a Graph event is the user (Microsoft does not flag it).</summary>
+    public string? OutlookAccountEmail { get; set; }
+
+    /// <summary>True when an Outlook refresh token is stored.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool OutlookConnected => !string.IsNullOrEmpty(OutlookRefreshTokenProtected);
 
     /// <summary>True when a Google refresh token is stored (the calendar is connected).</summary>
     [JsonIgnore]

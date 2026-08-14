@@ -32,7 +32,8 @@
 
         <!-- Expanded content (revealed only when you hover the working sliver fully open). -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <controls:TokiBlob x:Name="Toki" Width="26" Height="24" Margin="0,0,10,0"
+            <!-- HIDDEN: the floating bubble Toki (Thinking mood) is this state's mascot. -->
+            <controls:TokiBlob x:Name="Toki" Width="26" Height="24" Margin="0,0,10,0" Visibility="Collapsed"
                                VerticalAlignment="Center" RenderTransformOrigin="0.5,1"/>
             <TextBlock Text="Tidying up your notes" Style="{StaticResource Body}"
                        FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>

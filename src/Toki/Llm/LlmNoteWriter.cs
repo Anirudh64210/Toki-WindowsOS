@@ -72,8 +72,11 @@ public sealed class LlmNoteWriter
             sourceIsDigests = true;
         }
 
-        // Use the caller's forced template (manual override), else pick the one that fits this meeting.
-        var template = force ?? await ClassifyTemplate(source, sourceIsDigests, ct);
+        // Use the caller's forced template (a human assertion, never second-guessed), else pick the one
+        // that fits - and then make the TRANSCRIPT confirm it. A template is a claim about the meeting,
+        // and an unearned one manufactures content to fill its sections. See TemplateGate.
+        var template = force ?? TemplateGate.Verify(
+            await ClassifyTemplate(source, sourceIsDigests, ct), transcript);
 
         // REDUCE / FINAL: the adaptive, honest note in the chosen template.
         var note = await FinalNote(source, sourceIsDigests, template, ct);
@@ -152,6 +155,9 @@ public sealed class LlmNoteWriter
     {
         var prompt =
             "Pick the single best note template for this meeting from the list below. "
+            + "A specific template only fits when that IS the meeting's main purpose and the text shows "
+            + "it plainly. Discussing a choice is not a decision; mentioning a task is not a standup. "
+            + "When in doubt, answer General. "
             + "Reply with ONLY the template name, exactly as written - nothing else.\n\n"
             + NoteTemplates.Menu() + "\n\n"
             + (isDigests ? "Notes:\n" : "Transcript:\n") + source;
@@ -175,7 +181,9 @@ public sealed class LlmNoteWriter
 
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
             $"{s.ToUpperInvariant()}\n- up to 5 tight bullets for \"{s}\". Every bullet must carry information a busy "
-            + "person needs - drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists."));
+            + "person needs - drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists. "
+            + "If filling it would need you to infer, justify, or fill a gap, LEAVE THE WHOLE SECTION OUT - an "
+            + "absent section is correct, an invented one is not."));
 
         var prompt =
             $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"

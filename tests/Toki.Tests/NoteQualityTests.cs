@@ -27,9 +27,11 @@ public sealed class NoteQualityTests
     {
         // Exactly what happened: good sections, no SUMMARY. The old code pasted in the heuristic's
         // summary, which is the opening words of the transcript.
+        // The template here is General on purpose: this transcript made no decision, and since the
+        // TemplateGate landed, asking for "Decision log" over it correctly gets you General instead.
         var llm = new ScriptedLlm(
-            "TITLE\nAttendance automation\n\nDECISION\n- Propose automated notifications",  // no SUMMARY
-            "Decision log",
+            "TITLE\nAttendance automation\n\nKEY POINTS\n- Propose automated notifications",  // no SUMMARY
+            "General",
             "The team discussed automating attendance notifications and agreed to propose it.");
 
         var note = await new LlmNoteWriter(llm).WriteAsync(
@@ -45,8 +47,8 @@ public sealed class NoteQualityTests
     {
         // An empty section is honest. Raw transcript labelled "Summary" is not.
         var llm = new ScriptedLlm(
-            "TITLE\nSomething\n\nDECISION\n- do the thing",
-            "Decision log",
+            "TITLE\nSomething\n\nKEY POINTS\n- do the thing",
+            "General",
             "NOTHING");
 
         var note = await new LlmNoteWriter(llm).WriteAsync(
@@ -54,6 +56,40 @@ public sealed class NoteQualityTests
 
         Assert.True(string.IsNullOrWhiteSpace(note.Tldr), $"expected no summary, got: {note.Tldr}");
         Assert.DoesNotContain("on mute", note.Tldr ?? "");
+    }
+
+    // ── a template is a claim about the meeting ──
+
+    [Fact]
+    public async Task A_meeting_that_made_no_decision_is_not_written_as_a_decision_log()
+    {
+        // Both real meetings on 2026-08-11 were classified "Decision log" and neither decided anything,
+        // so the Rationale section came out as a justification for a decision that never happened.
+        var llm = new ScriptedLlm(
+            "TITLE\nWeekly catch-up\n\nSUMMARY\nA catch-up on last week's reports.\n\nKEY POINTS\n- reports ran late",
+            "Decision log");
+
+        var note = await new LlmNoteWriter(llm).WriteAsync(
+            Transcript("How did the reports go last week?",
+                       "Fine, mostly. The numbers took longer than I expected.",
+                       "Okay. Let's talk again on Thursday."));
+
+        Assert.Equal("General", note.Template);
+    }
+
+    [Fact]
+    public async Task A_meeting_that_did_decide_keeps_its_decision_log()
+    {
+        var llm = new ScriptedLlm(
+            "TITLE\nReview day\n\nSUMMARY\nThe review moves to Thursdays.\n\nDECISION\n- Reviews move to Thursday",
+            "Decision log");
+
+        var note = await new LlmNoteWriter(llm).WriteAsync(
+            Transcript("We went round on this for a while.",
+                       "Right, so we decided to move the review to Thursdays.",
+                       "Agreed."));
+
+        Assert.Equal("Decision log", note.Template);
     }
 
     // ── a name is not a to-do ──
@@ -114,14 +150,19 @@ public sealed class NoteQualityTests
         public ScriptedLlm(params string[] answers) => _answers = answers;
         public bool Ready => true;
 
+        /// <summary>An answer that is nothing but a template name is meant for the classify call, and
+        /// must not be consumed as a note. Matching by NAME rather than a hardcoded "Decision log"
+        /// keeps the fake honest when a test wants a different template.</summary>
+        static bool IsTemplateName(string a) =>
+            NoteTemplates.All.Any(t => string.Equals(t.Name, a?.Trim(), StringComparison.OrdinalIgnoreCase));
+
         public Task<string> CompleteAsync(string system, string user, int max, CancellationToken ct = default)
         {
-            // The classify call asks for a template name; hand it the one meant for it wherever it lands.
             if (user.Contains("Pick the single best note template"))
-                return Task.FromResult(_answers.FirstOrDefault(a => a == "Decision log") ?? "General");
+                return Task.FromResult(_answers.FirstOrDefault(IsTemplateName) ?? "General");
             var answer = _i < _answers.Length ? _answers[_i] : _answers[^1];
             _i++;
-            if (answer == "Decision log") { answer = _i < _answers.Length ? _answers[_i] : _answers[^1]; _i++; }
+            if (IsTemplateName(answer)) { answer = _i < _answers.Length ? _answers[_i] : _answers[^1]; _i++; }
             return Task.FromResult(answer);
         }
 

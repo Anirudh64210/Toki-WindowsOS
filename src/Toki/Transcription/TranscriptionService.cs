@@ -57,10 +57,10 @@ public sealed class TranscriptionService
             // 182 fragments (see docs/real-meeting-findings.md).
             var merged = TranscriptMerger.Merge(you, them);
 
-            // Then repair mis-heard names against the user's own history. Runs LAST so it sees whole
-            // turns rather than fragments, and so a name split across two fragments is one word by the
-            // time it is judged.
-            merged = CorrectNames(merged, attendees);
+            // Then repair mis-heard names against the user's own history, and drop the discarded half
+            // of spoken self-corrections. Runs LAST so it sees whole turns rather than fragments, and
+            // so a name split across two fragments is one word by the time it is judged.
+            merged = Polish(merged, attendees);
 
             App.Log($"transcribed in {sw.ElapsedMilliseconds} ms: you={you.Count} them={them.Count} -> merged {merged.Count} segments");
             return merged;
@@ -68,33 +68,58 @@ public sealed class TranscriptionService
     }
 
     /// <summary>
-    /// Repair names on an ALREADY-merged transcript - the live path, which decodes during the meeting
-    /// and so never goes through <see cref="Process"/>. Both routes must get this: the live one is the
-    /// fast path and therefore the one most meetings actually take.
+    /// Every edit the last <see cref="Process"/> or <see cref="PolishNames"/> made to the transcript.
+    /// Read straight after the call, on the same thread that made it - the recorder finishes one
+    /// meeting at a time, and this exists so the caller can store the edits WITH the meeting instead
+    /// of the transcript quietly disagreeing with what was said.
+    /// </summary>
+    public IReadOnlyList<Toki.Storage.TextFix> LastCorrections { get; private set; } = [];
+
+    /// <summary>
+    /// Repair an ALREADY-merged transcript - the live path, which decodes during the meeting and so
+    /// never goes through <see cref="Process"/>. Both routes must get this: the live one is the fast
+    /// path and therefore the one most meetings actually take.
     /// </summary>
     public IReadOnlyList<TranscriptSegment> PolishNames(
         IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees = null) =>
-        CorrectNames(segments, attendees);
+        Polish(segments, attendees);
 
-    /// <summary>Apply <see cref="NameCorrector"/> using the library as the authority. Never fatal: a
-    /// transcript with a mis-heard name is far better than no transcript.</summary>
-    static IReadOnlyList<TranscriptSegment> CorrectNames(
+    /// <summary>
+    /// The two text repairs, in the order that makes each one see its best input: names first (whole
+    /// turns, so a name split across fragments is one word by the time it is judged), then spoken
+    /// self-corrections. Never fatal - a transcript with a mis-heard name beats no transcript.
+    /// </summary>
+    IReadOnlyList<TranscriptSegment> Polish(
         IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees)
     {
+        var record = new List<Toki.Storage.TextFix>();
         try
         {
             var trusted = NameLexicon.Trusted(attendees);
             var corpus = NameLexicon.Corpus(App.Store);
-            var (fixedUp, fixes) = NameCorrector.Correct(segments, trusted, corpus);
+            var (named, fixes) = NameCorrector.Correct(segments, trusted, corpus);
             if (fixes.Count > 0)
                 App.Log("names corrected: " + string.Join(", ", fixes.Select(f => $"{f.From}->{f.To}")));
-            return fixedUp;
+            record.AddRange(fixes.Select(f => new Toki.Storage.TextFix(f.From, f.To, "name")));
+            segments = named;
         }
-        catch (Exception ex)
+        catch (Exception ex) { App.Log($"name correction skipped (non-fatal): {ex.Message}"); }
+
+        try
         {
-            App.Log($"name correction skipped (non-fatal): {ex.Message}");
-            return segments;
+            var (repaired, repairs) = SelfCorrection.Clean(segments);
+            if (repairs.Count > 0)
+                App.Log("self-corrections dropped: " + string.Join(", ", repairs.Select(r => $"{r.From}->{r.To}")));
+            record.AddRange(repairs.Select(r => new Toki.Storage.TextFix(r.From, r.To, "repair")));
+            segments = repaired;
         }
+        catch (Exception ex) { App.Log($"self-correction skipped (non-fatal): {ex.Message}"); }
+
+        LastCorrections = record
+            .GroupBy(f => (f.From.ToLowerInvariant(), f.To.ToLowerInvariant()))
+            .Select(g => g.First())
+            .ToList();
+        return segments;
     }
 
     /// <summary>

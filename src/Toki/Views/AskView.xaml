@@ -12,7 +12,10 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <Viewbox Width="26" Height="24" VerticalAlignment="Top">
+            <!-- HIDDEN, not removed: the ONE visible Toki on a panel is the floating bubble beside
+                 the card (owner: never two mascots on one surface). The blob stays for the code
+                 that pokes it; hidden blobs pause their own animation. -->
+            <Viewbox Width="26" Height="24" VerticalAlignment="Top" Visibility="Collapsed">
                 <controls:TokiBlob x:Name="Toki"/>
             </Viewbox>
             <TextBlock Grid.Column="1" x:Name="StatusText" Text="" Style="{StaticResource Dim}" FontSize="11"

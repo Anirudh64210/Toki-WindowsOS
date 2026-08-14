@@ -700,6 +700,7 @@ public partial class App : Application
             catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
 
             IReadOnlyList<TranscriptSegment>? transcript = null;
+            IReadOnlyList<Storage.TextFix> corrections = [];
             var minShow = System.Threading.Tasks.Task.Delay(1200); // let the loader be seen
             try
             {
@@ -712,11 +713,13 @@ public partial class App : Application
                     // through Process, so it still needs its names repaired. This is the fast path and
                     // therefore the one most meetings take - it cannot be the one that misses out.
                     transcript = TranscriptionService.Instance.PolishNames(live, attendeeNames);
+                    corrections = TranscriptionService.Instance.LastCorrections;
                     Log($"using live transcript ({live.Count} segments) - no stop-time ASR");
                 }
                 else if (folder.Length > 0)
                 {
                     transcript = TranscriptionService.Instance.Process(folder, attendeeNames);
+                    corrections = TranscriptionService.Instance.LastCorrections;
                 }
             }
             catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
@@ -755,6 +758,7 @@ public partial class App : Application
                         DurationMs = durationMs,
                         Folder = folder,
                         Transcript = transcript.ToList(),
+                        Corrections = corrections.ToList(),
                         Notes = notes,
                         Title = NoteExtractor.Title(notes, app, startedAt.ToLocalTime()),
                     };
@@ -795,6 +799,15 @@ public partial class App : Application
                         .GetAwaiter().GetResult();
                     if (llmNotes is not null)
                     {
+                        // What the last occurrence of this meeting left unfinished, if there was one.
+                        // Deterministic and instant - no second model pass, so it costs nothing on the
+                        // wait the user is already sitting through. Silent for a one-off.
+                        meeting.Notes = llmNotes;
+                        if (Llm.OpenFromLastTime.Build(meeting, Store) is { } carried)
+                        {
+                            llmNotes.Sections = llmNotes.Sections.Prepend(carried).ToList();
+                            Log($"carried {carried.Bullets.Count} open item(s) forward into meeting {meeting.Id}");
+                        }
                         Store.ReplaceNotes(meeting.Id, llmNotes);
                         meeting.Notes = llmNotes;
                         meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);

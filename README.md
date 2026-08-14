@@ -25,6 +25,329 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
+## One Toki, clean air, flush summon (2026-08-14, latest)
+
+The owner's check found four things, all fixed and republished (23:49):
+
+- **ONE mascot per surface, everywhere.** Panels show the floating bubble Toki; the in-view blobs
+  that doubled him are hidden (Ask/push-to-talk - the reported "two Tokis", RecordingOpen,
+  Summarizing, Onboarding) and the Calendar's two empty-state blobs became a quiet calendar glyph.
+  Blobs are hidden not deleted - the poke/animation wiring stays, and a hidden TokiBlob pauses
+  itself.
+- **Clean spacing**: the bubble no longer overlaps the card by 4px; CardPadL 56 -> 68 gives a
+  crisp 10px air gap (58px bubble + 10 + card).
+- **The transcribing mood reaches the bar**: the recording BAR is a peek (floating Toki hidden),
+  so its own tiny Toki now carries the Writing mood - the pen scribbles while a meeting is being
+  taken down, matching the open panel.
+- **The edge-summon peek is flush with the top again** (TopGap 0 for Collapsed) - the hover-summon
+  drops out of the screen edge; a 12px gap there read "too low", not "hovering".
+
+1,915 tests green; hittest/uitest/measuretest clean.
+
+## Claude Design + the Ask/Settings redesign lands in the app (2026-08-14, late)
+
+Two halves. FIRST, at the owner's ask, Toki's design system went to claude.ai/design: a hand-authored
+React mirror (`design-web/` - 15 components, the exact theme hexes, press-feel, mascot, notch shell)
+was converted, render-verified (15/15) and uploaded to the "Toki Design System" project, with a
+design-language guide distilled from the Figma file so the design agent knows the rules. The mirror's
+cloud then got de-weirded: each SVG lobe had its OWN gradient (per-lobe light = visible seams); one
+userSpaceOnUse gradient across the fused shape restored the smooth WPF texture.
+
+SECOND, the owner picked the direction (the frames, not the agent's button-fixated takes) and the ASK
+and SETTINGS pages were rebuilt IN THE APP from the Figma frames (348:5438, 353:9154):
+
+- **Ask**: a teal-blue ambient bloom rises from the bottom (the one page with atmosphere - it is a
+  conversation, not a document); the hero glow went blue with the mascot; the FOUR suggestion chips
+  are back as real Buttons (the frame draws them; the old veto was about the oval look); the prompt
+  bar is a full capsule (r26) ending in a round send disc; History gets its glyph and New Chat is
+  the white pill.
+- **Settings**: one centred 640px column titled "Settings · Toki 1.0"; the name field spans the
+  column; APPEARANCE moved up under the name as the frame's CARD of rows - one rounded surface,
+  hairline-split rows (Dark theme / Glassy notch / Show Toki in screen recordings), switch on the
+  right. The frame's Recording/Permissions sections are NOT shipped - no auto-record mode or audio
+  retention exists yet, and a control wired to nothing is worse than no control.
+- Gotcha recorded: WPF has no `VerticalAlignment="Baseline"` - it parses to a runtime XAML crash
+  that took --uitest down; siblings baseline-align by Bottom + margin.
+
+1,915 tests green; hittest (253 controls) and uitest (0.2ms/43ms/137ms) clean; published to
+`dist\Toki.exe` (23:32) and running. --libshot hung once against the live dist instance - killed,
+noted, harnesses covered the rest.
+
+## Round four: the motion-and-feel skill, and the research that fixed the "hard" rendering (2026-08-14)
+
+The owner's verdict on round three: the animation was poorly designed, no haptic feel, Toki too low
+and too small to notice, the rendering "very hard and ugly". Per their ask, this round started with
+RESEARCH (Apple HIG springs, Material 3 motion tokens, IBM Carbon, Emil Kowalski's standards,
+Duolingo's mascot practice, and the WPF rendering docs), the findings were written into a project
+skill - `.claude/skills/motion-and-feel/SKILL.md` - and then the skill was applied:
+
+- **The jank had a NAME.** WPF renders any `DropShadowEffect` subtree in SOFTWARE, re-rendered on
+  every animated frame. TokiBlob carried THREE effects (body + both eyes) inside a subtree that
+  breathes and blinks constantly - the mascot was software-rendered ~60x a second, which is exactly
+  the "hard and ugly". All three are gone: the body's lift is now a cheap gradient ellipse, the
+  eyes sit on a static darker pill offset 1.5px (the blink transform moved UP to the grid so the
+  seat closes with the eye - a seat that stayed open would flash dark mid-blink). Same story on the
+  notch: the shadow caster now HIDES during every size morph and reveal and fades back on settle,
+  instead of software-re-rendering its blur on every frame of the animation.
+- **The researched curves replaced the stock eases.** `Theme/Motion.cs` gained a real cubic-bezier
+  easing (`BezierEase`, browser-style Newton solve) and three named curves: `ArriveStrong`
+  (0.23,1,0.32,1 - entering content), `Depart` (0.3,0,0.8,0.15 - exits), and `Drawer`
+  (0.32,0.72,0,1 - the iOS-sheet/Dynamic-Island settle, now THE curve for the notch morph and
+  reveal). Gotcha worth recording: `EasingFunctionBase` defaults to `EasingMode.EaseOut`, which
+  MIRRORS a curve that already encodes its whole shape - the class pins `EaseIn` (raw passthrough).
+- **Haptic feel, centrally.** Every shared button style (PillButton, ChipButton, RowButton,
+  SquareButton, IconButton) now compresses on press (0.97; rows 0.985; icons 0.94) in 90ms and
+  springs back in 200ms with a whisper of overshoot - the whole box, from the template, never
+  per-site.
+- **Toki is bigger, higher, and placed PER STATE.** The bubble grew 44 -> 58px (blob 44x40), and
+  `PlaceMascot` now glides him (composition translate, Drawer curve) to where each Figma frame
+  draws him: vertically centred on a compact pill, bottom-left overlapping the corner on the
+  expanded recording panel, level with the header on tall panels.
+- **He's also more alive**: breathing retuned to the researched calm (3.5s cycle at <=2% amplitude,
+  was 3s at 4.5%), blinks are asymmetric (close 60ms, open 190ms decelerating), and a fidget layer
+  fires every 30-60s while idle - a sideways glance (new Gaze transform), a nod, a wobble, or a
+  double-blink - never during a working mood.
+- **Recording sits AT the top.** `TopGap` is state-aware: 2px for the recording bar/panel (a status
+  strip, not a floating panel), 12px for everything else.
+- **The Library reading pane got the frame's minute details** (348:2933): title 26 Bold; a meta row
+  with "N open" (amber) and "N people" status capsules; action items with the redesign's CIRCULAR
+  teal checks, real strikethrough on done, owner/due as capsule chips BELOW the text; transcript
+  lines with derived initial-avatars (StableHash colours, full name on hover - the name run stays,
+  because two people can share an initial); and the toolbar is ONE rounded icon group - copy (menu +
+  green-check flash) and a red trash - instead of two text pills.
+
+1,915 tests green; uitest 0.5ms/51ms/156ms, notetest 23, hittest, stickytest 4, measuretest all
+clean. NOT yet in `dist\` - the owner's Toki was running from dist (a live lock), so the publish
+waits for them to quit it. Still open in #93/#94: the compact pill states, transcribing live-lines,
+Settings segmented controls, Ask window suggestion chips (now allowed), and section collapse
+chevrons (deferred - FlowDocument blocks have no Visibility; needs a rebuild-on-toggle).
+
+## Revamp round three: the duplicates, the bubble, the moods, the Library window (2026-08-14)
+
+The owner's meticulous pass on round two, all taken:
+
+- **Toki no longer appears twice.** The Home card's greeting-row blob is gone (a hidden host keeps
+  the pop/blink wiring); the ONE Toki is the floating one beside the card.
+- **Toki sits in his circle** - the round translucent bubble every frame draws him in (42px, soft
+  white glass, gentle shadow), not a bare cloud on the wallpaper.
+- **The mood system is real**: `TokiBlob.SetMood` - THINKING (a dots bubble at his shoulder, dots
+  pulsing in sequence), WRITING (a pen scribbling at his side), HAPPY (^^ squinted eyes + pulsing
+  sparkles, blink timer suspended so a scheduled blink can't pop the smile open). Wired to the notch:
+  thinking while notes are written, writing while recording, happy when notes land.
+- **The Library WINDOW is on the redesign** (frame 349:6743): the sidebar's logo row (small blue
+  cloud + "Toki" wordmark) over icon nav; list rows with the DATE OUTSIDE the card (16 Black over
+  8 Bold), a per-meeting accent bar inside, meta, snippet, chips; and the reading pane's colored
+  section headers - a round tinted icon chip + label per meaning, with the design's mapping
+  (decisions green, actions teal, open questions pink, transcript amber). Selection paints the inner
+  card only, so the date column never highlights; `_cardFills` carries that and is cleared per load.
+
+1,915 tests green, hit/measure/uitest all clean - the Library list stays under its 250ms budget with
+the new rows (48ms). Remaining, specced in #93/#94: the compact recording/prompt/ready pills, the
+transcribing live-lines view, Settings segmented controls, and the Ask window.
+
+## The revamp goes structural: the notch HOVERS (2026-08-13, late night)
+
+The owner's correction on slice one was that the redesign is not a restyle - the fundamentals
+changed. The biggest: **the panel no longer fuses to the top edge. It hovers.** Landed:
+
+- **The floating card.** 12px below the top edge, rounded on all four corners (r24), a soft shadow
+  under it - cast by a separate near-invisible border, never an Effect on the card itself, which
+  would push every glyph through an intermediate surface and cost ClearType.
+- **Toki floats beside it.** The mascot is his own element in a zone left of the card (the frames
+  put him at the panel's top-left, outside it), hidden during the peek, which carries its own Toki.
+- **One conversion point for the new geometry.** The window is bigger than the card (mascot zone +
+  shadow room); every size in PillWindow speaks CARD dimensions and WinW/WinH/CardW/CardH are the
+  only place pads are applied - so the pads can never be added twice, and the card (not the window)
+  sits on the screen's centreline.
+- **Window-level acrylic retired.** The DWM accent fills the rectangular window, which would frost
+  the empty pads around a floating card. The glass reading now comes from the card's own
+  semi-transparent tint; the "Glassy notch" setting picks the more transparent tint.
+
+1,915 tests green, all four harnesses clean. **The moving parts (reveal, tuck, hover) were verified
+by harnesses only - the hovering window needs the owner's eyes on the real machine.** The remaining
+states and animations are specced frame-by-frame in task #93.
+
+## The design revamp begins: Figma "Redesign by SKz", slice one (2026-08-13, night)
+
+The owner supplied the full redesign as a Figma file (node 288:4) - 16 notch states, the live panel,
+and Ask/Library/Settings at 1440x900 - and asked for the revamp against it. Design properties were
+pulled straight from the file (get_design_context), not eyeballed. **1,915 tests green, `--hittest`
+and `--measuretest` clean.** This is SLICE ONE; the remaining states are specced in tasks #93/#94.
+
+**The design system, measured from the file:** warm dark GLASS - rgba(33,30,30,.5) tint over a frost,
+1px white-10% rim, corner radius 24, inner capsules rgba(33,30,30,.4) r12; text as WHITE OPACITIES
+(90/50/25), never grey hexes; SF Pro Rounded -> Segoe UI Variable; per-event accent lines #F5A05C /
+#32C7D3; a white Join pill with dark text; #FF2D55 for "Stop & summarize". All landed as theme tokens
+(Glass/GlassCapsule/GlassBorder/TextHi/TextMid/TextLow/AccentAmber/AccentTeal/JoinPill/StopRed) with
+contrast-checked light-theme counterparts.
+
+**Landed in this slice:**
+- **The notch is the glass sheet**: radius 24, glass tint + rim in both the acrylic and opaque paths
+  (the old pitch-black slab and the untinted blur are both gone).
+- **The mascot is the blue cloud** - body gradient EAF6FF->3D9BEA, WHITE eyes (the redesign inverts
+  them), blue blush and glow. App icon regenerated from it (7 sizes).
+- **Home is the Default frame**: greeting 14/TextHi with calendar+settings icons right, COMING UP as
+  the content, twin glass action buttons ("Start a meeting" / "Take Notes"), the conditional connect
+  row and account footer beneath.
+- **COMING UP rows are the design's capsules**: bare date column (16 Black over 8 Bold) outside a
+  r12 glass capsule with the 3px accent line, 12-Semibold title, 10 TextLow time, countdown, and the
+  white Join pill on imminent meetings (which now actually opens the link).
+
+**Still to build** (fully specced with screenshots in the session scratchpad + tasks):
+prompt/recording/ready compact pills, transcribing-expanded with avatar-chip live lines, the
+Meetings/Meeting-Notes panels with colored collapsible sections, Settings segmented controls, the
+mascot's expression states, and the three full-window redesigns.
+
+## Round two of owner testing: the sticky, the clips, the home card (2026-08-13, evening)
+
+Research-first this time, as asked - one agent pass over Otter, Fathom, Fireflies, Grain, Descript's
+edit-point patent, Granola, Fantastical, Krisp and Loom, plus the WPF nesting literature - then built.
+**1,915 tests green, `--stickytest` 4/4 (with a new structural check that the OLD build fails),
+`--notetest` 23/23, `--hittest` and `--measuretest` clean.** Full session notes:
+[`docs/notes-2026-08-13.md`](docs/notes-2026-08-13.md).
+
+- **The sticky note works.** It was nested inside the read-only note document, whose text editor
+  starves any nested editor of keyboard, caret and selection at class level - three separately
+  documented mechanisms, which is why point-fixes (focus-after-layout) kept "passing" while the owner
+  could not type a letter. The note page now SPLITS at the sticky: notes document, real editor,
+  transcript document - three siblings under one scroll. The trade (no drag-selection THROUGH the
+  sticky) is honest: selection across it only ever worked while typing in it did not.
+- **Clips play the moment, not the word "That".** Evidence scored a 3-line window but returned only
+  its first line - which could carry zero matched words. `BestRange` returns the span, trimmed at
+  both ends to lines that hold actual evidence. Padding went from 1500ms of somebody else's sentence
+  to 300ms lead / 700ms tail, with the cut SNAPPED into the silence before the same stream's next
+  line (Descript's rule; transducer ASR end-times run early, so the tail matters more than the lead).
+- **Play buttons are now guaranteed-present**: same stream, monotonic timestamps, a 1.5s minimum
+  moment, and the WAV header proves the file covers the window - all checked at render, so a button
+  that appears is a button that works.
+- **The home card has a hierarchy instead of a grid.** One hero (Take notes), the calendar as a quiet
+  pill, COMING UP as the content, and ONE "Connect a calendar ▾" row that offers Google or Outlook
+  and disappears entirely once connected - the Granola/Loom/Fantastical pattern, and the end of the
+  "weirdly symmetric" 2x2.
+
+## The owner's four corrections, taken properly (2026-08-13, later)
+
+The owner opened the build and found four things wrong, with reference screenshots from Outlook. All
+four were right, and one exposed a rule this repo had already written down twice and ignored a third
+time. **1,907 tests green**, `--notetest` 23/23, `--measuretest` clean, `--hittest` clean.
+
+- **The day "picker" was a list of 14 days.** A meeting three weeks out was unreachable, and a flat
+  list answers none of what a person is weighing ("is that a Friday?"). New `Views/DayPicker.cs`: a
+  real month calendar in Toki's language - month + year, arrows, locale-aware weekday header, always
+  six rows so paging never jumps, today ringed, chosen day filled, dimmed neighbours, a Today jump.
+- **The time list ran 7am-9pm**, which quietly asserted nobody meets outside office hours - a 6am
+  call with another timezone was unpickable. Now the whole day, and the picker opens SCROLLED TO the
+  current value, which is what makes 48 rows cost nothing.
+- **The third field is the END TIME, not a duration.** Outlook shows `6:00 PM - 6:30 PM`; nobody
+  should do the arithmetic. The row now reads `2pm - 2:30 PM`, and the end picker's rows are
+  "2:30 PM (30 min)" - Google's annotation, so time-thinkers and length-thinkers both get their
+  answer. The When row went to two lines; three fields in 360px was clipping "tomorrow" mid-word.
+- **The audio play button did not play. It had NEVER worked in the product** - it was a Border with a
+  MouseLeftButtonUp handler inside a read-only RichTextBox, whose selection machinery eats the
+  mouse-up. `NotePicker`'s own comment warns about exactly this. It is now a real Button (Click is
+  raised from capture logic, which is why the ticks beside it always worked), drawn as a small filled
+  pill instead of a bare triangle.
+- **Style and Size are two toolbar controls now**, like every editor on earth - a Style dropdown
+  (Title/Heading/Body, opens on the current line's style) and an "Aa 4" size chip that shows its
+  number. The merged two-section dropdown is gone.
+- **Connect Google AND Outlook live on the notch Home** - side by side when nothing is connected;
+  once connected they shrink to small round provider marks beside the account address, with a compact
+  "+ Outlook" pill to add the second. In Settings the unconfigured Outlook button is no longer
+  DISABLED (indistinguishable from broken) - it explains the one-time Microsoft registration and
+  names the guide.
+
+**Two things the harnesses caught on the way out**, both worth their write-up: `--notetest` started
+failing at 19px because the editor now loads the OWNER'S saved text size - the first real use of the
+size dial broke a test that inherited ambient settings; it now pins the size. And `--measuretest`
+reported a 4px clip that was really the harness measuring TWO DIFFERENT LAYOUTS: showing the view
+fired `RefreshGoogle`, which read the real (disconnected) state and flipped the debug-pinned connected
+card back to the CTA. `DebugConnected` now pins. The measure harness also learned to NAME the element
+that differs instead of leaving a whole view to bisect by hand.
+
+## Quality bugs, a document-shaped note editor, and a second calendar (2026-08-13)
+
+**1,907 tests green.** The owner picked a batch off the pending list; this is all of it.
+
+**Note quality - the three defects two real meetings left behind**
+
+- **A template is a CLAIM, and it now has to be earned.** Both real meetings were classified
+  "Decision log" and neither made a decision, so "Rationale" came out as invented justification for
+  something that never happened. New `Llm/TemplateGate.cs`: the model still proposes, but the
+  TRANSCRIPT has to contain evidence for a specialised template or it falls back to General ("Key
+  points"), which asserts nothing and therefore cannot be wrong. Decision language, interview
+  language, commercial language, standup reporting; 1:1 needs exactly two voices; a lecture needs one
+  voice carrying 80% of the words. Deliberately loose about what counts and strict about needing
+  some, because a missed specialisation costs a plainer note while a false one puts words in people's
+  mouths.
+- **Spoken self-corrections kept both halves.** "The educative, oh, executive summary" reached the
+  notes with a word nobody said. `Transcription/SelfCorrection.cs` drops the discarded attempt, but
+  ONLY when a cue ("sorry", "I mean", "oh") sits between two words that clearly sound like the same
+  word - so "we're shipping, I mean, Tuesday" is left completely alone.
+- **Toki's own edits are now visible.** Names it unified and repairs it dropped are stored with the
+  meeting (`corrections_json`) and drawn in the transcript with a dotted underline and the original on
+  hover. Notes stay clean, per the owner's rule. The wording is honest at meeting level - "also
+  transcribed as" - because Toki records the PAIR it changed, not which instance.
+- **"Re-clean saved transcripts"**, in Settings. Re-runs turn-joining, name correction and
+  self-correction over meetings you already have. Offered, never automatic, and it does not touch a
+  single summary, to-do or tick box - which is exactly why it is safe to offer.
+
+**The note editor and the manual-note page**
+
+- **A size dial, 1 to 12**, replacing the parked Bold/Italic. It scales the whole ramp together
+  rather than setting a point size on a selection, for two reasons that are the same reason
+  Bold/Italic is parked: Markdown cannot record "this word is 14pt", and per-Run formatting on this
+  surface is what caused the S8 mosquito-text data loss. Remembered across notes, because somebody who
+  wants bigger text wants it everywhere. `--notetest` is now **23 checks**.
+- **The manual-note page reads as a document.** It ran the full width of the pane (a 900px line is
+  genuinely hard to read), drew a form-style rule under the title, and ended in a Delete button. Now:
+  a capped 720px measure, centred, with the date under the title where a document keeps its quiet
+  facts, and Delete in a footer past a generous gap.
+- **List markers are set RIGHT in their gutter.** Left-aligned, a tick box nearly filled the gutter
+  while a four-pixel bullet floated 20px from its own words. Right alignment with one fixed gap gives
+  every marker the same relationship to its text and still lines the text column up.
+- **Blank lines were nearly twice the gap they asked for.** WPF's default `LineStackingStrategy`
+  takes the LARGER of the requested line height and the font's natural height, so a 9px beat silently
+  became 17px and every section drifted apart.
+
+**The new-meeting composer, reshaped like Google's and Outlook's**
+
+Day and Time still take typed words ("tomorrow", "2pm") and now each carries a picker, so nobody has
+to guess what the box accepts. Both are prefilled with today and the next half hour - a blank form
+asks a question the app could have answered. Guests became a labelled field that is always there
+rather than a surprise behind an "Add people" toggle, and the Meet link became a labelled switch,
+because a chip that fills in when active cannot say whether it describes a state or offers an action.
+
+**"Open from last time"**
+
+A recurring meeting's note now opens with what the last occurrence left unfinished
+(`Llm/OpenFromLastTime.cs`). Deterministic, no second model pass, no added wait. It refuses to fire on
+a one-off, refuses to repeat a to-do this meeting already produced, and refuses to resurrect anything
+ticked.
+
+**Evidence audio - hear the moment, and share the clip**
+
+Researched first, as asked. **Granola keeps no audio at all** and markets that as the privacy
+feature, so its evidence links can only ever reach the transcript. **Otter keeps audio in its cloud**
+and shares a snippet as a hosted LINK it continues to control. Toki is the only one holding the audio
+on the user's own disk - a real advantage, and a real liability, because a local file has no revoke.
+
+So: playback is free and silent, plays a WINDOW with a run-up rather than the meeting, and export is a
+separate deliberate act behind a right-click that warns once, in plain words, that the clip carries
+other people's voices. Playing and exporting share one code path, so "share this" can never quietly
+widen. No play button at all when the recording is gone. The text jump is KEPT beside it - reading is
+instant and works in an open office; they answer the same question at different costs.
+
+**Outlook, alongside Google rather than instead of it**
+
+`MicrosoftAuth` (loopback + PKCE, no client secret - Microsoft registers this as a public client) and
+`OutlookClient` (Graph). Both connections can be on at once and the agenda is merged; every event
+carries its `Provider`, so an edit or delete goes back to the account that owns it. Three Graph
+gotchas handled and commented: `calendarView` rather than `events` (or a daily standup appears once),
+timestamps arrive with NO offset (parsed as local, a 2pm meeting shows at 7:30), and Microsoft rotates
+the refresh token on EVERY refresh (store it or the connection dies overnight). Setup:
+[`docs/outlook-setup.md`](docs/outlook-setup.md) - **needs an Azure app registration before the button
+can do anything**, exactly like the Google one.
+
 ## Pinned names + the migration that retried forever (2026-08-13)
 
 **Built**

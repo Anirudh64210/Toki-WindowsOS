@@ -51,10 +51,52 @@ public partial class NoteEditor : UserControl
     /// it - at 21 the checkbox sat flush against the first letter.</summary>
     const double MarkerWidth = 26;
 
+    /// <summary>The gap between a marker and the word after it. One number, so a bullet, a number and a
+    /// tick box all sit the same distance from their own text.</summary>
+    const double MarkerGap = 8;
+
     bool _loading;    // rebuilding from Markdown - the document is ours, not the user's
     bool _mutating;   // our own structural edit - don't re-enter the text-changed repair
     bool _compact;
     public event EventHandler? Changed;
+
+    /// <summary>
+    /// How big the note's text is, 1 to 12, as a comfort setting for the person WRITING.
+    ///
+    /// It scales the whole ramp - body, headings, list gutter and line spacing together - rather than
+    /// setting a point size on a selection. Two reasons, and both are the reason Bold/Italic is parked:
+    /// Markdown has no way to record "this word is 14pt", so a per-selection size could not survive a
+    /// save; and per-Run formatting on this surface is exactly what caused the mosquito-text data loss
+    /// (S8) - a line whose Run carried its own FontSize outranked its paragraph and was then written
+    /// out as an empty block. The LINE decides how its text looks; this decides how big a line is.
+    ///
+    /// So the ramp stays semantic (Title / Heading / Body, which are real Markdown and travel with the
+    /// file) and this is the dial on top of it.
+    /// </summary>
+    public int TextSize
+    {
+        get => _textSize;
+        set
+        {
+            var clamped = Math.Clamp(value, MinTextSize, MaxTextSize);
+            if (_textSize == clamped) return;
+            _textSize = clamped;
+            RestyleForSize();
+        }
+    }
+
+    public const int MinTextSize = 1;
+    public const int MaxTextSize = 12;
+
+    /// <summary>4 is 13px, which is the size this editor shipped at - so an existing note is unchanged
+    /// until somebody deliberately moves the dial.</summary>
+    public const int DefaultTextSize = 4;
+
+    int _textSize = DefaultTextSize;
+
+    /// <summary>Body text in pixels for a step on the dial. Linear and gentle: 1 is 10px (dense, for a
+    /// long note in a small window), 12 is 21px (comfortable across the room).</summary>
+    double BodySize => 9 + _textSize;
 
     /// <summary>Compact toolbar for narrow hosts - the notch is 356px wide, where the full labelled
     /// toolbar wraps onto two rows and eats the card. Same capabilities, glyphs instead of words, with
@@ -68,12 +110,37 @@ public partial class NoteEditor : UserControl
     public NoteEditor()
     {
         InitializeComponent();
+        // Before the first document is built, so nothing has to be restyled after the fact.
+        try
+        {
+            var saved = Llm.AppSettings.Current.NoteTextSize;
+            if (saved is >= MinTextSize and <= MaxTextSize) _textSize = saved;
+        }
+        catch { /* a settings read must never stop a note opening */ }
         BuildToolbar();
         Editor.TextChanged += OnTextChanged;
         Editor.PreviewKeyDown += OnKey;
         // A fresh RichTextBox defaults to a fat paragraph gap; we control spacing per block kind.
         Editor.Document.PagePadding = new Thickness(0);
-        Editor.Document.LineHeight = 20;
+        Editor.Document.LineHeight = DocLineHeight;
+    }
+
+    /// <summary>Leading grows with the type, or a bigger note reads as a tighter one.</summary>
+    double DocLineHeight => Math.Round(BodySize * 20.0 / 13.0);
+
+    /// <summary>Re-apply the ramp to every line after the size dial moves. Structural, so it must not
+    /// look like the user typed - hence the mutation guard, and no Changed event: the note's TEXT has
+    /// not changed, only how big it is drawn.</summary>
+    void RestyleForSize()
+    {
+        _mutating = true;
+        try
+        {
+            Editor.Document.LineHeight = DocLineHeight;
+            foreach (var p in Paragraphs()) ApplyStyle(p, DerivedKind(p));
+        }
+        finally { _mutating = false; }
+        Renumber();
     }
 
     // ── the text in, the text out ──
@@ -91,7 +158,7 @@ public partial class NoteEditor : UserControl
         _loading = true;
         try
         {
-            var doc = new FlowDocument { PagePadding = new Thickness(0), LineHeight = 20 };
+            var doc = new FlowDocument { PagePadding = new Thickness(0), LineHeight = DocLineHeight };
             foreach (var b in NoteMarkdown.Parse(markdown)) doc.Blocks.Add(MakeParagraph(b.Kind, b.Text, b.Done));
             if (doc.Blocks.Count == 0) doc.Blocks.Add(MakeParagraph(NoteBlockKind.Body, "", false));
             Editor.Document = doc;
@@ -128,36 +195,56 @@ public partial class NoteEditor : UserControl
         return p;
     }
 
-    static void ApplyStyle(Paragraph p, NoteBlockKind kind)
+    // The ramp is expressed as RATIOS of the body size, not as three fixed numbers, so the whole
+    // document scales together when the size dial moves. The ratios are the sizes it shipped with
+    // (19 and 15 against a 13px body), so at the default step nothing moves by a pixel.
+    const double HeadingRatio = 19.0 / 13.0;
+    const double SubheadingRatio = 15.0 / 13.0;
+
+    void ApplyStyle(Paragraph p, NoteBlockKind kind)
     {
+        var body = BodySize;
+        var gutter = MarkerWidth * body / 13.0;   // the marker column grows with the text beside it
+
         p.ClearValue(Paragraph.TextIndentProperty);
         p.ClearValue(Paragraph.LineHeightProperty);   // only Blank sets one; it must not survive a change
+        p.ClearValue(Paragraph.LineStackingStrategyProperty);   // ditto - it travels with that LineHeight
         p.FontWeight = FontWeights.Normal;
         switch (kind)
         {
             case NoteBlockKind.Heading:
-                p.FontSize = 19; p.FontWeight = FontWeights.SemiBold; p.Margin = new Thickness(0, 14, 0, 4);
+                p.FontSize = Math.Round(body * HeadingRatio);
+                p.FontWeight = FontWeights.SemiBold; p.Margin = new Thickness(0, 14, 0, 4);
                 break;
             case NoteBlockKind.Subheading:
-                p.FontSize = 15; p.FontWeight = FontWeights.SemiBold; p.Margin = new Thickness(0, 12, 0, 3);
+                p.FontSize = Math.Round(body * SubheadingRatio);
+                p.FontWeight = FontWeights.SemiBold; p.Margin = new Thickness(0, 12, 0, 3);
                 break;
             case NoteBlockKind.Blank:
                 // A blank line is a BEAT, not a full empty row. Headings already carry a top margin,
                 // so rendering the user's blank at full body height stacked into a chasm between
-                // sections. LineHeight alone does the shrinking (the document's LineHeight=20 wins
+                // sections. LineHeight alone does the shrinking (the document's LineHeight wins
                 // otherwise). The FONT SIZE deliberately stays at body size: it used to be 6, and the
                 // first character typed into a blank line came out mosquito-sized.
-                p.FontSize = 13; p.LineHeight = 9;
+                //
+                // LineStackingStrategy is what makes the LineHeight actually count. WPF's default,
+                // MaxHeight, takes the LARGER of the requested line height and the font's natural
+                // height - so asking a 13px line for 9px of leading quietly got you 17px, and every
+                // blank line in a note was nearly twice the gap it was supposed to be. Sections drifted
+                // apart and the page read as loose rather than spaced.
+                p.FontSize = body;
+                p.LineHeight = Math.Round(body * 9.0 / 13.0);
+                p.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
                 break;
             case NoteBlockKind.Bullet:
             case NoteBlockKind.Numbered:
             case NoteBlockKind.Todo:
                 // Hanging indent: the marker sits in the gutter and wrapped text lines up under the
                 // first word, not under the dot.
-                p.FontSize = 13; p.Margin = new Thickness(MarkerWidth, 1, 0, 1); p.TextIndent = -MarkerWidth;
+                p.FontSize = body; p.Margin = new Thickness(gutter, 1, 0, 1); p.TextIndent = -gutter;
                 break;
             default:
-                p.FontSize = 13; p.Margin = new Thickness(0);
+                p.FontSize = body; p.Margin = new Thickness(0);
                 break;
         }
 
@@ -200,8 +287,20 @@ public partial class NoteEditor : UserControl
             default: return null;
         }
 
-        child.HorizontalAlignment = HorizontalAlignment.Left;   // glyph left, gap right - never flush to the text
-        var host = new Border { Width = MarkerWidth, Child = child, Background = Brushes.Transparent };
+        // The marker is set RIGHT in its gutter, with one fixed gap before the text.
+        //
+        // Left-aligning it made every kind sit at the same left edge and therefore a different distance
+        // from its own words: a tick box nearly filled the gutter and looked attached, while a bullet
+        // dot is four pixels wide and floated a clear 20px away from the line it belonged to. Right
+        // alignment is how numbered lists have been set for centuries - "1." and "10." end flush - and
+        // it gives every marker the same relationship to its text while keeping one text column, so a
+        // list of bullets and to-dos still lines up down the page.
+        child.HorizontalAlignment = HorizontalAlignment.Right;
+        child.Margin = new Thickness(0, 0, MarkerGap, 0);
+        var host = new Border
+        {
+            Width = MarkerWidth * BodySize / 13.0, Child = child, Background = Brushes.Transparent,
+        };
         return new InlineUIContainer(host) { BaselineAlignment = BaselineAlignment.Center, Tag = kind };
     }
 
@@ -456,14 +555,30 @@ public partial class NoteEditor : UserControl
 
     // ── the toolbar ──
 
+    // The style chip and the size chip are rebuilt-in-place labels, so both can show their current
+    // value the way Word's toolbar does ("Body", "13") instead of a generic glyph.
+    Border? _styleChip, _sizeChip;
+
     void BuildToolbar()
     {
         Toolbar.Children.Clear();
 
+        // STYLE and SIZE are two controls, not one dropdown with two sections.
+        //
+        // The first pass merged them behind a single "Aa" button with group headings inside, and the
+        // owner's critique was exact: no document editor on earth does that. Word has a Styles control
+        // and a Size control; Google Docs has a styles dropdown and a size stepper; they are separate
+        // because they are different KINDS of answer - style is per-line structure that travels with
+        // the file, size is how big the whole page is drawn. Merging them was tidiness at the cost of
+        // matching every editor the user has ever used, which is the one convention a toolbar must
+        // never spend.
         if (_compact)
         {
             // Everything the full bar does, in one row that fits the notch. Tooltips carry the words.
-            Toolbar.Children.Add(Chip("Aa", "Text size", ShowSizes));
+            _styleChip = Chip(StyleChipLabel(), "Line style - Title, Heading or Body", ShowStyles);
+            _sizeChip = Chip($"{TextSize}", "Text size", ShowSizes);
+            Toolbar.Children.Add(_styleChip);
+            Toolbar.Children.Add(_sizeChip);
             Toolbar.Children.Add(Chip("☑", "A line with a tick box", () => SetKind(NoteBlockKind.Todo)));
             Toolbar.Children.Add(Chip("•", "Bulleted list", () => SetKind(NoteBlockKind.Bullet)));
             Toolbar.Children.Add(Chip("1.", "Numbered list", () => SetKind(NoteBlockKind.Numbered)));
@@ -471,11 +586,10 @@ public partial class NoteEditor : UserControl
             return;
         }
 
-        // ONE size control, not three chips. Text size is a choice from a set, and three separate chips
-        // spend the bar's whole width saying so while still reading as three unrelated buttons - the same
-        // shape of mistake as the calendar's cycling duration chip. The picker names the sizes, so
-        // nothing is hidden behind a glyph.
-        Toolbar.Children.Add(Chip("Aa  ▾", "Text size", ShowSizes));
+        _styleChip = Chip(StyleChipLabel(), "Line style - Title, Heading or Body", ShowStyles);
+        _sizeChip = Chip($"Aa {TextSize}  ▾", "Text size for the whole note", ShowSizes);
+        Toolbar.Children.Add(_styleChip);
+        Toolbar.Children.Add(_sizeChip);
         Toolbar.Children.Add(Gap());
         Toolbar.Children.Add(Chip("☑ To-do", "A line with a tick box", () => SetKind(NoteBlockKind.Todo)));
         Toolbar.Children.Add(Chip("• List", "Bulleted list", () => SetKind(NoteBlockKind.Bullet)));
@@ -484,13 +598,69 @@ public partial class NoteEditor : UserControl
         Toolbar.Children.Add(Chip("Template", "Insert the sections of one of Toki's note shapes", ShowTemplates));
     }
 
-    /// <summary>The three text sizes, behind one "Aa" button. Used by both toolbars.</summary>
-    void ShowSizes() => ShowPicker(new (string, Action)[]
+    string StyleChipLabel() => _compact ? "¶" : "Style  ▾";
+
+    /// <summary>
+    /// Everything about how big text is, behind one "Aa" button - in two groups, because they are two
+    /// different questions and merging them would be the confusing kind of tidy.
+    ///
+    /// THIS LINE is structure: Title / Heading / Body are real Markdown, they travel with the file, and
+    /// they are per-line. TEXT SIZE is comfort: 1 to 12, applies to the whole note, and is remembered
+    /// for next time. See <see cref="TextSize"/> for why the numeric dial is not per-selection.
+    /// </summary>
+    /// <summary>The STYLE dropdown: what this line is. Anchored to its own chip, opened on the current
+    /// line's kind, exactly the shape of Word's Styles control.</summary>
+    void ShowStyles()
     {
-        ("Title",   () => SetKind(NoteBlockKind.Heading)),
-        ("Heading", () => SetKind(NoteBlockKind.Subheading)),
-        ("Body",    () => SetKind(NoteBlockKind.Body)),
-    });
+        var current = CaretParagraph() is { } p ? DerivedKind(p) : NoteBlockKind.Body;
+        var selectedLabel = current switch
+        {
+            NoteBlockKind.Heading => "Title",
+            NoteBlockKind.Subheading => "Heading",
+            _ => "Body",
+        };
+        NotePicker.Show((FrameworkElement?)_styleChip ?? Toolbar, new List<(string, Action?)>
+        {
+            ("Title",   () => SetKind(NoteBlockKind.Heading)),
+            ("Heading", () => SetKind(NoteBlockKind.Subheading)),
+            ("Body",    () => SetKind(NoteBlockKind.Body)),
+        }, selectedLabel);
+    }
+
+    /// <summary>The SIZE dropdown: how big the note is drawn, 1 to 12. Its own chip, numbers only.</summary>
+    void ShowSizes()
+    {
+        var items = new List<(string Label, Action? Pick)>();
+        for (var n = MinTextSize; n <= MaxTextSize; n++)
+        {
+            var step = n;
+            items.Add(($"{step}", () => SetTextSize(step)));
+        }
+        NotePicker.Show((FrameworkElement?)_sizeChip ?? Toolbar, items, selected: $"{TextSize}");
+    }
+
+    /// <summary>Change the size, remember it, and update the chip so the toolbar always states the
+    /// current value - a size control that does not show its number is half a control.</summary>
+    void SetTextSize(int step)
+    {
+        TextSize = step;
+        try
+        {
+            var s = Llm.AppSettings.Current;
+            if (s.NoteTextSize != TextSize) { s.NoteTextSize = TextSize; s.Save(); }
+        }
+        catch (Exception ex) { App.Log($"save note text size: {ex.Message}"); }
+        RelabelChip(_sizeChip, _compact ? $"{TextSize}" : $"Aa {TextSize}  ▾");
+        Editor.Focus();
+    }
+
+    /// <summary>The paragraph the caret sits in, for opening the style picker on the right answer.</summary>
+    Paragraph? CaretParagraph() => Editor.CaretPosition?.Paragraph;
+
+    static void RelabelChip(Border? chip, string label)
+    {
+        if (chip?.Child is TextBlock t) t.Text = label;
+    }
 
     static UIElement Gap() => new Border { Width = 10 };
 
@@ -573,12 +743,20 @@ public partial class NoteEditor : UserControl
 
     // ── templates ──
 
-    void ShowTemplates() =>
-        ShowPicker(NoteTemplates.All.Select(t => (t.Name, (Action)(() => InsertTemplate(t)))).ToArray());
+    void ShowTemplates()
+    {
+        var items = new List<(string Label, Action? Pick)>();
+        foreach (var t in NoteTemplates.All)
+        {
+            var template = t;
+            items.Add((template.Name, () => InsertTemplate(template)));
+        }
+        ShowPicker(items.ToArray());
+    }
 
     /// <summary>Toki's own themed popup - see <see cref="NotePicker"/>, which is also why the rows are
     /// real Buttons (a Border's mouse-up gets eaten as the popup closes, leaving dead menu items).</summary>
-    void ShowPicker((string Label, Action Pick)[] items) => NotePicker.Show(Toolbar, items);
+    void ShowPicker((string Label, Action? Pick)[] items) => NotePicker.Show(Toolbar, items);
 
     /// <summary>Append a template's sections to what's already written - never replace it. Someone who
     /// has already typed half a page and then picks a shape shouldn't lose the half page.</summary>

@@ -173,7 +173,7 @@ public partial class PrepCardView : UserControl
         if (App.CurrentPrep is not { } prep || App.Headless) return;
         FlushScratch();
 
-        var items = new List<(string Label, Action Pick)>
+        var items = new List<(string Label, Action? Pick)>
         {
             ("Start a new note", () => UseNote(null, prep)),
         };

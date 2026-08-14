@@ -5,7 +5,9 @@
     <!-- First-run, notch-native: three short steps that morph in place (name → privacy → all set),
          never a separate wizard window. The mascot is the constant identity at the top. -->
     <StackPanel Margin="22,18,22,16">
-        <Viewbox Width="42" HorizontalAlignment="Center">
+        <!-- HIDDEN: the floating bubble Toki beside the card is the one mascot; two on the very
+             first screen would teach a double-vision Toki from minute one. -->
+        <Viewbox Width="42" HorizontalAlignment="Center" Visibility="Collapsed">
             <controls:TokiBlob x:Name="Toki"/>
         </Viewbox>
 

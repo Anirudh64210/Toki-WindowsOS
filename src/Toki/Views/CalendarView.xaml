@@ -31,61 +31,100 @@
         <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,12,0,0"
                 BorderBrush="{DynamicResource Hairline}" BorderThickness="0,1,0,0" Padding="0,12,0,2">
             <StackPanel>
-                <!-- Separate fields (owner: not everything crammed in one box): title, then day + time.
-                     Day/Time accept natural words ("tomorrow", "Friday", "2pm") - resolved live below. -->
-                <TextBlock Text="Title" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
+                <!-- Shaped like the composer in Google Calendar or Outlook, for the reasons in
+                     CalendarView.xaml.cs "the composer":
+                       · the title is the first thing and needs no label - a placeholder says what it is
+                       · Day and Time still accept typing ("tomorrow", "2pm"), but each now carries a
+                         picker, so nobody has to GUESS what this box will accept
+                       · both are prefilled with a sensible answer, so the form is never blank
+                       · guests are a labelled field that is always there, not a surprise behind a toggle
+                       · the Meet link is a labelled switch, because a bare chip cannot say whether it
+                         is describing a state or offering an action -->
                 <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
-                    <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="36"
-                             Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                             FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                             TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                    <Grid>
+                        <TextBlock x:Name="TitlePlaceholder" Text="Add a title" IsHitTestVisible="False"
+                                   Foreground="{DynamicResource TextDim}" Opacity="0.6" VerticalAlignment="Center"
+                                   FontSize="13.5" FontFamily="{StaticResource UiFont}" Margin="1,0,0,0"/>
+                        <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="38"
+                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                 FontSize="13.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                 TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                    </Grid>
                 </Border>
 
-                <Grid Margin="0,9,0,0">
+                <!-- WHEN, on two lines - the day, then start–end. Three fields on one 360px line
+                     clipped the word "tomorrow" mid-word; Outlook's compact pane stacks them for the
+                     same reason. The dash between start and end says they are two ends of one thing. -->
+                <TextBlock Text="When" Style="{StaticResource Caption}" Margin="2,12,0,4"/>
+                <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0,4,0">
+                    <DockPanel>
+                        <Button x:Name="DatePick" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                                Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10" Width="28" Height="30"
+                                ToolTip="Pick a day" Click="OnPickDay"/>
+                        <TextBox x:Name="DateBox" Background="Transparent" BorderThickness="0" Height="36"
+                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                 FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                 TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                    </DockPanel>
+                </Border>
+
+                <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Day" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
-                        <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
-                            <TextBox x:Name="DateBox" Background="Transparent" BorderThickness="0" Height="36"
-                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                     FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                                     TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
-                        </Border>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Time" Style="{StaticResource Caption}" Margin="2,0,0,4"/>
-                        <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+
+                    <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0,4,0">
+                        <DockPanel>
+                            <Button x:Name="TimePick" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                                    Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10" Width="28" Height="30"
+                                    ToolTip="Pick a start time" Click="OnPickTime"/>
                             <TextBox x:Name="TimeBox" Background="Transparent" BorderThickness="0" Height="36"
                                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                      FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                                      TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
-                        </Border>
-                    </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <TextBlock Grid.Column="1" Text="–" Style="{StaticResource Dim}" FontSize="13"
+                               VerticalAlignment="Center" Margin="8,0"/>
+
+                    <Button x:Name="DurationChip" Grid.Column="2" Style="{StaticResource ChipButton}"
+                            Content="30 min  &#x25BE;" Click="OnPickDuration" Height="36"
+                            HorizontalContentAlignment="Center"
+                            ToolTip="When the meeting ends"/>
                 </Grid>
 
                 <TextBlock x:Name="ComposerHint" Style="{StaticResource Caption}" Margin="2,7,0,0"
-                           Text="e.g. Design sync · tomorrow · 2pm"/>
+                           Text="Type a day and time, or pick them"/>
                 <TextBlock x:Name="ParsePreview" Style="{StaticResource Secondary}" FontWeight="SemiBold"
                            Foreground="{DynamicResource Green}" Margin="2,6,0,0" Visibility="Collapsed"/>
 
-                <!-- Optional attendees, revealed by the People chip -->
-                <Border x:Name="PeopleRow" Visibility="Collapsed" Background="{DynamicResource Chip}"
-                        CornerRadius="10" Padding="12,0" Margin="0,8,0,0">
-                    <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="32"
-                             Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                             FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"/>
+                <TextBlock Text="Guests" Style="{StaticResource Caption}" Margin="2,12,0,4"/>
+                <Border x:Name="PeopleRow" Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+                    <Grid>
+                        <TextBlock x:Name="PeoplePlaceholder" Text="name@company.com, someone@else.com"
+                                   IsHitTestVisible="False" Foreground="{DynamicResource TextDim}" Opacity="0.55"
+                                   VerticalAlignment="Center" FontSize="12" FontFamily="{StaticResource UiFont}"
+                                   Margin="1,0,0,0"/>
+                        <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="36"
+                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                                 FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                 TextChanged="OnPeopleChanged"/>
+                    </Grid>
                 </Border>
 
-                <StackPanel Orientation="Horizontal" Margin="0,11,0,0">
-                    <Button x:Name="DurationChip" Style="{StaticResource ChipButton}" Content="30 min  &#x25BE;" Click="OnPickDuration"
-                            ToolTip="How long the meeting runs"/>
-                    <Button x:Name="MeetChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Content="Google Meet" Click="OnToggleMeet"/>
-                    <Button x:Name="PeopleChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Content="Add people" Click="OnTogglePeople"/>
-                </StackPanel>
+                <Grid Margin="0,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Add a Google Meet link" Style="{StaticResource Body}" FontSize="12.5"
+                               VerticalAlignment="Center"/>
+                    <CheckBox x:Name="MeetToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
+                              VerticalAlignment="Center" Click="OnToggleMeet"/>
+                </Grid>
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
                     <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"

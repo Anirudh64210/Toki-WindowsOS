@@ -44,9 +44,32 @@ public partial class PillWindow : Window
         [PillState.Onboarding]    = (330, 250),   // auto-height: steps (name/privacy/done) differ in height
     };
 
-    const double TopGap = 0;        // flush to the top edge - the notch hangs from the top
+    // ── the HOVERING card (2026-08 redesign) ──
+    // The panel floats a little below the top edge instead of fusing to it, and the window is bigger
+    // than the card: a left zone where Toki floats beside it, and right/bottom room for the shadow.
+    // EVERY size in this file speaks CARD dimensions; the two conversion helpers below are the only
+    // place window dimensions are derived, so the pads can never be added twice.
+    // The hover: how far below the top edge the card hangs. Two exceptions (owner, 2026-08-13/14):
+    // RECORDING sits AT the top, non-invasive - a status strip, not a floating panel; and the
+    // COLLAPSED edge-summon peek is FLUSH with the edge - it drops out of the top of the screen
+    // when you hover there, so a gap above it reads as "too low", not as hovering.
+    const double TopGapDefault = 12;
+    const double TopGapRecording = 2;
+    double TopGap => _state.Current switch
+    {
+        PillState.RecordingBar or PillState.RecordingOpen => TopGapRecording,
+        PillState.Collapsed => 0,
+        _ => TopGapDefault,
+    };
     const double BottomMargin = 12;  // never grow past the bottom of the work area
-    const double CornerRadius = 22;
+    const double CornerRadius = 24;
+    const double CardPadL = 68;      // Toki's floating zone, left of the card (58px bubble + 10px air)
+    const double CardPadR = 20;      // shadow room
+    const double CardPadB = 24;      // shadow room
+    static double WinW(double cardW) => cardW + CardPadL + CardPadR;
+    static double WinH(double cardH) => cardH + CardPadB;
+    static double CardW(double winW) => Math.Max(1, winW - CardPadL - CardPadR);
+    static double CardH(double winH) => Math.Max(1, winH - CardPadB);
 
     // GLASS ONLY: DWM rounds ALL corners of an acrylic window (it can't round just the bottom), which
     // curves the TOP corners that must be flush with the screen edge. So in glass mode the window is
@@ -140,9 +163,16 @@ public partial class PillWindow : Window
                 var p = e.GetPosition(this);
                 var hit = System.Windows.Media.VisualTreeHelper.HitTest(this, p)?.VisualHit;
 
-                // Did the click land inside a button (or anything else that handles a click)?
+                // Did the click land on something that ACTS like a button?
+                //
+                // ButtonBase alone is not enough, and assuming it was made this log cry wolf: the
+                // collapsed peek opens on a Border with a mouse handler, so clicking Toki's face -
+                // which works, and opened Home 65ms later - was written down as a missed click. A log
+                // that reports healthy behaviour as broken is worse than no log, because it is the
+                // thing the owner and I both reach for when something IS wrong.
                 for (var q = hit; q is not null; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
-                    if (q is System.Windows.Controls.Primitives.ButtonBase) return;
+                    if (q is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Documents.Hyperlink
+                        || (q is FrameworkElement fe2 && fe2.Cursor == Cursors.Hand)) return;
 
                 var chain = new List<string>();
                 for (var q = hit; q is not null && chain.Count < 5; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
@@ -175,8 +205,15 @@ public partial class PillWindow : Window
                     if (!b.IsVisible || b.ActualWidth <= 0) continue;
                     Point local;
                     try { local = TranslatePoint(p, b); } catch { continue; }
-                    var inside = local.X >= 0 && local.Y >= 0 && local.X <= b.ActualWidth && local.Y <= b.ActualHeight;
-                    if (!inside) continue;
+                    // INSET, not the raw rectangle. Toki's buttons are drawn with large corner radii,
+                    // so a point a pixel in from the left edge and seven up from the bottom is inside
+                    // the RECT and genuinely outside the SHAPE - WPF is right to ignore it and this
+                    // log was wrong to call it a miss. It reported exactly that twice while the owner
+                    // was using Home, which sent me hunting a bug that was not there.
+                    //
+                    // The inset is the corner radius, so only points that are unambiguously within the
+                    // drawn button count. Same lesson as --hittest v1, which probed literal corners.
+                    if (!WellInside(local, b)) continue;
 
                     // Inside the button's box. Is the button itself aware of it? If not, the highlight
                     // cannot be coming from this button, and THAT is the bug.
@@ -206,11 +243,26 @@ public partial class PillWindow : Window
             if (!b.IsVisible || b.ActualWidth <= 0) continue;
             Point local;
             try { local = TranslatePoint(p, b); } catch { continue; }
-            if (local.X >= 0 && local.Y >= 0 && local.X <= b.ActualWidth && local.Y <= b.ActualHeight)
+            if (WellInside(local, b))
                 return $"{b.GetType().Name}:{(b.Name.Length > 0 ? b.Name : b.Content as string ?? "?")} "
                      + $"({b.ActualWidth:F0}x{b.ActualHeight:F0}) at local ({local.X:F0},{local.Y:F0})";
         }
         return null;
+    }
+
+    /// <summary>
+    /// Is this point unambiguously within a rounded button, rather than merely within its rectangle?
+    ///
+    /// A pill button 36px tall carries a radius of up to half its height, so the rectangle overstates
+    /// the shape by a lot near the corners. The diagnostics inset by that radius: better to miss a
+    /// genuine edge case than to report a healthy button as broken, because the whole value of this log
+    /// is that a line in it means something.
+    /// </summary>
+    static bool WellInside(Point local, FrameworkElement b)
+    {
+        var inset = Math.Min(10, Math.Min(b.ActualWidth, b.ActualHeight) / 3);
+        return local.X > inset && local.Y > inset
+            && local.X < b.ActualWidth - inset && local.Y < b.ActualHeight - inset;
     }
 
     static IEnumerable<DependencyObject> Descendants(DependencyObject root)
@@ -334,8 +386,9 @@ public partial class PillWindow : Window
         var work = PhysicalWorkArea();
         var dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
         int gap = (int)Math.Round(TopGap * dpi);
-        int x = work.Left + ((work.Right - work.Left) - winW) / 2;
-        int y = work.Top + gap - _topBleedPx;   // top edge fixed → height grows downward (glass bleeds above)
+        int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi);
+        int x = work.Left + ((work.Right - work.Left) - winW) / 2 - skew;
+        int y = work.Top + gap - _topBleedPx;   // top edge fixed → height grows downward
         // Skip the move when nothing changed - SizeChanged fires this on every frame of a size
         // animation, but for a height-only morph x/y are constant, so the Win32 call is pure waste.
         if (x == _lastPlaceX && y == _lastPlaceY) return;
@@ -352,11 +405,14 @@ public partial class PillWindow : Window
         if (_hwnd == IntPtr.Zero) return;
         var work = PhysicalWorkArea();
         var dpi = VisualTreeHelper.GetDpi(this);
-        int pw = Math.Max(1, (int)Math.Round(dipW * dpi.DpiScaleX));
-        int ph = Math.Max(1, (int)Math.Round(dipH * dpi.DpiScaleY));
+        int pw = Math.Max(1, (int)Math.Round(WinW(dipW) * dpi.DpiScaleX));
+        int ph = Math.Max(1, (int)Math.Round(WinH(dipH) * dpi.DpiScaleY));
         int gap = (int)Math.Round(TopGap * dpi.DpiScaleY);
-        int x = work.Left + ((work.Right - work.Left) - pw) / 2;
-        int y = work.Top + gap - _topBleedPx;   // glass panels bleed above the screen edge
+        // Centre the CARD, not the window: the mascot pad makes the window asymmetric, so the window
+        // shifts left by half the pad difference to put the card itself on the screen's centreline.
+        int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi.DpiScaleX);
+        int x = work.Left + ((work.Right - work.Left) - pw) / 2 - skew;
+        int y = work.Top + gap - _topBleedPx;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, pw, ph, SwpNoZOrder | SwpNoActivate);   // NOT SwpNoSize - set both
         _lastPlaceX = x; _lastPlaceY = y;
     }
@@ -482,7 +538,9 @@ public partial class PillWindow : Window
         var fullH = enterTucked ? SliverH : Math.Min(ContentHeight(next, w, h), availH);
         // Glass panels extend above the screen edge (see GlassTopBleed): grow the window by the bleed and
         // push the content down by it, so the off-screen top hides the DWM top-corner rounding.
-        var bleed = (Toki.Llm.AppSettings.Current.GlassyNotch && !peek && !enterTucked) ? GlassTopBleed : 0.0;
+        // The bleed existed to hide DWM's top-corner rounding on the FUSED sheet; the hovering card
+        // has a real gap above it, so bleeding upward would just eat the hover. Always zero now.
+        var bleed = 0.0;
         _topBleedPx = (int)Math.Round(bleed * dpi);
         Host.Margin = new Thickness(0, bleed, 0, 0);
         var targetH = fullH + bleed;
@@ -513,8 +571,8 @@ public partial class PillWindow : Window
             // move) while the content pops in - a clean extend-out-of-the-edge, no jank.
             BeginAnimation(WidthProperty, null);
             BeginAnimation(HeightProperty, null);
-            Width = w;
-            Height = targetH;
+            Width = WinW(w);
+            Height = WinH(targetH);
             // Clip to ZERO height and hide the content BEFORE Show(), so the very first composited frame
             // is empty - not a full-height black box that then unfurls. That single un-clipped frame was
             // the "black/white glitch" on hover-to-summon. RevealDown animates the clip open from here.
@@ -526,6 +584,7 @@ public partial class PillWindow : Window
             // the centred peek - the "asymmetric darker strip on the left" during the drop. Pre-sizing +
             // pre-centring makes the first visible frame already correct.
             PlaceExactTopCenter(w, targetH);
+            PlaceMascot(targetH, 0);       // Toki starts at this state's spot - no glide on a fresh reveal
             Show(); ApplyGhost();          // re-apply WDA - hide/show can drop it
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
             if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent - re-assert glass
@@ -538,8 +597,9 @@ public partial class PillWindow : Window
             Root.Clip = null; _clipGen++;
             BeginAnimation(WidthProperty, null);   // clear any in-flight resize animation
             BeginAnimation(HeightProperty, null);
-            Width = w;
-            Height = targetH;
+            Width = WinW(w);
+            Height = WinH(targetH);
+            PlaceMascot(targetH, Theme.Motion.Morph);   // glide to this state's spot with the morph
             PositionTopCenter();   // physical-pixel placement, DPI-proof (top-anchored notch)
             MorphContent();
         }
@@ -576,17 +636,56 @@ public partial class PillWindow : Window
     /// <summary>Smoothly animate the window's size (the pill morph) with a gentle ease.
     /// Animates from the CURRENT actual size (explicit From) so a morph that interrupts an
     /// in-flight one can't get stuck holding the old target.</summary>
+    /// <summary>Animate the window to hold a CARD of (w,h) - the pads are added here, once.</summary>
     void AnimateSize(double w, double h, int ms)
     {
-        // Ease-OUT, not ease-in-out: an expanding/morphing notch should decelerate into its new size
-        // (Glass's 1−(1−p)³; Material/Fluent agree arriving motion decelerates). Reads noticeably more
-        // premium than the old symmetric curve. Central motion token - see Theme/Motion.
-        var ease = Theme.Motion.EaseOut;
+        PlaceMascot(h, ms);
+        w = WinW(w); h = WinH(h);
+        // The DRAWER curve (0.32,0.72,0,1) - the iOS-sheet / Dynamic-Island settle - replaces the
+        // stock CubicEase: fast launch, long soft landing. This is THE curve for the notch morph
+        // (motion-and-feel skill §2); the old built-in ease read mechanical.
+        var ease = Theme.Motion.Drawer;
         var dur = new Duration(TimeSpan.FromMilliseconds(ms));
         var fromW = ActualWidth > 0 ? ActualWidth : w;
         var fromH = ActualHeight > 0 ? ActualHeight : h;
-        BeginAnimation(WidthProperty, new DoubleAnimation(fromW, w, dur) { EasingFunction = ease });
+        // The shadow caster carries the window's only Effect; resizing it per frame would software-
+        // re-render the blur on EVERY frame of the morph (the jank triad, skill §1.3). Hide it for
+        // the ride and fade it back once the size settles - a shadow that arrives a beat after the
+        // panel reads as the panel settling into place, not as a missing shadow.
+        ShadowCaster.BeginAnimation(OpacityProperty, null);
+        ShadowCaster.Opacity = 0;
+        var wAnim = new DoubleAnimation(fromW, w, dur) { EasingFunction = ease };
+        wAnim.Completed += (_, _) =>
+        {
+            // Only if THIS morph is still the live one (an interrupting morph re-hides and re-arms).
+            if (Math.Abs(ActualWidth - w) < 2 && ShadowCaster.Visibility == Visibility.Visible)
+                ShadowCaster.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
+        };
+        BeginAnimation(WidthProperty, wAnim);
         BeginAnimation(HeightProperty, new DoubleAnimation(fromH, h, dur) { EasingFunction = ease });
+    }
+
+    /// <summary>Glide Toki's bubble to where the CURRENT state's Figma frame draws him: vertically
+    /// centered on a compact pill, bottom-left (overlapping the corner) on the expanded recording
+    /// panel, level with the header on tall panels. Composition-only (translate), never Margin.</summary>
+    void PlaceMascot(double cardH, int ms)
+    {
+        const double zone = 58;   // MascotZone height (XAML)
+        double y = _state.Current switch
+        {
+            PillState.RecordingOpen => Math.Max(0, cardH - zone + 8),      // corner overlap, pokes into the shadow pad
+            _ when cardH <= 90      => Math.Max(-4, (cardH - zone) / 2.0), // compact pill: centered on it
+            _                       => 8,                                  // tall panel: level with the header row
+        };
+        if (ms <= 0)
+        {
+            MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, null);
+            MascotShift.Y = y;
+            return;
+        }
+        MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty,
+            new DoubleAnimation(y, Theme.Motion.Dur(ms)) { EasingFunction = Theme.Motion.Drawer });
     }
 
     /// <summary>Apply the notch surface: a peek is transparent (just Toki floating); an open panel is
@@ -599,26 +698,33 @@ public partial class PillWindow : Window
             Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
             ApplyBlur(false); ApplyRoundRegion(false);   // a peek is just Toki floating - no glass
         }
-        else if (Toki.Llm.AppSettings.Current.GlassyNotch)
-        {
-            // REAL frosted glass: an acrylic blur-behind (DWM) dissolves whatever's behind the notch,
-            // with a thin dark tint over it for legibility. The Border fill AND rim are transparent so the
-            // frost is seamless (a 25%-white rim outlined the glass and read as a floating panel). DWM
-            // rounds the corners; DWM's own auto-border is killed in ApplyRoundRegion.
-            Root.Background = System.Windows.Media.Brushes.Transparent;
-            Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
-            ApplyBlur(true); ApplyRoundRegion(true);
-        }
         else
         {
-            // Opaque tinted-mirror notch (the shipped default). Re-bind to themed resources so a live
-            // light/dark swap recolours.
-            Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Notch");
-            Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "NotchBorder");
+            // The HOVERING card cannot use window-level DWM acrylic: the accent fills the whole
+            // rectangular window, and this window is now bigger than the card (mascot zone + shadow
+            // room), so the frost would paint the empty pads too. The glass reading comes from the
+            // card's own semi-transparent tint over the see-through window instead - "Glassy notch"
+            // now means the more transparent tint, off means the opaque approximation.
+            Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty,
+                Toki.Llm.AppSettings.Current.GlassyNotch ? "Glass" : "GlassOpaque");
+            Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "GlassBorder");
             ApplyBlur(false); ApplyRoundRegion(false);
         }
-        // No rim in glass mode (seamless frost); the 1px rim only frames the opaque notch.
-        Root.BorderThickness = (peek || Toki.Llm.AppSettings.Current.GlassyNotch) ? default : new Thickness(1, 0, 1, 1);
+        Root.BorderThickness = peek ? default : new Thickness(1);
+        // Toki floats beside the card on panel states; the peek carries its own Toki.
+        MascotZone.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        ShadowCaster.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        if (!peek && MascotHost.Content is null) MascotHost.Content = new Controls.TokiBlob();
+        // The floating Toki NARRATES the state: thinking while notes are written, writing while a
+        // recording runs, happy when the notes land (the redesign's Characters row).
+        if (MascotHost.Content is Controls.TokiBlob blob)
+            blob.SetMood(_state.Current switch
+            {
+                PillState.Summarizing => Controls.TokiBlob.TokiMood.Thinking,
+                PillState.RecordingBar or PillState.RecordingOpen => Controls.TokiBlob.TokiMood.Writing,
+                PillState.Notes => Controls.TokiBlob.TokiMood.Happy,
+                _ => Controls.TokiBlob.TokiMood.Idle,
+            });
         Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
         // Corner radius is a SINGLE value for both modes so toggling glass never changes the size/shape.
     }
@@ -670,7 +776,7 @@ public partial class PillWindow : Window
         {
             Host.Margin = new Thickness(0, bleed, 0, 0);
             _topBleedPx = (int)Math.Round(bleed * dpi);
-            Height = Math.Max(1, ActualHeight + delta);
+            Height = Math.Max(1, ActualHeight + delta);   // window-space on both sides - no pad conversion
             PositionTopCenter();
         }
     }
@@ -757,7 +863,9 @@ public partial class PillWindow : Window
     {
         // Buttery: content settles in with a soft pop + fade (window bg stays dark).
         HostScale.ScaleX = HostScale.ScaleY = 0.97;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        // ArriveStrong (0.23,1,0.32,1) - entering content rides a STRONG ease-out (skill §2); the
+        // stock CubicEase was the "too weak built-in" the research warns about.
+        var ease = Theme.Motion.ArriveStrong;
         var dur = new Duration(TimeSpan.FromMilliseconds(200));
         HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, dur) { EasingFunction = ease });
         HostScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, dur) { EasingFunction = ease });
@@ -770,7 +878,7 @@ public partial class PillWindow : Window
         // Retract UP into the top edge, GPU-COMPOSITED: only an animated clip + content fade run -
         // the window is NOT resized per frame (the old close animated Window.Height → relayout every
         // frame). Reads as the notch retracting cleanly into the edge, then hides.
-        ConcealUp(ActualWidth, 170, Hide);
+        ConcealUp(CardW(ActualWidth), 170, Hide);
     }
 
     /// <summary>Composited "unfurl": reveal the notch downward via an animated clip (render-only - no
@@ -783,10 +891,21 @@ public partial class PillWindow : Window
         var geo = new RectangleGeometry(new Rect(0, 0, w, 0));
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, 0), new Rect(0, 0, w, h),
-            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Drawer };
+        // The clip only masks ROOT - the shadow caster is a sibling, so without this the full-size
+        // shadow would sit there before the card has unfurled over it. Shadow follows the settle.
+        ShadowCaster.BeginAnimation(OpacityProperty, null);
+        ShadowCaster.Opacity = 0;
         // Drop the clip so content isn't capped - but ONLY if this reveal is still the latest clip op. A
         // rapid re-open/close can supersede it; a late-firing Completed must not clobber the new clip.
-        anim.Completed += (_, _) => { if (gen == _clipGen) Root.Clip = null; };
+        anim.Completed += (_, _) =>
+        {
+            if (gen != _clipGen) return;
+            Root.Clip = null;
+            if (ShadowCaster.Visibility == Visibility.Visible)
+                ShadowCaster.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
+        };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
         MorphContent();   // content settles in with the soft pop + fade
     }
@@ -800,7 +919,10 @@ public partial class PillWindow : Window
         var geo = new RectangleGeometry(new Rect(0, 0, w, h));
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, h), new Rect(0, 0, w, 0),
-            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
+            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Depart };
+        // The shadow leaves FIRST (a shadow with no caster is the tell of a cheap fade).
+        ShadowCaster.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, Theme.Motion.Dur(Math.Max(60, ms - 60))) { EasingFunction = Theme.Motion.Depart });
         // Only finish the hide if this conceal is STILL the latest clip op. If a re-open (RevealDown)
         // superseded it, this late Completed must NOT null the new reveal's clip and must NOT Hide() the
         // window we just brought back - that was the "reopen right after close → blank/clipped notch" bug.
@@ -903,7 +1025,13 @@ public partial class PillWindow : Window
     // intact behind it. Hover the sliver and the SAME page slides back down (no reload, state
     // preserved). It stays like that until you click outside (→ fully tucked away / Hidden).
     const double SliverH = 13;
-    const int IdleTuckMs = 2500;       // a deliberate page (Home/Settings) tucks this long after you stop hovering
+    // A page you OPENED ON PURPOSE gets long enough to be used.
+    //
+    // This was 2500. The owner opened Home, reached for a button, and the page closed itself before
+    // they got there - "can't check anything". Two and a half seconds is roughly one glance: it is
+    // enough for a result that announces itself, and far too little for a page somebody is reading,
+    // deciding on, or moving a mouse across. The tuck still happens, it just stops racing the user.
+    const int IdleTuckMs = 9000;       // a deliberate page (Home/Settings) tucks this long after you stop hovering
     const int ResultShowMs = 2000;     // a result (Notes / nothing-was-said) announces itself this long, then tucks
     const int AutoHideMs = 9000;       // a tucked sliver fully hides after this (context remembered)
     const int NotesSliverHideMs = 120000; // a ready-notes sliver lingers this long (2 min) so you can come
@@ -960,7 +1088,15 @@ public partial class PillWindow : Window
                 if (PillHasFocusedInput()) { ArmIdle(); return; }
                 // Only tuck once you've stopped hovering - never yank a page away while you're
                 // reading it (hovering re-arms this timer in HoverTick).
-                if (!CursorOverPill()) TuckCurrent();
+                if (CursorOverPill()) return;
+
+                // Say WHY, with the numbers. When a page closes while somebody is using it, the whole
+                // question is "did the notch think the pointer had left, and was it right?" - and that
+                // took a log-reading session to answer once. One line answers it now.
+                if (GetCursorPos(out var c))
+                    App.Log($"idle tuck: {cur} after {IdleTuckMs}ms - cursor ({c.X},{c.Y}) "
+                        + $"vs notch [{_rectL},{_rectT}..{_rectR},{_rectB}] (+{InsidePad}px slack)");
+                TuckCurrent();
             };
         }
         // Results announce briefly (2s) then tuck; deliberate pages linger a touch longer.
@@ -996,7 +1132,7 @@ public partial class PillWindow : Window
         if (_state.Current is PillState.Summarizing or PillState.Notes)
         {
             _tucked = true;
-            AnimateSize(ActualWidth, SliverH, 200);   // retract to a sliver (top-anchored: hangs a little)
+            AnimateSize(CardW(ActualWidth), SliverH, 200);   // retract to a sliver (CARD dims in, pads re-added inside)
             if (_state.Current == PillState.Notes) ArmAutoHide(NotesSliverHideMs);
             return;
         }
@@ -1200,13 +1336,22 @@ public partial class PillWindow : Window
     }
 
     // The physical cursor position, tested against the pill's cached physical rectangle.
+    /// <summary>
+    /// Is the pointer on (or near) the notch? Used to decide whether a page may tuck itself away.
+    ///
+    /// It uses the SAME edge slack as <see cref="PointInWindow"/>, and the two disagreeing is a bug
+    /// worth naming: a click a pixel outside the notch was forgiven as "inside", while the pointer a
+    /// pixel outside was judged "gone" and the page closed itself. The forgiving rule is the right one
+    /// in both places - a page vanishing while somebody is moving towards it is the single most
+    /// hostile thing this window can do, and being a touch slow to tuck costs nothing.
+    /// </summary>
     bool CursorOverPill()
     {
         // While a notch dropdown is open, keep the panel "held" - the cursor is likely down in the
         // list (below the notch), which must not trigger the idle-tuck.
         if (Views.NotchPopups.AnyOpen) return true;
         if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
-        return p.X >= _rectL && p.X <= _rectR && p.Y >= _rectT && p.Y <= _rectB;
+        return PointInWindow(p.X, p.Y);
     }
 
     // True while the user is typing in a field inside the notch (create composer, API key, …) - used to

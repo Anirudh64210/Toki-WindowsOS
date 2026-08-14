@@ -18,15 +18,18 @@ public partial class TokiBlob : UserControl
 {
     static readonly Random Rng = new();
     readonly DispatcherTimer _blinkTimer = new();
+    readonly DispatcherTimer _fidgetTimer = new();
     DispatcherTimer? _resume;
 
     bool _running;
     int _reactKind;
+    int _fidgetKind;
 
     public TokiBlob()
     {
         InitializeComponent();
         _blinkTimer.Tick += OnBlinkTick;
+        _fidgetTimer.Tick += OnFidgetTick;
         // Only animate while actually on screen - cached-but-hidden views must
         // not burn CPU (this was part of the slowness).
         IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Pause(); };
@@ -39,6 +42,7 @@ public partial class TokiBlob : UserControl
         _running = true;
         StartBreathing();
         ScheduleBlink();
+        ScheduleFidget();
     }
 
     void OnBlinkTick(object? sender, EventArgs e)
@@ -49,11 +53,47 @@ public partial class TokiBlob : UserControl
         ScheduleBlink();
     }
 
+    // ── fidgets: the "alive when ignored" layer (the motion-and-feel skill: every 30-60s a small
+    // autonomous motion, layered over idle, never during a working mood - a thinking/writing Toki
+    // is busy, and a wobble mid-scribble would read as a glitch, not charm). ──
+    void OnFidgetTick(object? sender, EventArgs e)
+    {
+        _fidgetTimer.Stop();
+        if (!_running) return;
+        if (_mood == TokiMood.Idle)
+            switch (_fidgetKind++ % 4)
+            {
+                case 0: Glance(); break;
+                case 1: Nod(); break;
+                case 2: Wobble(); break;
+                default: Blink(doubleBlink: true); break;
+            }
+        ScheduleFidget();
+    }
+
+    void ScheduleFidget()
+    {
+        _fidgetTimer.Interval = TimeSpan.FromMilliseconds(30_000 + Rng.Next(30_000));
+        _fidgetTimer.Start();
+    }
+
+    /// <summary>A sideways glance: the eyes drift a few px aside, hold a beat, drift back.</summary>
+    void Glance()
+    {
+        var dir = Rng.Next(2) == 0 ? -3.5 : 3.5;
+        var f = new DoubleAnimationUsingKeyFrames();
+        void K(double x, int ms) => f.KeyFrames.Add(new EasingDoubleKeyFrame(x, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms)), new SineEase { EasingMode = EasingMode.EaseInOut }));
+        K(0, 0); K(dir, 260); K(dir, 1100); K(0, 1400);
+        Gaze.BeginAnimation(TranslateTransform.XProperty, f);
+    }
+
     void Pause()
     {
         _running = false;
         _blinkTimer.Stop();
+        _fidgetTimer.Stop();
         _resume?.Stop();
+        Gaze.BeginAnimation(TranslateTransform.XProperty, null); Gaze.X = 0;
         Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         Breathe.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         Hop.BeginAnimation(TranslateTransform.YProperty, null); Hop.Y = 0;
@@ -66,17 +106,95 @@ public partial class TokiBlob : UserControl
 
     void StartBreathing()
     {
+        // ~3.5s full cycle at <=2% amplitude (the researched relaxed-breathing numbers - 15-20
+        // breaths/min, tiny travel). The old 3s cycle at 4.5% read agitated, not calm.
         var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
-        var y = new DoubleAnimation(1.0, 0.955, TimeSpan.FromMilliseconds(1500))
+        var y = new DoubleAnimation(1.0, 0.982, TimeSpan.FromMilliseconds(1750))
         {
             AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease,
         };
-        var x = new DoubleAnimation(1.0, 1.03, TimeSpan.FromMilliseconds(1500))
+        var x = new DoubleAnimation(1.0, 1.014, TimeSpan.FromMilliseconds(1750))
         {
             AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease,
         };
         Breathe.BeginAnimation(ScaleTransform.ScaleYProperty, y);
         Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, x);
+    }
+
+    // ── Moods (the redesign's Characters row): what Toki is DOING, shown on the mascot itself ──
+
+    public enum TokiMood { Idle, Thinking, Writing, Happy }
+
+    TokiMood _mood = TokiMood.Idle;
+
+    /// <summary>
+    /// Put Toki in a mood: Thinking (dots bubble, dots pulsing in sequence), Writing (pen scribbling
+    /// at his side), Happy (squinted ^^ eyes + sparkles), or Idle. The notch wires these to its
+    /// states - thinking while notes are being written, writing while transcribing, happy when the
+    /// notes are ready - so the character narrates what the app is doing without a word of text.
+    /// Idempotent; switching moods tears the previous overlay down cleanly.
+    /// </summary>
+    public void SetMood(TokiMood mood)
+    {
+        if (_mood == mood) return;
+        _mood = mood;
+
+        // Tear down everything, then raise the one overlay this mood owns.
+        ThinkBubble.Visibility = Visibility.Collapsed;
+        Pen.Visibility = Visibility.Collapsed;
+        Sparkles.Visibility = Visibility.Collapsed;
+        foreach (var d in new[] { Dot1, Dot2, Dot3 }) d.BeginAnimation(OpacityProperty, null);
+        PenTilt.BeginAnimation(RotateTransform.AngleProperty, null);
+        Sparkles.BeginAnimation(OpacityProperty, null);
+        // Un-squint (Happy holds the lids down; every other mood has open eyes).
+        LeftBlink.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        RightBlink.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        LeftBlink.ScaleY = RightBlink.ScaleY = 1;
+        _blinkTimer.Stop();
+        if (_running) ScheduleBlink();
+
+        switch (mood)
+        {
+            case TokiMood.Thinking:
+            {
+                ThinkBubble.Visibility = Visibility.Visible;
+                // The dots pulse in order - the universal "working on it".
+                var dots = new[] { Dot1, Dot2, Dot3 };
+                for (var i = 0; i < dots.Length; i++)
+                    dots[i].BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 1, TimeSpan.FromMilliseconds(420))
+                    {
+                        AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever,
+                        BeginTime = TimeSpan.FromMilliseconds(i * 160),
+                    });
+                break;
+            }
+            case TokiMood.Writing:
+            {
+                Pen.Visibility = Visibility.Visible;
+                // A small wrist-scribble, not a wave: ±7° around the nib, quick and continuous.
+                PenTilt.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(98, 112, TimeSpan.FromMilliseconds(240))
+                {
+                    AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever,
+                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+                });
+                break;
+            }
+            case TokiMood.Happy:
+            {
+                Sparkles.Visibility = Visibility.Visible;
+                Sparkles.BeginAnimation(OpacityProperty, new DoubleAnimation(0.45, 1, TimeSpan.FromMilliseconds(700))
+                {
+                    AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever,
+                    EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+                });
+                // The ^^ squint: lids held most of the way down. The blink timer is stopped above so a
+                // scheduled blink can't pop the eyes open mid-smile.
+                LeftBlink.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, 0.28, TimeSpan.FromMilliseconds(160)) { FillBehavior = FillBehavior.HoldEnd });
+                RightBlink.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, 0.28, TimeSpan.FromMilliseconds(160)) { FillBehavior = FillBehavior.HoldEnd });
+                _blinkTimer.Stop();
+                break;
+            }
+        }
     }
 
     /// <summary>Blink right now (a cute reaction, e.g. when the pill is hovered), with a tiny squash-pop.</summary>
@@ -202,15 +320,18 @@ public partial class TokiBlob : UserControl
 
     void Blink(bool doubleBlink)
     {
+        // Asymmetric, the way real blinks read on screen: close FAST (60ms, linear), open slower
+        // (190ms, decelerating) - a 250ms blink total (the researched natural-on-screen number).
         var frames = new DoubleAnimationUsingKeyFrames();
         void Close(int atMs)
         {
             frames.KeyFrames.Add(new LinearDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs))));
-            frames.KeyFrames.Add(new LinearDoubleKeyFrame(0.06, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs + 70))));
-            frames.KeyFrames.Add(new LinearDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs + 150))));
+            frames.KeyFrames.Add(new LinearDoubleKeyFrame(0.06, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs + 60))));
+            frames.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(atMs + 250)),
+                new SineEase { EasingMode = EasingMode.EaseOut }));
         }
         Close(0);
-        if (doubleBlink) Close(230);
+        if (doubleBlink) Close(330);
 
         LeftBlink.BeginAnimation(ScaleTransform.ScaleYProperty, frames);
         RightBlink.BeginAnimation(ScaleTransform.ScaleYProperty, frames.Clone());

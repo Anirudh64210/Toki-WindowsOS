@@ -68,7 +68,14 @@ public class LlmNotesTests
                 "UPDATES\n- Alice finished the API\n\nBLOCKERS\n- Waiting on the design\n\nSUMMARY\nQuick team sync."
             : "NONE");
 
-        var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
+        // The transcript has to actually LOOK like a standup: since TemplateGate landed, a specialised
+        // template the transcript does not support is downgraded to General.
+        var standup = new TranscriptSegment[]
+        {
+            new(Speaker.Them, 0, 4000, "Yesterday I finished the API, today I'm on the tests."),
+            new(Speaker.You, 4100, 8000, "I'm blocked on the design review."),
+        };
+        var notes = await new LlmNoteWriter(llm).WriteAsync(standup);
         Assert.Equal("Standup", notes.Template);
         Assert.Contains(notes.Sections, s => s.Heading == "Updates" && s.Bullets.Any(b => b.Contains("API")));
         Assert.Contains(notes.Sections, s => s.Heading == "Blockers");

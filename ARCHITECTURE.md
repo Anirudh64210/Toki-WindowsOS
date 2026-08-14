@@ -1379,3 +1379,274 @@ stamped formatting.
 Both previous defects in this control were DATA LOSS (bullets multiplying on every save; blank lines
 eating a typed sentence). It holds the user's own words. That is a control where a half-finished feature
 costs more than a missing one.
+
+## A template is a claim, not a layout (2026-08-13)
+
+**Decision: the model proposes a note template; the transcript has a veto.** `Llm/TemplateGate.cs`.
+
+"Decision log" does not describe a shape, it asserts that a decision was made - and then asks the
+model to fill in "Options considered", "Decision" and "Rationale". Both of the first real meetings
+were classified that way and neither decided anything, so Rationale came out as a justification for
+something that never happened. The note did not look wrong. It looked authoritative, which is worse.
+
+Every non-General template now has to clear a deterministic evidence check against the raw transcript.
+Failing is not an error and is never surfaced: it falls back to General, whose only section is "Key
+points", which asserts nothing about the meeting and therefore cannot be wrong about it.
+
+The gates are deliberately **loose about what counts as evidence and strict about needing some** - the
+same asymmetry that sets `NameCorrector`'s thresholds. A missed specialisation costs a slightly
+plainer note; a false one puts words in people's mouths.
+
+Two of the gates use facts rather than words, which is why diarisation was worth having: "1:1" needs
+exactly two distinct voices, and "Lecture" needs one voice carrying 80% of the words.
+
+## What Toki rewrote is now part of the record (2026-08-13)
+
+**Decision: store the edits, show them in the transcript only.** `MeetingRecord.Corrections`, a
+`corrections_json` column, rendered as a dotted underline with the original on hover.
+
+Toki quietly rewrites two things - names it unifies against the library, and the discarded half of a
+spoken self-correction. Both make the transcript easier to read and both make it a slightly edited
+record of what a person said. A transcript that silently disagrees with the room is the one artefact
+Toki cannot afford.
+
+The wording is honest at MEETING level rather than occurrence level: Toki stores the pair it changed,
+not which instance it changed, so the tooltip says "also transcribed as" - true of every occurrence -
+rather than claiming this particular word was wrong.
+
+Notes stay unmarked (owner's rule). A note peppered with hover marks is harder to read, and the
+transcript is where anyone goes to check a claim anyway.
+
+## Re-cleaning is offered, never done (2026-08-13)
+
+**Decision: a button in Settings, and it never touches a note.** `Storage/TranscriptCleanup.cs`.
+
+Every improvement to turn-merging or name correction makes older transcripts look worse by
+comparison, and the tempting move is to fix them quietly at the next launch. A transcript is a record
+of what people said; silently rewriting one the user has already read - possibly quoted, possibly
+acted on - is not a favour.
+
+It rewrites the transcript and nothing else. Summaries and to-dos are left exactly as they are, even
+where the transcript underneath them changed: re-writing them would need the model, would take
+minutes, and would throw away edits and tick states a person owns. A slightly stale summary over a
+cleaner transcript is the right trade; the reverse is not.
+
+## The size dial, and why it is not a point size (2026-08-13)
+
+**Decision: 1 to 12, scaling the whole note, not a size on a selection.** `NoteEditor.TextSize`.
+
+The owner asked for a size control with more than three values. The obvious build - a point size
+applied to the selection, like Word - is the same build that is currently blocked for Bold and Italic,
+for the same two reasons:
+
+1. **Markdown cannot record it.** The note is stored as plain Markdown so it survives in Obsidian and
+   in the file mirror. "This word is 14pt" has nowhere to live, so a per-selection size could not
+   survive a save.
+2. **Per-Run formatting on this surface caused data loss once already.** S8's mosquito-text bug was a
+   line whose Run carried its own FontSize, outranking its paragraph and then being written out as an
+   empty block. The rule since then is that the LINE decides how its text looks.
+
+So the ramp stays semantic (Title / Heading / Body - real Markdown, travels with the file) and the
+numeric dial sits on top of it, scaling body, headings, gutter and leading together. It is stored per
+PERSON rather than per note, because somebody who wants larger text wants it in every note.
+
+## A note page is a document, not a form (2026-08-13)
+
+**Decision: a capped 720px measure, centred.** `LibraryWindow.MeasureWidth`.
+
+The owner's report was that the manual-note page looked machine-made. The causes were structural:
+
+- It ran the full width of the pane. Typography's rule of thumb is 45-75 characters a line; past that
+  the eye starts losing its place on the carriage return. Every word processor solves this with a
+  fixed measure and margins, and that is most of what makes a page look like a page.
+- A hard rule sat under the title, which is what a FORM does between fields. A document separates its
+  title from its body with space and puts the quiet facts underneath.
+- Delete sat immediately after the last line of writing, so the document appeared to end in a button.
+
+Two rendering fixes came out of the same pass. **List markers are set RIGHT in their gutter** with one
+fixed gap, because left alignment gave a tick box and a four-pixel bullet completely different
+relationships to their own text. And **blank lines honour their line height** - WPF's default
+`LineStackingStrategy` is `MaxHeight`, which takes the LARGER of the requested height and the font's
+natural height, so a 9px beat was silently rendering at 17px and every section drifted apart.
+
+## Two calendars at once (2026-08-13)
+
+**Decision: Google and Outlook are independent connections, not a choice.** `CalendarService`,
+`MicrosoftAuth`, `OutlookClient`, `CalEvent.Provider`.
+
+A work Outlook calendar and a personal Google one is an ordinary combination, and a notetaker watching
+only one of them misses half the meetings without ever saying so. Both can be connected; the agenda is
+the two merged and sorted; connecting or disconnecting one never touches the other. One provider
+failing does not empty the agenda - the exception is only rethrown when NOTHING came back.
+
+`CalEvent.Provider` is what makes writes safe. An event id from Graph means nothing to Google, and
+sending one to the other fails in a way that looks like a broken Edit button rather than a routing
+mistake. It defaults to Google so every existing construction site keeps meaning what it meant.
+
+**Three ways Graph differs from Google, each of which bites:**
+
+1. **`/me/events` returns the series MASTER of a recurring meeting**, once, with a recurrence rule to
+   expand yourself. `/me/calendarView` takes a range and returns instances. Use the wrong one and a
+   daily standup appears once, on the day it was created.
+2. **Timestamps arrive with NO offset**, plus a separate `timeZone` field. Parsed like RFC3339 they
+   read as local - a 2pm meeting shows at 7:30pm in another zone and nothing looks broken. Toki sends
+   `Prefer: outlook.timezone="UTC"` and attaches the zone explicitly rather than assuming.
+3. **Microsoft rotates the refresh token on EVERY refresh** and invalidates the previous one. Storing
+   what comes back is not an optimisation here: skip it and the connection dies at the next restart.
+
+**No client secret.** Microsoft registers a desktop app as a public client, where a secret is not
+merely unnecessary but rejected - PKCE is the whole proof. That removes the one piece of the Google
+setup that looks like a secret and isn't.
+
+## Evidence audio: Otter's usefulness, Granola's caution (2026-08-13)
+
+**Decision: playing is free and silent; exporting warns once and is a separate act.**
+`Storage/EvidenceAudio.cs`, `Views/EvidencePlayer.cs`.
+
+Researched before building, as the owner asked:
+
+- **Granola keeps no audio at all.** It streams to a transcription service and deletes the audio the
+  moment the text exists, and markets that as the privacy feature - which it is. Its evidence links
+  can therefore only ever reach the transcript. You can check the model against what was written down,
+  never against what was said.
+- **Otter keeps the audio, in its cloud.** A shared snippet is a hosted LINK Otter continues to
+  control; the audio never leaves as a file, and revoking the link revokes the access.
+- **Toki already holds the audio on the user's own disk, forever, at zero cost.** That answers the
+  loudest complaint in this category - "no way to verify what the AI claims" - without a server. It is
+  also a real liability, because a local file has no revoke.
+
+Hence: playback asks nothing (it is the user and their own disk), plays a **window with a run-up**
+rather than the meeting, and there is deliberately no "play the whole recording" affordance. Export is
+behind a right-click, exports exactly the window that was played through the same code path, and warns
+once in plain words. WAV rather than MP3 - an encoder is a dependency and a licence question to ship
+one clip.
+
+**The text jump is kept beside it, not replaced.** Reading is instant, silent and works in an open
+office; audio is slower and not always socially possible. They answer the same question at different
+costs, so the line offers both.
+
+## The sticky note leaves the document (2026-08-13)
+
+**Decision: an editable control is never hosted inside a read-only RichTextBox's document.** The
+meeting note splits at the sticky into three siblings - notes document, the real `NoteEditor`, the
+transcript document - under one ScrollViewer, each document's own scrolling disabled so the page
+stays one surface.
+
+The nested version failed three documented ways at once: FlowDocument-hosted elements are disabled by
+design unless `IsDocumentEnabled` intervenes; the outer TextEditor claims keyboard focus on mouse-down
+even when read-only; and it registers class-level handlers for the entire editing key vocabulary. No
+caret, no keystrokes, no selection - each symptom a different mechanism, which is why point-fixes kept
+passing their own tests while the product stayed broken. The split is the standard fix in the
+literature, and the sticky self-test now asserts the STRUCTURE (no RichTextBox ancestor) rather than
+focus, because the structure was the bug.
+
+Two costs, both accepted: drag-selection cannot cross the sticky (it could before - into an editor
+that could not be typed in, which was not a feature), and the two documents forward their mouse wheel
+to the outer scroll (a scroll-disabled RichTextBox still eats the wheel).
+
+## Evidence audio: the range, the snap, and the guarantee (2026-08-13)
+
+**The "That." bug:** `Evidence` scored a window of up to three transcript lines but returned only the
+first line's index, and the first line of a winning window can contribute NOTHING to the match - the
+union collects its words from the lines after it. A real meeting's clips played one stray word while
+the evidence sat unplayed. `BestRange` now returns the span, trimmed at both ends to lines that hold
+matched words, and refuses if no single line does.
+
+**The cut rule** (from Descript's edit-point patent + transducer timing realities): never cut at a raw
+ASR end-time - Parakeet's TDT emits a token before its sound finishes, so end-times run early. 300ms
+lead, 700ms tail, and when the same stream's next line is known the cut snaps to just before it -
+into the silence, never into the next sentence.
+
+**The guarantee** (owner's rule, verbatim: "only show audio if it's guaranteed present"): a play
+button renders only when the range is one stream, timestamps are monotonic and non-degenerate, the
+moment clears 1.5 seconds, and the WAV header proves the file covers the window. Checked at render
+with cached headers; a button that appears is a button that works.
+
+Considered and rejected for now: Otter's seek-and-continue model (position the playhead, keep
+playing), which eliminates the end-timestamp problem entirely by never bounding playback. It is the
+stronger design for a media-player surface; Toki's evidence affordance is deliberately a bounded
+moment, and the bounded version now earns its bounds. Revisit if a full playback surface (#60's
+original framing) ever ships.
+
+## The home card gets a hierarchy (2026-08-13)
+
+**Decision: one hero, quiet secondaries, setup as an errand.** The 2x2 grid (Calendar + Take Notes
+over Connect Google + Connect Outlook) put a once-ever setup task at the same visual weight as the
+product's core verb - equal size asserts equal importance, and symmetry forced four slots regardless
+of state. Researched pattern across Granola, Loom, Krisp, Wispr Flow, Fantastical and Raycast: one
+dominant CTA, content in the middle, secondary destinations subordinate, account setup as a row that
+exists only while unconnected. Home is now: Take notes (hero) → Calendar (quiet pill) → COMING UP
+(content) or one "Connect a calendar ▾" row offering both providers → footer with provider marks and
+the Library link. The connect row deletes itself the moment a calendar connects.
+
+## The redesign lands as tokens first (2026-08-13)
+
+**Decision: the Figma redesign (288:4) enters the codebase as a DESIGN SYSTEM before any screen.**
+New theme tokens carry the material - Glass/GlassOpaque (the rgba(33,30,30,.5) card and its no-acrylic
+stand-in), GlassCapsule for inner rows, GlassBorder (the 1px white-10% rim), TextHi/TextMid/TextLow
+(text as white opacities, never grey hexes - what keeps type legible over any glass), the accent set,
+JoinPill/JoinPillText, StopRed. Each has a contrast-checked light-theme counterpart so the material
+survives the theme flip.
+
+Why tokens first: the file has 16 notch states and three full windows, and restyling them screen by
+screen without a shared vocabulary is how a design drifts apart mid-migration. With the tokens in,
+each surface migrates by re-pointing at them - and surfaces not yet migrated keep their old brushes
+untouched.
+
+Also decided: the notch's two surface modes (acrylic on/off) now share ONE look - the glass tint and
+rim on both, with the opaque brush approximating the glass reading. The pitch-black slab is retired;
+the redesign's card IS the notch.
+
+## The motion constitution, and why the mascot was software-rendered (2026-08-14)
+
+**Decision: motion, haptics and glass rules live in a project skill** -
+`.claude/skills/motion-and-feel/SKILL.md` - written from research (Apple HIG springs, Material 3
+motion tokens, IBM Carbon, Emil Kowalski's animation standards, Duolingo's Rive mascot practice,
+the WPF rendering docs) and applied on every visual change. The tightest rules: animate only
+transforms/opacity/clip (never Width/Height/Margin, never the HWND when avoidable); enter =
+strong ease-out, exit = accelerate at ~70% of the enter's duration; press = the whole box to 0.97
+in 90ms, spring back in 200ms; overshoot 2-5% max; no Effect on anything that animates.
+
+**The root cause of the "hard and ugly" rendering was that last rule.** A WPF `DropShadowEffect`
+renders its whole subtree in SOFTWARE and re-renders on every change. TokiBlob carried three
+(body, both eyes) inside a subtree that breathes and blinks continuously - the mascot was a
+software render loop. The notch's shadow caster had the same disease during morphs: the window
+resize resized the caster every frame, re-blurring in software 60x a second. Fixes: shadows became
+cheap gradients/static seats inside the blob; the caster hides during any morph/reveal and fades
+back on settle (which also reads as the panel "settling into place").
+
+**Curves are code, not adjectives.** `Theme/Motion.cs` gained `BezierEase` (CSS-semantics cubic
+bezier, Newton solve) and three named curves: ArriveStrong (0.23,1,0.32,1), Depart
+(0.3,0,0.8,0.15), Drawer (0.32,0.72,0,1 - the iOS-sheet settle; the notch morph and reveal ride
+it). WPF trap recorded: `EasingFunctionBase` defaults to EaseOut, which MIRRORS a curve that
+already encodes its full shape - BezierEase pins EasingMode=EaseIn (the raw passthrough).
+
+**The mascot is placed per state, by the frames.** `PlaceMascot` glides the (now 58px) bubble on a
+composition translate: centred on compact pills, bottom-left overlapping the corner of the expanded
+recording panel, level with the header on tall panels. Recording surfaces hug the top (`TopGap` 2px
+vs the hover's 12px) - a status strip, not a floating panel. Aliveness is layered and prioritised:
+reaction > fidget > idle; fidgets (glance/nod/wobble/double-blink) fire every 30-60s only in the
+Idle mood - a wobble mid-scribble would read as a glitch, not charm.
+
+## One mascot per surface, and the design-system mirror (2026-08-14)
+
+**Decision: there is ONE Toki on any surface - the floating bubble beside the card.** The owner's
+live check found the push-to-talk panel showing two (the panel's own inline blob plus the new
+floating one). Every panel-state view now HIDES its inline blob (Ask, RecordingOpen, Summarizing,
+Onboarding; the Calendar's two empty-state blobs became a quiet calendar glyph) - hidden, not
+deleted, so the poke/animation wiring survives and a hidden TokiBlob pauses itself. The exception
+that proves the rule: PEEK states (collapsed summon, recording bar) hide the floating bubble, so
+their own tiny Toki IS the mascot there - which is why the recording bar's blob now carries the
+Writing mood itself.
+
+Geometry settled the same day: the bubble gets a clean 10px AIR GAP to the card (CardPadL 68 =
+58px bubble + 10px; the old 4px overlap read messy), and the hover-summon peek is FLUSH with the
+top edge (TopGap 0 for Collapsed - it drops out of the screen edge; a gap there read "too low").
+
+**Decision: Toki's design system lives on claude.ai/design as a hand-authored React mirror**
+(`design-web/`, 15 components; project pinned in `.design-sync/config.json`, gotchas in
+`.design-sync/NOTES.md`). The WPF theme is the source of truth; the mirror is a sketchpad for the
+design agent and a shareable reference. The owner's verdict after using it: the FIGMA FRAMES stay
+the boss - adopted screens (Ask, Settings) are implemented in WPF from the frame, never ported
+from the agent's HTML. The mirror drifts silently when Theme.xaml changes; port token changes by
+hand and re-sync.

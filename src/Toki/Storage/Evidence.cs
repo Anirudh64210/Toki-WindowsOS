@@ -46,7 +46,25 @@ public static class Evidence
 
     /// <summary>The index of the transcript line a note bullet most likely came from, or null when
     /// nothing matches well enough to be worth pointing at.</summary>
-    public static int? BestSegment(string? bullet, IReadOnlyList<TranscriptSegment>? transcript)
+    public static int? BestSegment(string? bullet, IReadOnlyList<TranscriptSegment>? transcript) =>
+        BestRange(bullet, transcript)?.First;
+
+    /// <summary>
+    /// The RANGE of consecutive transcript lines a note bullet came from - inclusive indices, trimmed
+    /// so both ends actually contain evidence.
+    ///
+    /// This exists because the scoring works on a WINDOW of up to three lines while the first version
+    /// returned only the window's first index, and the audio player then played only that line. Two
+    /// ways that made clips nonsense, both heard in a real meeting: a point spread across three lines
+    /// played only the first third, and - worse - the first line of a winning window can contribute
+    /// NOTHING to the match (the union picks its words up from the lines after it), so the clip was a
+    /// stray "That." with the actual evidence in the two lines never played.
+    ///
+    /// So the window is trimmed to [first line with a matching word .. last line with a matching word]
+    /// before it is returned, which is also what makes the clip's from/to times honest: they are the
+    /// bounds of the words that earned the link, not of a scoring artefact.
+    /// </summary>
+    public static (int First, int Last)? BestRange(string? bullet, IReadOnlyList<TranscriptSegment>? transcript)
     {
         if (string.IsNullOrWhiteSpace(bullet) || transcript is null || transcript.Count == 0) return null;
 
@@ -57,6 +75,7 @@ public static class Evidence
         foreach (var s in transcript) segWords.Add(Words(s.Text));
 
         var bestIdx = -1;
+        var bestWidth = 0;
         var bestScore = 0.0;
 
         for (var i = 0; i < transcript.Count; i++)
@@ -73,11 +92,20 @@ public static class Evidence
                 // Penalise wider windows very slightly, so the tightest line that explains the bullet
                 // wins over a sprawl that happens to contain the same words.
                 var score = (double)shared / want.Count - w * 0.01;
-                if (score > bestScore) { bestScore = score; bestIdx = i; }
+                if (score > bestScore) { bestScore = score; bestIdx = i; bestWidth = w; }
             }
         }
 
-        return bestScore >= Floor ? bestIdx : null;
+        if (bestScore < Floor) return null;
+
+        // Trim to the lines that actually hold evidence words.
+        var first = bestIdx;
+        var last = bestIdx + bestWidth;
+        while (first < last && !segWords[first].Overlaps(want)) first++;
+        while (last > first && !segWords[last].Overlaps(want)) last--;
+        if (!segWords[first].Overlaps(want)) return null;   // no single line carries a word: refuse
+
+        return (first, last);
     }
 
     static HashSet<string> Words(string? text)

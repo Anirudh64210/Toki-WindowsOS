@@ -17,19 +17,28 @@
                     </TransformGroup>
                 </Grid.RenderTransform>
 
-                <!-- Body: the soft pink CLOUD. A vertical gradient (light, glossy top → deep pink base) gives
-                     it a puffy, dimensional look instead of the old flat fill; a soft blurred shadow lifts it
-                     off the surface. Same cloud silhouette as the Toki-ProductDesign logo. -->
+                <!-- Body: the soft BLUE cloud (the 2026-08 redesign - figma "Charecters", 325:278; it was
+                     pink before). A vertical gradient (airy sky top → saturated blue base) keeps the puffy,
+                     dimensional look. NO DropShadowEffect anywhere in this control: the body breathes and
+                     the eyes blink CONSTANTLY, and an Effect re-renders its whole subtree in software on
+                     every animated frame (the motion-and-feel skill, rule 1.3) - it was why the mascot
+                     rendered "hard". The lift comes from the cheap gradient ellipse below instead. -->
+                <Ellipse Width="96" Height="22" IsHitTestVisible="False"
+                         HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-6">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Color="#4D3E86D6" Offset="0.0"/>
+                            <GradientStop Color="#003E86D6" Offset="1.0"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
                 <Path>
-                    <Path.Effect>
-                        <DropShadowEffect Color="#E0559A" BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.30"/>
-                    </Path.Effect>
                     <Path.Fill>
                         <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.42,1">
-                            <GradientStop Color="#FFDCEC" Offset="0.0"/>
-                            <GradientStop Color="#FF9FCB" Offset="0.40"/>
-                            <GradientStop Color="#FB74AE" Offset="0.72"/>
-                            <GradientStop Color="#EE4F9B" Offset="1.0"/>
+                            <GradientStop Color="#EAF6FF" Offset="0.0"/>
+                            <GradientStop Color="#A9DCFB" Offset="0.40"/>
+                            <GradientStop Color="#6EBCF6" Offset="0.72"/>
+                            <GradientStop Color="#3D9BEA" Offset="1.0"/>
                         </LinearGradientBrush>
                     </Path.Fill>
                     <Path.Data>
@@ -54,33 +63,63 @@
                     </Ellipse.Fill>
                 </Ellipse>
 
-                <!-- Cheek blush -->
-                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
+                <!-- Cheek blush - a cool blue now, barely-there, so the face still has warmth without
+                     fighting the blue body. -->
+                <Ellipse Width="17" Height="11" Fill="#5FA8E8" Opacity="0.35" IsHitTestVisible="False"
                          HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,28,0,0"/>
-                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
+                <Ellipse Width="17" Height="11" Fill="#5FA8E8" Opacity="0.35" IsHitTestVisible="False"
                          HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,28,14,0"/>
 
-                <!-- Eyes: clean white rounded pills, each with a scale transform so they blink (and can widen
-                     for a "surprised" reaction). A tiny highlight dot keeps them glossy, not flat. -->
+                <!-- Eyes: WHITE rounded pills on the blue body (the redesign inverts them - they were
+                     near-black on pink). Each has a scale transform so they blink. The "seated in the
+                     face" depth is a static darker pill BEHIND each eye, offset 1.5px down - the same
+                     read as the old per-eye DropShadowEffect at none of its per-frame software cost.
+                     The whole pair also carries a Gaze translate so Toki can glance aside (fidget). -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
                             VerticalAlignment="Center" Margin="0,-4,0,0">
-                    <Grid Margin="0,0,13,0">
-                        <Border x:Name="LeftEye" Width="16" Height="30" Background="#1E1C22"
-                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform><ScaleTransform x:Name="LeftBlink"/></Border.RenderTransform>
-                        </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                    <StackPanel.RenderTransform><TranslateTransform x:Name="Gaze"/></StackPanel.RenderTransform>
+                    <!-- The blink transform sits on the GRID so the seat closes with the eye (a seat
+                         that stayed open would flash as a dark pill mid-blink). -->
+                    <Grid Margin="0,0,13,0" RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform><ScaleTransform x:Name="LeftBlink"/></Grid.RenderTransform>
+                        <Border Width="16" Height="30" Background="#592F7BC4" CornerRadius="8" Margin="0,3,0,-3"/>
+                        <Border x:Name="LeftEye" Width="16" Height="30" Background="#FAFDFF" CornerRadius="8"/>
                     </Grid>
-                    <Grid>
-                        <Border x:Name="RightEye" Width="16" Height="30" Background="#1E1C22"
-                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform><ScaleTransform x:Name="RightBlink"/></Border.RenderTransform>
-                        </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                    <Grid RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform><ScaleTransform x:Name="RightBlink"/></Grid.RenderTransform>
+                        <Border Width="16" Height="30" Background="#592F7BC4" CornerRadius="8" Margin="0,3,0,-3"/>
+                        <Border x:Name="RightEye" Width="16" Height="30" Background="#FAFDFF" CornerRadius="8"/>
                     </Grid>
                 </StackPanel>
+
+                <!-- ── Mood overlays (the redesign's Characters row, 348:5426-5435) ──
+                     Each mood shows ONE overlay; SetMood in code owns visibility + motion. -->
+
+                <!-- THINKING: a little speech bubble with three dots, at the cloud's right shoulder. -->
+                <Border x:Name="ThinkBubble" Visibility="Collapsed" IsHitTestVisible="False"
+                        Background="#F2FFFFFF" CornerRadius="9" Padding="7,4"
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-6,18">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="Dot1" Width="4.5" Height="4.5" Fill="#4A9BE8" Margin="0,0,3,0"/>
+                        <Ellipse x:Name="Dot2" Width="4.5" Height="4.5" Fill="#4A9BE8" Margin="0,0,3,0"/>
+                        <Ellipse x:Name="Dot3" Width="4.5" Height="4.5" Fill="#4A9BE8"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- WRITING: a pen at the cloud's right paw, nib down, gently scribbling. -->
+                <TextBlock x:Name="Pen" Visibility="Collapsed" IsHitTestVisible="False"
+                           Text="&#x270E;" FontSize="26" Foreground="#2E6FB2"
+                           HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-4,10"
+                           RenderTransformOrigin="0.8,0.9">
+                    <TextBlock.RenderTransform><RotateTransform x:Name="PenTilt" Angle="105"/></TextBlock.RenderTransform>
+                </TextBlock>
+
+                <!-- HAPPY: sparkles around the crown (the eyes squint via their own transforms). -->
+                <Canvas x:Name="Sparkles" Visibility="Collapsed" IsHitTestVisible="False">
+                    <TextBlock Canvas.Left="8"  Canvas.Top="6"  Text="&#x2726;" FontSize="13" Foreground="#F5C56B" Opacity="0.95"/>
+                    <TextBlock Canvas.Left="96" Canvas.Top="0"  Text="&#x2726;" FontSize="17" Foreground="#F5C56B" Opacity="0.95"/>
+                    <TextBlock Canvas.Left="104" Canvas.Top="34" Text="&#x2726;" FontSize="10" Foreground="#F5C56B" Opacity="0.85"/>
+                </Canvas>
             </Grid>
         </Grid>
     </Viewbox>

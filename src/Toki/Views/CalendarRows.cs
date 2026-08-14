@@ -84,33 +84,138 @@ static class CalendarRows
 
     // ── Home "COMING UP" glance row: accent bar · title / avatars + "day · time · place" · Join ──
 
+    /// <summary>
+    /// A COMING UP row in the 2026-08 redesign's shape (figma 293:1912 "list-item-bordered"):
+    /// a bare DATE COLUMN outside the capsule (day numeral 16 Black over month 8 Bold at 50%), then a
+    /// glass capsule (r12) holding the 3px accent line, the title (12 Semibold, TextHi), the time
+    /// (10, TextLow), and on the right either the countdown + white Join pill or a quiet "in 3 days".
+    /// The date lives OUTSIDE the capsule so a column of rows reads as a calendar down its left edge.
+    /// </summary>
     public static FrameworkElement GlanceRow(CalEvent e, Action onOpen)
     {
-        var grid = new Grid { MinHeight = 40 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var row = new Grid { Height = 40, Margin = new Thickness(0, 0, 0, 8) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var bar = AccentBar(e, new Thickness(1, 4, 0, 4));
-        Grid.SetColumn(bar, 0);
-        grid.Children.Add(bar);
+        // The date column.
+        var date = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        date.Children.Add(new TextBlock
+        {
+            Text = e.StartLocal.Day.ToString(CultureInfo.InvariantCulture),
+            FontFamily = Ui, FontSize = 16, FontWeight = FontWeights.Black,
+            Foreground = Br("TextHi"), HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        date.Children.Add(new TextBlock
+        {
+            Text = e.StartLocal.ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant(),
+            FontFamily = Ui, FontSize = 8, FontWeight = FontWeights.Bold,
+            Foreground = Br("TextMid"), HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 1, 0, 0),
+        });
+        row.Children.Add(date);
 
-        var mid = new StackPanel { Margin = new Thickness(9, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        // The capsule.
+        var inner = new Grid();
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var accent = new Border
+        {
+            Width = 3, CornerRadius = new CornerRadius(1.5),
+            Background = AccentBrush(e), Margin = new Thickness(0, 4, 8, 4),
+        };
+        inner.Children.Add(accent);
+
+        var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
             Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
-            Foreground = Br("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = Br("TextHi"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        mid.Children.Add(SubRow(e, GlanceSubtitle(e)));
+        mid.Children.Add(new TextBlock
+        {
+            Text = TimeRange(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Medium,
+            Foreground = Br("TextLow"), Margin = new Thickness(0, 2, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
         Grid.SetColumn(mid, 1);
-        grid.Children.Add(mid);
+        inner.Children.Add(mid);
 
-        var right = RightAffordance(e);
+        var right = GlanceRight(e);
         Grid.SetColumn(right, 2);
-        grid.Children.Add(right);
+        inner.Children.Add(right);
 
-        return Clickable(grid, onOpen);
+        var capsule = new Border
+        {
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(8, 5, 12, 5),
+            Child = inner, Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        capsule.SetResourceReference(Border.BackgroundProperty, "GlassCapsule");
+        Grid.SetColumn(capsule, 2);
+        row.Children.Add(capsule);
+
+        return Clickable(row, onOpen);
     }
+
+    /// <summary>The row's right edge: an imminent meeting gets "in 9 min" + the white Join pill; a
+    /// distant one gets a quiet "in 3 days". The pill is WHITE with dark text - the one loud element
+    /// in the card, because joining is the one thing the card exists to make instant.</summary>
+    static FrameworkElement GlanceRight(CalEvent e)
+    {
+        var until = e.Until;
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+        };
+
+        var soon = until.TotalMinutes <= 30 && until.TotalMinutes > -5;
+        var label = new TextBlock
+        {
+            Text = Countdown(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Bold,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        label.SetResourceReference(TextBlock.ForegroundProperty, soon ? "TextHi" : "TextMid");
+        stack.Children.Add(label);
+
+        if (soon && e.HasMeetLink)
+        {
+            var joinText = new TextBlock
+            {
+                Text = "Join", FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            joinText.SetResourceReference(TextBlock.ForegroundProperty, "JoinPillText");
+            var join = new Border
+            {
+                CornerRadius = new CornerRadius(999), Padding = new Thickness(11, 4, 11, 4),
+                Child = joinText, Margin = new Thickness(6, 0, 0, 0), Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = "Open the meeting link",
+            };
+            join.SetResourceReference(Border.BackgroundProperty, "JoinPill");
+            // A real click, not just decoration - and it must not ALSO open the row.
+            join.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; Interop.SafeShell.OpenUrl(e.MeetLink); };
+            stack.Children.Add(join);
+        }
+        return stack;
+    }
+
+    static string Countdown(CalEvent e)
+    {
+        var until = e.Until;
+        if (until.TotalMinutes <= 0) return "now";
+        if (until.TotalMinutes < 60) return $"in {(int)Math.Ceiling(until.TotalMinutes)} min";
+        if (until.TotalHours < 24) return $"in {(int)Math.Round(until.TotalHours)} h";
+        return $"in {(int)Math.Round(until.TotalDays)} day{((int)Math.Round(until.TotalDays) == 1 ? "" : "s")}";
+    }
+
+    /// <summary>The capsule's accent line colour - stable per event, from the redesign's line set.
+    /// StableHash, never GetHashCode: string.GetHashCode is randomised per process, and an event that
+    /// changed colour on every launch would read as a different meeting.</summary>
+    static readonly string[] RedesignAccents = { "AccentAmber", "AccentTeal", "Blue", "Green", "Purple" };
+    static Brush AccentBrush(CalEvent e) => Br(RedesignAccents[StableHash(e.Id) % RedesignAccents.Length]);
 
     // The subtitle line: meta text + the attendee stack beside it (reference: avatars under the title,
     // so the right edge stays reserved for the Join affordance).

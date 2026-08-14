@@ -66,7 +66,21 @@ public sealed class MeetingRecord
     public string? Body { get; set; }            // freeform markdown for manual notes
     public NoteSet Notes { get; set; } = new();
     public List<TranscriptSegment> Transcript { get; set; } = [];
+
+    /// <summary>
+    /// What Toki quietly rewrote in this transcript: mis-heard names it unified, and self-repairs it
+    /// dropped. Kept so the transcript can SHOW the change (underlined, original on hover) rather than
+    /// silently presenting an edited record of what somebody said. The owner's rule: mark it in the
+    /// transcript only - the notes stay clean.
+    /// </summary>
+    public List<TextFix> Corrections { get; set; } = [];
 }
+
+/// <summary>One word Toki changed, and what it changed it from.</summary>
+/// <param name="From">What the recogniser produced.</param>
+/// <param name="To">What the transcript now says.</param>
+/// <param name="Reason">"name" (unified against the library) or "repair" (a spoken self-correction).</param>
+public sealed record TextFix(string From, string To, string Reason);
 
 /// <summary>Lightweight row for the Library list.</summary>
 public sealed record MeetingSummary(

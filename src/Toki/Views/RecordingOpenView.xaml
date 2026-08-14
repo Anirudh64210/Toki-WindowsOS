@@ -12,7 +12,10 @@
     <StackPanel Margin="14,10,14,11">
         <Grid Background="Transparent" MouseLeftButtonUp="OnCollapse" Cursor="Hand" ToolTip="Collapse">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-                <Viewbox x:Name="TokiBox" Width="18" Margin="0,0,8,0" RenderTransformOrigin="0.5,0.9">
+                <!-- HIDDEN: the floating Toki overlaps this panel's bottom-left corner (the frame's
+                     spot) - a second one in the header was the "two Tokis" bug. -->
+                <Viewbox x:Name="TokiBox" Width="18" Margin="0,0,8,0" RenderTransformOrigin="0.5,0.9"
+                         Visibility="Collapsed">
                     <Viewbox.RenderTransform>
                         <ScaleTransform x:Name="TokiPop"/>
                     </Viewbox.RenderTransform>

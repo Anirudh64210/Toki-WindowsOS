@@ -730,6 +730,45 @@ static class SelfTests
             if (shortBy > 0.5) anyShort = true;
             var flag = shortBy > 0.5 ? "  <-- CLIPS(H)" : wideBy > 0.5 ? "  <-- WIDE" : "";
             Console.WriteLine($"{name,-24} measA={hA,7:F1}  trueB={hB,7:F1}  natW={natW,6:F1}/{w,0:F0}  A_short_by={shortBy,6:F1}{flag}");
+
+            // When a page clips, NAME the element rather than leaving a whole view to bisect by hand:
+            // walk both trees and report every element whose arranged height beats its measured one.
+            if (shortBy > 0.5)
+            {
+                // Keyed by tree PATH, not by type - a page is mostly unnamed Borders, and keying those
+                // by type made every one overwrite the last, which produced a report that named nothing.
+                var measured = new Dictionary<string, double>();
+                void WalkA(System.Windows.DependencyObject d, string path)
+                {
+                    if (d is System.Windows.FrameworkElement fe)
+                        measured[path] = fe.DesiredSize.Height;
+                    var n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(d);
+                    for (var i = 0; i < n; i++)
+                        WalkA(System.Windows.Media.VisualTreeHelper.GetChild(d, i), $"{path}/{i}");
+                }
+                WalkA(a, "");
+                void WalkB(System.Windows.DependencyObject d, string path)
+                {
+                    if (d is System.Windows.FrameworkElement fe
+                        && measured.TryGetValue(path, out var ha) && fe.DesiredSize.Height - ha > 0.5)
+                    {
+                        var label = $"{fe.GetType().Name}:{(fe.Name is { Length: > 0 } nm ? nm : path)}";
+                        Console.WriteLine($"    {label,-46} A={ha,6:F1}  B={fe.DesiredSize.Height,6:F1}");
+                    }
+                    var n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(d);
+                    for (var i = 0; i < n; i++)
+                        WalkB(System.Windows.Media.VisualTreeHelper.GetChild(d, i), $"{path}/{i}");
+                }
+                var win2 = new System.Windows.Window
+                {
+                    Width = w, Height = 900, Left = -4000, Top = -4000,
+                    WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+                    Content = new System.Windows.Controls.Border { Width = w, VerticalAlignment = System.Windows.VerticalAlignment.Top, Child = build() },
+                };
+                win2.Show(); win2.UpdateLayout();
+                WalkB(((System.Windows.Controls.Border)win2.Content).Child!, "");
+                win2.Close();
+            }
         }
         Console.WriteLine(anyShort
             ? "RESULT: at least one page's out-of-tree measure under-reports the true height → reveal clips."
@@ -1095,6 +1134,20 @@ static class SelfTests
         var landed = editor.Markdown.Contains("pricing call notes");
         Check("typed text lands in the note", landed, landed ? "" : $"markdown is «{editor.Markdown}»");
 
+        // THE STRUCTURAL RULE, learned the hard way. DebugType above inserts text through the editor's
+        // own API, which bypasses WPF's real input routing - so it PASSED while the shipped product
+        // could not take a keystroke. What actually broke the product was the hosting: the editor sat
+        // inside a read-only RichTextBox's document, whose text editor claims keyboard, caret and
+        // selection services at class level and starves any editor nested in it (three separately
+        // documented mechanisms). Real key routing cannot be exercised in a never-activated offscreen
+        // window, but the structure CAN be checked - and the structure is the bug.
+        var nested = false;
+        for (System.Windows.DependencyObject? a = sticky; a is not null;
+             a = System.Windows.Media.VisualTreeHelper.GetParent(a))
+            if (a is System.Windows.Controls.RichTextBox) { nested = true; break; }
+        Check("the sticky editor is NOT nested inside another text editor", !nested,
+            nested ? "a RichTextBox ancestor will eat its keystrokes, caret and selection" : "");
+
         win.Close();
         Console.WriteLine();
         Console.WriteLine($"RESULT: {pass} passed, {fail} failed");
@@ -1140,7 +1193,14 @@ static class SelfTests
         var windows = new List<System.Windows.Window>();
         Views.NoteEditor New(string markdown = "")
         {
-            var ed = new Views.NoteEditor();
+            var ed = new Views.NoteEditor
+            {
+                // Pin the size dial. The editor loads the USER'S saved size on construction (that is
+                // the feature), and the first time the owner actually used the dial, every 13px
+                // assertion here started failing at 19px. A self-test must not inherit ambient user
+                // settings - it pins them and tests relative to the pin.
+                TextSize = Views.NoteEditor.DefaultTextSize,
+            };
             var win = new System.Windows.Window
             {
                 Width = 440, Height = 700, Left = -4000, Top = -4000,
@@ -1294,6 +1354,30 @@ static class SelfTests
             var ed = New("## Agenda\n- •\t•\t•\t•\t•\t•\t•\tConfirm launch blockers & owners");
             Check("a note damaged by the old bug opens clean",
                 "## Agenda\n- Confirm launch blockers & owners", ed.Markdown);
+        }
+
+        // 12. THE SIZE DIAL. It scales how the note is drawn and must never touch what the note SAYS -
+        //     the whole reason it is a document-wide dial rather than a per-selection point size (see
+        //     NoteEditor.TextSize). These three checks are the ones that would catch a regression into
+        //     the mosquito-text failure mode from the other direction.
+        {
+            var ed = New("# Title\n\nbody line\n- a bullet\n- [ ] a task");
+            var before = ed.Markdown;
+
+            ed.TextSize = Views.NoteEditor.MaxTextSize;
+            if (ed.Markdown == before) { pass++; Console.WriteLine("PASS  changing the text size changes no text"); }
+            else { fail++; Console.WriteLine($"FAIL  the size dial rewrote the note:\n{ed.Markdown}"); }
+
+            var big = ed.DebugFontSize(2);        // the body line
+            ed.TextSize = Views.NoteEditor.MinTextSize;
+            var small = ed.DebugFontSize(2);
+            if (big > small) { pass++; Console.WriteLine($"PASS  the dial actually resizes the text ({small}px -> {big}px)"); }
+            else { fail++; Console.WriteLine($"FAIL  size {small}px at min and {big}px at max"); }
+
+            // Out of range must clamp rather than throw or produce an unreadable note.
+            ed.TextSize = 99;
+            if (ed.TextSize == Views.NoteEditor.MaxTextSize) { pass++; Console.WriteLine("PASS  an out-of-range size clamps"); }
+            else { fail++; Console.WriteLine($"FAIL  size 99 became {ed.TextSize}"); }
         }
 
         foreach (var w in windows) w.Close();

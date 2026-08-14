@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using Toki.Calendar;   // for the CalendarProvider display-name extensions
 using Toki.State;
 using Toki.Storage;
 using Toki.Views;
@@ -98,6 +99,16 @@ public partial class LibraryWindow : Window
             Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, $"hub-{page}.png"));
         }
 
+        // The Calendars block sits well below the fold on the Settings page, so a plain shot of that
+        // page never shows the two connection rows - which are exactly what a design review of this
+        // change needs to see.
+        w.ShowPage("settings", animate: false);
+        w.UpdateLayout();
+        w.SettingsPage.ScrollToEnd();
+        w.UpdateLayout();
+        Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-settings-calendars.png"));
+        w.SettingsPage.ScrollToHome();
+
         // Nav hover: proves the whole rounded row is the target, not the label (there is no way to
         // move a real pointer in a headless render, so the state is set directly).
         w.ShowPage("library", animate: false);
@@ -119,6 +130,29 @@ public partial class LibraryWindow : Window
         w._sticky?.BringIntoView();     // it sits below the notes - scroll to it so the shot shows it
         w.UpdateLayout();
         Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-library-sticky.png"));
+
+        // A hand-written note, which is the page the owner called "very AI generated". Rendered from an
+        // IN-MEMORY record with a negative id: RenderManual only reads what it is handed, so nothing is
+        // created, and the debounced auto-save is never scheduled because nothing is typed. A render
+        // harness must never be able to write to the real note store.
+        w.ShowPage("library", animate: false);
+        w.RenderManual(new MeetingRecord
+        {
+            Id = -1,
+            Kind = MeetingKind.Manual,
+            Title = "Pricing page rewrite",
+            StartedAt = DateTimeOffset.Now,
+            Body = "# What we agreed\n\nThe pricing page reads like a spec sheet. People land on it, "
+                 + "scan for a number, and leave before the part that explains why the number is what "
+                 + "it is.\n\n## To change\n- lead with the one-time price, not the feature grid\n"
+                 + "- move the comparison table below the fold\n- cut the third testimonial\n\n"
+                 + "## Next\n- [ ] draft the new opening paragraph\n- [x] pull last month's bounce rate\n"
+                 + "- [ ] ask Devi for the screenshots\n\n"
+                 + "1. rewrite\n2. review together on Thursday\n3. ship Friday if it holds up",
+        });
+        w.UpdateLayout();
+        Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-manual-note.png"));
+        w._manualFlush = null;   // belt and braces: nothing pending can fire after the shot
 
         // Button-centering calibration: the real buttons on a dark surface, big, so vertical
         // centering of the label (and the Back chevron) can be judged precisely.
@@ -659,6 +693,52 @@ public partial class LibraryWindow : Window
 
     void OnLibPinnedCancel(object sender, RoutedEventArgs e) => LoadPinnedSettings();
 
+    // ── Settings page: re-clean saved transcripts ──
+    //
+    // A button, not a startup job. See Storage/TranscriptCleanup for the reasoning. Everything here is
+    // about being honest while it runs: the button disables so it cannot be double-started, the status
+    // line counts up so a large library does not look frozen, and the result says how many meetings
+    // actually changed - including "nothing to change", which is the good outcome and should read that
+    // way rather than as a failure.
+    bool _recleaning;
+
+    async void OnLibReclean(object sender, RoutedEventArgs e)
+    {
+        if (_recleaning) return;
+        _recleaning = true;
+        LibRecleanButton.IsEnabled = false;
+        LibRecleanStatus.Visibility = Visibility.Visible;
+        LibRecleanStatus.Text = "Reading your meetings...";
+
+        var ui = Dispatcher;
+        void Report(int done, int total) =>
+            ui.BeginInvoke(new Action(() => LibRecleanStatus.Text = $"Cleaning {done} of {total}..."));
+
+        try
+        {
+            var result = await Task.Run(() => Storage.TranscriptCleanup.RunAll(App.Store, null, Report));
+            LibRecleanStatus.Text = result.MeetingsChanged switch
+            {
+                0 => $"Nothing to change - all {result.MeetingsScanned} transcripts are already clean.",
+                1 => "Done - 1 transcript cleaned up. Your notes and to-dos are unchanged.",
+                _ => $"Done - {result.MeetingsChanged} transcripts cleaned up. Your notes and to-dos are unchanged.",
+            };
+            // The open note may be one of the rewritten ones, and it is holding the old text.
+            MarkDirty();
+            if (_selected is { } id) Select(id, byUser: false);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"re-clean failed: {ex.Message}");
+            LibRecleanStatus.Text = "Could not finish. Nothing was changed.";
+        }
+        finally
+        {
+            LibRecleanButton.IsEnabled = true;
+            _recleaning = false;
+        }
+    }
+
     // ── Settings page: everything else (the notch-settings consolidation - DONE 2026-08-04) ──
     //
     // This page is THE home for preferences. All of it goes through the existing one-path
@@ -702,48 +782,93 @@ public partial class LibraryWindow : Window
         App.SetGhostMode(on: LibGhostToggle.IsChecked != true);
     }
 
+    // ── Settings page: the two calendar connections ──
+    //
+    // Google and Outlook are independent and can both be on. One method draws either row, so the two
+    // can never drift into behaving differently - which is the failure mode when a second provider is
+    // bolted on beside a first.
     void RefreshLibGoogle()
     {
         var svc = Toki.Calendar.CalendarService.Instance;
-        if (svc.IsConnected)
-        {
-            LibGoogleStatus.Text = svc.AccountEmail is { Length: > 0 } m
-                ? $"Connected as {m}." : "Connected to Google Calendar.";
-            LibGoogleConnectBtn.Content = "Reconnect";
-            LibGoogleConnectBtn.IsEnabled = true;
-            LibGoogleDisconnectBtn.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            LibGoogleStatus.Text = svc.IsConfigured
-                ? "Not connected. Sign in to see upcoming meetings and let Toki prep you."
-                : "Google sign-in isn’t set up in this build yet.";
-            LibGoogleConnectBtn.Content = "Connect Google";
-            LibGoogleConnectBtn.IsEnabled = svc.IsConfigured;
-            LibGoogleDisconnectBtn.Visibility = Visibility.Collapsed;
-        }
+        DrawCalendarRow(Toki.Calendar.CalendarProvider.Google,
+            LibGoogleStatus, LibGoogleConnectBtn, LibGoogleDisconnectBtn, LibGoogleMark);
+        DrawCalendarRow(Toki.Calendar.CalendarProvider.Outlook,
+            LibOutlookStatus, LibOutlookConnectBtn, LibOutlookDisconnectBtn, LibOutlookMark);
+        _ = svc;
     }
 
-    async void OnLibGoogleConnect(object sender, RoutedEventArgs e)
+    static void DrawCalendarRow(Toki.Calendar.CalendarProvider provider,
+        TextBlock status, Button connect, Button disconnect, Border mark)
     {
         var svc = Toki.Calendar.CalendarService.Instance;
-        if (!svc.IsConfigured) { LibGoogleStatus.Text = "Google sign-in isn’t set up in this build yet."; return; }
-        LibGoogleConnectBtn.IsEnabled = false;
-        LibGoogleStatus.Text = "Opening your browser - sign in and click Allow…";
-        try
+        var connected = svc.IsConnectedTo(provider);
+        var configured = svc.IsConfiguredFor(provider);
+
+        // Connected: the provider mark appears and the button shrinks to "Reconnect" - the row stops
+        // being a call to action and becomes a statement of fact you can check at a glance.
+        mark.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+        disconnect.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+
+        if (connected)
         {
-            await svc.ConnectAsync();
+            status.Text = svc.AccountEmailFor(provider) is { Length: > 0 } who
+                ? $"Connected as {who}." : $"Connected to {provider.Name()}.";
+            connect.Content = "Reconnect";
+            connect.IsEnabled = true;
+            connect.Padding = new Thickness(14, 9, 14, 9);
+            return;
         }
-        catch (Toki.Calendar.GoogleAuthException ex) { LibGoogleStatus.Text = ex.Message; }
-        catch { LibGoogleStatus.Text = "Couldn’t connect to Google."; }
-        finally { LibGoogleConnectBtn.IsEnabled = true; RefreshLibGoogle(); }
+
+        status.Text = configured
+            ? "Not connected. Sign in to see upcoming meetings and let Toki prep you."
+            : $"{provider.ShortName()} needs a one-time setup first - the button explains.";
+        connect.Content = $"Connect {provider.ShortName()}";
+        // ENABLED even when the sign-in is not configured. A greyed-out button is indistinguishable
+        // from a broken one (the owner's exact report), and it cannot say what is missing. Clicking
+        // it explains and opens the setup guide instead.
+        connect.IsEnabled = true;
+        connect.Padding = new Thickness(20, 9, 20, 9);
     }
 
-    async void OnLibGoogleDisconnect(object sender, RoutedEventArgs e)
+    void OnLibGoogleConnect(object sender, RoutedEventArgs e) =>
+        ConnectCalendar(Toki.Calendar.CalendarProvider.Google, LibGoogleStatus, LibGoogleConnectBtn);
+
+    void OnLibOutlookConnect(object sender, RoutedEventArgs e) =>
+        ConnectCalendar(Toki.Calendar.CalendarProvider.Outlook, LibOutlookStatus, LibOutlookConnectBtn);
+
+    async void ConnectCalendar(Toki.Calendar.CalendarProvider provider, TextBlock status, Button button)
     {
-        LibGoogleDisconnectBtn.IsEnabled = false;
-        try { await Toki.Calendar.CalendarService.Instance.DisconnectAsync(); }
-        finally { LibGoogleDisconnectBtn.IsEnabled = true; RefreshLibGoogle(); }
+        var svc = Toki.Calendar.CalendarService.Instance;
+        if (!svc.IsConfiguredFor(provider))
+        {
+            // Say exactly what is missing and where the fix lives. The one-time setup is registering
+            // Toki with the provider (free, ~10 min) - the same step Google needed before its button
+            // could work. A greyed button or a bare "not set up" is just a nicer way of being broken;
+            // this at least names the next step.
+            status.Text = provider == Toki.Calendar.CalendarProvider.Outlook
+                ? "One-time setup: register Toki with Microsoft (free, ~10 min) - see docs\\outlook-setup.md, then this button works."
+                : "One-time setup: create Toki's Google OAuth client (free) - see docs\\google-setup.md, then this button works.";
+            return;
+        }
+        button.IsEnabled = false;
+        status.Text = "Opening your browser - sign in and click Allow…";
+        try { await svc.ConnectAsync(provider); }
+        catch (Toki.Calendar.GoogleAuthException ex) { status.Text = ex.Message; }
+        catch { status.Text = $"Couldn’t connect to {provider.ShortName()}."; }
+        finally { button.IsEnabled = true; RefreshLibGoogle(); }
+    }
+
+    void OnLibGoogleDisconnect(object sender, RoutedEventArgs e) =>
+        DisconnectCalendar(Toki.Calendar.CalendarProvider.Google, LibGoogleDisconnectBtn);
+
+    void OnLibOutlookDisconnect(object sender, RoutedEventArgs e) =>
+        DisconnectCalendar(Toki.Calendar.CalendarProvider.Outlook, LibOutlookDisconnectBtn);
+
+    async void DisconnectCalendar(Toki.Calendar.CalendarProvider provider, Button button)
+    {
+        button.IsEnabled = false;
+        try { await Toki.Calendar.CalendarService.Instance.DisconnectAsync(provider); }
+        finally { button.IsEnabled = true; RefreshLibGoogle(); }
     }
 
     // The "Built with" credits live on the notch's About screen (one canonical copy of the licence
@@ -820,28 +945,35 @@ public partial class LibraryWindow : Window
 
     void BuildSuggestions()
     {
-        // Owner: the example-question pills read as ugly/uninviting - removed. The landing is just the
-        // mascot hero + one identity line; a clean prompt bar below invites the real question.
+        // BACK by the redesign (figma 348:5438 draws exactly this 2x2 chip block; the earlier veto
+        // was about the old oval look, reversed with the frame). Four invitations that show the RANGE
+        // of what Ask can do - commitments, owners, summaries, decisions.
         Suggestions.Children.Clear();
-        Suggestions.Visibility = Visibility.Collapsed;
+        Suggestions.MaxWidth = 560;
+        foreach (var q in new[]
+        {
+            "What did I commit to this week?",
+            "What's still open from my last meeting?",
+            "Summarize yesterday's calls",
+            "What did we decide recently?",
+        })
+            Suggestions.Children.Add(SuggestionChip(q));
+        Suggestions.Visibility = Visibility.Visible;
     }
 
-    // Suggestion chips (Luma-style invitations): full-radius outlined pills that light on hover.
-    Border SuggestionChip(string text)
+    // Suggestion chips: quiet capsules that light on hover. Real BUTTONS (a Border with a mouse-up
+    // inside a page of real buttons is the mistake this codebase has made three times).
+    Button SuggestionChip(string text)
     {
-        var t = new TextBlock { Text = text, FontSize = 11.5, FontFamily = (FontFamily)FindResource("UiFont") };
-        t.SetResourceReference(TextBlock.ForegroundProperty, "TextSoft");
-        var b = new Border
+        var b = new Button
         {
-            CornerRadius = new CornerRadius(999), Padding = new Thickness(14, 8, 14, 9),
-            Margin = new Thickness(4, 0, 4, 8), Cursor = Cursors.Hand,
-            BorderThickness = new Thickness(1), Child = t,
+            Content = text, Style = (Style)FindResource("PillButton"),
+            FontSize = 11.5, FontWeight = FontWeights.Normal,
+            Padding = new Thickness(15, 8, 15, 9), Margin = new Thickness(4, 0, 4, 8),
         };
-        b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        b.SetResourceReference(Border.BorderBrushProperty, "Hairline");
-        b.MouseEnter += (_, _) => b.SetResourceReference(Border.BackgroundProperty, "Chip");
-        b.MouseLeave += (_, _) => b.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        b.MouseLeftButtonUp += (_, _) => { AskBox.Text = text; OnAsk(this, new RoutedEventArgs()); };
+        b.SetResourceReference(Button.BackgroundProperty, "SurfaceHi");
+        b.SetResourceReference(Button.ForegroundProperty, "TextSoft");
+        b.Click += (_, _) => { AskBox.Text = text; OnAsk(this, new RoutedEventArgs()); };
         return b;
     }
 
@@ -1534,6 +1666,7 @@ public partial class LibraryWindow : Window
         // census of what's in the Library - most rows have none.
         _items = items;
         _listLoaded = true;
+        _cardFills.Clear();   // rebuilt rows register fresh inner-card fills; stale ones must not linger
         Cards.ItemsSource = items;
 
         CardsEmpty.Text =
@@ -1629,29 +1762,46 @@ public partial class LibraryWindow : Window
     {
         foreach (var row in Cards.Realised())
         {
-            if (row is not Border card || card.Tag is not long id) continue;
-            card.Background = id == _selected ? (Brush)FindResource("Chip") : Brushes.Transparent;
+            if (row is not Border host || host.Tag is not long id) continue;
+            // The fill lives on the INNER card (the redesign's date column sits OUTSIDE it and must
+            // never highlight); the outer host is only the hit target + id carrier.
+            if (_cardFills.TryGetValue(id, out var fill))
+                fill.Background = id == _selected ? (Brush)FindResource("Chip") : Brushes.Transparent;
         }
     }
 
+    /// <summary>
+    /// A list row in the redesign's shape (figma 349:6743): the DATE lives OUTSIDE the card as bare
+    /// type (day 16 Black over month 8 Bold at 50%), so the list's left edge reads as a calendar;
+    /// the card carries a per-meeting accent bar, the title, a meta line, a two-line snippet, and the
+    /// "n open" / "n people" chips. Only the selected card has a fill; hover shows a soft one.
+    /// </summary>
     Border Card(MeetingSummary m)
     {
         var selected = _selected == m.Id;
 
-        // Left: a calendar-style date badge (day over month), like the design.
-        var badge = new Border
+        // The bare date column, outside the card.
+        var date = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 0, 0), Width = 30 };
+        date.Children.Add(new TextBlock
         {
-            // SurfaceHi (not Chip) so the date tile stays visible on BOTH a transparent row and the
-            // Chip-filled selected row, without being a heavy box.
-            Background = (Brush)FindResource("SurfaceHi"), CornerRadius = new CornerRadius(9),
-            Width = 42, Height = 46, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 11, 0),
-        };
-        var badgeStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        badgeStack.Children.Add(new TextBlock { Text = m.StartedAt.Day.ToString(), Style = St("Body"), FontSize = 17, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
-        badgeStack.Children.Add(new TextBlock { Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 8, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, -1, 0, 0) });
-        badge.Child = badgeStack;
+            Text = m.StartedAt.Day.ToString(), FontFamily = (FontFamily)FindResource("UiFont"),
+            FontSize = 16, FontWeight = FontWeights.Black, Foreground = (Brush)FindResource("Text"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        date.Children.Add(new TextBlock
+        {
+            Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 8,
+            FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 0),
+        });
 
-        // Right: title, meta line, snippet, and count chips.
+        // The per-meeting accent bar inside the card (stable colour per id).
+        var accent = new Border
+        {
+            Width = 3, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(0, 2, 10, 2),
+            Background = (Brush)FindResource(CardAccentKey(m.Id)), VerticalAlignment = VerticalAlignment.Stretch,
+        };
+
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
         content.Children.Add(new TextBlock { Text = CardMeta(m), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
@@ -1663,27 +1813,44 @@ public partial class LibraryWindow : Window
         if (m.PeopleCount > 0) chips.Children.Add(Chip($"{m.PeopleCount} {(m.PeopleCount == 1 ? "person" : "people")}", "TextDim", "Chip"));
         if (chips.Children.Count > 0) content.Children.Add(chips);
 
-        var row = new Grid();
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.Children.Add(badge);
+        var inner = new Grid();
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inner.Children.Add(accent);
         Grid.SetColumn(content, 1);
-        row.Children.Add(content);
+        inner.Children.Add(content);
 
-        // Airy list (like the Ask panel): rows are OPEN - no card fill, no boxed boundary. Only the
-        // selected row carries a soft fill, and hovering shows a subtle one. This drops the "wall of
-        // boxes" that read as tight and heavy.
         var card = new Border
         {
             Background = selected ? (Brush)FindResource("Chip") : Brushes.Transparent,
-            CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 11, 12, 12),
-            Margin = new Thickness(0, 0, 2, 3), Cursor = Cursors.Hand, Child = row, Tag = m.Id,
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 11, 12, 12),
+            Cursor = Cursors.Hand, Child = inner,
         };
-        card.MouseEnter += (_, _) => { if (_selected != m.Id) card.Background = (Brush)FindResource("SurfaceHi"); };
-        card.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
-        card.PreviewMouseLeftButtonUp += (_, _) => Select(m.Id);
-        return card;
+
+        var row = new Grid { Margin = new Thickness(0, 0, 2, 3), Tag = m.Id };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.Children.Add(date);
+        Grid.SetColumn(card, 2);
+        row.Children.Add(card);
+
+        // The OUTER border keeps the id-Tag contract every consumer relies on (selection highlight,
+        // perf test, hover) - and the whole row is the click target, date column included.
+        var host = new Border { Background = Brushes.Transparent, Child = row, Tag = m.Id, Cursor = Cursors.Hand };
+        host.MouseEnter += (_, _) => { if (_selected != m.Id) card.Background = (Brush)FindResource("SurfaceHi"); };
+        host.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
+        host.PreviewMouseLeftButtonUp += (_, _) => Select(m.Id);
+        _cardFills[m.Id] = card;   // the highlight paints the INNER card, not the outer host
+        return host;
     }
+
+    // The inner card fill per meeting id - HighlightSelectedCard repaints these (the outer border's
+    // background must stay transparent or the date column would highlight too).
+    readonly Dictionary<long, Border> _cardFills = new();
+
+    static readonly string[] CardAccents = { "AccentAmber", "AccentTeal", "Blue", "Green", "Pink", "Purple" };
+    static string CardAccentKey(long id) => CardAccents[(int)(((id % 6) + 6) % 6)];
 
     // (Drag-to-reorder lived here. Removed 2026-08-12 - owner: "it does not add much productivity as I
     //  thought it would". It was also the one feature virtualization silently breaks, because it walked
@@ -1771,11 +1938,63 @@ public partial class LibraryWindow : Window
         // places its button under the title and the note itself before the transcript.
         _sticky = new Views.MeetingStickyView(m.Id, App.Store.StickyForMeeting(m.Id));
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal };
-        right.Children.Add(CopyButton(m));
-        right.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
-        DockPanel.SetDock(right, Dock.Right);
-        row.Children.Add(right);
+        // The redesign's action group (figma 348:2933, top-right): ONE rounded container holding icon
+        // buttons - copy (opens the copy menu, flashes a green check after copying) and a RED trash.
+        // Text-label buttons are gone from this pane; the icons carry tooltips.
+        var group = new StackPanel { Orientation = Orientation.Horizontal };
+        var groupShell = new Border
+        {
+            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), Padding = new Thickness(3),
+            Child = group, VerticalAlignment = VerticalAlignment.Top,
+        };
+        groupShell.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
+        groupShell.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+
+        Button ToolIcon(string glyph, string tip, string? fgKey = null)
+        {
+            var tb = new TextBlock
+            {
+                Text = glyph, FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            // An explicit Foreground on the GLYPH (not the button) survives the style's hover
+            // recolour - the trash must stay red under the pointer.
+            if (fgKey is not null) tb.SetResourceReference(TextBlock.ForegroundProperty, fgKey);
+            var b = new Button { Content = tb, Style = (Style)FindResource("IconButton"), Width = 32, Height = 30, ToolTip = tip };
+            group.Children.Add(b);
+            return b;
+        }
+
+        var copyBtn = ToolIcon("", "Copy this note");
+        void CopyFlash(string text)
+        {
+            if (!CopyText(text)) return;
+            var was = copyBtn.Content;
+            copyBtn.Content = new TextBlock
+            {
+                Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13,
+                Foreground = (Brush)FindResource("Green"),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+            t.Tick += (_, _) => { t.Stop(); copyBtn.Content = was; };
+            t.Start();
+        }
+        copyBtn.Click += (_, _) =>
+        {
+            var items = new List<(string, Action)>
+            {
+                ("Copy everything", () => CopyFlash(NoteRenderer.FullText(m))),
+                ("Summary + to-dos", () => CopyFlash(NoteRenderer.NotesText(m))),
+            };
+            if (m.Transcript.Count > 0) items.Add(("Transcript only", () => CopyFlash(NoteRenderer.TranscriptText(m))));
+            items.Add(("Reveal note file", () => RevealNoteFile(m)));
+            ShowMenu(groupShell, items);
+        };
+        ToolIcon("", "Delete this meeting", "Danger").Click += (_, _) => Delete(m.Id);
+
+        DockPanel.SetDock(groupShell, Dock.Right);
+        row.Children.Add(groupShell);
 
         var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
@@ -1802,31 +2021,100 @@ public partial class LibraryWindow : Window
             Dispatcher.BeginInvoke(new Action(() => rtb.ScrollToHome()), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
+    /// <summary>
+    /// A hand-written note, laid out as a DOCUMENT rather than a form.
+    ///
+    /// The owner's note on the old version was that it looked machine-made, and the reasons were
+    /// structural rather than decorative:
+    ///
+    ///   • It ran the full width of the pane. A line of text 900px long is genuinely hard to read - the
+    ///     eye loses its place returning to the left edge. Every word processor solves this the same
+    ///     way, with a fixed MEASURE and margins either side, and that is most of what makes a page
+    ///     look like a page. The column is capped and centred.
+    ///   • A hard rule sat under the title, which is what a FORM does between fields. A document
+    ///     separates its title from its body with space, and puts the quiet facts (when, how long)
+    ///     under the title instead.
+    ///   • Delete sat immediately after the last line of writing, so the document appeared to end in a
+    ///     button. It now lives in a footer, past a generous gap, with the save state beside it.
+    ///
+    /// Everything here is spacing, measure and hierarchy - no new colours, no boxes. The full design
+    /// and haptics revamp is still coming, and this is the layer underneath it that has to be right
+    /// whatever it looks like afterwards.
+    /// </summary>
     void RenderManual(MeetingRecord m)
     {
         // (A manual note never grounds Ask - VisibleMeeting filters on Kind == Meeting.)
-        var panel = new StackPanel();
+        // Stretch + MaxWidth is WPF's way of saying "centred, up to this measure".
+        var page = new StackPanel
+        {
+            MaxWidth = MeasureWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
 
-        // 22 SemiBold: identical to a meeting note's title, so an open note looks the same whoever
-        // wrote it (it was 20 Bold, which read as a different font on the same screen).
-        var titleBox = new TextBox { Text = m.Title, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"), FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)FindResource("UiFont") };
-        panel.Children.Add(titleBox);
-        panel.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("SurfaceHi"), Margin = new Thickness(0, 8, 0, 0) });
+        // The title, at the same 22/SemiBold a meeting note uses, so an open note looks the same
+        // whoever wrote it. A placeholder sits behind it rather than seeding the box with the words
+        // "Untitled note" - text you have to delete before you can type is a small hostile act.
+        var titleBox = new TextBox
+        {
+            Text = m.Title == "Untitled note" ? "" : m.Title,
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"),
+            FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)FindResource("UiFont"),
+            Padding = new Thickness(0), TextWrapping = TextWrapping.Wrap,
+        };
+        var placeholder = new TextBlock
+        {
+            Text = "Untitled note", FontSize = 22, FontWeight = FontWeights.SemiBold,
+            FontFamily = (FontFamily)FindResource("UiFont"), Foreground = (Brush)FindResource("TextDim"),
+            Opacity = 0.45, IsHitTestVisible = false, Margin = new Thickness(2, 0, 0, 0),
+            Visibility = titleBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed,
+        };
+        var titleLayer = new Grid();
+        titleLayer.Children.Add(placeholder);
+        titleLayer.Children.Add(titleBox);
+        page.Children.Add(titleLayer);
 
-        // The real editor (N1): sizes, tickable to-dos, lists, spacing, template insertion. Replaces
-        // the plain TextBox this used to be - a hand-written note should be as capable as an AI one.
-        var bodyBox = new Views.NoteEditor { MinHeight = 340, Margin = new Thickness(0, 12, 0, 0) };
+        // The quiet facts, where a document keeps them: under the title, small, dim, never bold.
+        var meta = new TextBlock
+        {
+            Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
+            Text = m.StartedAt.ToLocalTime().ToString("dddd d MMMM yyyy"),
+        };
+        page.Children.Add(meta);
+
+        // The real editor (N1): sizes, tickable to-dos, lists, spacing, template insertion. The gap
+        // above it is the space that replaced the old rule - a document breathes between its title and
+        // its first line, it does not draw a border there.
+        var bodyBox = new Views.NoteEditor { MinHeight = 420, Margin = new Thickness(0, 26, 0, 0) };
         bodyBox.Markdown = m.Body ?? "";
-        panel.Children.Add(bodyBox);
+        page.Children.Add(bodyBox);
 
-        var status = new TextBlock { Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), Opacity = 0, Text = "Saved" };
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
-        bar.Children.Add(SmallButton("Delete", () => Delete(m.Id), danger: true));
-        bar.Children.Add(status);
-        panel.Children.Add(bar);
+        // The footer, well clear of the writing. Save state on the left where it is glanceable, the
+        // destructive action on the right where nobody reaches by accident.
+        var status = new TextBlock
+        {
+            Style = St("Dim"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0, Text = "Saved",
+        };
+        var footer = new Grid { Margin = new Thickness(0, 44, 0, 8) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var deleteButton = SmallButton("Delete", () => Delete(m.Id), danger: true);
+        Grid.SetColumn(deleteButton, 1);
+        footer.Children.Add(status);
+        footer.Children.Add(deleteButton);
 
-        // Fills the pane with its own inset (DetailBody no longer supplies a margin) and scrolls from the top.
-        DetailBody.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(28, 24, 16, 16) };
+        var footerRule = new Border
+        {
+            Height = 1, Background = (Brush)FindResource("Hairline"), Margin = new Thickness(0, 40, 0, 0),
+        };
+        page.Children.Add(footerRule);
+        page.Children.Add(footer);
+
+        DetailBody.Content = new ScrollViewer
+        {
+            Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Padding = new Thickness(40, 34, 40, 24),
+        };
 
         _manualFlush = () =>
         {
@@ -1836,9 +2124,22 @@ public partial class LibraryWindow : Window
             status.Text = "Saved"; FlashStatus(status);
         };
         void Schedule() { status.Text = "Saving…"; status.Opacity = 0.75; status.BeginAnimation(OpacityProperty, null); _manualDebounce.Stop(); _manualDebounce.Start(); }
-        titleBox.TextChanged += (_, _) => Schedule();
+        titleBox.TextChanged += (_, _) =>
+        {
+            placeholder.Visibility = titleBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            Schedule();
+        };
         bodyBox.Changed += (_, _) => Schedule();   // covers typing AND ticking a box
     }
+
+    /// <summary>
+    /// The reading measure for a written note, in device-independent pixels.
+    ///
+    /// Typography's rule of thumb is 45-75 characters a line; at Toki's body size that lands near 700.
+    /// Wider than this and the eye starts losing its place on the carriage return, which is the single
+    /// biggest difference between text that feels composed and text that feels dumped on a page.
+    /// </summary>
+    const double MeasureWidth = 720;
 
     // Show a status word, then let it fade out - "saved" should reassure, not linger as chrome.
     static void FlashStatus(UIElement e)

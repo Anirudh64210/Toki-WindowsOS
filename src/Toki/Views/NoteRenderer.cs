@@ -133,13 +133,15 @@ public static class NoteRenderer
             Foreground = B(HeaderColorKey(title)), Margin = new Thickness(0, first ? 0 : (spacious ? 22 : 17), 0, spacious ? 10 : 8),
         });
 
-    // One meaning → one accent (green=decided, blue=action, purple=open question/risk), else quiet grey.
+    // One meaning -> one accent, the REDESIGN's mapping (figma 329:1907): decisions green, actions
+    // teal, open questions pink, transcript amber; everything else quiet.
     static string HeaderColorKey(string title)
     {
         var t = (title ?? "").ToUpperInvariant();
         if (t.Contains("DECISION")) return "Green";
-        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO") || t.Contains("NEXT STEP")) return "Blue";
-        if (t.Contains("QUESTION") || t.Contains("OPEN") || t.Contains("RISK") || t.Contains("BLOCKER")) return "Purple";
+        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO") || t.Contains("NEXT STEP")) return "AccentTeal";
+        if (t.Contains("QUESTION") || t.Contains("OPEN") || t.Contains("RISK") || t.Contains("BLOCKER")) return "Pink";
+        if (t.Contains("TRANSCRIPT")) return "AccentAmber";
         return "TextDim";
     }
 
@@ -164,7 +166,8 @@ public static class NoteRenderer
     {
         var check = new CheckBox
         {
-            IsChecked = a.Done, Style = (Style)Res("TokiCheck"),
+            // Circular, like the Library pane and the figma notes panel - one tick language everywhere.
+            IsChecked = a.Done, Style = (Style)Res("CircleCheck"),
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(1, 1, 11, 0),
         };
         check.Checked += (_, _) => Toggle(a, true);
@@ -278,13 +281,26 @@ public static class NoteRenderer
         // of the one document (drag-select / Ctrl+C spans title → transcript).
         doc.Blocks.Add(new Paragraph(new Run(m.Title))
         {
-            // SemiBold, matching every other title in the app - Bold was the odd one out.
-            FontSize = spacious ? 22 : 18, FontWeight = FontWeights.SemiBold, Foreground = B("Text"),
-            Margin = new Thickness(0, 0, 0, 3),
+            // Big and Bold in the Library pane, the redesign's document title (figma 348:2933 draws it
+            // ~30px); the notch keeps the smaller ramp.
+            FontSize = spacious ? 26 : 18, FontWeight = spacious ? FontWeights.Bold : FontWeights.SemiBold,
+            Foreground = B("Text"), Margin = new Thickness(0, 0, 0, spacious ? 6 : 3),
         });
         var meta = MeetingMeta(m);
         if (!string.IsNullOrEmpty(meta))
-            doc.Blocks.Add(new Paragraph(new Run(meta)) { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) });
+        {
+            // The redesign's meta row: the facts as text, then STATUS CHIPS - "N open" (amber) and
+            // "N people" (quiet) - the same capsules the list cards carry, so the two panes speak
+            // the same language.
+            var mp = new Paragraph { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) };
+            mp.Inlines.Add(new Run(meta));
+            var open = m.Notes?.Actions?.Count(a => !a.Done) ?? 0;
+            var people = m.Transcript.Select(t => t.Label).Where(l => !string.IsNullOrWhiteSpace(l))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            if (open > 0) { mp.Inlines.Add(new Run("   ")); mp.Inlines.Add(new InlineUIContainer(MetaChip($"{open} open", "AccentAmber")) { BaselineAlignment = BaselineAlignment.Center }); }
+            if (people >= 2) { mp.Inlines.Add(new Run("  ")); mp.Inlines.Add(new InlineUIContainer(MetaChip($"{people} people", "TextMid")) { BaselineAlignment = BaselineAlignment.Center }); }
+            doc.Blocks.Add(mp);
+        }
 
         // "My sticky note" - at the top, under the title, where the owner asked for it. The note it
         // opens is placed further down, after everything Toki wrote.
@@ -296,7 +312,8 @@ public static class NoteRenderer
         // highlights it. Bullets that CAN'T be traced get nothing - a link to the wrong line would make
         // the note look like it's citing something it isn't. Computed here at render time rather than
         // stored, so it works on notes written before this existed and costs nothing on disk.
-        RichTextBox? host = null;
+        RichTextBox? host = null;          // the box holding the TRANSCRIPT paragraphs
+        ScrollViewer? outerScroll = null;  // set on the split layout - the one scroll for all three parts
         var transcriptParas = new Dictionary<int, Paragraph>();
         Action<Action?>? expandTranscript = null;
 
@@ -306,7 +323,15 @@ public static class NoteRenderer
             {
                 if (host is null || !transcriptParas.TryGetValue(index, out var target)) return;
                 var rect = target.ContentStart.GetCharacterRect(LogicalDirection.Forward);
-                host.ScrollToVerticalOffset(Math.Max(0, host.VerticalOffset + rect.Top - 70));
+                if (outerScroll is not null)
+                {
+                    // Split layout: the transcript box does not scroll itself, so the paragraph's
+                    // position is the box's own offset within the page plus the rect.
+                    var top = host.TranslatePoint(new Point(0, rect.Top), (FrameworkElement)outerScroll.Content).Y;
+                    outerScroll.ScrollToVerticalOffset(Math.Max(0, top - 70));
+                }
+                else
+                    host.ScrollToVerticalOffset(Math.Max(0, host.VerticalOffset + rect.Top - 70));
 
                 // A brief tint, then back - enough to find the line with your eye, not a permanent mark.
                 target.Background = B("Chip");
@@ -334,10 +359,33 @@ public static class NoteRenderer
             return link;
         }
 
+        // ...and the play button beside it, when the recording is still on disk.
+        //
+        // The jump is KEPT rather than replaced. Reading is instant, silent, and works in an open office
+        // or a meeting; audio is slower and not always socially possible. They answer the same question
+        // at different costs, so the line offers both and lets the reader pick: click the arrow to read
+        // it, press play to hear it. Right-click the play button to save the clip.
+        //
+        // Absent entirely when the audio is gone - a deleted meeting takes its recording with it (H1),
+        // and older meetings may never have kept one. Same rule as the link itself: show nothing rather
+        // than something that fails when pressed.
+        EvidencePlayer? Player(string text)
+        {
+            // The RANGE, not just the first line - the whole reason a real clip once played a stray
+            // "That." while the actual evidence sat unplayed in the next two lines (see Evidence.BestRange).
+            if (Evidence.BestRange(text, m.Transcript) is not { } r) return null;
+            if (r.First < 0 || r.Last >= m.Transcript.Count) return null;
+            var range = new List<TranscriptSegment>();
+            for (var i = r.First; i <= r.Last; i++) range.Add(m.Transcript[i]);
+            return EvidencePlayer.For(m, range, fs);
+        }
+
         Paragraph WithEvidence(string text, double lineHeight, Thickness margin)
         {
             var p = new Paragraph(new Run(text)) { LineHeight = lineHeight, Margin = margin };
             if (Link(text) is { } link) p.Inlines.Add(link);
+            if (Player(text) is { } play)
+                p.Inlines.Add(new InlineUIContainer(play) { BaselineAlignment = BaselineAlignment.Center });
             return p;
         }
 
@@ -366,29 +414,52 @@ public static class NoteRenderer
             // Action items get evidence links too (S7). A to-do is the single most useful line to be
             // able to check - "who agreed to this, and when?" - and it was the one kind of line the
             // first pass left unlinked.
-            foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs, Link));
+            foreach (var a in m.Notes.Actions) doc.Blocks.Add(DocAction(a, fs, Link, Player));
         }
 
-        // The user's own sticky note: after everything Toki wrote, before the transcript.
+        // ── THE SPLIT ──
+        //
+        // The sticky note is an EDITABLE RichTextBox, and the first shipped version parked it inside a
+        // BlockUIContainer of this read-only document. Focus landed in it (the sticky self-test proved
+        // that much) and then nothing else worked: no caret, no typing, no selection. The owner's
+        // verdict - "the note itself is a flop" - was accurate, because a RichTextBox's text editor
+        // claims keyboard and caret services at CLASS level, and a second editor nested inside its
+        // document is exactly the thing those services starve. The self-test measured focus and called
+        // it health; the product needed keystrokes.
+        //
+        // So the page is no longer one document when a sticky exists. It is three siblings under ONE
+        // scroll: the note document (read-only), the sticky editor (a normal panel child, with no
+        // editor wrapped around it), and the transcript document (read-only). Each document's own
+        // scrolling is disabled so the outer ScrollViewer is the single scroll, which keeps the page
+        // feeling like one surface. The cost is honest: a drag-selection can no longer run THROUGH the
+        // sticky from summary to transcript - and that trade is correct, because selection across it
+        // was only ever possible while typing into it was not.
+        var tdoc = doc;
         if (sticky is not null)
-            doc.Blocks.Add(new BlockUIContainer(sticky) { Margin = new Thickness(0, 14, 0, 0) });
+        {
+            tdoc = new FlowDocument
+            {
+                FontFamily = Ui, FontSize = fs, Foreground = B("Text"), Background = Brushes.Transparent,
+                PagePadding = new Thickness(0), TextAlignment = TextAlignment.Left,
+            };
+        }
 
         if (m.Transcript.Count > 0)
         {
-            doc.Blocks.Add(DocHeader("TRANSCRIPT"));
+            tdoc.Blocks.Add(DocHeader("TRANSCRIPT"));
             if (resolving)
-                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("telling the speakers apart"))
+                tdoc.Blocks.Add(new BlockUIContainer(new ThinkingDots("telling the speakers apart"))
                 { Margin = new Thickness(0, 0, 0, 4) });
             // Who Toki thinks was in the room, each one a click away from being corrected. Absent
             // entirely when the speakers were never told apart, so a plain two-party call is unchanged.
             if (renameSpeaker is not null && SpeakerChips.Build(m.Transcript, renameSpeaker) is { } chips)
-                doc.Blocks.Add(new BlockUIContainer(chips) { Margin = new Thickness(0, 0, 0, 6) });
+                tdoc.Blocks.Add(new BlockUIContainer(chips) { Margin = new Thickness(0, 0, 0, 6) });
             var preview = Math.Min(3, m.Transcript.Count);
             for (var i = 0; i < preview; i++)
             {
-                var p = DocTranscript(m.Transcript[i], fs);
+                var p = DocTranscript(m.Transcript[i], fs, m.Corrections);
                 transcriptParas[i] = p;     // so an evidence link can find and highlight it
-                doc.Blocks.Add(p);
+                tdoc.Blocks.Add(p);
             }
             if (m.Transcript.Count > preview)
             {
@@ -400,7 +471,7 @@ public static class NoteRenderer
                     HorizontalAlignment = HorizontalAlignment.Left, Cursor = Cursors.Hand,
                 };
                 var holder = new BlockUIContainer(btn) { Margin = new Thickness(0, 3, 0, 0) };
-                doc.Blocks.Add(holder);
+                tdoc.Blocks.Add(holder);
 
                 var expanding = false;
                 // Shared by the button and by any evidence link that points past the preview - a link
@@ -423,16 +494,16 @@ public static class NoteRenderer
                         var end = Math.Min(i + slice, m.Transcript.Count);
                         for (; i < end; i++)
                         {
-                            var p = DocTranscript(m.Transcript[i], fs);
+                            var p = DocTranscript(m.Transcript[i], fs, m.Corrections);
                             transcriptParas[i] = p;
-                            doc.Blocks.InsertAfter(after, p);
+                            tdoc.Blocks.InsertAfter(after, p);
                             after = p;
                         }
                         if (i < m.Transcript.Count)
                             btn.Dispatcher.BeginInvoke(InsertSlice, System.Windows.Threading.DispatcherPriority.Background);
                         else
                         {
-                            doc.Blocks.Remove(holder);
+                            tdoc.Blocks.Remove(holder);
                             // Let the layout settle before anyone measures a paragraph's position.
                             if (done is not null)
                                 btn.Dispatcher.BeginInvoke(done, System.Windows.Threading.DispatcherPriority.Loaded);
@@ -447,23 +518,66 @@ public static class NoteRenderer
         }
 
         // A READ-ONLY RichTextBox - not a FlowDocumentScrollViewer. This is the one WPF control
-        // whose selection is rock-solid: click anywhere and drag from the very top to the very
-        // bottom and it highlights continuously across summary → bullets → to-dos → transcript;
-        // Ctrl+A selects the whole note, Ctrl+C copies it. Read-only blocks editing, not selection.
-        var rtb = new RichTextBox
+        // whose selection is rock-solid: click anywhere and drag and it highlights continuously;
+        // Ctrl+A selects, Ctrl+C copies. Read-only blocks editing, not selection.
+        RichTextBox MakeReadOnlyBox(FlowDocument d, Thickness padding, ScrollBarVisibility scroll)
         {
-            Document = doc, IsReadOnly = true, IsReadOnlyCaretVisible = false, IsDocumentEnabled = true,
-            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
-            // Padding lives INSIDE the box so the scrollbar sits flush at the pane's right edge while text
-            // still clears it; top padding gives the toolbar room, left matches the old pane inset.
+            var box = new RichTextBox
+            {
+                Document = d, IsReadOnly = true, IsReadOnlyCaretVisible = false, IsDocumentEnabled = true,
+                Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                Padding = padding,
+                VerticalScrollBarVisibility = scroll, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Foreground = B("Text"), Cursor = Cursors.IBeam,
+            };
+            // Never the Win32 right-click menu - we don't ship Windows chrome.
+            box.ContextMenuOpening += (_, e) => e.Handled = true;
+            return box;
+        }
+
+        // No sticky → the original single box, its own scrolling, selection spanning the whole note.
+        if (sticky is null)
+        {
+            // Padding lives INSIDE the box so the scrollbar sits flush at the pane's right edge while
+            // text still clears it; top padding gives the toolbar room, left matches the pane inset.
+            var rtb = MakeReadOnlyBox(doc, new Thickness(28, 20, 16, 18), ScrollBarVisibility.Auto);
+            host = rtb;   // evidence links scroll THIS box
+            return rtb;
+        }
+
+        // Sticky → three siblings under one scroll (see THE SPLIT above). The two documents disable
+        // their own scrolling and grow to content, so the ScrollViewer is the only scroll on the page.
+        var notesBox = MakeReadOnlyBox(doc, new Thickness(0, 0, 0, 0), ScrollBarVisibility.Disabled);
+        var transcriptBox = MakeReadOnlyBox(tdoc, new Thickness(0, 0, 0, 0), ScrollBarVisibility.Disabled);
+        host = transcriptBox;
+
+        var page = new StackPanel();
+        page.Children.Add(notesBox);
+        page.Children.Add(sticky);
+        sticky.Margin = new Thickness(0, 14, 0, 0);
+        page.Children.Add(transcriptBox);
+        transcriptBox.Margin = new Thickness(0, 6, 0, 0);
+
+        var sv = new ScrollViewer
+        {
+            Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Padding = new Thickness(28, 20, 16, 18),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Foreground = B("Text"), Cursor = Cursors.IBeam,
         };
-        // Never the Win32 right-click menu - we don't ship Windows chrome. Ctrl+C / the Copy button do the copying.
-        rtb.ContextMenuOpening += (_, e) => e.Handled = true;
-        host = rtb;   // evidence links scroll THIS box (closed over above, assigned once it exists)
-        return rtb;
+        outerScroll = sv;
+
+        // A RichTextBox whose scrolling is DISABLED still eats the mouse wheel - its internal
+        // ScrollViewer marks the event handled and goes nowhere - so the page freezes wherever the
+        // pointer sits over text, which is almost everywhere. Re-route the wheel to the outer scroll.
+        void ForwardWheel(RichTextBox from) => from.PreviewMouseWheel += (_, e) =>
+        {
+            e.Handled = true;
+            sv.ScrollToVerticalOffset(sv.VerticalOffset - e.Delta);
+        };
+        ForwardWheel(notesBox);
+        ForwardWheel(transcriptBox);
+
+        return sv;
     }
 
     /// <summary>The plain text a full top-to-bottom select-all of the note document yields -
@@ -480,35 +594,229 @@ public static class NoteRenderer
     /// <summary>Duration · full date/time · app - the note's meta line, sitting under the title.</summary>
     static string MeetingMeta(MeetingRecord m) => TimeText.FullMeta(m);
 
-    static Paragraph DocHeader(string title, bool first = false) =>
-        new(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = B("TextDim"), FontSize = 10.5 })
-        { Margin = new Thickness(0, first ? 0 : 20, 0, 8) };
-
-    static Paragraph DocAction(ActionItem a, double fs, Func<string, Hyperlink?>? link = null)
+    /// <summary>
+    /// A section header in the redesign's shape (figma 349:6743 / 329:1907): a small round icon chip
+    /// in the section's colour, the label beside it in the same colour, and the section content
+    /// carrying a thin left accent rule. One meaning, one colour, one icon - the colour code from
+    /// HeaderColorKey, now with the glyph the design pairs with each meaning.
+    /// </summary>
+    static Paragraph DocHeader(string title, bool first = false)
     {
-        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 11), LineHeight = fs + 8 };
-        var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("TokiCheck"), Margin = new Thickness(0, 0, 9, 0) };
-        check.Checked += (_, _) => Toggle(a, true);
-        check.Unchecked += (_, _) => Toggle(a, false);
-        p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.TextTop });
-        p.Inlines.Add(new Run(a.Text) { Foreground = a.Done ? B("TextDim") : B("Text") });
-        // Owner / due are IMPORTANT labels - bright, bold, accent-coloured (person = blue, due = amber)
-        // so they stand out, with clear spacing. Kept as TEXT (not UI chips) so Copy still captures them.
-        if (Meaningful(a.Owner)) p.Inlines.Add(new Run($"   ·   {a.Owner}") { Foreground = B("Blue"), FontWeight = FontWeights.SemiBold });
-        if (Meaningful(a.Due)) p.Inlines.Add(new Run($"   ·   {a.Due}") { Foreground = B("Amber"), FontWeight = FontWeights.SemiBold });
-        // The task text alone is what's searched for in the transcript - the owner/due chips are Toki's
-        // formatting, not words anybody said, and feeding them in only dilutes the match.
-        if (link?.Invoke(a.Text) is { } jump) p.Inlines.Add(jump);
+        var key = HeaderColorKey(title);
+        var accent = B(key == "TextDim" ? "TextMid" : key);
+        var glyph = SectionGlyph(title);
+
+        var icon = new Border
+        {
+            Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
+            Background = Transparent(accent, 0x2E), Margin = new Thickness(0, 0, 7, 0),
+            Child = new TextBlock
+            {
+                Text = glyph, FontFamily = (FontFamily)Res("IconFont"), FontSize = 9.5, Foreground = accent,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+        var p = new Paragraph { Margin = new Thickness(0, first ? 0 : 22, 0, 8) };
+        p.Inlines.Add(new InlineUIContainer(icon) { BaselineAlignment = BaselineAlignment.Center });
+        p.Inlines.Add(new Run(title)
+        {
+            FontWeight = FontWeights.Bold, Foreground = accent, FontSize = 10,
+            BaselineAlignment = BaselineAlignment.Center,
+        });
         return p;
     }
 
-    static Paragraph DocTranscript(TranscriptSegment seg, double fs)
+    /// <summary>The design's icon per section meaning (Fluent glyphs standing in for the lucide set).</summary>
+    static string SectionGlyph(string title)
+    {
+        var t = (title ?? "").ToUpperInvariant();
+        if (t.Contains("DECISION")) return "";                                   // check
+        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO")) return "";  // checklist
+        if (t.Contains("QUESTION") || t.Contains("OPEN")) return "";             // question
+        if (t.Contains("TRANSCRIPT")) return "";                                  // speech
+        return "";                                                                // list
+    }
+
+    /// <summary>An outlined status capsule for the meta row ("2 open" / "3 people") - the redesign's
+    /// chip: tinted fill, tinted 1px rim, accent text.</summary>
+    static Border MetaChip(string text, string accentKey)
+    {
+        var accent = B(accentKey);
+        return new Border
+        {
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(7, 1.5, 7, 1.5),
+            Background = Transparent(accent, 0x1A), BorderBrush = Transparent(accent, 0x4D), BorderThickness = new Thickness(1),
+            Child = new TextBlock
+            {
+                Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold,
+                Foreground = accent, FontFamily = Ui,
+            },
+        };
+    }
+
+    /// <summary>The redesign's transcript avatar: a small circle with the speaker's initial in a colour
+    /// derived from the name (never fetched). YOU reads brighter than everyone else. Full name on hover.</summary>
+    static Border Avatar(string label, bool you)
+    {
+        var key = you ? "Text" : SpeakerAccents[StableHash(label) % SpeakerAccents.Length];
+        var accent = B(key);
+        var initial = string.IsNullOrWhiteSpace(label) ? "?" : char.ToUpperInvariant(label.Trim()[0]).ToString();
+        return new Border
+        {
+            Width = 16, Height = 16, CornerRadius = new CornerRadius(8),
+            Background = Transparent(accent, you ? (byte)0x30 : (byte)0x33),
+            ToolTip = label, Margin = new Thickness(0, 0, 8, 0),
+            Child = new TextBlock
+            {
+                Text = initial, FontSize = 8.5, FontWeight = FontWeights.Bold, Foreground = accent,
+                FontFamily = Ui, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+    }
+
+    static readonly string[] SpeakerAccents = { "Pink", "AccentTeal", "Blue", "Green", "Purple", "AccentAmber" };
+
+    // Stable across processes - GetHashCode is randomized per run and would recolour every speaker
+    // on every launch (the StableHash lesson from the card accents).
+    static int StableHash(string s)
+    {
+        unchecked
+        {
+            int h = 5381;
+            foreach (var c in s.ToUpperInvariant()) h = (h << 5) + h + c;
+            return h < 0 ? -h : h;
+        }
+    }
+
+    /// <summary>The section accent at a chip-tint alpha - the round icon chip's fill.</summary>
+    static Brush Transparent(Brush accent, byte alpha)
+    {
+        if (accent is SolidColorBrush s)
+        {
+            var c = s.Color;
+            var b = new SolidColorBrush(Color.FromArgb(alpha, c.R, c.G, c.B));
+            b.Freeze();
+            return b;
+        }
+        return accent;
+    }
+
+    static Paragraph DocAction(ActionItem a, double fs, Func<string, Hyperlink?>? link = null,
+        Func<string, EvidencePlayer?>? player = null)
+    {
+        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 11), LineHeight = fs + 8 };
+        // The redesign's CIRCULAR tick (hollow ring → filled teal disc), and a real strikethrough on
+        // done items - a FlowDocument Run CAN strike through, where the notch's TextBox cannot.
+        var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("CircleCheck"), Margin = new Thickness(0, 0, 9, 0) };
+        check.Checked += (_, _) => Toggle(a, true);
+        check.Unchecked += (_, _) => Toggle(a, false);
+        p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.TextTop });
+        var text = new Run(a.Text) { Foreground = a.Done ? B("TextDim") : B("Text") };
+        if (a.Done) text.TextDecorations = TextDecorations.Strikethrough;
+        p.Inlines.Add(text);
+        // The task text alone is what's searched for in the transcript - the owner/due chips are Toki's
+        // formatting, not words anybody said, and feeding them in only dilutes the match.
+        if (link?.Invoke(a.Text) is { } jump) p.Inlines.Add(jump);
+        // A to-do is the line people most want to check - "who agreed to this?" - so it is the line
+        // that most deserves being able to HEAR the moment, not just read it.
+        if (player?.Invoke(a.Text) is { } play)
+            p.Inlines.Add(new InlineUIContainer(play) { BaselineAlignment = BaselineAlignment.Center });
+        // Owner / due ride BELOW the item as capsule chips (figma 348:2933: "Priya" "Tomorrow" under the
+        // text) - accent text keeps them readable (person = blue, due = amber). The Copy BUTTON still
+        // captures them: its text comes from the record (NotesText), not from this rendering.
+        if (Meaningful(a.Owner) || Meaningful(a.Due))
+        {
+            p.Inlines.Add(new LineBreak());
+            // Indented past the 24px check + its 9px gap so the chips sit under the TEXT, as the frame draws.
+            var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(33, 2, 0, 0) };
+            if (Meaningful(a.Owner)) { chips.Children.Add(MetaChip(a.Owner!, "Blue")); chips.Children.Add(new Border { Width = 6 }); }
+            if (Meaningful(a.Due)) chips.Children.Add(MetaChip(a.Due!, "Amber"));
+            p.Inlines.Add(new InlineUIContainer(chips) { BaselineAlignment = BaselineAlignment.Center });
+        }
+        return p;
+    }
+
+    static Paragraph DocTranscript(TranscriptSegment seg, double fs,
+        IReadOnlyList<TextFix>? corrections = null)
     {
         var you = seg.Speaker == Speaker.You;
+        var fg = B(you ? "Text" : "TextDim");
         var p = new Paragraph { Margin = new Thickness(0, 0, 0, 9), LineHeight = fs + 7 };
-        p.Inlines.Add(new Run($"{seg.Label}:  ") { FontWeight = FontWeights.SemiBold, Foreground = B(you ? "Text" : "TextDim") });
-        p.Inlines.Add(new Run(seg.Text) { Foreground = B(you ? "Text" : "TextDim") });
+        // The redesign's transcript line: a small initial-avatar circle, then the words (figma
+        // 348:2933 - "P" / "S" chips). The full name is on the avatar's hover; the NAME run stays
+        // too when speakers are actually named, because a letter alone is ambiguous in a 4-person
+        // call where two people share an initial - and drag-select/Ctrl+C should still capture who
+        // spoke. YOU/THEM placeholders stay as text only (no avatar letter says less than "THEM").
+        p.Inlines.Add(new InlineUIContainer(Avatar(seg.Label, you)) { BaselineAlignment = BaselineAlignment.Center });
+        p.Inlines.Add(new Run($"{seg.Label}:  ") { FontWeight = FontWeights.SemiBold, Foreground = fg });
+        foreach (var run in MarkCorrections(seg.Text, fg, corrections)) p.Inlines.Add(run);
         return p;
+    }
+
+    /// <summary>
+    /// The transcript, with Toki's own edits visible.
+    ///
+    /// Toki quietly rewrites two things: names it unified against the library, and the discarded half
+    /// of a spoken self-correction. Both make the transcript easier to read and both make it a slightly
+    /// edited record of what a person said. So the changed words carry a dotted underline and the
+    /// original on hover - the owner's rule is that this shows in the TRANSCRIPT only; the notes stay
+    /// clean, because a note peppered with hover marks is harder to read and the transcript is where
+    /// anyone goes to check a claim.
+    ///
+    /// The mark is honest at meeting level rather than occurrence level: Toki stores the pairs it
+    /// changed, not which instance it changed, so the wording is "also transcribed as" - true of every
+    /// occurrence - instead of claiming this particular word was wrong.
+    /// </summary>
+    static IEnumerable<Run> MarkCorrections(string? text, Brush fg, IReadOnlyList<TextFix>? corrections)
+    {
+        text ??= "";
+        if (corrections is null || corrections.Count == 0 || text.Length == 0)
+            return [new Run(text) { Foreground = fg }];
+
+        // One pattern per render of a line is cheap; the alternation is at most a handful of words.
+        var words = corrections
+            .Where(f => !string.IsNullOrWhiteSpace(f.To))
+            .GroupBy(f => f.To, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        if (words.Count == 0) return [new Run(text) { Foreground = fg }];
+
+        var pattern = @"\b(?:" + string.Join("|", words.Keys.Select(System.Text.RegularExpressions.Regex.Escape)) + @")\b";
+        var runs = new List<Run>();
+        var at = 0;
+        foreach (System.Text.RegularExpressions.Match match in
+                 System.Text.RegularExpressions.Regex.Matches(text, pattern,
+                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            if (match.Index > at) runs.Add(new Run(text[at..match.Index]) { Foreground = fg });
+            var fix = words[match.Value];
+            runs.Add(new Run(match.Value)
+            {
+                Foreground = fg,
+                TextDecorations = Dotted(fg),
+                ToolTip = fix.Reason == "repair"
+                    ? $"Self-corrected from \"{fix.From}\""
+                    : $"Also transcribed as \"{fix.From}\"",
+            });
+            at = match.Index + match.Length;
+        }
+        if (at < text.Length) runs.Add(new Run(text[at..]) { Foreground = fg });
+        return runs.Count == 0 ? [new Run(text) { Foreground = fg }] : runs;
+    }
+
+    /// <summary>A dotted underline in the line's own colour - present enough to notice while reading,
+    /// quiet enough not to look like an error.</summary>
+    static TextDecorationCollection Dotted(Brush fg)
+    {
+        var pen = new Pen(fg.Clone(), 1) { DashStyle = new DashStyle([1, 2], 0) };
+        pen.Brush.Opacity = 0.55;
+        pen.Freeze();
+        var d = new TextDecorationCollection
+        {
+            new TextDecoration { Pen = pen, PenOffset = 1.5, PenOffsetUnit = TextDecorationUnit.Pixel },
+        };
+        d.Freeze();
+        return d;
     }
 
     /// <summary>Plain-text of a meeting's transcript, for the Copy button.</summary>

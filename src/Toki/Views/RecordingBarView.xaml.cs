@@ -17,6 +17,10 @@ public partial class RecordingBarView : UserControl
     public RecordingBarView()
     {
         InitializeComponent();
+        // The bar is a PEEK (the floating bubble Toki is hidden), so ITS tiny Toki carries the
+        // state's mood: writing while the meeting is being taken down - the mascot narrates
+        // "transcribing" here the same way the bubble does on the open panel.
+        BarToki.SetMood(Controls.TokiBlob.TokiMood.Writing);
         IsVisibleChanged += (_, e) =>
         {
             if (!(bool)e.NewValue) return;

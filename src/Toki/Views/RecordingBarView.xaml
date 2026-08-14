@@ -15,7 +15,7 @@
                     <TranslateTransform x:Name="Fall"/>
                 </TransformGroup>
             </Viewbox.RenderTransform>
-            <controls:TokiBlob/>
+            <controls:TokiBlob x:Name="BarToki"/>
         </Viewbox>
     </Grid>
 </UserControl>

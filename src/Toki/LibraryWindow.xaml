@@ -16,14 +16,21 @@
         <!-- ═══════════ Sidebar: mascot · nav · back ═══════════ -->
         <Border Grid.Column="0" Background="{DynamicResource Surface}">
             <DockPanel Margin="18,20,14,16">
-                <!-- Toki mascot - click to play a fun reaction -->
+                <!-- The LOGO ROW of the redesign (figma 349:6743): the blue cloud small, with the
+                     "Toki" wordmark beside it - an identity, not a toy taking a quarter of the rail.
+                     Still clickable for the reaction vocabulary. -->
                 <Border DockPanel.Dock="Top" x:Name="MascotBtn" Background="Transparent" Cursor="Hand"
-                        HorizontalAlignment="Left" Margin="4,0,0,20" ToolTip="Poke Toki"
+                        HorizontalAlignment="Left" Margin="4,2,0,22" ToolTip="Poke Toki"
                         MouseLeftButtonUp="OnMascotClick">
-                    <Viewbox Width="56" Height="50" RenderTransformOrigin="0.5,0.9">
-                        <Viewbox.RenderTransform><ScaleTransform x:Name="MascotPop"/></Viewbox.RenderTransform>
-                        <controls:TokiBlob x:Name="SideToki"/>
-                    </Viewbox>
+                    <StackPanel Orientation="Horizontal">
+                        <Viewbox Width="30" Height="27" RenderTransformOrigin="0.5,0.9">
+                            <Viewbox.RenderTransform><ScaleTransform x:Name="MascotPop"/></Viewbox.RenderTransform>
+                            <controls:TokiBlob x:Name="SideToki"/>
+                        </Viewbox>
+                        <TextBlock Text="Toki" FontFamily="{StaticResource UiFont}" FontSize="16"
+                                   FontWeight="Bold" Foreground="{DynamicResource Text}"
+                                   VerticalAlignment="Center" Margin="9,0,0,0"/>
+                    </StackPanel>
                 </Border>
 
                 <!-- Back to Toki (bottom) -->
@@ -44,6 +51,18 @@
 
                 <!-- ── Ask (conversation + landing) ── -->
                 <Grid x:Name="AskPage">
+                    <!-- The redesign's ambient depth (figma 348:5438): a cool teal-blue bloom rising
+                         from the bottom of the page - the one page with atmosphere, because it is the
+                         one page that is a conversation, not a document. Purely decorative. -->
+                    <Border IsHitTestVisible="False" VerticalAlignment="Bottom" Height="420">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0.5,1" EndPoint="0.5,0">
+                                <GradientStop Color="#3D103C46" Offset="0"/>
+                                <GradientStop Color="#1E10333E" Offset="0.5"/>
+                                <GradientStop Color="#00000000" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
                     <DockPanel>
                         <!-- Top bar: current chat title, History (past conversations), and New chat. -->
                         <Grid DockPanel.Dock="Top" Margin="40,16,40,0">
@@ -51,16 +70,25 @@
                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="Ask Toki"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <Button x:Name="HistoryBtn" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
-                                        Padding="11,7" FontSize="11.5" Click="OnHistory" Content="History"/>
-                                <Button x:Name="NewChatBtn" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
-                                        Padding="11,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New chat"/>
+                                        Padding="13,7" FontSize="11.5" Click="OnHistory">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                                   VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                        <TextBlock Text="History" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                                <!-- New Chat is the WHITE pill (figma): the one primary action on this bar. -->
+                                <Button x:Name="NewChatBtn" Style="{StaticResource WhiteButton}"
+                                        Padding="13,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New Chat"/>
                             </StackPanel>
                         </Grid>
 
                         <!-- Input bar - always docked at the bottom. -->
+                        <!-- The redesign's prompt bar: a full capsule (r26) with the mic and a ROUND
+                             send button seated at its right edge - one soft pill, not a box with icons. -->
                         <Border DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
-                                Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
-                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="6,4" Cursor="IBeam">
+                                Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="26"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="10,6,7,6" Cursor="IBeam">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -83,9 +111,13 @@
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <Button Grid.Column="1" x:Name="MicBtn" Style="{StaticResource IconButton}"
-                                        Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic"/>
-                                <Button Grid.Column="2" x:Name="AskBtn" Style="{StaticResource IconButton}"
-                                        Content="&#xE72A;" ToolTip="Ask" Click="OnAsk"/>
+                                        Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic" VerticalAlignment="Center"/>
+                                <!-- The circular send: a filled disc so the bar ends in one clear action. -->
+                                <Border Grid.Column="2" Background="{DynamicResource Chip}" CornerRadius="18"
+                                        Width="36" Height="36" Margin="4,0,0,0" VerticalAlignment="Center">
+                                    <Button x:Name="AskBtn" Style="{StaticResource IconButton}" Width="36" Height="36"
+                                            Content="&#xE724;" ToolTip="Ask" Click="OnAsk"/>
+                                </Border>
                             </Grid>
                         </Border>
 
@@ -100,11 +132,13 @@
                                     <StackPanel x:Name="Landing" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="620" Margin="40,20">
                                         <!-- Hero: the mascot on a soft radial pink glow - subtle depth, not decoration. -->
                                         <Grid x:Name="LandingHero" HorizontalAlignment="Center" Margin="0,0,0,14">
+                                            <!-- Soft BLUE glow (the mascot went blue with the redesign; the pink
+                                                 halo read as a leftover of the old character). -->
                                             <Ellipse Width="240" Height="150" IsHitTestVisible="False">
                                                 <Ellipse.Fill>
                                                     <RadialGradientBrush>
-                                                        <GradientStop Color="#2EF09CC7" Offset="0"/>
-                                                        <GradientStop Color="#00F09CC7" Offset="1"/>
+                                                        <GradientStop Color="#333D9BEA" Offset="0"/>
+                                                        <GradientStop Color="#003D9BEA" Offset="1"/>
                                                     </RadialGradientBrush>
                                                 </Ellipse.Fill>
                                             </Ellipse>
@@ -249,14 +283,21 @@
                         · about. Dividers-not-boxes: hairlines separate the sections. ── -->
                 <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
                               Padding="40,34,40,34" controls:SmoothScroll.Enabled="True">
-                    <StackPanel MaxWidth="560" HorizontalAlignment="Left">
-                        <TextBlock Text="Settings" Style="{StaticResource PageTitle}" Margin="0,0,0,26"/>
+                    <!-- The redesign's settings page (figma 353:9154): ONE centred column, each section a
+                         big title + a dim one-line explainer + a rounded CARD of rows. -->
+                    <StackPanel MaxWidth="640" HorizontalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,26">
+                            <TextBlock Text="Settings" Style="{StaticResource PageTitle}"/>
+                            <!-- Bottom-aligned with a nudge - WPF has no Baseline alignment for siblings. -->
+                            <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="11.5"
+                                       VerticalAlignment="Bottom" Margin="14,0,0,4"/>
+                        </StackPanel>
 
                         <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"
                                    Margin="0,0,0,12"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,0"
+                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="14,0"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
-                                Width="340" HorizontalAlignment="Left">
+                                HorizontalAlignment="Stretch">
                             <TextBox x:Name="LibNameBox" Background="Transparent" BorderThickness="0"
                                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                      Height="46" FontSize="15" FontFamily="{StaticResource UiFont}"
@@ -279,6 +320,56 @@
                             <TextBlock x:Name="LibNameSavedText" Style="{StaticResource Body}" FontSize="12.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
                         </StackPanel>
+
+                        <!-- ── Appearance: the redesign's CARD of rows - one rounded surface, rows split
+                             by hairlines, the switch on the right. Directly under the name, as the frame
+                             orders it (353:9154). ── -->
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Text="How Toki sits on your screen and in what you share."
+                                   Style="{StaticResource Dim}" FontSize="12" Margin="0,6,0,14"/>
+                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="16"
+                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
+                            <StackPanel>
+                                <Grid Margin="16,13">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Dark theme" Style="{StaticResource BodyStrong}" VerticalAlignment="Center"/>
+                                    <CheckBox x:Name="LibThemeToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
+                                              VerticalAlignment="Center" Click="OnLibThemeToggle"/>
+                                </Grid>
+                                <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0"/>
+                                <Grid Margin="16,13">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"/>
+                                        <TextBlock Text="Let more of your screen show through the notch."
+                                                   Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="LibGlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
+                                              VerticalAlignment="Center" Click="OnLibGlassToggle"/>
+                                </Grid>
+                                <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0"/>
+                                <Grid Margin="16,13">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <TextBlock Text="Show Toki in screen recordings" Style="{StaticResource BodyStrong}"/>
+                                        <TextBlock Text="Off = invisible to recordings and screen shares."
+                                                   Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="LibGhostToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
+                                              VerticalAlignment="Center" Click="OnLibGhostToggle"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
 
                         <!-- ── Names Toki should always get right ──
                              The roster behind speaker naming and name correction. AppSettings.PinnedNames
@@ -314,67 +405,106 @@
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
                         </StackPanel>
 
-                        <!-- ── Appearance ── -->
+                        <!-- ── Re-clean saved transcripts ──
+                             OFFERED, never automatic. Every improvement to turn-merging or name
+                             correction makes older transcripts look worse, and the tempting move is to
+                             fix them quietly at startup. A transcript is a record of what people said;
+                             rewriting one the user has already read is not a favour. So: a button, a
+                             plain statement of what it will and will not touch, and a count afterwards. -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/>
-
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                <TextBlock Text="Dark theme" Style="{StaticResource BodyStrong}"/>
-                            </StackPanel>
-                            <CheckBox x:Name="LibThemeToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
-                                      VerticalAlignment="Center" Click="OnLibThemeToggle"/>
-                        </Grid>
-
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"/>
-                                <TextBlock Text="Let more of your screen show through the notch."
-                                           Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <CheckBox x:Name="LibGlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
-                                      VerticalAlignment="Center" Click="OnLibGlassToggle"/>
-                        </Grid>
-
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                <TextBlock Text="Show Toki in screen recordings" Style="{StaticResource BodyStrong}"/>
-                                <TextBlock Text="Off = invisible to recordings and screen shares."
-                                           Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <CheckBox x:Name="LibGhostToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
-                                      VerticalAlignment="Center" Click="OnLibGhostToggle"/>
-                        </Grid>
+                        <TextBlock Text="Re-clean saved transcripts" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
+                                   Margin="0,6,0,12" MaxWidth="420" HorizontalAlignment="Left"
+                                   Text="Runs today's transcript clean-up over meetings you already have: joins split-up lines back into whole turns, spells names the way you do, and drops the discarded half of spoken corrections. Your summaries, to-dos and tick boxes are not touched."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="LibRecleanButton" Style="{StaticResource PillButton}"
+                                    Background="{DynamicResource Chip}" Content="Re-clean transcripts"
+                                    Padding="18,9" Click="OnLibReclean"/>
+                            <TextBlock x:Name="LibRecleanStatus" Style="{StaticResource Dim}" FontSize="12.5"
+                                       VerticalAlignment="Center" Margin="14,0,0,0" Visibility="Collapsed"/>
+                        </StackPanel>
 
                         <!-- ── AI summaries (the mode + BYO-API-key flow, moved whole from the notch) ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
                         <TextBlock Text="AI summaries" Style="{StaticResource SectionTitle}"/>
                         <views:AiSummariesSection x:Name="AiSection"/>
 
-                        <!-- ── Google Calendar ── -->
+                        <!-- ── Calendars ──
+                             TWO independent connections, not a choice between them. A work Outlook
+                             calendar and a personal Google one is an ordinary combination, and a
+                             notetaker watching only one of them misses half the meetings without ever
+                             saying so. Connect either, or both; the agenda is merged.
+
+                             A CONNECTED row shrinks to a small provider mark plus the account it is
+                             signed in as (owner's ask): once it is done, it is a fact to confirm at a
+                             glance, not an action taking up a button's worth of space. -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="Google Calendar" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock x:Name="LibGoogleStatus" Style="{StaticResource Dim}" FontSize="12"
-                                   Margin="0,3,0,0" TextWrapping="Wrap"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button x:Name="LibGoogleConnectBtn" Style="{StaticResource PillButton}" Padding="20,9"
-                                    Click="OnLibGoogleConnect"/>
-                            <Button x:Name="LibGoogleDisconnectBtn" Style="{StaticResource PillButton}" Background="Transparent"
-                                    Foreground="{DynamicResource Coral}" Content="Disconnect" Padding="16,9" Margin="8,0,0,0"
-                                    ToolTip="Sign out of Google and remove the stored token" Click="OnLibGoogleDisconnect"/>
-                        </StackPanel>
+                        <TextBlock Text="Calendars" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
+                                   Margin="0,6,0,14" MaxWidth="420" HorizontalAlignment="Left"
+                                   Text="Connect one or both. Toki shows them as a single agenda and never writes a change back to the wrong account."/>
+
+                        <!-- Google -->
+                        <Grid x:Name="LibGoogleRow">
+                            <!-- Three columns, not a horizontal stack: a StackPanel measures its
+                                 children with INFINITE width, so a wrapping status line simply ran
+                                 underneath the button instead of wrapping before it. -->
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="LibGoogleMark" Width="26" Height="26" CornerRadius="13"
+                                    Background="{DynamicResource Chip}" Margin="0,0,10,0"
+                                    VerticalAlignment="Center" Visibility="Collapsed">
+                                <TextBlock Text="G" FontFamily="{StaticResource UiFont}" FontSize="12"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource Text}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="Google Calendar" Style="{StaticResource BodyStrong}"/>
+                                <TextBlock x:Name="LibGoogleStatus" Style="{StaticResource Dim}" FontSize="12"
+                                           Margin="0,2,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="LibGoogleConnectBtn" Style="{StaticResource PillButton}" Padding="20,9"
+                                        Click="OnLibGoogleConnect"/>
+                                <Button x:Name="LibGoogleDisconnectBtn" Style="{StaticResource PillButton}" Background="Transparent"
+                                        Foreground="{DynamicResource Coral}" Content="Disconnect" Padding="16,9" Margin="8,0,0,0"
+                                        ToolTip="Sign out of Google and remove the stored token" Click="OnLibGoogleDisconnect"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Outlook -->
+                        <Grid x:Name="LibOutlookRow" Margin="0,18,0,0">
+                            <!-- Three columns, not a horizontal stack: a StackPanel measures its
+                                 children with INFINITE width, so a wrapping status line simply ran
+                                 underneath the button instead of wrapping before it. -->
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="LibOutlookMark" Width="26" Height="26" CornerRadius="13"
+                                    Background="{DynamicResource Chip}" Margin="0,0,10,0"
+                                    VerticalAlignment="Center" Visibility="Collapsed">
+                                <TextBlock Text="O" FontFamily="{StaticResource UiFont}" FontSize="12"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource Text}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="Outlook" Style="{StaticResource BodyStrong}"/>
+                                <TextBlock x:Name="LibOutlookStatus" Style="{StaticResource Dim}" FontSize="12"
+                                           Margin="0,2,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="LibOutlookConnectBtn" Style="{StaticResource PillButton}" Padding="20,9"
+                                        Click="OnLibOutlookConnect"/>
+                                <Button x:Name="LibOutlookDisconnectBtn" Style="{StaticResource PillButton}" Background="Transparent"
+                                        Foreground="{DynamicResource Coral}" Content="Disconnect" Padding="16,9" Margin="8,0,0,0"
+                                        ToolTip="Remove the stored Outlook token from this PC" Click="OnLibOutlookDisconnect"/>
+                            </StackPanel>
+                        </Grid>
 
                         <!-- ── About ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>

@@ -8,8 +8,9 @@ public sealed record CalAttendee(string? Email, string? DisplayName, string? Res
                          : !string.IsNullOrWhiteSpace(Email) ? Email! : "Guest";
 }
 
-/// <summary>A calendar event, normalized from Google's JSON into just what Toki's surfaces need.
-/// Times are stored in UTC; use <see cref="StartLocal"/>/<see cref="EndLocal"/> for display.</summary>
+/// <summary>A calendar event, normalized from Google's or Microsoft's JSON into just what Toki's
+/// surfaces need. Times are stored in UTC; use <see cref="StartLocal"/>/<see cref="EndLocal"/> for
+/// display.</summary>
 public sealed record CalEvent(
     string Id,
     string Summary,
@@ -22,6 +23,16 @@ public sealed record CalEvent(
     IReadOnlyList<CalAttendee> Attendees,
     string? Description = null)
 {
+    /// <summary>
+    /// Which account this came from. Toki can hold Google and Outlook at the same time and shows one
+    /// merged agenda, so an edit or a delete has to be sent back to the account that owns the event -
+    /// and an id from one service means nothing to the other.
+    ///
+    /// Defaults to Google so every existing construction site, test fixture and render sample keeps
+    /// compiling and keeps meaning what it meant.
+    /// </summary>
+    public CalendarProvider Provider { get; init; } = CalendarProvider.Google;
+
     public DateTimeOffset StartLocal => StartUtc.ToLocalTime();
     public DateTimeOffset EndLocal => EndUtc.ToLocalTime();
     public TimeSpan Until => StartUtc - DateTimeOffset.UtcNow;

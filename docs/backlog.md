@@ -1,5 +1,52 @@
 # Toki - backlog & "what's next" (living doc)
 
+## ✅ The 2026-08-13 batch - BUILT
+
+The owner picked from the pending list and everything picked is done. **1,907 tests green.**
+
+**Quality bugs from the real meetings:** template misfit (`TemplateGate` - a specialised template now
+has to be earned by the transcript), self-corrections ("educative, oh, executive"), corrections shown
+in the transcript with the original on hover, and "Re-clean saved transcripts" in Settings.
+
+**UI:** the new-meeting composer reshaped like Google's and Outlook's (day/time pickers, prefilled,
+labelled guests field, Meet as a switch); the manual-note page rebuilt as a document (720px measure,
+no form rule, footer Delete); a numeric text size 1-12 replacing the parked Bold/Italic.
+
+**Features:** "Open from last time" carries a recurring meeting's unfinished to-dos into the next
+note. Evidence audio plays the moment behind a note line and can export the clip. Outlook joins Google
+as a second, simultaneous calendar connection.
+
+**Positioning copy** for the moats: `docs/positioning.md`.
+
+### PARKED by the owner, 2026-08-13 - do not start without a fresh go
+
+- **The whole M8 ship path** - "waits until the product is finalised". Signed installer, Velopack,
+  licence gate, onboarding download, Google scope verification.
+- **Bold / Italic in the note editor** - replaced by the numeric size dial. The collision with the S8
+  per-Run FontWeight fix is written up in ARCHITECTURE.
+- **Per-app "always record"** - "we dont need that".
+- **Follow-up email draft** from a note.
+- **Import / transcribe an existing audio file.**
+- **Localhost-only MCP server** over the SQLite.
+- **All performance and resource work** - RAM tiers, load-on-demand model residency.
+
+### Undecided
+
+- **Topic Trackers** (a saved FTS5 query with a badge). Owner: "idk about topic trackers." Not
+  parked, not picked.
+
+### Needs the owner before it can be finished
+
+- **Outlook is BUILT but cannot sign in yet.** It needs an Azure app registration, exactly as Google
+  needed an OAuth client. Ten minutes, free: `docs/outlook-setup.md`. Until then the button correctly
+  says "Outlook sign-in isn't set up in this build yet".
+- **Attribution rows** for the CampPlus speaker-embedding model (Apache-2.0) are still owed in
+  `THIRD-PARTY-NOTICES.md` and `AboutView` now that diarisation ships. This is a licence obligation
+  and it is the one part of the parked M8 work that is not actually parked.
+
+---
+
+
 *Plain-language capture of everything decided or discussed but **not yet built**, so any of it can be
 picked up later without re-deriving it. Updated 2026-08-06. The canonical short roadmap lives at the
 top of `CLAUDE.md`; this doc is the fuller version with the reasoning.*

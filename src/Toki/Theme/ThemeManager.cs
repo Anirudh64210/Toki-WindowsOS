@@ -69,6 +69,24 @@ public static class ThemeManager
         ("GreenDark",        "#12351F", "#CDEDDB"),
         ("Blue",             "#5AA9F9", "#2A72C7"),
         ("BlueDark",         "#12314F", "#D3E6FA"),
+
+        // ── the 2026-08 redesign glass tokens ──
+        // Dark: warm glass over the desktop, text as white opacities. Light: the same glass idea in a
+        // pale key - warm off-white tint, text as BLACK opacities - so the material survives the
+        // theme flip instead of collapsing to flat panels.
+        ("Glass",              "#80211E1E", "#99F4F1EF"),
+        ("GlassOpaque",        "#2B2828",   "#F2EFED"),
+        ("GlassCapsule",       "#66211E1E", "#80EFEBE8"),
+        ("GlassCapsuleOpaque", "#252222",   "#E9E5E2"),
+        ("GlassBorder",        "#1AFFFFFF", "#1A000000"),
+        ("TextHi",             "#E6FFFFFF", "#E6000000"),
+        ("TextMid",            "#80FFFFFF", "#80000000"),
+        ("TextLow",            "#40FFFFFF", "#40000000"),
+        ("AccentAmber",        "#F5A05C", "#D97F35"),
+        ("AccentTeal",         "#32C7D3", "#1B9AA5"),
+        ("JoinPill",           "#E6FFFFFF", "#E6111111"),
+        ("JoinPillText",       "#E6000000", "#E6FFFFFF"),
+        ("StopRed",            "#FF2D55", "#E02248"),
     };
 
     /// <summary>

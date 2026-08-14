@@ -56,6 +56,12 @@ static class RenderHarness
         var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
         Shot(dir, "Calendar-composer", composer, 360, 520);
 
+        // The month calendar the Day field opens. Popups are invisible to a headless render, so the
+        // calendar's content is drawn directly - unseeable UI is how its predecessor (a 14-day text
+        // list) shipped without anyone looking at it.
+        var dayPicker = new Views.DayPickerShot();
+        Shot(dir, "Calendar-daypicker", dayPicker, 280, 320);
+
         // Agenda rows in their hover-EXPANDED state (inline Edit/Open/Delete strip).
         CalendarRows.DebugExpand = true;
         Shot(dir, "Calendar-hover", new CalendarView(), 360, 520);
