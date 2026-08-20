@@ -7,34 +7,10 @@ public sealed record StickyNote(
     long Id, string Title, string Body, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 /// <summary>
-/// Sticky notes - the side of the product that is purely the user's, and the storage rules that keep
-/// it from tangling into everything else.
-///
-/// ── Why its own tables, not a column and not a JSON file ──
-/// A sticky note has a lifecycle nothing else in Toki has. It is written BEFORE the meeting record
-/// exists (you jot things down while waiting for people to join), it may outlive any single meeting
-/// (a running note for a weekly 1:1), and it must survive a crash mid-sentence - losing text someone
-/// typed with their own hands is the worst data loss there is. So it gets a real row from the first
-/// keystroke, in the same local SQLite file as everything else.
-///
-/// The version this replaces kept them in %APPDATA%\Toki\prep-scratch.json keyed by calendar event id.
-/// That was wrong in two ways the owner hit directly: the file never pruned, and a note could only
-/// ever belong to the one event it was born on.
-///
-/// ── Linking is EXPLICIT. Never by title. ──
-/// Meeting titles change, meetings get renamed, recurring events get rescheduled, and two different
-/// meetings are often called "Weekly sync". So Toki never guesses which note belongs to which meeting
-/// by matching text. There are exactly two links, both by id, both written only because a person chose
-/// them:
-///   <c>sticky_event</c>   - the note this calendar event's prep card opens (the user picked it, or made it)
-///   <c>sticky_meeting</c> - the note that was open during this RECORDED meeting (written once, at stop)
-/// A note with no links is still a note; it just isn't attached to anything yet.
-///
-/// ── What it deliberately does NOT touch ──
-/// Sticky notes are not in the meetings table, so they never appear as rows in the Library list. They
-/// are not in the FTS index and are not an input to the summary writer, so they can neither steer nor
-/// leak into what Toki says about a meeting. Deleting a meeting drops its LINK (cascade) and leaves the
-/// note itself alone - you may still want it for next week.
+/// Sticky notes: the user's own Markdown, stored as a real row from the first keystroke.
+/// Links to events/meetings (sticky_event, sticky_meeting) are by id and by explicit user choice,
+/// never inferred from titles. Notes stay out of the Library list, the FTS index, and the summary
+/// writer; deleting a meeting cascades the link, never the note.
 /// </summary>
 public sealed partial class MeetingStore
 {
@@ -62,7 +38,7 @@ public sealed partial class MeetingStore
 
     // ── the notes themselves ──
 
-    /// <summary>Start a sticky note. Exists from this moment on, so nothing typed into it can be lost.</summary>
+    /// <summary>Create a sticky note row immediately so nothing typed into it can be lost.</summary>
     public long CreateSticky(string title, string body = "")
     {
         var now = DateTimeOffset.UtcNow.ToString("o");
@@ -86,8 +62,7 @@ public sealed partial class MeetingStore
         return r.Read() ? Read(r) : null;
     }
 
-    /// <summary>Save what's been typed. Empty text is kept, not deleted - an empty note the user made on
-    /// purpose is theirs to fill in; only Delete removes one.</summary>
+    /// <summary>Save the note. Empty text is kept, not deleted; only DeleteSticky removes one.</summary>
     public void UpdateSticky(long id, string body, string? title = null)
     {
         using var c = Open();
@@ -112,8 +87,7 @@ public sealed partial class MeetingStore
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Most recently written notes, newest first - what the "use an earlier note" picker
-    /// offers. Blank ones are skipped: offering to reuse an empty note is offering nothing.</summary>
+    /// <summary>Most recently written non-blank notes, newest first (the "use an earlier note" picker).</summary>
     public IReadOnlyList<StickyNote> RecentStickies(int limit = 20)
     {
         using var c = Open();
@@ -137,8 +111,7 @@ public sealed partial class MeetingStore
     public long? StickyForEvent(string? eventId) =>
         string.IsNullOrEmpty(eventId) ? null : LinkedId("sticky_event", "event_id", eventId);
 
-    /// <summary>Point this calendar event at this note. Replaces any previous choice - one event opens
-    /// one note, and changing your mind is just picking another.</summary>
+    /// <summary>Point this calendar event at this note; replaces any previous choice.</summary>
     public void LinkStickyToEvent(string eventId, long stickyId)
     {
         if (string.IsNullOrEmpty(eventId)) return;
@@ -155,8 +128,7 @@ public sealed partial class MeetingStore
     public long? StickyForMeeting(long meetingId) =>
         LinkedId("sticky_meeting", "meeting_id", meetingId);
 
-    /// <summary>Record which note was open during this recorded meeting. Written once, when recording
-    /// stops - that's the fact, and it doesn't change afterwards unless the user attaches another.</summary>
+    /// <summary>Record which note was open during this recorded meeting (written once, at stop).</summary>
     public void LinkStickyToMeeting(long meetingId, long stickyId)
     {
         using var c = Open();
@@ -189,8 +161,7 @@ public sealed partial class MeetingStore
         return v is null || v is DBNull ? null : Convert.ToInt64(v);
     }
 
-    /// <summary>The note attached to a meeting, if any - what the meeting note's "Sticky note" button
-    /// opens.</summary>
+    /// <summary>The note attached to a meeting, if any.</summary>
     public StickyNote? MeetingSticky(long meetingId) =>
         StickyForMeeting(meetingId) is { } id ? GetSticky(id) : null;
 }

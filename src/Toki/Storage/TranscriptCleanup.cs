@@ -4,18 +4,9 @@ namespace Toki.Storage;
 
 /// <summary>
 /// Re-runs today's transcript repairs over meetings recorded before those repairs existed.
-///
-/// WHY IT IS A BUTTON AND NOT A STARTUP JOB. Every improvement to turn-merging or name correction
-/// makes old transcripts look worse by comparison, and the temptation is to quietly fix them on the
-/// next launch. The owner's rule is the opposite: OFFER it, never do it. A transcript is a record of
-/// what people said, and silently rewriting a record the user has already read - possibly quoted,
-/// possibly acted on - is not a favour. So this runs when someone presses a button, says how many
-/// meetings it changed, and stops.
-///
-/// WHAT IT WILL NOT TOUCH. Summaries, sections and to-dos are left alone even when the transcript
-/// underneath them changes. Re-writing them would need the model, would take minutes, and would throw
-/// away edits and tick states a person owns. A slightly-stale summary over a cleaner transcript is the
-/// right trade; the reverse is not.
+/// Runs only from a button, never at startup: a transcript is a record, and rewriting one the user
+/// has read must be offered, not done silently. Summaries, sections and to-dos are never touched -
+/// they hold edits and tick states a person owns.
 /// </summary>
 public static class TranscriptCleanup
 {
@@ -31,11 +22,20 @@ public static class TranscriptCleanup
         var ids = store.List().Where(m => m.Kind == MeetingKind.Meeting).Select(m => m.Id).ToList();
         int changed = 0, before = 0, after = 0, done = 0;
 
+        // Compute the corpus ONCE, before anything is rewritten: recomputing inside the loop lets one
+        // meeting's rewrites vote in the next one's corrections and cascade across the library.
+        var corpus = NameLexicon.Corpus(store);
+        var trusted = NameLexicon.Trusted(trustedNames);
+
         foreach (var id in ids)
         {
             ct.ThrowIfCancellationRequested();
             progress?.Invoke(done, ids.Count);
             done++;
+
+            // A meeting being diarised is mid-write on another thread; rewriting rows here would race
+            // SetSpeakerTags (addresses lines by position) and stamp names onto the wrong lines.
+            if (App.IsResolvingSpeakers(id)) { App.Log($"re-clean: meeting {id} is being diarised, skipped"); continue; }
 
             MeetingRecord? m = null;
             try { m = store.Get(id); }
@@ -44,12 +44,24 @@ public static class TranscriptCleanup
 
             try
             {
-                var (cleaned, fixes) = Clean(m.Transcript, trustedNames);
+                // A meeting must not vote in its own corrections at corpus weight: one that mis-heard
+                // a name six times would outvote a library that knows the right spelling five.
+                var own = NameCorrector.CountNames(m.Transcript.Select(s => s.Text));
+                var others = Subtract(corpus, own);
+
+                var (cleaned, fixes) = Clean(m.Transcript, trusted, others);
                 before += m.Transcript.Count;
                 after += cleaned.Count;
                 if (!Differs(m.Transcript, cleaned)) continue;
 
-                store.ReplaceTranscript(id, cleaned, fixes);
+                // The audit trail is append-only: overwriting corrections_json with only this run's
+                // fixes would erase every earlier fix and its "Also transcribed as..." hover.
+                var merged = m.Corrections.Concat(fixes)
+                    .GroupBy(f => (f.From.ToLowerInvariant(), f.To.ToLowerInvariant()))
+                    .Select(g => g.First())
+                    .ToList();
+
+                store.ReplaceTranscript(id, cleaned, merged);
                 MarkdownMirror.Write(store.Get(id) ?? m);   // the .md files mirror the DB, so they follow
                 changed++;
             }
@@ -68,6 +80,10 @@ public static class TranscriptCleanup
     /// </summary>
     public static (IReadOnlyList<TranscriptSegment> Segments, IReadOnlyList<TextFix> Fixes) Clean(
         IReadOnlyList<TranscriptSegment> transcript, IEnumerable<string>? trustedNames)
+        => Clean(transcript, NameLexicon.Trusted(trustedNames), NameLexicon.Corpus(App.Store));
+
+    static (IReadOnlyList<TranscriptSegment> Segments, IReadOnlyList<TextFix> Fixes) Clean(
+        IReadOnlyList<TranscriptSegment> transcript, List<string> trusted, Dictionary<string, int> corpus)
     {
         // Merge wants the two streams separately - it is what decides which turn a backchannel
         // interrupts - so split the saved transcript back into the streams it came from.
@@ -77,19 +93,34 @@ public static class TranscriptCleanup
 
         var record = new List<TextFix>();
 
-        var trusted = NameLexicon.Trusted(trustedNames);
-        var corpus = NameLexicon.Corpus(App.Store);
         var (named, nameFixes) = NameCorrector.Correct(merged, trusted, corpus);
         record.AddRange(nameFixes.Select(f => new TextFix(f.From, f.To, "name")));
 
         var (repaired, repairs) = SelfCorrection.Clean(named);
         record.AddRange(repairs.Select(r => new TextFix(r.From, r.To, "repair")));
 
+        var (tidied, tidies) = Readability.Clean(repaired);
+        record.AddRange(tidies.Select(td => new TextFix(td.From, td.To, "tidy")));
+        repaired = tidied;
+
         var distinct = record
             .GroupBy(f => (f.From.ToLowerInvariant(), f.To.ToLowerInvariant()))
             .Select(g => g.First())
             .ToList();
         return (repaired, distinct);
+    }
+
+    /// <summary>The corpus minus one meeting's own counts - never below zero.</summary>
+    static Dictionary<string, int> Subtract(Dictionary<string, int> corpus, Dictionary<string, int> own)
+    {
+        var result = new Dictionary<string, int>(corpus, StringComparer.OrdinalIgnoreCase);
+        foreach (var (word, n) in own)
+            if (result.TryGetValue(word, out var c))
+            {
+                if (c - n <= 0) result.Remove(word);
+                else result[word] = c - n;
+            }
+        return result;
     }
 
     /// <summary>Is this actually a different transcript? An unchanged meeting must not be rewritten -

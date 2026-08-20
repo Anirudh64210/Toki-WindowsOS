@@ -52,21 +52,50 @@ public static partial class NoteExtractor
         }
         DedupeActions(notes.Actions);
 
+        // Uncapped extraction dumps dozens of raw questions/to-dos into a note. Keep the most
+        // substantial few of each; the full transcript is one section away for anything trimmed.
+        Trim(notes.Questions, MaxQuestions);
+        Trim(notes.Decisions, MaxDecisions);
+        if (notes.Actions.Count > MaxActions)
+        {
+            // An action with a named owner or a due date is worth more than a bare sentence.
+            var keep = notes.Actions
+                .OrderByDescending(a => (a.Owner is null ? 0 : 2) + (a.Due is null ? 0 : 1))
+                .ThenByDescending(a => a.Text.Length)
+                .Take(MaxActions).ToHashSet();
+            notes.Actions.RemoveAll(a => !keep.Contains(a));
+        }
+
         notes.Tldr = Tldr(sentences);
         return notes;
+    }
+
+    const int MaxQuestions = 10, MaxDecisions = 10, MaxActions = 12;
+
+    /// <summary>Drop sub-4-word lines ("What?", "Is it good?" - connection checks and grunts),
+    /// then keep the longest <paramref name="max"/> in their original order.</summary>
+    static void Trim(List<string> list, int max)
+    {
+        list.RemoveAll(s => s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length < 4);
+        if (list.Count <= max) return;
+        var keep = new HashSet<string>(list.OrderByDescending(s => s.Length).Take(max));
+        list.RemoveAll(s => !keep.Contains(s));
     }
 
     /// <summary>Title from the notes, heuristically (no separate LLM pass - lesson 9).</summary>
     public static string Title(NoteSet notes, string? app, DateTimeOffset when)
     {
-        // Prefer a decision (a topic-y statement) over the TL;DR, which may open
-        // with a question; fall back to the TL;DR's first sentence.
-        // Prefer an LLM-written title when present (concise + context-aware).
+        // Prefer an LLM-written title; else a decision (topic-y) over the TL;DR, which may open
+        // with a question; else the TL;DR's first sentence.
         if (!string.IsNullOrWhiteSpace(notes.Title) && IsValidTitle(notes.Title!))
             return CapWords(notes.Title!, 8);
 
+        // The canned low-substance summary must not become the title; for those meetings the
+        // app-date fallback below is the honest name.
+        var lowSubstance = notes.Tldr == Toki.Llm.LlmNoteWriter.LowSubstanceTldr;
+
         var candidate = (notes.Decisions.Count > 0 ? FirstMeaningful(notes.Decisions[0]) : null)
-                        ?? FirstSentence(notes.Tldr);
+                        ?? (lowSubstance ? null : FirstSentence(notes.Tldr));
         if (candidate is not null && IsValidTitle(candidate))
             return CapWords(candidate, 7);
 
@@ -101,11 +130,21 @@ public static partial class NoteExtractor
         return sb.ToString();
     }
 
+    /// <summary>Capitalised sentence-openers that are grammar, not a person ("This will take a
+    /// while" is not owned by "This"). Mirrors the LLM path's ValidOwner rule.</summary>
+    static readonly HashSet<string> NotAPerson = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "This", "That", "There", "They", "Them", "These", "Those", "Then", "It", "He", "She",
+        "We", "Someone", "Somebody", "Everyone", "Everybody", "Anyone", "Anybody", "Nobody",
+        "Team", "People", "Management", "Everything", "Something", "Nothing", "What", "Who",
+    };
+
     static string? Owner(string sentence, Speaker fallback)
     {
         // "Priya will confirm ..." / "Sid to wire ..." -> the leading proper noun.
         var m = OwnerPattern().Match(sentence);
-        if (m.Success) return m.Groups[1].Value;
+        if (m.Success && !NotAPerson.Contains(m.Groups[1].Value)) return m.Groups[1].Value;
+        if (m.Success) return null;   // pronoun-led ("They will handle it"): a task, but nobody named
         if (Regex.IsMatch(sentence, @"^\s*(I'?ll|I will|I need)", RegexOptions.IgnoreCase)) return "You";
         return fallback == Speaker.You ? "You" : null;
     }

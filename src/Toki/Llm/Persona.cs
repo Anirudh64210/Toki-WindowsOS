@@ -3,24 +3,17 @@ using System.Text.RegularExpressions;
 namespace Toki.Llm;
 
 /// <summary>
-/// Tier 0.6: questions ABOUT TOKI ITSELF - its mood ("why are you so rude?"), its abilities, whether
-/// it can see the screen, privacy, complaints, apologies - get a short, warm, in-character CANNED
-/// reply and are NEVER sent to notes retrieval. Without this tier, "why are you so rude?" was
-/// literally searched against the meeting notes and answered "there's no mention of rudeness in the
-/// meeting notes" (real screenshot). The shipping-assistant pattern (Dialogflow "long tail" design,
-/// Copilot Studio out-of-scope guidance): identify the likely out-of-domain intents up front and give
-/// each a prepared, personable answer instead of a retrieval dead-end.
-///
+/// Tier 0.6: questions ABOUT TOKI ITSELF (mood, abilities, screen awareness, privacy, complaints,
+/// apologies) get a short in-character CANNED reply and are NEVER sent to notes retrieval.
 /// Anchored whole-utterance, like <see cref="SmallTalk"/>, so a real notes question that merely
-/// contains "you" ("what did you note down about pricing?" - arguably about notes) falls through.
-/// Deterministic, ~0ms, no model.
+/// contains "you" falls through. Deterministic, ~0ms, no model.
 /// </summary>
 public static class Persona
 {
     // Each entry: whole-utterance pattern → reply. {screen} is replaced with the screen-aware line.
     static readonly (Regex Rx, string Reply)[] Table =
     {
-        // ── mood / rudeness complaints ("why are you so rude?" - the screenshot bug) ──
+        // ── mood / rudeness complaints ──
         (Whole(@"why\s+(are|r)\s+(you|u)\s+(so\s+|being\s+so\s+|being\s+)?(rude|mean|grumpy|cold|short|snappy|angry|harsh|blunt|sassy)(\s+to\s+me)?|(you('re|\s+are)|ur)\s+(so\s+|being\s+|really\s+)?(rude|mean|grumpy|cold|harsh|blunt)(\s+to\s+me)?|are\s+you\s+(mad|angry|annoyed|upset)(\s+(at|with)\s+me)?"),
             "Sorry if I came across short - never my intent. Ask me again and I'll do better."),
 
@@ -28,7 +21,7 @@ public static class Persona
         (Whole(@"why\s+(are|r)\s+(you|u)\s+(so\s+)?(dumb|stupid|bad|useless|slow|terrible|awful|wrong)|(you('re|\s+are)|ur)\s+(so\s+|really\s+)?(dumb|stupid|bad|useless|terrible|awful|wrong|not\s+(very\s+)?smart|not\s+helping)|that('s|\s+is|\s+was)\s+(wrong|not\s+right|incorrect|not\s+what\s+i\s+(asked|meant|wanted))|you\s+(got|have)\s+(it|that)\s+wrong|(that\s+)?(answer\s+)?(was|is)\s+(so\s+)?(bad|wrong|useless)|wrong\s+answer|try\s+again"),
             "Sorry about that - I clearly missed. Rephrase it, or name the meeting or person, and I'll take another shot."),
 
-        // ── screen awareness ("do you see what's on my screen right now?" - the screenshot bug) ──
+        // ── screen awareness ──
         (Whole(@"(do|can|could)\s+(you|u)\s+(see|tell|know|read)\s+(what('s|\s+is)\s+)?(on\s+)?(my\s+)?screen(\s+right\s+now)?|(do|can)\s+(you|u)\s+(see|know)\s+what\s+i('m|\s+am)\s+(looking\s+at|reading|viewing|doing)(\s+right\s+now)?|what('s|\s+is)\s+on\s+my\s+screen(\s+right\s+now)?|what\s+am\s+i\s+looking\s+at(\s+right\s+now)?|(do|can)\s+(you|u)\s+watch\s+my\s+screen"),
             "{screen}"),
 
@@ -87,8 +80,7 @@ public static class Persona
     {
         var t = (input ?? "").Trim();
         if (t.Length == 0) return null;
-        // Strip a leading/trailing address, same as SmallTalk - via the shared FUZZY wake-name
-        // (WakeName), so "why are you so rude, Doky?" is still a persona intercept, not retrieval.
+        // Strip a leading/trailing address via the shared fuzzy wake-name, same as SmallTalk.
         t = WakeName.StripLeading(t);
         t = WakeName.StripTrailing(t);
         if (t.Length == 0) return null;

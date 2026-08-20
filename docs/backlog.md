@@ -1,5 +1,81 @@
 # Toki - backlog & "what's next" (living doc)
 
+## 📋 THE OPEN LIST as of 2026-08-19 (after the glass + details + film rounds)
+
+Everything below was surfaced during the 2026-08-18/19 design-quality rounds and is NOT done.
+Grouped by what unblocks it. This section supersedes older "next up" lists further down for
+anything they disagree on.
+
+### Waiting on the owner's word (posed as questions, never started)
+
+- **Delete the two dead button styles?** `ChipButton` and `SquareButton` in Theme.xaml have zero
+  consumers since the glass wave. One-commit cleanup if yes.
+- **`TokiCheckOpen` promises an amber outline it never draws.** Either draw the outline or drop
+  the promise from the style - owner to pick which.
+- **The remaining instant-hover holdouts** (pre-glass Border-with-mouse-handler rows):
+  AiSummariesSection's SegButton, the CalendarRows clickables (hover-reveal rows, action/copy
+  links, copy icon), and the AboutView credit rows. Sweeping them into the glass hover grammar
+  is mechanical; owner said "say the word".
+- **SpeakerChips rename popup still wears the pre-glass look** - same sweep, same word.
+- **Library accent bars: keep blue/purple kind-coding or go one uniform colour?** Coding shipped
+  2026-08-19 (blue = recorded, purple = manual note); collapsing to a single colour is a
+  one-line change if the owner prefers.
+- **Manual-note bullet dots sit at cap-height** (look superscript). Pre-existing, flagged by two
+  audits, deliberately left; fix on request.
+- **`NotesReadyPeekMs` = 2000ms** - the "Notes ready" click window before Toki flies to the
+  peek. Flagged as tight; it is one constant if the owner wants it longer.
+- **The somersault flight tuning** - bigger / slower / bouncier on request after the owner sees
+  it live.
+- **Recording-stop snap**: on the in-place path, stopping snaps RecordingOpen (48px) to the
+  13px sliver with no animation. Noticed by the behaviour audit; if the owner ever reports "a
+  blink when I hit stop", this is it - can be given a proper shrink morph.
+- **Rebuild meetings 92/93** from their intact WAVs with the fixed audio engine (owner decision
+  carried from the ASR-fix day).
+- **Multilingual Whisper opt-in** (~500MB model choice in Settings) for Hinglish meetings.
+- **The WER baseline recording**: owner records the script in `docs/wer-eval.md` on their real
+  mic so the accuracy gate measures reality instead of TTS audio.
+- **Outlook live sign-in** still needs the Azure app registration (owner does the portal step,
+  guided - exactly as Google was).
+- **Topic Trackers** - still undecided ("idk"), still neither parked nor picked.
+
+### Owed to the owner's EYES (built and tested, but no harness can picture them)
+
+- The evidence play/stop chips on a note with real recordings (glyphs are now drawn paths).
+- The chat-history delete cross (now the house Path glyph) inside the history popup.
+- The warm flip-to-peek on a GENUINE recording start (only reachable mid-meeting; guarded by
+  code tests, never filmed).
+- The Y/T speaker discs on the Library note page (probe-verified, below the harness fold).
+- The full notes-ready flight and the ghost-frame-free summon, live, in both themes.
+
+### Small debts seen in passing (assistant can do without a decision, just not started)
+
+- **`--themetest` coverage narrowed by the glass**: its background-finder only accepts opaque
+  solid brushes, so labels sitting on gradient plates are no longer contrast-measured (worst
+  cases were hand-checked). Teach it gradient sampling.
+- **Loader sliver plate looks faint in light theme** for its first moments (film observation,
+  possibly just the shimmer phase - verify, fix if real).
+- **The `--state` comma-path dev seam skips an explicit `hidden` hop** mid-path (TryGo rejects
+  Home -> Hidden from the seam) - tooling nit, matters only for filming transitions.
+- **ScrollThumb kept its instant hover swap deliberately** (drag-flicker risk) - revisit only
+  with a fade that provably does not flicker during drag.
+- **CollapsedView / RecordingBarView peek Grids use MouseLeftButtonUp** - documented-deliberate
+  exception to "a clickable thing is a Button" (whole-peek hit areas); revisit only if the rule
+  is ever made absolute.
+- **design-web mirror drift**: StopRed was ported by hand 2026-08-19; the mirror still drifts
+  whenever Theme.xaml changes - port by hand per `.design-sync/NOTES.md`, and a fuller re-sync
+  is pending since the glass rounds.
+
+### Still open from before these rounds (unchanged status)
+
+- **Tasks #93/#94** - the Figma revamp remainders (the open front in the task list).
+- **P10 dialogue brain live-verify** - the owner still owes a verdict on conversational feel.
+- **Attribution row for CampPlus** (Apache-2.0) still owed on the Built-with screen.
+- **The five-critic audit deferrals** (listed further down in this file).
+- **On-device meaning-search (embeddings)** - still blocked by the native-runtime conflict.
+- **The M8 ship path** - still parked until the product is final.
+- **Mac version** - `HANDOFF-MAC.md` written 2026-08-19 at the repo root; starts whenever the
+  owner opens that front.
+
 ## ✅ The 2026-08-13 batch - BUILT
 
 The owner picked from the pending list and everything picked is done. **1,907 tests green.**
@@ -480,3 +556,34 @@ republished. The golden set lives in `tests/Toki.Tests/Brain/` (fixture + frozen
 - **Speaker-attribution honesty** (who said what) is coarse until named diarisation ships (YOU/THEM only).
 - Deeper generation-side answer-quality (faithfulness scoring, citation-moment links) is a separate,
   model-in-the-loop eval - the deterministic layer is what this suite locks down.
+
+## Deferred from the five-critic audit (2026-08-18)
+
+24 confirmed findings were fixed the same day (see README + ARCHITECTURE). These were confirmed or
+plausible but deliberately deferred, each because the fix is invasive relative to its harm:
+
+- **Live window seams cut at quiet points, not VAD boundaries.** Roughly every 15s of CONTINUOUS
+  speech risks one garbled token where a word straddles two windows. Proper fix: consume only up to
+  the last completed VAD region per window and hold the tail for the next one (needs a consumed-samples
+  contract between LiveTranscriber and Transcriber, plus forward-progress guarantees). Medium effort,
+  small recurring quality gain.
+- **Device-change gaps insert no silence.** A Bluetooth mic re-pair mid-meeting shifts the "you"
+  timeline earlier by the gap length; if it exceeds ~4s the echo de-dup window and merge ordering are
+  wrong from then on. Fix: track the gap and write zeros into WAV + live tap on rebuild. Also: the
+  loopback capture thread has no rebuild at all - if it dies, "them" ends silently.
+- **Live-pipe drift accounting.** Buffer overflow (post-fix: only during extreme stalls) still shifts
+  timestamps with no detection. A fed-vs-decoded seconds comparison per pipe could log and correct it.
+- **Handover names the backchannel.** "Over to you, Priya" → cluster of whoever says "yep" first gets
+  named Priya. Needs interjection-aware NextOther. Related: a turn-initial vocative credits the NEXT
+  speaker where it usually names the PREVIOUS one.
+- **Inherited clusters feed the namer.** A sub-0.6s "Priya here." inherits the previous turn's cluster
+  and its self-intro then names the WRONG voice. Fix: mark inherited turns; exclude them from votes.
+- **Evidence 45s cap keeps the head of the range.** A bullet whose matched words sit in the tail of a
+  long merged range plays a clip that never reaches them. Fix: anchor the cap around the best-matching
+  line, not the range start.
+- **No live Library refresh when the LLM title lands.** During the up-to-300s wait an open Library
+  shows the placeholder title; MarkDirty only applies on next open.
+- **Lecture gate dominance** merges all remote voices into "Them", so any remote-dominated call with
+  one teaching phrase can pass as Lecture (cue count keeps this rare).
+- **Attendee named an ordinary word ("May", "Will")** is now never auto-corrected toward (the
+  correction-magnet fix) - a deliberate miss; pinning can't override it currently.

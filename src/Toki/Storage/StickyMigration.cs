@@ -4,18 +4,9 @@ using System.Text.Json;
 namespace Toki.Storage;
 
 /// <summary>
-/// Moves the old prep-card scratchpad file into the sticky-note tables, once, and then gets out of the
-/// way.
-///
-/// Sticky notes used to live in <c>%APPDATA%\Toki\prep-scratch.json</c>, keyed by calendar event id.
-/// This is the ONLY code that still reads that file - everything else now goes through
-/// <see cref="MeetingStore"/>, so there is exactly one place the legacy format is understood and one
-/// moment it matters.
-///
-/// It is deliberately careful, because the file holds text the user typed by hand: it never deletes,
-/// only renames to <c>.migrated</c> once every entry is safely in the database; it skips any event that
-/// already has a note (so running twice can't duplicate); and any failure leaves the file exactly where
-/// it was, to be retried next launch.
+/// One-time migration of the legacy prep-scratch.json into the sticky-note tables; the only code that
+/// reads that file. The file holds hand-typed text, so it is never deleted, only renamed to .migrated
+/// once every entry is in the database; already-linked events are skipped so reruns can't duplicate.
 /// </summary>
 public static class StickyMigration
 {
@@ -29,17 +20,8 @@ public static class StickyMigration
     {
         if (!File.Exists(LegacyPath)) return;
 
-        // CLAIM the file by renaming it BEFORE reading a byte of it.
-        //
-        // The old order was read-migrate-rename, which is not atomic. Toki's single-instance guard stops
-        // a second window, but the migration runs on a background thread 3 seconds after start, so two
-        // launches in quick succession genuinely overlapped: both saw the file, both read it, both wrote
-        // the same note. The owner's log showed "migrated 1 prep-card note(s)" three times in under a
-        // second - three copies of one note. `StickyForEvent` cannot prevent that; it is a check-then-act
-        // across processes.
-        //
-        // Renaming is the one operation the filesystem makes atomic. Whoever wins owns the migration;
-        // everyone else finds nothing and leaves.
+        // Claim by rename BEFORE reading a byte: rename is the one atomic filesystem operation, so
+        // overlapping launches can't both migrate (check-then-act across processes duplicates notes).
         var claimed = LegacyPath + ".migrating";
         try { File.Move(LegacyPath, claimed, overwrite: false); }
         catch (IOException) { return; }          // someone else claimed it, or it vanished
@@ -51,10 +33,8 @@ public static class StickyMigration
             try { notes = ReadLegacy(File.ReadAllText(claimed)); }
             catch (Exception ex)
             {
-                // Unreadable in BOTH shapes. The old code left it in place "to be retried next launch",
-                // but a file that cannot be parsed will never parse - so that was an error logged on
-                // every single launch, forever, with no path to success. Park it under a name that says
-                // what happened. The text is still on disk, in plain JSON, for a person to read.
+                // Unreadable in both shapes will never parse; park it instead of retrying forever.
+                // The text stays on disk, in plain JSON, for a person to read.
                 Move(claimed, LegacyPath + ".unreadable");
                 App.Log($"sticky migration: prep-scratch.json could not be read ({ex.Message}) - "
                     + "parked as prep-scratch.json.unreadable and NOT retried; your text is still in that file");
@@ -70,15 +50,13 @@ public static class StickyMigration
                 moved++;
             }
 
-            // Renamed, never deleted: if anything about this went wrong the user's words are still on
-            // disk, in plain JSON, where a person can read them.
+            // Renamed, never deleted: the user's words stay on disk in plain JSON.
             Move(claimed, LegacyPath + ".migrated");
             if (moved > 0) App.Log($"sticky: migrated {moved} prep-card note(s) from prep-scratch.json");
         }
         catch (Exception ex)
         {
-            // Something unexpected (a locked database, a disk error). Put the file BACK so the next
-            // launch can try again - unlike an unreadable file, this really might succeed later.
+            // Transient failure (locked db, disk error) may succeed later; put the file back for retry.
             try { Move(claimed, LegacyPath); } catch { }
             App.Log($"sticky migration failed (non-fatal - file restored, retried next launch): {ex.Message}");
         }

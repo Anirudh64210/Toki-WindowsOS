@@ -17,13 +17,9 @@ public sealed class Transcriber : IDisposable
     // pausing between words) can't shatter into one word per line. Sentence ends still break freely.
     const int MinWordsForPauseBreak = 8;
 
-    // Whole-file decode is best (lesson 3) but the native recognizer THREW on a
-    // real 35-minute clip ("External component has thrown an exception") and the
-    // whole meeting was lost. So: normal-length meetings still take the single
-    // whole-file path; anything longer is split into windows cut at quiet points
-    // (avoids slicing mid-word) and decoded piece by piece. Never crash, never
-    // lose a long meeting.
-    // Env override (seconds) lets tests trigger the windowed path on a short clip.
+    // Whole-file decode is the rule (never hand-chunk), but the native recognizer can throw on
+    // very long inputs; past SafeMaxSamples the file is split into windows cut at quiet points
+    // so a word is never sliced. Env overrides (seconds) let tests trigger the windowed path.
     static readonly int SafeMaxSamples = SecondsEnv("TOKI_ASR_MAXSEC", 6 * 60) * AudioLoader.TargetRate;
     static readonly int WindowSamples  = SecondsEnv("TOKI_ASR_WINSEC", 3 * 60) * AudioLoader.TargetRate;
     const int SearchSamples  = 5 * AudioLoader.TargetRate;       // ±5s quiet-point search
@@ -56,6 +52,32 @@ public sealed class Transcriber : IDisposable
     /// </summary>
     public IReadOnlyList<TranscriptSegment> Transcribe(float[] samples16kMono, Speaker speaker)
     {
+        // Speech gate: decode only where somebody is speaking - Parakeet fed near-silence returns
+        // confident nonsense, not nothing. Level FIRST, then gate: Silero cannot read a far-too-
+        // quiet signal either, so both the gate and the recogniser see the lifted stream.
+        var gain = SpeechGain(samples16kMono);
+        if (SpeechRegions(samples16kMono, gain) is { } regions)
+        {
+            // Zero regions is an answer (nobody spoke), not a failure - never fall through to
+            // the ungated decode, the input most likely to come back as confident nonsense.
+            if (regions.Count == 0)
+            {
+                App.Log($"ASR gate: no speech in {samples16kMono.Length / (double)AudioLoader.TargetRate:F0}s stream, decoding nothing");
+                return [];
+            }
+            var gated = new List<TranscriptSegment>();
+            var speech = regions.Sum(r => r.Length);
+            App.Log($"ASR gate: {regions.Count} speech region(s), {speech / (double)AudioLoader.TargetRate:F0}s of "
+                  + $"{samples16kMono.Length / (double)AudioLoader.TargetRate:F0}s "
+                  + $"({100.0 * speech / Math.Max(1, samples16kMono.Length):F0}% speech), gain x{gain:F1}");
+            foreach (var r in regions)
+            {
+                try { gated.AddRange(TranscribeWindow(samples16kMono, r.Start, r.End, r.StartSeconds, speaker, gain)); }
+                catch (Exception ex) { App.Log($"ASR region {r.StartSeconds:F0}s failed, skipping: {ex.GetType().Name}: {ex.Message}"); }
+            }
+            return gated;
+        }
+
         if (samples16kMono.Length <= SafeMaxSamples)
             return TranscribeWindow(samples16kMono, 0, samples16kMono.Length, 0, speaker);
 
@@ -80,23 +102,109 @@ public sealed class Transcriber : IDisposable
     }
 
     /// <summary>
-    /// Public slice decode for LIVE incremental transcription: decode [start,end) of a buffer at a
-    /// given meeting-time offset. Same one-shot-stream path the whole-file decode uses, so quality
-    /// is identical - the live path just hands it ~15s windows during the meeting instead of the
-    /// whole file at the end.
+    /// Slice decode for LIVE incremental transcription: decode [start,end) at a meeting-time
+    /// offset via the same one-shot-stream path as the whole-file decode. Gated and levelled like
+    /// the whole-file path - the gate must sit on the LIVE path, the one meetings actually take.
     /// </summary>
-    public IReadOnlyList<TranscriptSegment> TranscribeSlice(float[] samples, int start, int end, double offsetSec, Speaker speaker) =>
-        TranscribeWindow(samples, start, end, offsetSec, speaker);
-
-    /// <summary>Public quiet-point finder for the live windower - cut here to avoid slicing a word.</summary>
-    public static int FindQuietCut(float[] samples, int center, int radius) => QuietCut(samples, center, radius);
-
-    /// <summary>Decode one slice [start,end) with a fresh stream; timestamps offset to meeting time.</summary>
-    List<TranscriptSegment> TranscribeWindow(float[] samples, int start, int end, double offsetSec, Speaker speaker)
+    public IReadOnlyList<TranscriptSegment> TranscribeSlice(float[] samples, int start, int end, double offsetSec, Speaker speaker)
     {
         var len = end - start;
         if (len <= 0) return [];
         var slice = start == 0 && end == samples.Length ? samples : samples[start..end];
+
+        // Level first, then gate - same order and reasons as the whole-file path. Gain is per
+        // window; a pure-silence window has nothing worth lifting to, and nothing gets decoded.
+        var gain = SpeechGain(slice);
+        var regions = LiveRegions(slice, gain);
+        if (regions is null)
+        {
+            // Gate unavailable: decode ungated, but the final flush after a stall can hand this a
+            // backlog past what one decode call survives - chunk anything oversized at quiet points.
+            if (len <= SafeMaxSamples)
+                return TranscribeWindow(samples, start, end, offsetSec, speaker);
+            var segs0 = new List<TranscriptSegment>();
+            var pos = start;
+            while (pos < end)
+            {
+                var target = Math.Min(pos + WindowSamples, end);
+                var cut = target >= end ? end : QuietCut(samples, target, SearchSamples);
+                if (cut <= pos) cut = target;
+                try { segs0.AddRange(TranscribeWindow(samples, pos, cut, offsetSec + (pos - start) / (double)AudioLoader.TargetRate, speaker)); }
+                catch (Exception ex) { App.Log($"live flush window failed, skipping: {ex.GetType().Name}: {ex.Message}"); }
+                pos = cut;
+            }
+            return segs0;
+        }
+
+        var segs = new List<TranscriptSegment>();
+        foreach (var r in regions)
+        {
+            try { segs.AddRange(TranscribeWindow(slice, r.Start, r.End, offsetSec + r.StartSeconds, speaker, gain)); }
+            catch (Exception ex) { App.Log($"live region {offsetSec + r.StartSeconds:F0}s failed, skipping: {ex.GetType().Name}: {ex.Message}"); }
+        }
+        return segs;
+    }
+
+    // The live gate is PERSISTENT (one Silero session, reset per window) because it runs every ~15
+    // seconds for the whole meeting - rebuilding the ONNX session each window is pure waste. All
+    // live decode is serialized by TranscriptionService, so one instance is safe.
+    SpeechGate? _liveGate;
+    bool _liveGateBroken;
+
+    List<SpeechRegion>? LiveRegions(float[] slice, float gain)
+    {
+        if (Environment.GetEnvironmentVariable("TOKI_ASR_NOGATE") == "1") return null;   // same A/B seam
+        if (_liveGateBroken || !ModelManager.VadInstalled) return null;
+        try
+        {
+            _liveGate ??= new SpeechGate(ModelManager.VadPath);
+            return _liveGate.Find(slice, gain: gain);
+        }
+        catch (Exception ex)
+        {
+            // One failure disables the gate for the rest of this transcriber's life rather than
+            // retrying (and re-logging) every 15 seconds of a long meeting.
+            _liveGateBroken = true;
+            App.Log($"live ASR gate failed, decoding ungated from here on: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Public quiet-point finder for the live windower - cut here to avoid slicing a word.</summary>
+    public static int FindQuietCut(float[] samples, int center, int radius) => QuietCut(samples, center, radius);
+
+    /// <summary>
+    /// Where speech actually is, or null when the gate cannot run (missing model, or a failure
+    /// inside it). Null means "fall back to the ungated path", never "no speech".
+    /// </summary>
+    static List<SpeechRegion>? SpeechRegions(float[] samples, float gain)
+    {
+        if (Environment.GetEnvironmentVariable("TOKI_ASR_NOGATE") == "1") return null;   // A/B seam
+        if (!ModelManager.VadInstalled) { App.Log("ASR gate: silero_vad.onnx not installed - decoding ungated"); return null; }
+        try
+        {
+            using var gate = new SpeechGate(ModelManager.VadPath);
+            return gate.Find(samples, gain: gain);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"ASR gate failed, decoding ungated: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Decode one slice [start,end) with a fresh stream; timestamps offset to meeting time.
+    /// <paramref name="gain"/> lifts a quiet stream to a level the recogniser can read (see
+    /// <see cref="SpeechGain"/>); 1 leaves the samples exactly as they are.</summary>
+    List<TranscriptSegment> TranscribeWindow(float[] samples, int start, int end, double offsetSec, Speaker speaker, float gain = 1f)
+    {
+        var len = end - start;
+        if (len <= 0) return [];
+        // The no-copy fast path is only safe at unity gain - scaling in place would mutate the
+        // caller's buffer, which diarisation and the evidence clips read afterwards.
+        var slice = gain == 1f && start == 0 && end == samples.Length ? samples : samples[start..end];
+        if (gain != 1f)
+            for (var i = 0; i < slice.Length; i++) slice[i] *= gain;
         using var stream = _recognizer.CreateStream();
         stream.AcceptWaveform(AudioLoader.TargetRate, slice);
         _recognizer.Decode(stream);
@@ -104,6 +212,52 @@ public sealed class Transcriber : IDisposable
         if (string.IsNullOrWhiteSpace(r.Text) || r.Tokens is null || r.Tokens.Length == 0)
             return [];
         return GroupIntoSegments(r.Tokens, r.Timestamps, r.Durations, offsetSec, speaker);
+    }
+
+    // Per-second RMS of a well-levelled meeting stream, measured, rounded down.
+    const double TargetSpeechRms = 0.06;
+    // Ceiling on the lift: past this the source is broken (muted mic, dead input), and
+    // amplifying its noise floor only manufactures hallucination.
+    const float MaxGain = 20f;
+    // Leave headroom so a lifted peak cannot clip; clipping costs more accuracy than the gain buys.
+    const float PeakCeiling = 0.95f;
+
+    /// <summary>
+    /// Gain to lift a quiet stream to a level the recogniser was trained on. Level is the 95th
+    /// percentile of 25ms frame energy (a mean over a mostly-silent track lies, and a percentile
+    /// needs no VAD pass, so this runs BEFORE the gate); headroom comes from the 99.9th-percentile
+    /// sample so one transient cannot veto the lift. Only ever lifts, never attenuates.
+    /// </summary>
+    static float SpeechGain(float[] samples)
+    {
+        if (samples.Length < FrameSamples) return 1f;
+
+        var frames = samples.Length / FrameSamples;
+        var energies = new double[frames];
+        for (var f = 0; f < frames; f++)
+        {
+            double sum = 0;
+            var at = f * FrameSamples;
+            for (var i = at; i < at + FrameSamples; i++) sum += (double)samples[i] * samples[i];
+            energies[f] = Math.Sqrt(sum / FrameSamples);
+        }
+        Array.Sort(energies);
+        var level = energies[(int)(frames * 0.95)];
+        // Below this floor there is no speech to lift, only a noise floor: lifting a silent live
+        // window's hiss re-arms the hallucination path the gate closed. 2e-4 sits under the
+        // quietest real speech measured and above electrical noise.
+        if (level <= 2e-4) return 1f;
+        var gain = TargetSpeechRms / level;
+        if (gain <= 1.0) return 1f;                   // already at or above the target
+
+        // Peak headroom from the 99.9th percentile magnitude, so isolated transients cannot veto it.
+        var mags = new float[samples.Length];
+        for (var i = 0; i < samples.Length; i++) mags[i] = Math.Abs(samples[i]);
+        Array.Sort(mags);
+        var peak = mags[(int)((samples.Length - 1) * 0.999)];
+        var headroom = peak > 1e-6 ? PeakCeiling / peak : MaxGain;
+
+        return (float)Math.Min(Math.Min(gain, headroom), MaxGain);
     }
 
     /// <summary>Index of the quietest 25ms frame within ±radius of center - a safe place to cut.</summary>
@@ -144,16 +298,11 @@ public sealed class Transcriber : IDisposable
         {
             var start = i < times.Length ? times[i] : prevEnd;
             var end = start + (i < durations.Length ? durations[i] : 0);
-            // Break ONLY at a WORD boundary. This Parakeet build marks a new word with a
-            // LEADING SPACE on the token (" Rashmi" = " R","as","h","m","i"); sub-word pieces
-            // carry no leading space. Splitting on a time-gap alone would cut mid-word on
-            // hesitant/pausey speech, shattering "Deepika" into "D / eep / ik / a".
-            // At a word boundary we break on the end of a sentence (". ? !") - always - OR on a
-            // real pause (>0.8s), but the pause break only fires once the line already has enough
-            // words (MinWordsForPauseBreak). Otherwise a presenter pausing between words produces
-            // one word per line (the real regression). So lines land per-utterance: not per-word,
-            // and not one giant run-on per window (which would break echo de-dup).
-            // (▁ is handled too, for other SentencePiece model builds.)
+            // Break ONLY at a word boundary (this Parakeet build marks word starts with a leading
+            // space; ▁ handled for other SentencePiece builds) - a time-gap split alone cuts
+            // mid-word on pausey speech. At a boundary: sentence end always breaks; a real pause
+            // (>0.8s) breaks only past MinWordsForPauseBreak words, so lines land per-utterance
+            // (giant run-ons would break echo de-dup, one-word lines were the regression).
             var isWordStart = StartsWord(tokens[i]);
             if (sb.Length > 0 && isWordStart)
             {
@@ -204,5 +353,9 @@ public sealed class Transcriber : IDisposable
         return Math.Clamp(Environment.ProcessorCount / 2, 3, 8);
     }
 
-    public void Dispose() => _recognizer.Dispose();
+    public void Dispose()
+    {
+        _liveGate?.Dispose();
+        _recognizer.Dispose();
+    }
 }

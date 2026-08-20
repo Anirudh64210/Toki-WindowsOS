@@ -3,9 +3,8 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// The shared "when was this" formatting - one implementation instead of the per-view copies
-/// that had already drifted. LibraryWindow's card list keeps its own tighter "3m ago" format
-/// on purpose (a deliberate density choice for cards, not drift).
+/// Shared "when was this" formatting. LibraryWindow's card list keeps its own tighter
+/// "3m ago" format on purpose (density choice for cards).
 /// </summary>
 public static class TimeText
 {

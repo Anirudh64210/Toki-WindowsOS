@@ -8,9 +8,7 @@ namespace Toki.Llm;
 /// 1. The user STATES a fact about themself ("call me Anirudh", "my name is …", "I work at …") →
 ///    capture it, remember it (persisted via <see cref="UserProfile"/>), and acknowledge naturally.
 /// 2. The user asks about THEMSELF ("what is my name", "who am I", "what do you know about me") →
-///    answer from the profile - NEVER a notes search. ("What is my name" being searched against the
-///    meeting notes and answered with three citations was a real, screenshot-verified failure: the
-///    old pipeline had no concept of a fact the user just told it.)
+///    answer from the profile - NEVER a notes search.
 ///
 /// Same discipline as SmallTalk/Persona: anchored whole-utterance patterns with the fuzzy wake-name
 /// stripped, so "did we discuss my name in the sync?" still falls through to the notes Q&amp;A.
@@ -18,8 +16,8 @@ namespace Toki.Llm;
 /// </summary>
 public static class UserFacts
 {
-    // "call me X" / "my name is X" / "i'm called X" - allowing the connective lead the live
-    // screenshot produced ("BUT YOU call me anirudh"). The captured value is 1–3 word-ish tokens.
+    // "call me X" / "my name is X" / "i'm called X" - allows a connective lead ("but you call
+    // me anirudh"). The captured value is 1–3 word-ish tokens.
     static readonly Regex NameRx = new(
         @"^(?:(?:but|and|no|hey|well|actually|so|btw|please|listen)[,\s]+)*" +
         @"(?:(?:you\s+(?:(?:can|could|should|may|will|always)\s+)?)?call\s+me|my\s+name(?:'s|\s+is)|i\s*am\s+called|i'?m\s+called|the\s+name(?:'s|\s+is)|i\s+go\s+by|i'?d\s+like\s+to\s+be\s+called|i\s+prefer\s+(?:to\s+be\s+called\s+)?)\s+" +

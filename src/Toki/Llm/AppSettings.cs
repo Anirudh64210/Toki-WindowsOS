@@ -10,7 +10,7 @@ public enum NotesMode { Local, HeuristicOnly, ApiKey }
 
 /// <summary>
 /// User settings persisted to %APPDATA%\Toki\settings.json. The BYO API key is
-/// DPAPI-encrypted (per-user) so it's never stored in plaintext (brief §4).
+/// DPAPI-encrypted (per-user) so it's never stored in plaintext.
 /// </summary>
 public sealed class AppSettings
 {
@@ -30,19 +30,14 @@ public sealed class AppSettings
 
     /// <summary>
     /// Names and terms the user has told Toki to get right, one per line (or comma-separated).
-    ///
-    /// The escape hatch for what frequency cannot settle. Toki repairs most mis-heard names by counting
-    /// spellings across the library, but some never appear correctly at all ("Yashtren" for "Yashina" is
-    /// four edits away and does not even sound alike to the matcher). A name typed here is treated as
-    /// ground truth and is allowed a wider match, because the user has asserted it.
+    /// The escape hatch for names frequency cannot settle: a name typed here is ground truth
+    /// and is allowed a wider match, because the user has asserted it.
     /// </summary>
     public string? PinnedNames { get; set; }
 
     /// <summary>
-    /// How big note text is drawn, 1 to 12. A comfort setting that belongs to the person rather than
-    /// to any one note - somebody who wants larger text wants it everywhere, and per-note sizing would
-    /// mean setting it again on each new note. 0 or out of range means "never chosen" and falls back to
-    /// the editor's default, so an existing install is pixel-identical until the dial is moved.
+    /// How big note text is drawn, 1 to 12; a per-person setting, not per-note. 0 or out of range
+    /// means "never chosen" and falls back to the editor's default.
     /// </summary>
     public int NoteTextSize { get; set; }
 
@@ -140,14 +135,10 @@ public sealed class AppSettings
     /// ("Connected as sid@…"). Null when not connected.</summary>
     public string? GoogleAccountEmail { get; set; }
 
-    // ---- Outlook / Microsoft 365 (2026-08-13) ----
-    //
-    // A SECOND, INDEPENDENT connection, deliberately not a replacement. Plenty of people have a work
-    // Outlook calendar and a personal Google one, and asking them to pick would mean Toki misses half
-    // their meetings. Both can be connected at once and the agenda is merged.
-    //
-    // Same storage shape as the Google grant: the long-lived refresh token DPAPI-encrypted at rest,
-    // the short-lived access token never persisted.
+    // ---- Outlook / Microsoft 365 ----
+    // A SECOND, INDEPENDENT connection, not a replacement: both can be connected at once and the
+    // agenda is merged. Same storage shape as the Google grant: refresh token DPAPI-encrypted at
+    // rest, access token never persisted.
 
     /// <summary>DPAPI-encrypted Microsoft OAuth refresh token (base64). Use
     /// <see cref="OutlookRefreshToken"/> to read/write in the clear.</summary>
@@ -207,9 +198,8 @@ public sealed class AppSettings
             try
             {
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-                // Atomic: write to a temp file, then swap it in. A crash or power loss mid-write
-                // on the direct overwrite left a truncated settings.json - silently wiping the
-                // DPAPI-encrypted API key and Google refresh token, both unrecoverable.
+                // Atomic write-then-swap: a crash mid-overwrite truncates settings.json and
+                // silently wipes the DPAPI-encrypted key and refresh tokens, both unrecoverable.
                 var tmp = Path + ".tmp";
                 File.WriteAllText(tmp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
                 File.Move(tmp, Path, overwrite: true);

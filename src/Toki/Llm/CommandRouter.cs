@@ -26,15 +26,10 @@ public enum AppCommand
 }
 
 /// <summary>
-/// Tier 0 of the understand-first pipeline: a deterministic router that turns a short imperative like
-/// "take me to the library" into an app action - BEFORE any retrieval or model. Runs in ~1ms, no LLM.
-///
-/// The whole trick (from the shipping assistants - Alexa/App Intents/Voice Access): the WHOLE utterance
-/// must BE a command (anchored ^…$, ≤8 words), and a QUESTION always wins a tie. A missed command is
-/// cheap (it just falls through to Ask and gets answered); a false positive - Settings popping open
-/// while you asked "what did we decide in the settings review?" - destroys trust. So the question-shape
-/// veto is unconditional and checked first. Mirrors the "classify from query shape, not content words"
-/// rule already in <see cref="QueryUnderstanding"/>.
+/// Tier 0: a deterministic router that turns a short imperative ("take me to the library") into an
+/// app action BEFORE any retrieval or model. The WHOLE utterance must BE a command (anchored ^…$,
+/// ≤8 words), and a QUESTION always wins a tie: a missed command is cheap, a false positive
+/// destroys trust, so the question-shape veto is unconditional and checked first.
 /// </summary>
 public static class CommandRouter
 {
@@ -70,9 +65,8 @@ public static class CommandRouter
         // Recording: "start taking notes", "start recording", "record this meeting", "take notes".
         // ("start a note" stays NewNote below - that's the typed manual note, not a recording.)
         (Anchor(@"(start|begin)\s+(taking|writing)\s+notes?|(start|begin)\s+(a\s+|the\s+)?record(ing)?|record(\s+(this|the|a|my))?(\s+(meeting|call))?|take\s+notes|start\s+notes?\s*[- ]?\s*taking"), AppCommand.StartRecording),
-        // Notes engine: api / on-device / heuristic. "model|mode|notes|engine|ai" tail is optional so
-        // "switch to heuristic" alone works too; "key/settings" tails cover the spoken variants the
-        // live run produced ("switch to api key settings" fell through to Q&A - a real screenshot bug).
+        // Notes engine: api / on-device / heuristic. The "model|mode|notes|engine|ai" tail is
+        // optional ("switch to heuristic" alone works); "key/settings" tails cover spoken variants.
         (Anchor($@"(?:{V}|use|enable)\s+(the\s+|my\s+|an?\s+)?(api|cloud)(\s+key)?(\s+(model|mode|models?|notes|engine|settings?))?"),   AppCommand.UseApiModel),
         (Anchor($@"(?:{V}|use|enable)\s+(the\s+|an?\s+)?(on[\s-]?device|local|offline)(\s+(model|mode|notes|engine|ai))?"), AppCommand.UseLocalModel),
         (Anchor($@"(?:{V}|use|enable)\s+(the\s+|an?\s+)?(heuristics?|basic|no[\s-]?ai|built[\s-]?in)(\s+(model|mode|notes|engine|extraction))?"), AppCommand.UseHeuristicMode),
@@ -82,15 +76,14 @@ public static class CommandRouter
         // Ghost (capture-exclusion): on = hidden from screen recordings, off = visible.
         (Anchor(@"(turn\s+|switch\s+|set\s+)?ghost(\s+mode)?\s+on|(turn\s+on|enable|activate)\s+ghost(\s+mode)?|hide\s+(toki\s+)?from\s+(screen\s+)?(recordings?|capture|share|sharing)"), AppCommand.GhostOn),
         (Anchor(@"(turn\s+|switch\s+|set\s+)?ghost(\s+mode)?\s+off|(turn\s+off|disable|deactivate)\s+ghost(\s+mode)?|show\s+(toki\s+)?in\s+(screen\s+)?(recordings?|captures?|shares?|sharing)"), AppCommand.GhostOff),
-        // "a library" (not just "the/my") - spoken articles drift ("can you open a library for me?"
-        // was a live mis-route to Q&A). Same for templates/settings below.
+        // "a library" (not just "the/my") - spoken articles drift. Same for templates/settings below.
         (Anchor($@"(?:{V})\s+(the\s+|my\s+|an?\s+)?libr(?:ary|arry|ery)"),                                     AppCommand.OpenLibrary),
         (Anchor($@"(?:{V})\s+(the\s+|my\s+)?settings?|(where\s+are\s+)?(the\s+|my\s+)?settings?"),             AppCommand.OpenSettings),
         (Anchor($@"(?:{V})\s+(the\s+|my\s+|an?\s+)?templates?"),                                               AppCommand.OpenTemplates),
         (Anchor($@"(?:{V})\s+(the\s+)?(assistant|chat\s*bot|chat|ask(\s+(page|view|{WakeName.Pattern}))?)"),   AppCommand.OpenAsk),
         (Anchor($@"(go|take\s+me|head)\s+(back\s+)?home|(?:{V})\s+(the\s+)?(notch|pill|home|{WakeName.Pattern})"), AppCommand.GoHome),
-        // "add a new note (in the library)" - the optional "new" and the optional destination tail are
-        // what the live run said; both must still be the NewNote command, never a notes search.
+        // "add a new note (in the library)" - the optional "new" and destination tail must still
+        // be the NewNote command, never a notes search.
         (Anchor(@"(new|create|start|add|make|write)\s+(a\s+|another\s+)?(new\s+)?(manual\s+|custom\s+|quick\s+)?notes?(\s+(in|to|into)\s+(the\s+|my\s+)?library)?"), AppCommand.NewNote),
         (Anchor(@"(new|start|clear|reset|fresh)\s+(a\s+)?(new\s+)?(the\s+)?(chat|conversation|thread)|start\s+over|clear\s+(the\s+)?(chat|history)"), AppCommand.NewChat),
         (Anchor($@"(?:{V}|list)\s+(me\s+)?(my\s+|the\s+)?(tasks?|to-?dos?|action\s+items?)"),                  AppCommand.ShowTasks),
@@ -124,12 +117,9 @@ public static class CommandRouter
         return null;
     }
 
-    // ── misheard-command resilience ──
-    // Push-to-talk ASR garbles commands ("switch to LIKE theme" for "light theme"). The old pipeline
-    // sent that to notes retrieval, which FABRICATED a link to an unrelated meeting (real
-    // screenshot: the theme command was "answered" with a weekend-attendance action item). The VUI
-    // error-recovery pattern: when a low-confidence command is recognised, degrade to a targeted
-    // clarification (a safe no-op), never to an unrelated action - and never to retrieval.
+    // Misheard-command resilience: push-to-talk ASR garbles commands ("switch to LIKE theme").
+    // A low-confidence command degrades to a targeted clarification (a safe no-op), never to an
+    // unrelated action and never to retrieval.
 
     static readonly Regex SwitchVerbLead = new(
         @"^(switch|change|set|turn|toggle|put|make|use|enable|disable|activate|deactivate|go)\b",
@@ -138,10 +128,9 @@ public static class CommandRouter
     static readonly Regex GhostWordRx = new(@"\bghost\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex ModelWordRx = new(@"\b(model|engine)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Recording near-miss: an imperative that starts like "start/begin/take/record …" and mentions a
-    // record-ish word the ASR garbled - the owner's real case, "start reporting" heard for "start
-    // recording". (A clean "start recording"/"take notes" already matches TryMatch, so only mis-hears
-    // reach here.) "reporting/report/recoding/note-taking" are the common Parakeet confusions for it.
+    // Recording near-miss: an imperative "start/begin/take/record …" with a record-ish word the
+    // ASR garbled ("start reporting" for "start recording"). A clean phrasing already matched
+    // TryMatch, so only mis-hears reach here.
     static readonly Regex RecordVerbLead = new(@"^(start|begin|take|record|do)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex RecordWordRx = new(
         @"\brecord(ing|in)?\b|\breport(ing|s)?\b|\brecoding\b|\bnote[\s-]?taking\b|\btaking\s+notes?\b",

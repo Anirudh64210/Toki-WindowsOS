@@ -9,10 +9,9 @@ using Toki.Theme;
 namespace Toki.Views;
 
 /// <summary>
-/// The notch Settings - UI/VISIBILITY settings only (owner decision, 2026-08-04): theme + ghost in
-/// the header, the glassy-notch toggle, and a row that opens the Library's Settings page, where
-/// everything else (AI summaries + API key, calendar, name, about) now lives - see
-/// <see cref="AiSummariesSection"/> and LibraryWindow's SettingsPage.
+/// The notch Settings - UI/visibility settings only: theme + ghost in the header, the glassy-notch
+/// toggle, and a row that opens the Library's Settings page, where everything else lives
+/// (see <see cref="AiSummariesSection"/> and LibraryWindow's SettingsPage).
 /// </summary>
 public partial class SettingsView : UserControl
 {
@@ -72,8 +71,7 @@ public partial class SettingsView : UserControl
         UpdateRecordingIcon();
     }
 
-    // A video camera, CROSSED OUT when Toki is hidden from recordings (ghost on, the default) and
-    // plain when it's visible - an immediate, obvious on/off, no colour change needed.
+    // A video camera, crossed out when Toki is hidden from recordings (ghost on, the default).
     void UpdateRecordingIcon()
     {
         var hidden = !AppSettings.Current.ShowInRecordings;   // ghost on = not shown in recordings
@@ -103,8 +101,6 @@ public partial class SettingsView : UserControl
 
     // ── everything else lives in the Library's Settings page ──
 
-    // A real Button now (RowButton), so the hover box is the template's job - the hand-rolled
-    // MouseEnter/MouseLeave handlers that used to tint a Border are gone with it.
     void OnOpenLibrarySettings(object sender, RoutedEventArgs e)
     {
         App.CloseOverlay();                       // recording-aware: a live session keeps its bar

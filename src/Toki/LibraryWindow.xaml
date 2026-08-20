@@ -3,65 +3,114 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Toki.Controls"
         xmlns:views="clr-namespace:Toki.Views"
+        xmlns:theme="clr-namespace:Toki.Theme"
         Title="Toki" Height="640" Width="960" MinWidth="720" MinHeight="460"
         WindowStartupLocation="Manual" Background="{DynamicResource Ink}"
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
         <Grid.ColumnDefinitions>
-            <!-- Nav sidebar is a FIXED rail (no drag-resizer) - Ask/Library/Templates don't need resizing. -->
-            <ColumnDefinition x:Name="SidebarCol" Width="204"/>
+            <!-- Nav sidebar is a FIXED rail (no drag-resizer) - Ask/Library/Templates don't need resizing.
+                 240 is the frame's own width (Library - List + Detail, "Frame 525"). -->
+            <ColumnDefinition x:Name="SidebarCol" Width="240"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- ═══════════ Sidebar: mascot · nav · back ═══════════ -->
-        <Border Grid.Column="0" Background="{DynamicResource Surface}">
-            <DockPanel Margin="18,20,14,16">
-                <!-- The LOGO ROW of the redesign (figma 349:6743): the blue cloud small, with the
-                     "Toki" wordmark beside it - an identity, not a toy taking a quarter of the rail.
-                     Still clickable for the reaction vocabulary. -->
-                <Border DockPanel.Dock="Top" x:Name="MascotBtn" Background="Transparent" Cursor="Hand"
-                        HorizontalAlignment="Left" Margin="4,2,0,22" ToolTip="Poke Toki"
-                        MouseLeftButtonUp="OnMascotClick">
-                    <StackPanel Orientation="Horizontal">
-                        <Viewbox Width="30" Height="27" RenderTransformOrigin="0.5,0.9">
-                            <Viewbox.RenderTransform><ScaleTransform x:Name="MascotPop"/></Viewbox.RenderTransform>
-                            <controls:TokiBlob x:Name="SideToki"/>
-                        </Viewbox>
-                        <TextBlock Text="Toki" FontFamily="{StaticResource UiFont}" FontSize="16"
-                                   FontWeight="Bold" Foreground="{DynamicResource Text}"
-                                   VerticalAlignment="Center" Margin="9,0,0,0"/>
-                    </StackPanel>
-                </Border>
+        <!-- ═══════════ Sidebar: mascot · nav · back ═══════════
+             The frame draws this as a FLOATING CARD, not a flush rail: 240 wide, inset 9 from the
+             window edges, radius 18, the same warm glass as the notch, a 1px white-10% rim and the
+             shadow every surface in this design carries. A rail that runs edge to edge reads as
+             window chrome; a card reads as a panel, which is what it is. -->
+        <!-- It wears the CARD MATERIAL, not a flat tint: the plate gradient (lighter at the top,
+             because light comes from above), a rim that is brightest along the top edge, and the
+             sheen/light-field/inner-edge stack the notch card has. Same material, one surface smaller.
+
+             THE LIFT IS CAST BY TWO SEPARATE BORDERS, never by an Effect on the card. Every nav row
+             in here animates its hover and press, and an Effect renders its whole subtree in software
+             on each frame of that (motion skill §1.3) - which would be the entire sidebar, text and
+             all, re-rasterised while you move the pointer down it. The casters have the card's shape
+             at 1/255 alpha: invisible themselves, enough silhouette to cast.
+
+             The key caster is blur 22 / y6 rather than the recipe's blur 30 / y10: the Library gives
+             this card a 9px gutter to the window edge, and a shadow wider than its gutter does not
+             read as softer, it reads as CUT OFF along the left and bottom. Opacities are the recipe's
+             (22% / 12%), scaled to 70% in the light theme by ApplyShadowDepth. -->
+        <Grid Grid.Column="0" Margin="9,9,0,9">
+            <Border x:Name="SidebarKeyShadow" CornerRadius="18" Background="#01000000" IsHitTestVisible="False">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="22" ShadowDepth="6" Direction="270" Opacity="0.22" Color="#000000"/>
+                </Border.Effect>
+            </Border>
+            <Border x:Name="SidebarAmbientShadow" CornerRadius="18" Background="#01000000" IsHitTestVisible="False">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="8" ShadowDepth="2" Direction="270" Opacity="0.12" Color="#000000"/>
+                </Border.Effect>
+            </Border>
+            <Border x:Name="SidebarCard" CornerRadius="18" BorderThickness="1"
+                    Background="{DynamicResource CardPlateOpaque}" BorderBrush="{DynamicResource CardRim}">
+            <Grid>
+            <!-- Concentric with the card: 18 minus the 1px rim it sits inside. -->
+            <theme:CardMaterial Radius="17"/>
+            <DockPanel Margin="12,24,12,16">
+                <!-- The LOGO ROW: the WORDMARK ALONE.
+                     It used to be the blue cloud plus "Toki", and it was a button so you could poke
+                     him. Two problems, both the owner's (2026-08-14, with a screenshot): hovering it
+                     drew a grey rounded box behind the pair, and there is no reason for a second Toki
+                     to live here at all. "One Toki per surface" is a standing rule in CLAUDE.md, and
+                     the Ask page already has the real one, big and pokeable, in the middle of the
+                     page. This is a masthead - it identifies the app, it is not a control.
+                     So: no mascot, no button, no hover. Just the name. -->
+                <TextBlock DockPanel.Dock="Top" Text="Toki" FontFamily="{StaticResource UiFont}"
+                           FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
+                           Margin="12,0,0,34" Height="28" VerticalAlignment="Center"/>
 
                 <!-- Back to Toki (bottom) -->
                 <!-- Content (chevron+label) is set in code so both pieces are vertically centered. -->
+                <!-- Its own opaque fill, NOT one of the Glass tokens: those are tuned for the notch
+                     and over the sidebar card they land within 1.02:1 of it, which is a button you
+                     cannot see. -->
                 <Button DockPanel.Dock="Bottom" x:Name="BackBtn" Style="{StaticResource PillButton}"
-                        Background="{DynamicResource SurfaceHi}"
-                        HorizontalContentAlignment="Center" Padding="13,9" FontSize="11.5" Click="OnBack"/>
+                        Background="{DynamicResource SidebarButton}"
+                        HorizontalContentAlignment="Center" Padding="13,10" FontSize="12" Click="OnBack"/>
 
                 <!-- Nav items (built in code so the active one highlights) -->
                 <StackPanel x:Name="Nav" DockPanel.Dock="Top"/>
             </DockPanel>
-        </Border>
+            </Grid>
+            </Border>
+        </Grid>
 
         <!-- ═══════════ Main pane ═══════════ -->
-        <Border Grid.Column="1" Background="{DynamicResource Ink}"
-                BorderBrush="{DynamicResource Hairline}" BorderThickness="1,0,0,0">
+        <!-- No left seam any more: the sidebar floats as its own card with air around it, so a rule
+             here would draw a line down the middle of that gap. -->
+        <Border Grid.Column="1" Background="Transparent">
             <Grid x:Name="MainHost">
 
                 <!-- ── Ask (conversation + landing) ── -->
                 <Grid x:Name="AskPage">
                     <!-- The redesign's ambient depth (figma 348:5438): a cool teal-blue bloom rising
                          from the bottom of the page - the one page with atmosphere, because it is the
-                         one page that is a conversation, not a document. Purely decorative. -->
-                    <Border IsHitTestVisible="False" VerticalAlignment="Bottom" Height="420">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0.5,1" EndPoint="0.5,0">
-                                <GradientStop Color="#3D103C46" Offset="0"/>
-                                <GradientStop Color="#1E10333E" Offset="0.5"/>
-                                <GradientStop Color="#00000000" Offset="1"/>
+                         one page that is a conversation, not a document. Purely decorative.
+
+                         It fades out at BOTH SIDES as well as upward. It used to be a plain full-width
+                         rectangle, and a rectangle of tint has two hard edges: a vertical line down the
+                         gap beside the sidebar card, and a square corner where it met the window's
+                         rounded one (owner, 2026-08-14, with a before/after pair - "only have the
+                         curved corner"). Atmosphere with a straight edge is not atmosphere, it is a
+                         panel. The opacity mask costs one static brush and no per-frame work. -->
+                    <!-- The stops live in ThemeManager's Gradients table now, as AskBloom. They were
+                         written here as three DARK teal stops with no light counterpart, so a wash
+                         drawn for a near-black page was painted over a near-white one and read as a
+                         stain rather than as depth. -->
+                    <Border IsHitTestVisible="False" VerticalAlignment="Bottom" Height="420"
+                            Background="{DynamicResource AskBloom}">
+                        <Border.OpacityMask>
+                            <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                <GradientStop Color="#00000000" Offset="0.00"/>
+                                <GradientStop Color="#FF000000" Offset="0.14"/>
+                                <GradientStop Color="#FF000000" Offset="0.86"/>
+                                <GradientStop Color="#00000000" Offset="1.00"/>
                             </LinearGradientBrush>
-                        </Border.Background>
+                        </Border.OpacityMask>
                     </Border>
                     <DockPanel>
                         <!-- Top bar: current chat title, History (past conversations), and New chat. -->
@@ -86,9 +135,18 @@
                         <!-- Input bar - always docked at the bottom. -->
                         <!-- The redesign's prompt bar: a full capsule (r26) with the mic and a ROUND
                              send button seated at its right edge - one soft pill, not a box with icons. -->
-                        <Border DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
-                                Margin="40,10,40,28" Background="{DynamicResource SurfaceHi}" CornerRadius="26"
-                                BorderBrush="{DynamicResource Hairline}" BorderThickness="1" Padding="10,6,7,6" Cursor="IBeam">
+                        <!-- The capsule is a RAISED surface, so it gets the card material: the plate
+                             gradient and the top-bright rim, over the three-ring lift the design uses
+                             under every floating capsule (GlassPill's idiom). Rings, not an Effect -
+                             this box is full of live, editable text, and an Effect would push all of
+                             it through an intermediate surface and cost ClearType on every keystroke. -->
+                        <Grid DockPanel.Dock="Bottom" HorizontalAlignment="Stretch" MaxWidth="720"
+                              Margin="40,10,40,28">
+                            <Rectangle RadiusX="26" RadiusY="26" Margin="-3,2,-3,-4" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
+                            <Rectangle RadiusX="26" RadiusY="26" Margin="-2,2,-2,-3" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
+                            <Rectangle RadiusX="26" RadiusY="26" Margin="-1,2,-1,-2" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                        <Border x:Name="AskCapsule" Background="{DynamicResource CardPlateOpaque}" CornerRadius="26"
+                                BorderBrush="{DynamicResource CardRim}" BorderThickness="1" Padding="10,6,7,6" Cursor="IBeam">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -112,14 +170,33 @@
                                 </StackPanel>
                                 <Button Grid.Column="1" x:Name="MicBtn" Style="{StaticResource IconButton}"
                                         Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic" VerticalAlignment="Center"/>
-                                <!-- The circular send: a filled disc so the bar ends in one clear action. -->
-                                <Border Grid.Column="2" Background="{DynamicResource Chip}" CornerRadius="18"
-                                        Width="36" Height="36" Margin="4,0,0,0" VerticalAlignment="Center">
-                                    <Button x:Name="AskBtn" Style="{StaticResource IconButton}" Width="36" Height="36"
-                                            Content="&#xE724;" ToolTip="Ask" Click="OnAsk"/>
-                                </Border>
+                                <!-- The circular send: a filled disc so the bar ends in one clear action.
+                                     It WAS a Chip-filled Border with an IconButton inside it, which put
+                                     an r10 hover highlight inside an r18 circle - the box lit up in a
+                                     different shape from the button it belongs to. RoundPuck IS the
+                                     disc, so the hit target, the fill and the highlight are one shape.
+                                     GLASS ON GLASS: it rests on the capsule, so its fill is a step of
+                                     light above it (GlassFill) rather than the capsule's tint again.
+                                     38, not 36: the capsule is r26 with a 7px right padding, so the
+                                     disc seated in it is r19 - concentric, inner = outer minus pad. -->
+                                <Button Grid.Column="2" x:Name="AskBtn" Style="{StaticResource RoundPuck}"
+                                        Background="{DynamicResource GlassFill}" Foreground="{DynamicResource TextHi}"
+                                        FontFamily="{StaticResource IconFont}" FontSize="14"
+                                        Width="38" Height="38" Margin="4,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Ask" Click="OnAsk">
+                                    <!-- The plane glyph carries its mass at the tail, so box-centred it reads
+                                         as sitting left of the disc's middle. The correction is a RENDER
+                                         transform, not a margin: a 1px left margin inside a centre-aligned
+                                         ContentPresenter widens the content box by 1 and re-centres it, which
+                                         moves the glyph half a pixel and then layout rounding eats that. This
+                                         moves exactly one pixel and touches no layout. -->
+                                    <TextBlock Text="&#xE724;">
+                                        <TextBlock.RenderTransform><TranslateTransform X="1"/></TextBlock.RenderTransform>
+                                    </TextBlock>
+                                </Button>
                             </Grid>
                         </Border>
+                        </Grid>
 
                         <!-- Conversation scroll: the landing (greeting + suggestions) when empty; the Q&A thread once asked.
                              A floating "↓ Latest" pill (same as the notch AskView's JumpPill) appears when you've scrolled
@@ -142,12 +219,20 @@
                                                     </RadialGradientBrush>
                                                 </Ellipse.Fill>
                                             </Ellipse>
-                                            <Border Background="Transparent" Cursor="Hand" ToolTip="Poke Toki"
-                                                    MouseLeftButtonUp="OnLandingMascotClick">
+                                            <!-- A BUTTON, but a BARE one. It has to be a Button so that
+                                                 poking Toki presses (it was a Border with a mouse
+                                                 handler, which gives no feedback at all) - and it has
+                                                 to be bare because Toki is a drawn character, not a
+                                                 control: a grey rounded rectangle appearing behind him
+                                                 on hover draws a box around a shape that is
+                                                 deliberately not a box. BareButton keeps the compress
+                                                 and drops the fill. -->
+                                            <Button Style="{StaticResource BareButton}"
+                                                    Padding="6" ToolTip="Poke Toki" Click="OnLandingMascotClick">
                                                 <Viewbox Width="88" Height="78">
                                                     <controls:TokiBlob x:Name="LandingToki"/>
                                                 </Viewbox>
-                                            </Border>
+                                            </Button>
                                         </Grid>
                                         <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="30" FontWeight="SemiBold"
                                                    TextAlignment="Center" TextWrapping="Wrap"/>
@@ -159,17 +244,21 @@
                                                 Margin="40,28,40,20" Visibility="Collapsed"/>
                                 </Grid>
                             </ScrollViewer>
-                            <Border x:Name="ChatJumpPill" Visibility="Collapsed" Opacity="0"
+                            <!-- A BUTTON. It was a Border with a mouse handler: pill-shaped, hand
+                                 cursor, sitting there asking to be clicked, and giving nothing back
+                                 when you pressed it - no compress, no hover fill, no keyboard. -->
+                            <Button x:Name="ChatJumpPill" Visibility="Collapsed" Opacity="0"
+                                    Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                                    BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                     HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
-                                    Background="{DynamicResource Chip}" BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
-                                    CornerRadius="13" Padding="11,5" Cursor="Hand" MouseLeftButtonUp="OnChatJumpToLatest">
+                                    Padding="11,5" Click="OnChatJumpToLatest">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9.5"
                                                Foreground="{DynamicResource Pink}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                     <TextBlock Text="Latest" FontFamily="{StaticResource UiFont}" FontSize="10.5" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextSoft}" VerticalAlignment="Center"/>
                                 </StackPanel>
-                            </Border>
+                            </Button>
                         </Grid>
                     </DockPanel>
                 </Grid>
@@ -178,7 +267,7 @@
                 <Grid x:Name="LibraryPage" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <!-- Fixed note-list column - no drag-resizer (owner: remove the VS Code resizer). -->
-                        <ColumnDefinition x:Name="ListCol" Width="300"/>
+                        <ColumnDefinition x:Name="ListCol" Width="368"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
@@ -194,11 +283,22 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <!-- Same SemiBold weight as the Settings/Templates headers (smaller, because
-                                     it sits in the narrow list column above the search box). -->
-                                <TextBlock Text="Library" Style="{StaticResource Body}" FontSize="18" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="CountLabel" Style="{StaticResource Dim}" FontSize="10" Margin="0,2,0,0"/>
+                            <!-- ONE LINE, as the frame draws it: "Library   48 | all on this PC". It was
+                                 a stacked title with a caption under it, which cost a second line for
+                                 two facts that fit comfortably beside the word. The rule between the
+                                 count and the scope is the frame's 1px white-15% divider. -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Library" FontFamily="{StaticResource UiFont}" FontSize="20"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="CountLabel" FontFamily="{StaticResource UiFont}" FontSize="14"
+                                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                                           Margin="12,1,0,0"/>
+                                <Border x:Name="CountRule" Width="1" Height="15" Margin="10,1,10,0"
+                                        Background="{DynamicResource GlassBorder}" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="ScopeLabel" Text="all on this PC" FontFamily="{StaticResource UiFont}"
+                                           FontSize="14" Foreground="{DynamicResource TextMid}"
+                                           VerticalAlignment="Center" Margin="0,1,0,0"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button x:Name="MyNotesToggle" Style="{StaticResource IconButton}" Content="&#xE736;"
@@ -213,17 +313,62 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0" Cursor="IBeam"
-                                    BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
-                                <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
-                                         Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                         VerticalContentAlignment="Center" Height="36" FontSize="12.5" TextChanged="OnSearch"/>
+                            <!-- The frame's search field: 44 tall, radius 24, the same glass and shadow as
+                                 every other surface, with a magnifier and a placeholder that says what
+                                 the box accepts. It had none of those - a bare r10 rectangle with no
+                                 icon and no placeholder, which is a box you have to guess at. -->
+                            <!-- Same material as every other raised surface (plate + top-bright rim),
+                                 lifted by the three-ring shadow rather than by an Effect: the box
+                                 holds a live TextBox, and an Effect would rasterise the text you are
+                                 typing through an intermediate surface on every keystroke.
+                                 r22, not r24: at 44 tall a full capsule IS 22, and asking for 24 just
+                                 gets silently clamped - the number should say what it draws. -->
+                            <Grid Height="44">
+                            <Rectangle RadiusX="22" RadiusY="22" Margin="-3,2,-3,-4" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
+                            <Rectangle RadiusX="22" RadiusY="22" Margin="-2,2,-2,-3" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
+                            <Rectangle RadiusX="22" RadiusY="22" Margin="-1,2,-1,-2" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                            <Border x:Name="SearchCapsule" Background="{DynamicResource CardPlateOpaque}" CornerRadius="22"
+                                    Padding="8,0,14,0" Cursor="IBeam"
+                                    BorderBrush="{DynamicResource CardRim}" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                                               Foreground="{DynamicResource TextMid}" Opacity="0.75"
+                                               VerticalAlignment="Center" Margin="8,0,8,0" IsHitTestVisible="False"/>
+                                    <Grid Grid.Column="1">
+                                        <TextBlock x:Name="SearchPlaceholder" Text="Search these notes - you: / them"
+                                                   IsHitTestVisible="False" VerticalAlignment="Center"
+                                                   FontFamily="{StaticResource UiFont}" FontSize="13.5"
+                                                   Foreground="{DynamicResource TextLow}"/>
+                                        <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
+                                                 Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
+                                                 VerticalContentAlignment="Center" FontSize="13.5" TextChanged="OnSearch"/>
+                                    </Grid>
+                                </Grid>
                             </Border>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks. -->
-                                <Button x:Name="SortBtn" Style="{StaticResource IconButton}"
-                                        Margin="6,0,0,0" Content="&#xE8CB;" ToolTip="Sort &amp; filter" Click="OnSortMenu"/>
-                            </StackPanel>
+                            </Grid>
+                            <!-- Sort/filter menu: Newest/Oldest/Longest/Shortest/Open tasks. A 44x44
+                                 glass button in the frame, matching the field beside it, not a bare glyph.
+                                 MATCHING means the same material: the rings and the rim are drawn around
+                                 it here rather than in PillButton, because that style is shared by every
+                                 pill in the app and most of them are not raised surfaces. The rim sits
+                                 ABOVE the button so it traces the same box the hover fills. -->
+                            <Grid Grid.Column="1" Width="44" Height="44" Margin="12,0,0,0">
+                                <Rectangle RadiusX="13" RadiusY="13" Margin="-3,2,-3,-4" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
+                                <Rectangle RadiusX="13" RadiusY="13" Margin="-2,2,-2,-3" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
+                                <Rectangle RadiusX="13" RadiusY="13" Margin="-1,2,-1,-2" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                                <Button x:Name="SortBtn" Style="{StaticResource PillButton}"
+                                        Background="{DynamicResource CardPlateOpaque}"
+                                        Foreground="{DynamicResource TextMid}"
+                                        Width="44" Height="44" Padding="0"
+                                        FontFamily="{StaticResource IconFont}" FontSize="15"
+                                        Content="&#xE8CB;" ToolTip="Sort &amp; filter" Click="OnSortMenu"/>
+                                <Border x:Name="SortRim" CornerRadius="13" BorderThickness="1"
+                                        BorderBrush="{DynamicResource CardRim}" IsHitTestVisible="False"/>
+                            </Grid>
                         </Grid>
 
                         <!-- The meeting list only builds the rows that are on screen. The ScrollViewer is
@@ -295,7 +440,7 @@
 
                         <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"
                                    Margin="0,0,0,12"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="14,0"
+                        <Border x:Name="NameCard" Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="14,0"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 HorizontalAlignment="Stretch">
                             <TextBox x:Name="LibNameBox" Background="Transparent" BorderThickness="0"
@@ -328,7 +473,7 @@
                         <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/>
                         <TextBlock Text="How Toki sits on your screen and in what you share."
                                    Style="{StaticResource Dim}" FontSize="12" Margin="0,6,0,14"/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="16"
+                        <Border x:Name="AppearanceCard" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                             <StackPanel>
                                 <Grid Margin="16,13">
@@ -382,7 +527,7 @@
                         <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
                                    Margin="0,6,0,12" MaxWidth="420" HorizontalAlignment="Left"
                                    Text="Names your meetings use often. Toki trusts these over what it thinks it heard, and uses them to put a name to a voice. One per line, or separated by commas."/>
-                        <Border Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
+                        <Border x:Name="PinnedCard" Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 Width="340" HorizontalAlignment="Left">
                             <TextBox x:Name="LibPinnedBox" Background="Transparent" BorderThickness="0"
@@ -509,9 +654,12 @@
                         <!-- ── About ── -->
                         <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
                         <TextBlock Text="About" Style="{StaticResource SectionTitle}"/>
-                        <Border Margin="-8,8,-8,0" Padding="8,10" CornerRadius="10" Background="Transparent"
-                                Cursor="Hand" MouseEnter="OnLibAboutHover" MouseLeave="OnLibAboutUnhover"
-                                MouseLeftButtonUp="OnLibOpenSource">
+                        <!-- A BUTTON, and its hover comes from the shared style rather than from two
+                             hand-written MouseEnter/MouseLeave handlers that had to re-implement what
+                             every other row in this window gets for free (and could not press). -->
+                        <Button Margin="-8,8,-8,0" Padding="8,10" Style="{StaticResource RowButton}"
+                                Background="Transparent" HorizontalContentAlignment="Stretch"
+                                Click="OnLibOpenSource">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -525,7 +673,7 @@
                                 <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
                                            FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
                             </Grid>
-                        </Border>
+                        </Button>
 
                     </StackPanel>
                 </ScrollViewer>

@@ -9,37 +9,18 @@ using Toki.Views;
 namespace Toki.Dev;
 
 /// <summary>
-/// Proves that every button is clickable across its WHOLE box, and that its label sits in the middle.
-///
-/// Both checks exist because of one owner report: *"they have a button activate UI on hover over the
-/// button, like the background turns grey right, the pressable button area is still the text or the
-/// symbol"*. That sounds contradictory until you see the mechanism, and the mechanism is the point:
-///
-///   **A bare TextBlock with a click handler paints nothing, so only the GLYPHS are hit-testable. Give
-///   it a parent Border that draws a hover fill, and the whole box lights up while only the letters
-///   respond.** The highlight is a lie about where the button is. Hover looks right, clicking does not,
-///   and the user is left aiming at text.
-///
-/// A screenshot cannot catch that - the pixels look identical either way. So this walks the real visual
-/// tree of every notch state and every Library page and asks WPF itself, via
-/// <see cref="VisualTreeHelper.HitTest(Visual, Point)"/>, what would receive a click at each corner of
-/// each clickable thing. If the answer is not that control, it fails.
-///
-/// It also measures CENTERING, because "looks centred" is not a fact. Text is placed by its line box,
-/// which includes descender space the glyphs do not use, so a label centred by layout sits visibly LOW.
-/// See <see cref="Theme.OpticalCenter"/> for the fix; this measures whether the fix worked, in pixels,
-/// using the font's real cap-height metrics.
-///
-/// Run: <c>Toki.exe --hittest</c>
+/// --hittest: proves every button is clickable across its WHOLE box (a hover highlight bigger than
+/// the hit area is a lie about where the button is - a bare TextBlock only hit-tests its glyphs),
+/// and that every label sits in the OPTICAL middle of its button (cap-height band, not line box;
+/// see <see cref="Theme.OpticalCenter"/>). Walks the real visual tree of every notch state and
+/// Library page and asks <see cref="VisualTreeHelper.HitTest(Visual, Point)"/> what a click lands on.
 /// </summary>
 static class HitTargets
 {
     /// <summary>
-    /// How far inside an EDGE to probe. Deliberately not the literal corners: Toki's pills carry a 13px
-    /// corner radius on a 32px-tall button, so a point 3px in from a corner is genuinely outside the
-    /// shape and SHOULD miss. Probing there reported every healthy pill as broken on the first run of
-    /// this test. Edge midpoints and quarter-points are inside any rounded rect, and they are what the
-    /// complaint is actually about: the body of the button, not its last anti-aliased pixel.
+    /// How far inside an EDGE to probe. Never the literal corners: a point near a rounded corner is
+    /// genuinely outside the shape and SHOULD miss. Edge midpoints/quarter-points are inside any
+    /// rounded rect and are what users actually aim at.
     /// </summary>
     const double Inset = 3;
 
@@ -79,11 +60,9 @@ static class HitTargets
             finally { try { host.Close(); } catch { } }
         }
 
-        // THE REAL NOTCH WINDOW. Everything above builds views inside a plain host, which is a model of
-        // the app rather than the app: it has no reveal ScaleTransform on `Host`, no ClipToBounds, no
-        // layered-window transparency, no acrylic. Those are precisely the things that can move where a
-        // click lands without moving where the pixels appear - and the owner kept reporting dead buttons
-        // that every synthetic test called healthy. Test the thing, not the model of the thing.
+        // THE REAL NOTCH WINDOW. The plain hosts above are a model of the app: no reveal transform,
+        // no ClipToBounds, no layered-window transparency - exactly the things that can move where a
+        // click lands without moving the pixels. Test the thing, not the model of the thing.
         PillWindow? pill = null;
         try
         {
@@ -103,10 +82,7 @@ static class HitTargets
         finally { try { pill?.Close(); } catch { } }
 
         // The LIBRARY WINDOW - a separate window with its own buttons (Copy, Delete, the template
-        // picker, the nav rail, every Settings row). This was missing for the first several runs while
-        // the header cheerfully said "and Library page", so the surface the owner actually spends their
-        // time in was never examined. A test that overstates its coverage is worse than one that admits
-        // a gap, because it converts "not measured" into "measured and fine".
+        // picker, the nav rail, every Settings row).
         LibraryWindow? lib = null;
         try
         {
@@ -146,23 +122,16 @@ static class HitTargets
     }
 
     /// <summary>
-    /// Draw every button's REGION over the real view and save it as a PNG, so "what lights up when I
-    /// hover" becomes something to look at instead of something to describe.
-    ///
-    /// Built after a long, expensive disagreement: the instrumentation said hover was firing across each
-    /// button's whole box, the owner said it only worked on the glyphs. Both can be true if the box is
-    /// simply SMALLER than expected - the highlight covers the button exactly, and the button hugs its
-    /// label. A picture settles in one glance what four rounds of measurement could not.
-    ///
-    /// Run: <c>Toki.exe --hovershot &lt;dir&gt;</c>
+    /// --hovershot &lt;dir&gt;: draw every button's REGION over the real view and save it as a PNG, so
+    /// "what lights up when I hover" is something to look at instead of describe. (Hover firing
+    /// across the whole box and hover "only on the glyphs" can both be true when the box hugs its label.)
     /// </summary>
     public static int Shot(string dir, bool dark = false)
     {
         App.Headless = true;
         System.IO.Directory.CreateDirectory(dir);
-        // The theme is not a detail here: the notch is PITCH BLACK, and a hover wash that reads clearly
-        // on a white card can be invisible on it. Any judgement about hover feedback has to be made in
-        // the theme the user is actually looking at.
+        // The theme matters: a hover wash that reads on a white card can be invisible on the
+        // pitch-black notch, so judge hover feedback in the theme the user actually sees.
         if (dark) Toki.Theme.ThemeManager.Apply(Toki.Theme.AppTheme.Dark);
 
         foreach (var (name, view, width) in Surfaces())
@@ -187,15 +156,16 @@ static class HitTargets
                 var file = name.Replace(" · ", "-").Replace(" ", "");
                 var target = (FrameworkElement)host.Content;
 
-                // (a) THE REAL HOVER LOOK. IsMouseOver cannot be forced headlessly, so reach into each
-                // button's template and paint the hover layer by hand - the same brush the trigger uses.
-                // This is what the screen shows when you hover, which is the actual thing in dispute.
+                // (a) THE REAL HOVER LOOK. IsMouseOver cannot be forced headlessly, so paint each
+                // button's hover layer by hand with the brush its trigger uses. "Hl" is the dedicated
+                // hover layer and rests at Opacity 0 with the right brush already set, so it only
+                // needs turning up; styles that tint "Bd" directly need the brush supplied.
                 foreach (var el in Clickables(host).OfType<System.Windows.Controls.Primitives.ButtonBase>())
                 {
                     if (!IsReachable(el) || el.Template is null) continue;
-                    // "Hl" is PillButton's dedicated hover layer; every other style tints "Bd" directly.
-                    var layer = (el.Template.FindName("Hl", el) ?? el.Template.FindName("Bd", el)) as Border;
-                    layer?.SetResourceReference(Border.BackgroundProperty, "HoverOverlay");
+                    if (el.Template.FindName("Hl", el) is Border hl) hl.Opacity = 1;
+                    else if (el.Template.FindName("Bd", el) is Border bd)
+                        bd.SetResourceReference(Border.BackgroundProperty, "HoverOverlay");
                 }
                 host.UpdateLayout();
                 RenderHarness.SaveVisual(target, System.IO.Path.Combine(dir, $"{file}-HOVER.png"));
@@ -233,12 +203,8 @@ static class HitTargets
     /// <summary>Examine every clickable thing in one window. Returns how many were checked.</summary>
     static int Audit(Window host, string name, List<Finding> findings)
     {
-        // Hit-test against the window's CONTENT root, never the Window itself. A Window's coordinate
-        // space and its content's are offset by the non-client area (border, title bar), so probing a
-        // real chrome-bearing window through the Window shifted every point and reported the Library's
-        // whole Ask page as "fully blocked" by a page that was demonstrably collapsed. The borderless
-        // notch hosts happened to have a zero offset, which is exactly why this hid until the Library
-        // window was added.
+        // Hit-test against the window's CONTENT root, never the Window itself: the non-client area
+        // (border, title bar) offsets the Window's coordinate space and shifts every probe point.
         if (host.Content is not UIElement root) return 0;
 
         var n = 0;
@@ -372,8 +338,19 @@ static class HitTargets
         if (w < MinSide || h < MinSide)
             yield return new Finding(where, label, $"only {w:F0}x{h:F0} - too small to aim at (floor {MinSide:F0})");
 
-        // Where would a click actually land? Edge midpoints and quarter-points - all well inside a
-        // rounded rect, all places a user reasonably expects to be able to press.
+        // Is layout SLICING this control? A control bigger than its parent's slot keeps its own
+        // reported size but gets a layout clip - a flat cut edge nothing in the numbers reveals.
+        if (System.Windows.Controls.Primitives.LayoutInformation.GetLayoutClip(el) is { } clip)
+        {
+            var kept = clip.Bounds;
+            var cutH = h - kept.Height;
+            var cutW = w - kept.Width;
+            if (cutH > 0.5 || cutW > 0.5)
+                yield return new Finding(where, label,
+                    $"layout clips it - {w:F0}x{h:F0} squeezed into {kept.Width:F0}x{kept.Height:F0} (the parent's slot is too small)");
+        }
+
+        // Where would a click actually land? Edge midpoints and quarter-points - inside any rounded rect.
         var probes = new (string Name, Point P)[]
         {
             ("centre",       new Point(w / 2, h / 2)),
@@ -396,8 +373,8 @@ static class HitTargets
             Point inHost;
             try { inHost = el.TranslatePoint(p, root); } catch { continue; }
 
-            // Scrolled out of view, or clipped by a parent: WPF hit-tests nothing there and it tells us
-            // about the viewport, not about the button. Not a defect - skip the whole control.
+            // Scrolled out of view or clipped by a parent: that describes the viewport, not the
+            // button. Not a defect - skip the whole control.
             var rootSize = root.RenderSize;
             if (inHost.X < 0 || inHost.Y < 0 || inHost.X > rootSize.Width || inHost.Y > rootSize.Height)
             { offScreen = true; break; }
@@ -406,10 +383,8 @@ static class HitTargets
             if (hit is null) { dead.Add(pname); stealer ??= "nothing"; continue; }
             if (IsSelfOrDescendant(hit, el)) continue;
 
-            // The click landed on one of this element's own ANCESTORS - a ScrollViewer, a page. That
-            // means the element is scrolled or clipped out of view, so the ancestor is what is painted
-            // there. It says nothing about the button. (A SIBLING receiving the click would be a real
-            // overlap, and still reports.)
+            // A click landing on an ANCESTOR means the element is scrolled/clipped out of view -
+            // not a defect. (A SIBLING receiving the click is a real overlap and still reports.)
             if (IsSelfOrDescendant(el, hit)) { offScreen = true; break; }
 
             dead.Add(pname);
@@ -419,20 +394,13 @@ static class HitTargets
         if (!offScreen && dead.Count > 0)
             yield return new Finding(where, label,
                 dead.Count >= 9
-                    // Everything blocked means something is sitting ON TOP, which is a different bug from
-                    // a hit area that is merely too small - and naming the culprit is the whole diagnosis.
+                    // Everything blocked means something sits ON TOP - naming the culprit is the diagnosis.
                     ? $"fully blocked by {stealer}"
                     : $"dead at {string.Join(", ", dead)} (hit {stealer} instead)");
 
-        // Centering, but ONLY for a simple label. A composite row (date badge + title + chips) has no
-        // single "the text", and measuring its first TextBlock against the row's middle is meaningless -
-        // that is what produced "label sits 30.3px HIGH" for every meeting card on the first run.
-        //
-        // Measured against the VISIBLE FILL, not the control bounds. The owner's words were "not
-        // centered to the button grey area" - and those are different rectangles whenever the fill is
-        // inset, or the control is wider than what it paints. Measuring the control bounds passed a
-        // button that visibly is not centred, which is how the first pass reported "all centred" while
-        // the screen said otherwise.
+        // Centering, but ONLY for a simple label (a composite row has no single "the text"), and
+        // measured against the VISIBLE FILL, not the control bounds - the eye judges the label
+        // against the painted rectangle, which differs whenever the fill is inset.
         if (!offScreen && SoleText(el) is { } text && text.Text.Length > 0)
         {
             var fill = VisibleFill(el) ?? el;
@@ -515,13 +483,9 @@ static class HitTargets
     }
 
     /// <summary>
-    /// What a real click at this point would land on.
-    ///
-    /// NOT the simple <c>VisualTreeHelper.HitTest(visual, point)</c> overload: that walks raw geometry
-    /// and happily returns elements that are <see cref="Visibility.Collapsed"/> or have hit-testing
-    /// switched off. It reported the Library's whole Ask page as "fully blocked" by a page whose own
-    /// IsVisible was False - a ghost. The filtered overload is the one that answers the question the
-    /// user is actually asking, which is where their click goes.
+    /// What a real click at this point would land on. NOT the simple HitTest overload: that walks
+    /// raw geometry and returns collapsed or hit-test-disabled elements; only the filtered overload
+    /// answers where a click actually goes.
     /// </summary>
     static DependencyObject? TopmostAt(UIElement root, Point p)
     {
@@ -618,6 +582,25 @@ static class HitTargets
             if (v is not null) yield return ($"notch · {s}", v, w);
             CalendarRows.DebugExpand = false;
         }
+
+        // The calendar's CREATE COMPOSER is a MODE of the Calendar page rather than a PillState, so
+        // the loop above cannot reach it - force it open or its buttons go unaudited.
+        FrameworkElement? composer = null;
+        try
+        {
+            var c = new CalendarView();
+            c.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
+            composer = c;
+        }
+        catch { }
+        if (composer is not null) yield return ("notch · Calendar composer", composer, 360);
+
+        // The month picker the Day field opens. A Popup is invisible to this walk, so its day cells -
+        // 42 of them, all clickable - are audited through the same standalone host the render harness
+        // uses to picture them.
+        FrameworkElement? days = null;
+        try { days = new Views.DayPickerShot(); } catch { }
+        if (days is not null) yield return ("notch · Calendar day picker", days, 280);
 
         // The prep card, which carries its own action row.
         FrameworkElement? prep = null;

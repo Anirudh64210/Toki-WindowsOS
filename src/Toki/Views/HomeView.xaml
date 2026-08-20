@@ -28,85 +28,90 @@
                        FontFamily="{StaticResource UiFont}" FontSize="14" FontWeight="Medium"
                        Foreground="{DynamicResource TextHi}" Margin="1,0,0,0" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Style="{StaticResource IconButton}" Content="&#xE787;" FontSize="13"
-                        Foreground="{DynamicResource TextMid}"
-                        ToolTip="See your week and create a meeting" Click="OnMeeting"/>
+                <!-- Only Settings up here. The Library is a real, labelled button in the bottom
+                     right (owner: "library button should be at the bottom right corner, like last
+                     time"), and a bare icon was not enough - "the library should have a proper
+                     button mentioning library and the symbol, not just the symbol". -->
                 <Button Style="{StaticResource IconButton}" Content="&#xE713;" FontSize="13"
                         Foreground="{DynamicResource TextMid}" Margin="2,0,0,0"
                         ToolTip="Settings" Click="OnSettings"/>
             </StackPanel>
         </Grid>
 
-        <!-- Connected: the week, as the card's content. -->
-        <StackPanel x:Name="ConnectedHost" Visibility="Collapsed" Margin="0,12,0,0">
-            <TextBlock Text="COMING UP" FontFamily="{StaticResource UiFont}" FontSize="10"
-                       FontWeight="Bold" Foreground="{DynamicResource TextMid}"
-                       Margin="1,0,0,8"/>
-            <StackPanel x:Name="ComingUp"/>
-        </StackPanel>
-
-        <!-- The two equal actions from the frame: Start a meeting · Take Notes. Glass capsules,
-             height 40, radius 20 (a 40px-tall r24 collapses to a stadium anyway), icon + 13 Semibold. -->
-        <Grid Margin="0,12,0,0">
+        <!-- The two equal actions from the frame ("Menu Bar - Idle" draws them standalone at 144x40
+             with a 12px gap): glass capsule, radius 24, a 16px lucide icon, an 8px gap, and a 13
+             SemiBold label at white 90%. Built in code so both pills come from the one PillParts
+             definition the compact states use - the same pill everywhere it appears. -->
+        <Grid x:Name="ActionRow" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="12"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Button Style="{StaticResource PillButton}" Height="40" Padding="0,0"
-                    Background="{DynamicResource GlassCapsule}" BorderThickness="0"
-                    HorizontalContentAlignment="Center"
-                    Click="OnMeeting" ToolTip="See your week and start or create a meeting">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE714;" FontFamily="{StaticResource IconFont}" FontSize="13"
-                               Foreground="{DynamicResource TextHi}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Start a meeting" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextHi}" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
-            <Button Grid.Column="2" Style="{StaticResource PillButton}" Height="40" Padding="0,0"
-                    Background="{DynamicResource GlassCapsule}" BorderThickness="0"
-                    HorizontalContentAlignment="Center"
-                    Click="OnTakeNotes" ToolTip="Start recording this meeting and take notes">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="13"
-                               Foreground="{DynamicResource TextHi}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Take Notes" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextHi}" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <ContentControl x:Name="StartMeetingHost"/>
+            <ContentControl x:Name="TakeNotesHost" Grid.Column="2"/>
         </Grid>
 
-        <!-- Nothing connected yet: ONE quiet setup row (Google or Outlook on click) that disappears
-             once connected - setup is an errand, not furniture. Below the actions, per the design's
-             hierarchy: the verbs first, the errand under them. -->
-        <StackPanel x:Name="ConnectHost">
-            <Button x:Name="ConnectCalBtn" Margin="0,10,0,0" Style="{StaticResource PillButton}"
-                    Background="Transparent" Padding="0,7" HorizontalContentAlignment="Center"
-                    Click="OnConnectCalendar"
-                    ToolTip="Connect Google Calendar or Outlook - your week shows up right here">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE787;" FontFamily="{StaticResource IconFont}" FontSize="11"
-                               Foreground="{DynamicResource TextMid}" Margin="0,0,7,0" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="ConnectCalLabel" Text="Connect a calendar" Foreground="{DynamicResource TextMid}"
-                               FontSize="11" VerticalAlignment="Center"/>
-                    <TextBlock Text="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="9"
-                               Foreground="{DynamicResource TextMid}" Margin="6,1,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+        <!-- ══ UPCOMING ══ under the two actions, which is the order the owner asked for: the
+             verbs first, then what is coming.
+
+             What used to be here instead: a "Connect a calendar" button with a dropdown caret, a
+             row of provider marks, a "+ Google" pill and a "Library >" pill. The owner's verdict
+             was "so ugly and weird, what is +google, we have outlook as well, why is that even
+             there?" - and they were right on the substance too: naming ONE provider on the home
+             screen of an app that supports two is a bug, not a shortcut. Connecting a calendar is
+             a once-ever errand and it belongs in Settings, where both providers already live. -->
+        <StackPanel x:Name="ConnectedHost" Visibility="Collapsed" Margin="0,14,0,0">
+            <TextBlock Text="UPCOMING" FontFamily="{StaticResource UiFont}" FontSize="10"
+                       FontWeight="Bold" Foreground="{DynamicResource TextMid}"
+                       Margin="1,0,0,8"/>
+            <StackPanel x:Name="ComingUp"/>
+        </StackPanel>
+
+        <!-- Nothing connected: one quiet line that says where to go, naming BOTH providers. -->
+        <StackPanel x:Name="ConnectHost" Margin="0,14,0,0">
+            <TextBlock Text="UPCOMING" FontFamily="{StaticResource UiFont}" FontSize="10"
+                       FontWeight="Bold" Foreground="{DynamicResource TextMid}"
+                       Margin="1,0,0,8"/>
+            <!-- Four words, not a sentence. The label was "Connect to Google or Outlook calendar
+                 in Settings", which is an instruction printed on a button instead of a button
+                 (owner: "the button itself is so long and so much text it cannot have that"). And
+                 it now opens the Library's Settings scrolled to the calendar rows - the page that
+                 can actually do it - rather than the notch's Settings, which cannot. -->
+            <Button Style="{StaticResource RowButton}" Padding="10,9" Click="OnConnectCalendar"
+                    ToolTip="Sign in to Google Calendar or Outlook">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE787;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                               Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                               Margin="0,0,9,0" IsHitTestVisible="False"/>
+                    <TextBlock Grid.Column="1" Text="Connect a calendar" Style="{StaticResource Body}"
+                               Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                               FontSize="11" Foreground="{DynamicResource TextDim}"
+                               VerticalAlignment="Center" IsHitTestVisible="False"/>
+                </Grid>
             </Button>
         </StackPanel>
 
-        <!-- Footer: connected-account marks (code-built) + the Library door. Quiet, under everything. -->
-        <Grid Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel x:Name="AccountsRow" Orientation="Horizontal" VerticalAlignment="Center"
-                        MinHeight="26"/>
-            <Button Grid.Column="1" Style="{StaticResource PillButton}" Background="Transparent"
-                    Foreground="{DynamicResource TextMid}" FontSize="10.5" Padding="12,6"
-                    Content="Library  ›" Click="OnLibrary"/>
-        </Grid>
+        <!-- ══ The Library door: bottom RIGHT, labelled, with its icon ══
+             It was a bare "Library  >" text pill sharing a footer row with account admin, then an
+             unlabelled icon in the header. Neither was a button you could read. This is a real pill
+             with the shelf icon and the word, on the same Chip fill every other secondary action in
+             the notch uses - so its shade and size are not a one-off any more. -->
+        <Button HorizontalAlignment="Right" Margin="0,12,0,0" Style="{StaticResource PillButton}"
+                Background="{DynamicResource Chip}" Padding="13,7" Click="OnLibrary"
+                ToolTip="Every meeting and note, searchable">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE8F1;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="Library" Style="{StaticResource BodyStrong}"
+                           Foreground="{DynamicResource TextHi}" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Button>
     </StackPanel>
 </UserControl>

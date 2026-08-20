@@ -7,13 +7,10 @@ using Toki.Storage;
 namespace Toki.Llm;
 
 /// <summary>
-/// Due-date-aware scoping for task questions. "What tasks do I have this week / what's due Friday /
-/// what's overdue" are DEADLINE questions, not "tasks from meetings held this week" - the mistake that
-/// made a temporal task query dump every open task on a recent library. This resolves each task's
-/// free-text due ("Friday", "next week", "by EOD") against ITS meeting's date (a due said in a meeting
-/// means the date after that meeting), then buckets open tasks into Overdue / Due-in-window /
-/// undated-from-window - the market-validated shape (task-managers scope by due date; meeting tools
-/// disclose the undated fallback).
+/// Due-date-aware scoping for task questions. "What's due Friday / what's overdue" are DEADLINE
+/// questions, not "tasks from meetings held then". Resolves each task's free-text due against ITS
+/// meeting's date (a due said in a meeting means the date after that meeting), then buckets open
+/// tasks into Overdue / Due-in-window / undated-from-window.
 /// </summary>
 public static class TaskScheduling
 {
@@ -97,8 +94,7 @@ public static class TaskScheduling
         + @"did\s+i\s+take\s+on|had\s+to\s+do)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    /// <summary>How a task query with a time reference should be scoped. The subtle distinction the
-    /// taxonomy calls Rule T / the "August 2nd" fix.</summary>
+    /// <summary>How a task query with a time reference should be scoped.</summary>
     public enum TimeMode { None, DueDate, Provenance }
 
     /// <summary>

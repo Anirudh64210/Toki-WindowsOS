@@ -6,18 +6,17 @@ using Toki.Llm;
 namespace Toki.Views;
 
 /// <summary>
-/// First-run onboarding, rendered inside the notch (no separate wizard window). Three short steps -
-/// name → privacy-as-pitch → all set - each a height morph via <see cref="App.GrowNotch"/>. Finishing
-/// persists the name + the OnboardingComplete flag and lands in Home, where the greeting immediately
-/// uses the name they just gave (proof the answer mattered). See <see cref="AppSettings.OnboardingComplete"/>.
+/// First-run onboarding, rendered inside the notch. Three steps (name, privacy, done), each a height
+/// morph via <see cref="App.GrowNotch"/>. Finishing persists the name + OnboardingComplete and lands in Home.
 /// </summary>
 public partial class OnboardingView : UserControl
 {
     public OnboardingView()
     {
         InitializeComponent();
-        // Prefill with the name Toki currently holds (so a stale/wrong one - e.g. "Sid" - is shown and
-        // corrected here); empty on a fresh install, where the field's prompt asks for it.
+        // Rounded 1px rim, snapped to whole device pixels (see GlassSurface.Hairline).
+        Theme.GlassSurface.CrispRim(NameFieldRim);
+        // Prefill with the name Toki currently holds so a stale one can be corrected here.
         NameBox.Text = AppSettings.Current.UserName ?? "";
         Loaded += (_, _) =>
         {
@@ -25,6 +24,20 @@ public partial class OnboardingView : UserControl
             NameBox.Focus();
             NameBox.SelectAll();
         };
+    }
+
+    /// <summary>
+    /// Back to step one, for a replay: the notch caches one instance of this view, whose flow position
+    /// lives only in the three steps' Visibility. Visibility only - no React, no GrowNotch: this runs
+    /// from OnStateChanged BEFORE the notch measures the view; morphing here fights the starting transition.
+    /// </summary>
+    public void ResetToStart()
+    {
+        StepName.Visibility = Visibility.Visible;
+        StepPrivacy.Visibility = Visibility.Collapsed;
+        StepDone.Visibility = Visibility.Collapsed;
+        // Re-read the name: it may have been changed in Settings since the last run.
+        NameBox.Text = AppSettings.Current.UserName ?? "";
     }
 
     void Show(StackPanel step)
@@ -53,6 +66,11 @@ public partial class OnboardingView : UserControl
     }
 
     void OnFinish(object sender, RoutedEventArgs e) => App.CompleteOnboarding(NameBox.Text?.Trim() ?? "");
+
+    /// <summary>Dev-only: which step is showing (0 name, 1 privacy, 2 done).</summary>
+    public int AuditOnStep() =>
+        StepName.Visibility == Visibility.Visible ? 0
+        : StepPrivacy.Visibility == Visibility.Visible ? 1 : 2;
 
     /// <summary>Dev-only: jump straight to a step (0 name, 1 privacy, 2 done) for the --measuretest layout check.</summary>
     public void DebugShowStep(int step)

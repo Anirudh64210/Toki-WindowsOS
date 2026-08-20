@@ -4,21 +4,9 @@ namespace Toki.Llm;
 
 /// <summary>
 /// Carries a recurring meeting's unfinished business forward into the next one's note.
-///
-/// The prep card has computed this since M7.2 and it was the most useful thing on it - what was left
-/// open last time is the first thing anyone wants when the same meeting comes round again. But the prep
-/// card only exists BEFORE a meeting with a calendar event; the note is where people actually look
-/// afterwards, and it had no memory of the previous occurrence at all.
-///
-/// So the note gets its own section, built the same deterministic way: no model pass, no extra wait, no
-/// chance of an invented item, and it works whether or not the meeting came from a calendar.
-///
-/// THREE THINGS IT REFUSES TO DO, because each would make the section a liability:
-///   • It never fires on a one-off. No prior meeting means no section, not an empty one.
-///   • It never repeats a to-do THIS meeting already produced - the same task listed twice, once as
-///     new and once as carried over, reads as two separate jobs.
-///   • It never carries an item the user has ticked. Done is done, and re-surfacing it would make the
-///     tick feel like it did not take.
+/// Deterministic, no model pass, calendar not required. It refuses to: fire on a one-off (no
+/// prior meeting = no section, not an empty one), repeat a to-do this meeting already produced,
+/// or carry an item the user has ticked.
 /// </summary>
 public static class OpenFromLastTime
 {
@@ -27,6 +15,11 @@ public static class OpenFromLastTime
     /// <summary>Most a note will carry forward. Beyond a handful this stops being a reminder and starts
     /// being a backlog, which belongs in the Library rather than at the top of today's note.</summary>
     const int MaxItems = 4;
+
+    /// <summary>How far back a "previous occurrence" may be. Recurring meetings run weekly to
+    /// monthly; 45 days covers both. Without the cap, a stale record hands its to-dos to every
+    /// later meeting whose title shares one word with it.</summary>
+    const int MaxAgeDays = 45;
 
     /// <summary>
     /// The section, or null when there is nothing honest to say. <paramref name="current"/> must
@@ -38,9 +31,8 @@ public static class OpenFromLastTime
         {
             if (current.Kind != MeetingKind.Meeting) return null;
 
-            // Lowercased HERE, once. ContentQuery preserves the title's own casing, and comparing a
-            // capitalised term against a lowercased title silently matches nothing - the section simply
-            // never appears, which is indistinguishable from "there was nothing to carry".
+            // Lowercased HERE, once: a capitalised term against a lowercased title silently matches
+            // nothing, which is indistinguishable from "there was nothing to carry".
             var terms = NotesQa.ContentQuery(current.Title)
                 .ToLowerInvariant()
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -80,16 +72,20 @@ public static class OpenFromLastTime
             var m = store.Get(id);
             if (m is null || m.Kind != MeetingKind.Meeting) continue;
             if (m.StartedAt >= current.StartedAt) continue;              // must be a PRIOR occurrence
+            if (m.StartedAt < current.StartedAt.AddDays(-MaxAgeDays)) continue;   // too old to be "last time"
             if (!Shares(m.Title, terms)) continue;
             if (best is null || m.StartedAt > best.StartedAt) best = m;  // the most recent one
         }
         return best;
     }
 
+    /// <summary>Whole-WORD overlap, not substring: substring fragments ("just" in "AdJUST") connect
+    /// unrelated meetings and hand this one somebody else's unfinished work.</summary>
     static bool Shares(string? title, string[] terms)
     {
-        var t = (title ?? "").ToLowerInvariant();
-        return terms.Any(term => t.Contains(term));
+        var words = (title ?? "").ToLowerInvariant()
+            .Split(new[] { ' ', '-', ',', ':', ';', '(', ')', '/', '.', '\'' }, StringSplitOptions.RemoveEmptyEntries);
+        return terms.Any(term => words.Contains(term));
     }
 
     /// <summary>The carried line, keeping the owner when one is known - "who still owes this" is half

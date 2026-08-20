@@ -38,6 +38,7 @@ static class SelfTests
                 "--detecttest" => DetectTest(Seconds(args, 30)),
                 "--recordtest" => RecordTest(args, Seconds(args, 6)),
                 "--asrtest" => AsrTest(args),
+                "--wertest" => WerTest.Run(args),
                 "--voicetest" => VoiceTest(args),
                 "--transcribetest" => TranscribeTest(args),
                 "--dbtest" => DbTest(),
@@ -54,6 +55,9 @@ static class SelfTests
                 "--diartest" => DiarTest(args),
                 "--speakertest" => SpeakerTest(args),
                 "--hittest" => HitTargets.Run(),
+                "--revealtest" => RevealTest(),
+                "--wavetest" => WaveTest(),
+                "--fpstest" => FrameTest.Run(),
                 "--stickytest" => StickyTest(),
                 "--hovershot" => HitTargets.Shot(
                     args.Skip(1).FirstOrDefault(a => !a.StartsWith("--") && a != "dark") ?? ".",
@@ -212,8 +216,7 @@ static class SelfTests
     }
 
     /// <summary>Re-run the LLM note writer on a STORED meeting's real transcript and print the
-    /// result - so we can verify the notes engine against actual meetings (e.g. the 25-min one that
-    /// used to summarise only its first lines) without recording again.</summary>
+    /// result - verifies the notes engine against actual meetings without recording again.</summary>
     static int ReNotes(string[] args)
     {
         var idArg = ArgValue(args, "--renotes");
@@ -551,6 +554,21 @@ static class SelfTests
             Console.WriteLine("  --- TAIL ---");
             foreach (var s in segments.TakeLast(3)) Console.WriteLine($"  [{s.Start:mm\\:ss}] {s.Text}");
         }
+        // The WHOLE transcript to a file so two runs can be DIFFED. Named after the wav and whether
+        // the speech gate ran, so an A/B is two runs and a diff:
+        //     Toki.exe --asrtest x.wav --out C:\tmp
+        //     set TOKI_ASR_NOGATE=1 && Toki.exe --asrtest x.wav --out C:\tmp
+        var dumpDir = ArgValue(args, "--out") ?? Path.GetDirectoryName(file) ?? ".";
+        var dump = Path.Combine(dumpDir,
+            $"{Path.GetFileNameWithoutExtension(file)}.{(Environment.GetEnvironmentVariable("TOKI_ASR_NOGATE") == "1" ? "ungated" : "gated")}.txt");
+        try
+        {
+            File.WriteAllLines(dump, segments.Select(s => $"[{s.Start:hh\\:mm\\:ss}] {s.Text}"));
+            var words = segments.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+            Console.WriteLine($"  {words} words -> {dump}");
+        }
+        catch (Exception ex) { Console.WriteLine($"  (could not write the transcript: {ex.Message})"); }
+
         Console.WriteLine($"[--asrtest] PASS - verify the TAIL matches the END of the audio (proves no mid-file truncation).");
         return 0;
     }
@@ -671,13 +689,9 @@ static class SelfTests
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
 
-    // Prove the live light/dark swap recolours an ALREADY-RENDERED element. The old bug: WPF froze the
-    // themed brushes so mutating .Color threw, and nothing repainted. Replace-based Apply must instead
-    // make the DynamicResource re-resolve to the new brush. Black notch → white notch on swap = PASS.
-    // Diagnoses the notch auto-height cut-off headlessly (no RenderTargetBitmap, which hangs offscreen).
-    // For each auto-height page it prints TWO heights: (A) the out-of-tree Measure that PillWindow.
-    // ContentHeight uses today, and (B) the TRUE arranged height from a real offscreen window. If A < B,
-    // the reveal is sized short and the content's bottom clips - that's the bug.
+    // Diagnoses the notch auto-height cut-off headlessly. For each auto-height page it prints TWO
+    // heights: (A) the out-of-tree Measure PillWindow.ContentHeight uses, and (B) the TRUE arranged
+    // height from a real offscreen window. If A < B, the reveal is sized short and the bottom clips.
     static int MeasureTest()
     {
         var cases = new (string name, double w, Func<System.Windows.Controls.UserControl> build)[]
@@ -777,12 +791,8 @@ static class SelfTests
     }
 
     /// <summary>
-    /// Measure speaker separation on REAL meeting audio, both ways, on THIS machine.
-    ///
-    /// The published benchmarks are macOS arm64 and predict 6-9 minutes for an hour-long meeting, which
-    /// the owner rightly called unacceptable. Rather than argue with a number from someone else's
-    /// hardware, this runs both routes on a real `them.wav` and prints the wall clock.
-    ///
+    /// Measure speaker separation on REAL meeting audio, both routes, on THIS machine - published
+    /// benchmarks are other hardware; this prints the actual wall clock.
     /// Run: Toki.exe --diartest "%APPDATA%\Toki\Recordings\&lt;folder&gt;\them.wav" [speakers]
     /// </summary>
     static int DiarTest(string[] args)
@@ -811,9 +821,8 @@ static class SelfTests
         Console.WriteLine($"  speakers   : {(expected > 0 ? expected.ToString() : "estimate")}");
         Console.WriteLine();
 
-        // Sweep mode: the clustering threshold is model- and audio-dependent, and the published default
-        // (0.5) put ONE remote person into five clusters on this recording. So measure it rather than
-        // trust it - print how many speakers each threshold yields, and pick from real audio.
+        // Sweep mode: the clustering threshold is model- and audio-dependent, so measure it rather
+        // than trust a published default - print how many speakers each threshold yields.
         if (sweep)
         {
             var scribeS = new Transcriber();
@@ -871,13 +880,9 @@ static class SelfTests
     }
 
     /// <summary>
-    /// Run the WHOLE speaker chain on a real saved meeting and print what it concluded. READ-ONLY -
-    /// nothing is written to the database, so this can be run on the owner's real library safely.
-    ///
-    /// This is the test that matters, because every part of T8 is only as good as what it does to an
-    /// actual recording: how many voices it finds, which of them it can put a name to, and - the part
-    /// worth staring at - which lines each name ended up on. Run:
-    /// <c>Toki.exe --speakertest [meeting id]</c> (defaults to the most recent meeting with audio).
+    /// Run the WHOLE speaker chain on a real saved meeting and print what it concluded: voices
+    /// found, names assigned, and which lines each name landed on. READ-ONLY - safe on the real
+    /// library. Run: <c>Toki.exe --speakertest [meeting id]</c> (defaults to the latest with audio).
     /// </summary>
     static int SpeakerTest(string[] args)
     {
@@ -986,11 +991,9 @@ static class SelfTests
         Console.WriteLine($"[--uitest] {ids.Count} meetings in the library");
         Console.WriteLine();
 
-        // Split it: querying is SQLite, handing the list over is ours, realising and arranging the
-        // visible rows is WPF's. The list virtualizes, so "build" should now barely move as the
-        // library grows - if it starts tracking the meeting count again, virtualization has been
-        // defeated (the usual cause: an ItemsControl wrapped in an outer ScrollViewer, which measures
-        // it with infinite height and realises every row).
+        // Split: query is SQLite, handover is ours, arranging visible rows is WPF's. The list
+        // virtualizes, so "build" must not track the meeting count - if it does, virtualization is
+        // defeated (usual cause: an ItemsControl inside an outer ScrollViewer realises every row).
         Time("  ...of which: query the store", 5, () => w.PerfQueryOnly());
         Time("  ...of which: hand the list over", 5, () => w.PerfBuildOnly());
         var build = Time("build the whole list (create + lay out)", 5, () => w.PerfLoadList());
@@ -1003,7 +1006,7 @@ static class SelfTests
             : 0;
 
         Console.WriteLine();
-        // A click must feel instant. Selection used to rebuild the list, so it cost a full build.
+        // A click must feel instant.
         var ok = true;
         void Check(string what, double ms, double budget)
         {
@@ -1023,11 +1026,9 @@ static class SelfTests
     }
 
     /// <summary>
-    /// Print a note's RAW stored text, with every character visible. READ-ONLY.
-    ///
-    /// Exists because "what does the screen show?" and "what is actually saved?" are different questions,
-    /// and guessing at the second one wasted real time chasing the bullet bug. Run:
-    /// <c>Toki.exe --dumpnote "some words from the note"</c>
+    /// Print a note's RAW stored text, every character visible. READ-ONLY. "What does the screen
+    /// show" and "what is saved" are different questions.
+    /// Run: <c>Toki.exe --dumpnote "some words from the note"</c>
     /// </summary>
     static int DumpNote(string[] args)
     {
@@ -1060,20 +1061,181 @@ static class SelfTests
         return 0;
     }
 
+    /// <summary>Let the real dispatcher and the real animation clock run for a while. The entrance and
+    /// the retract are animations, so a test that only calls methods measures a model of them.</summary>
+    static void Pump(int ms)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+        t.Tick += (_, _) => { t.Stop(); frame.Continue = false; };
+        t.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
     /// <summary>
-    /// Drives the REAL note editor the way fingers do - types markers, presses Enter, clicks toolbar
-    /// buttons, ticks boxes - and checks the Markdown that comes back out. Written for the owner-reported
-    /// bug "the bullet points and the lists get incremented, bullets are created by themselves", which a
-    /// pure round-trip test could never have caught: the fault lived in the document structure, not the
-    /// text format. Run: Toki.exe --notetest
+    /// --wavetest: the waveform on the REAL control with the REAL clock - the bars must rise fast,
+    /// fall slow, and rest as dots at silence (a wave dancing at silence is the one lie this product
+    /// cannot afford). No microphone involved: a synthetic level is pushed at capture rate.
     /// </summary>
+    static int WaveTest()
+    {
+        var fails = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}{(ok ? "" : $"   ({detail})")}");
+            if (!ok) fails++;
+        }
+
+        var meter = new LevelMeter();
+        var wave = new Toki.Controls.VoiceWave { BarCount = 14, Height = 20, Meter = meter };
+        var host = new System.Windows.Window
+        {
+            Left = -32000, Top = -32000, Width = 200, Height = 60, Content = wave,
+            WindowStyle = System.Windows.WindowStyle.None, ShowActivated = false, ShowInTaskbar = false,
+        };
+        var rest = Toki.Controls.VoiceWave.AuditRest;
+        try
+        {
+            host.Show();
+            wave.IsLive = true;
+            Pump(200);
+
+            var quiet = wave.AuditScales();
+            Console.WriteLine($"  silence      : {Fmt(quiet)}");
+            Check("a silent room rests as dots", quiet.All(v => Math.Abs(v - rest) < rest * 0.1),
+                  $"max {quiet.Max():F2} vs rest {rest:F2}");
+
+            // Speech-level tone, arriving at capture rate (every 20ms) for 500ms.
+            var feed = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(20) };
+            feed.Tick += (_, _) => meter.Report(0.12f);
+            feed.Start();
+            Pump(120);
+            var early = wave.AuditScales();
+            Pump(400);
+            var loud = wave.AuditScales();
+            feed.Stop();
+            Console.WriteLine($"  after 120ms  : {Fmt(early)}");
+            Console.WriteLine($"  talking      : {Fmt(loud)}");
+            Check("the bars rise fast", early.Max() > 0.6, $"max {early.Max():F2} after 120ms");
+            Check("the row fills while somebody talks", loud.Max() > 0.85, $"max {loud.Max():F2}");
+            Check("the envelope is centre-weighted", loud[7] > loud[0] * 1.4 && loud[7] > loud[13] * 1.4,
+                  $"centre {loud[7]:F2} vs ends {loud[0]:F2}/{loud[13]:F2}");
+
+            Pump(250);
+            var falling = wave.AuditScales();
+            Console.WriteLine($"  +250ms quiet : {Fmt(falling)}");
+            Check("the fall is slower than the rise", falling.Max() > rest * 1.5 && falling.Max() < loud.Max(),
+                  $"max {falling.Max():F2} (was {loud.Max():F2}, rest {rest:F2})");
+
+            Pump(1200);
+            var settled = wave.AuditScales();
+            Console.WriteLine($"  +1.5s quiet  : {Fmt(settled)}");
+            Check("it settles back to dots when the room goes quiet",
+                  settled.All(v => Math.Abs(v - rest) < rest * 0.12), $"max {settled.Max():F2}");
+
+            wave.IsLive = false;
+            Pump(120);
+            Check("parking the wave stops it dead at rest",
+                  wave.AuditScales().All(v => Math.Abs(v - rest) < 1e-9), "left mid-animation");
+        }
+        finally { try { host.Close(); } catch { } }
+
+        Console.WriteLine();
+        Console.WriteLine(fails == 0
+            ? "RESULT: the wave answers to the level, rises fast, falls slow, and rests at silence."
+            : $"RESULT: {fails} check(s) failed.");
+        return fails == 0 ? 0 : 1;
+
+        static string Fmt(double[] v) => string.Join(" ", v.Select(x => x.ToString("F2")));
+    }
+
     /// <summary>
-    /// Drive the sticky note WHERE IT ACTUALLY LIVES - inside the meeting note's read-only RichTextBox.
-    ///
-    /// The owner reported that "Add a sticky note" opens the panel and then typing does nothing. The
-    /// editor works perfectly on its own (`--notetest`, 20 checks), which is exactly why this test has to
-    /// build the real document around it: the defect is in the HOSTING, not the control. Run:
-    /// <c>Toki.exe --stickytest</c>. READ-ONLY - it uses a debug-seeded panel with no database row.
+    /// --revealtest: the notch's ENTRANCE on the real window - at the instant it becomes visible,
+    /// nothing that animates IN may already be at its final value (a delayed animation shows the
+    /// BASE value until its clock starts, which is the "flickers before it renders" bug class).
+    /// </summary>
+    static int RevealTest()
+    {
+        App.Headless = true;
+        var fails = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}{(ok ? "" : $"   ({detail})")}");
+            if (!ok) fails++;
+        }
+
+        PillWindow? pill = null;
+        try
+        {
+            var state = new Toki.State.AppState();
+            pill = new PillWindow(state) { Left = -32000, Top = -32000, ShowActivated = false, ShowInTaskbar = false };
+
+            // Hidden -> a panel state: the summon path. Read IMMEDIATELY, before any UpdateLayout -
+            // what is being tested is where the entrance starts, not how fast it runs.
+            state.ForceForDemo(Toki.State.PillState.Home);
+            var arm = pill.AuditEntranceArm();
+
+            // Everything below is read from a snapshot taken at Show(), not sampled afterwards - the
+            // entrance is an animation, and sampling it races the clock.
+            Check("the card starts clipped to zero height", arm.Clip is >= 0 and < 1,
+                  arm.Clip < 0 ? "no clip at all" : $"clip height {arm.Clip:F1}");
+            Check("Toki starts invisible", arm.MascotOpacity < 0.01, $"opacity {arm.MascotOpacity:F2}");
+            Check("Toki starts smaller than his final size", arm.MascotScale < 0.99, $"scale {arm.MascotScale:F2}");
+            Check("the content starts faded out", arm.Content < 0.01, $"opacity {arm.Content:F2}");
+
+            // Hiding must park everything shut: Windows retains a layered window's LAST composed
+            // frame and the next Show() presents it until a new frame lands.
+            state.ForceForDemo(Toki.State.PillState.Hidden);
+            Pump(500);   // the retract animation is 170ms; give it room
+
+            Check("after hiding, Toki is not left showing", !pill.AuditMascotShowing(), "still visible");
+            var parked = pill.AuditCardClip();
+            Check("after hiding, the card is left clipped shut", parked is { Height: < 1 },
+                  parked is null ? "clip cleared - the last frame is a full-size card" : $"clip height {parked.Value.Height:F1}");
+            Check("after hiding, the content is left faded out", pill.AuditContentOpacity() < 0.01,
+                  $"opacity {pill.AuditContentOpacity():F2}");
+            // Parked state is necessary but not sufficient: Hide() on the animation clock is one
+            // frame early - an empty frame must COMPOSE into the layered surface before hiding.
+            // The flag is set in that deferred step, so it proves the ORDER.
+            Check("the hide composed an empty frame before hiding", pill.AuditParkedEmptyFrame(),
+                  "Hide() ran before an empty frame landed in the layered surface");
+
+            // Entering a FLOW must rewind it: onboarding is one cached view, so walk to the end,
+            // leave, come back - it must be on step one. The caching IS the thing under test.
+            state.ForceForDemo(Toki.State.PillState.Onboarding);
+            pill.UpdateLayout();
+            if (pill.AuditView(Toki.State.PillState.Onboarding) is Views.OnboardingView ob1)
+            {
+                ob1.DebugShowStep(2);                                   // walk to "You're all set"
+                state.ForceForDemo(Toki.State.PillState.Home);          // leave
+                state.ForceForDemo(Toki.State.PillState.Onboarding);    // and come back
+                pill.UpdateLayout();
+                Check("replaying onboarding starts at step one", ob1.AuditOnStep() == 0,
+                      $"showing step {ob1.AuditOnStep()}");
+            }
+            else Check("replaying onboarding starts at step one", false, "could not reach the view");
+
+            // The SECOND summon must arm the entrance just like the first.
+            state.ForceForDemo(Toki.State.PillState.Home);
+            var arm2 = pill.AuditEntranceArm();
+            Check("the second summon arms Toki's entrance too",
+                  arm2.MascotOpacity < 0.01 && arm2.MascotScale < 0.99,
+                  $"opacity {arm2.MascotOpacity:F2}, scale {arm2.MascotScale:F2}");
+        }
+        catch (Exception ex) { Console.WriteLine($"FAIL  (driving the window)   {ex.Message}"); fails++; }
+        finally { try { pill?.Close(); } catch { } }
+
+        Console.WriteLine();
+        Console.WriteLine(fails == 0
+            ? "RESULT: the notch's entrance starts at its beginning, not at its end."
+            : $"RESULT: {fails} part(s) of the entrance are already finished before it starts - that is the flash.");
+        return fails == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// --stickytest: drive the sticky note WHERE IT LIVES - inside the meeting note's read-only
+    /// RichTextBox. The editor passes on its own; the defect class is the HOSTING. READ-ONLY,
+    /// debug-seeded panel, no database row.
     /// </summary>
     static int StickyTest()
     {
@@ -1108,21 +1270,17 @@ static class SelfTests
         // Open it exactly as the button does.
         sticky.DebugReveal();
         win.UpdateLayout();
-        // Let the dispatcher run. The fix focuses at Loaded priority - deliberately AFTER layout, since
-        // focusing a control that is not yet laid out fails silently - so a test that never pumps would
-        // report the bug as unfixed forever. (It did, once.)
+        // Let the dispatcher run: focus is set at Loaded priority (focusing an un-laid-out control
+        // fails silently), so a test that never pumps cannot see it.
         Pump();
 
         var editor = sticky.DebugEditor;
         Check("the panel opens and has an editor", editor is not null);
         if (editor is null) { Console.WriteLine("\nRESULT: cannot continue."); win.Close(); return 1; }
 
-        // THE REPORTED BUG: does focus actually land in the editor? If not, every keystroke goes to the
-        // read-only RichTextBox hosting it, which silently swallows the lot.
-        //
-        // LOGICAL focus, not Keyboard.FocusedElement: an offscreen window with ShowActivated=false is
-        // never the active window, so it has no keyboard focus to give and the keyboard check would fail
-        // for a reason that has nothing to do with the bug.
+        // Does focus land in the editor? If not, keystrokes go to the hosting read-only RichTextBox.
+        // LOGICAL focus, not Keyboard.FocusedElement: a never-activated offscreen window has no
+        // keyboard focus to give.
         var focused = System.Windows.Input.FocusManager.GetFocusedElement(win);
         var hasFocus = focused is System.Windows.DependencyObject d && IsWithin(d, editor);
         Check("focus lands in the editor when the panel opens", hasFocus,
@@ -1134,13 +1292,9 @@ static class SelfTests
         var landed = editor.Markdown.Contains("pricing call notes");
         Check("typed text lands in the note", landed, landed ? "" : $"markdown is «{editor.Markdown}»");
 
-        // THE STRUCTURAL RULE, learned the hard way. DebugType above inserts text through the editor's
-        // own API, which bypasses WPF's real input routing - so it PASSED while the shipped product
-        // could not take a keystroke. What actually broke the product was the hosting: the editor sat
-        // inside a read-only RichTextBox's document, whose text editor claims keyboard, caret and
-        // selection services at class level and starves any editor nested in it (three separately
-        // documented mechanisms). Real key routing cannot be exercised in a never-activated offscreen
-        // window, but the structure CAN be checked - and the structure is the bug.
+        // THE STRUCTURAL RULE: DebugType bypasses real input routing, so also check the structure -
+        // an editor nested inside a RichTextBox's document is starved of keyboard, caret and
+        // selection services at class level. The structure IS the bug class.
         var nested = false;
         for (System.Windows.DependencyObject? a = sticky; a is not null;
              a = System.Windows.Media.VisualTreeHelper.GetParent(a))
@@ -1171,6 +1325,11 @@ static class SelfTests
         }
     }
 
+    /// <summary>
+    /// --notetest: drives the REAL note editor the way fingers do (markers, Enter, toolbar, tick
+    /// boxes) and checks the Markdown that comes back out - the fault class lives in the document
+    /// structure, which a pure round-trip test cannot see.
+    /// </summary>
     static int NoteEditorTest()
     {
         var pass = 0; var fail = 0;
@@ -1195,10 +1354,8 @@ static class SelfTests
         {
             var ed = new Views.NoteEditor
             {
-                // Pin the size dial. The editor loads the USER'S saved size on construction (that is
-                // the feature), and the first time the owner actually used the dial, every 13px
-                // assertion here started failing at 19px. A self-test must not inherit ambient user
-                // settings - it pins them and tests relative to the pin.
+                // Pin the size dial: the editor loads the user's saved size on construction, and a
+                // self-test must never inherit ambient user settings.
                 TextSize = Views.NoteEditor.DefaultTextSize,
             };
             var win = new System.Windows.Window
@@ -1216,8 +1373,7 @@ static class SelfTests
             return ed;
         }
 
-        // 1. THE REPORTED BUG. Saving and reloading must not add anything. Ten cycles, because the
-        //    complaint was that it grows a little each time.
+        // 1. Saving and reloading must not add anything - ten cycles, because growth compounds.
         {
             const string src = "# Plan\n\n- one\n- two\n\n1. first\n2. second\n\n- [ ] send the deck\n- [x] booked the room";
             var ed = New(src);
@@ -1250,8 +1406,7 @@ static class SelfTests
             Check("typing \"- [ ] \" makes a tick box", "- [ ] call Ana", ed4.Markdown);
         }
 
-        // 3. Enter continues the list; Enter on an empty item leaves it. (This is where the old
-        //    native-List structure threw, because the paragraph wasn't a child of Document.Blocks.)
+        // 3. Enter continues the list; Enter on an empty item leaves it.
         {
             var ed = New("- one");
             ed.DebugCaretToEnd();
@@ -1269,7 +1424,7 @@ static class SelfTests
             Check("numbers are renumbered from position", "1. a\n2. b\n3. c", ed.Markdown);
         }
 
-        // 5. The toolbar can take a line OUT of a list again (the old "Body" button couldn't).
+        // 5. The toolbar can take a line OUT of a list again.
         {
             var ed = New("- one");
             ed.DebugCaretToEnd();
@@ -1309,10 +1464,8 @@ static class SelfTests
             Check("blank lines survive exactly", "a\n\n\nb", ed.Markdown);
         }
 
-        // 10. THE ACTUAL REPORTED LOOP. The old editor read a bulleted line back through
-        //     TextRange.Text, which includes the native List's own "•\t" marker; that got saved into
-        //     the text and picked up another one on every reload. The owner's note reached seven.
-        //     A marker GLYPH must never appear in what comes out of the editor.
+        // 10. A marker GLYPH must never appear in what comes out of the editor (reading a bulleted
+        //     line through TextRange.Text includes the native List's "•\t" and compounds per reload).
         {
             var ed = New("## Agenda\n- Confirm launch blockers & owners\n- Lock the ship date\n1. open with the numbers");
             var text = ed.Markdown;
@@ -1325,9 +1478,8 @@ static class SelfTests
             else { pass++; Console.WriteLine("PASS  no marker glyph or tab ever reaches the saved text"); }
         }
 
-        // 10b. THE MOSQUITO-TEXT BUG. Clicking on the empty line between two sections and typing used
-        //      to give 6px text - and worse, that line was still tagged Blank, and Write emits nothing
-        //      for a Blank block, so the sentence was thrown away on the next save.
+        // 10b. Typing on a blank line must retag it: Write emits nothing for a Blank block, so a
+        //      still-Blank tag throws the typed sentence away on the next save.
         {
             var ed = New("## Agenda\n\nsome body text");
             ed.DebugCaretToLine(1);              // the blank line between them
@@ -1393,6 +1545,10 @@ static class SelfTests
     {
         var outPath = args.Length > 1 && !args[1].StartsWith("--") ? args[1]
                     : System.IO.Path.Combine(Directory.GetCurrentDirectory(), "toki.ico");
+        // Build the icon from the LIGHT-theme mascot. Toki's dark-theme feet fade to near-white,
+        // which is right on a dark notch and invisible on a light taskbar; the light-theme values
+        // keep their edges on any background, which is the only requirement an icon has.
+        Theme.ThemeManager.Apply(Theme.AppTheme.Light);
         int[] sizes = { 16, 24, 32, 48, 64, 128, 256 };
         var pngs = new List<byte[]>();
         foreach (var s in sizes)
@@ -1459,13 +1615,218 @@ static class SelfTests
         Console.WriteLine(ok
             ? "PASS: an already-rendered element re-resolves + recolours on theme swap"
             : "FAIL: element did not recolour (still the old brush)");
-        return ok ? 0 : 1;
+
+        // The check above proves the MECHANISM on a correctly wired Border; the sweep asks the same
+        // question of the REAL views, which are built in code where a captured brush
+        // (`(Brush)Resources["TextHi"]`) never hears about a theme swap.
+        var live = ThemeContrastSweep();
+        return ok && live == 0 ? 0 : 1;
     }
 
-    // Proves the Library note is selectable + copyable TOP TO BOTTOM. Builds the note document,
-    // programmatically selects the whole thing (exactly what a drag from top to bottom + Ctrl+C does),
-    // and checks the captured text contains every part - summary, a bullet, a to-do, a transcript line.
-    // This is the real artifact the screenshot could never show.
+    /// <summary>
+    /// Build every notch view, in BOTH themes, and check that each piece of text actually contrasts
+    /// with whatever is painted behind it. Reports the offenders rather than a bare pass/fail, since
+    /// the useful output is "which label, on which view, at what ratio".
+    /// </summary>
+    static int ThemeContrastSweep()
+    {
+        const double floor = 3.0;   // generous: this is hunting invisible text, not grading a palette
+        var bad = 0;
+
+        // THE VIEWS ARE BUILT ONCE, IN DARK, AND THEN THE THEME IS SWITCHED UNDER THEM. That order
+        // is the entire point. Building a fresh view per theme would pass even with the bug this
+        // exists to catch: a view that reads `(Brush)Resources["TextHi"]` in its constructor gets
+        // the RIGHT brush if it is constructed after the switch, and the wrong one only when it
+        // outlives the switch - which is exactly what the notch's cached views do.
+        var views = ThemeSweepViews().ToList();
+        var hosts = new List<System.Windows.Window>();
+        foreach (var (name, view) in views)
+        {
+            var w = new System.Windows.Window
+            {
+                Width = 420, Height = 900, Left = -32000, Top = -32000,
+                WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+                Content = view,
+            };
+            w.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "GlassOpaque");
+            hosts.Add(w);
+            try { w.Show(); w.UpdateLayout(); w.UpdateLayout(); }
+            catch (Exception ex) { Console.WriteLine($"  (could not build {name}: {ex.Message})"); }
+        }
+
+        // The LIBRARY WINDOW too, on every page - it is a Window rather than a UserControl, so it
+        // hosts itself.
+        LibraryWindow? lib = null;
+        try
+        {
+            lib = LibraryWindow.ForAudit();
+        }
+        catch (Exception ex) { Console.WriteLine($"  (could not build the Library window: {ex.Message})"); lib = null; }
+
+        foreach (var theme in new[] { Toki.Theme.AppTheme.Dark, Toki.Theme.AppTheme.Light })
+        {
+            Toki.Theme.ThemeManager.Apply(theme);
+
+            if (lib is not null)
+            {
+                foreach (var page in new[] { "ask", "library", "templates", "settings" })
+                {
+                    try
+                    {
+                        lib.AuditPage(page);
+                        foreach (var (tb, ratio, fgC, bgC, owner) in WeakText(lib, floor))
+                        {
+                            bad++;
+                            var text = new string((tb.Text ?? "").Trim()
+                                .Select(ch => ch >= '' && ch <= '' ? '□' : ch).ToArray());
+                            if (text.Length > 28) text = text[..28] + "…";
+                            if (text.Length == 0) text = "(icon)";
+                            Console.WriteLine($"  FAIL [{theme}] Library/{page}: \"{text}\" {fgC} on {bgC} ({owner}) = {ratio:F2}:1");
+                        }
+                    }
+                    catch (Exception ex) { Console.WriteLine($"  (skipped Library/{page} in {theme}: {ex.Message})"); }
+                }
+            }
+
+            for (var i = 0; i < hosts.Count; i++)
+            {
+                var (name, _) = views[i];
+                var host = hosts[i];
+                try
+                {
+                    host.UpdateLayout();
+                    host.UpdateLayout();
+                    foreach (var (tb, ratio, fgC, bgC, owner) in WeakText(host, floor))
+                    {
+                        bad++;
+                        // Icon-font glyphs live in the private use area and print as mojibake, which
+                        // makes a failure unreadable in the one place it needs to be readable.
+                        var text = new string((tb.Text ?? "").Trim()
+                            .Select(ch => ch >= '' && ch <= '' ? '□' : ch).ToArray());
+                        if (text.Length > 28) text = text[..28] + "…";
+                        if (text.Length == 0) text = "(icon)";
+                        Console.WriteLine($"  FAIL [{theme}] {name}: \"{text}\" {fgC} on {bgC} ({owner}) = {ratio:F2}:1");
+                    }
+                }
+                catch (Exception ex) { Console.WriteLine($"  (skipped {name} in {theme}: {ex.Message})"); }
+            }
+        }
+        foreach (var h in hosts) { try { h.Content = null; h.Close(); } catch { } }
+        try { lib?.Close(); } catch { }
+        Toki.Theme.ThemeManager.Apply(Toki.Theme.AppTheme.Dark);
+        Console.WriteLine(bad == 0
+            ? "PASS: every label in every notch view contrasts with its background, in both themes"
+            : $"FAIL: {bad} label(s) are effectively invisible - see above");
+        return bad;
+    }
+
+    static IEnumerable<(string Name, System.Windows.Controls.UserControl View)> ThemeSweepViews()
+    {
+        yield return ("Home", new Views.HomeView());
+        yield return ("MeetingPrompt", new Views.MeetingPromptView());
+        yield return ("RecordingOpen", new Views.RecordingOpenView());
+        yield return ("NotesReady", new Views.NotesReadyView());
+        yield return ("Summarizing", new Views.SummarizingView());
+        yield return ("Settings", new Views.SettingsView());
+        yield return ("NoSpeech", new Views.NoSpeechView());
+        yield return ("Onboarding", new Views.OnboardingView());
+        // Opened, not empty: a collapsed composer has no visible labels, so a sweep that only built
+        // the calendar would report it clean while checking nothing in it.
+        var cal = new Views.CalendarView();
+        cal.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
+        yield return ("Calendar+composer", cal);
+    }
+
+    // Deliberately NOT here: a button-fill-vs-surface contrast check. Tree-walking cannot resolve
+    // what is actually painted behind rim-defined or gradient-backed buttons, so real faults and
+    // correct controls score alike and the gate cries wolf. If reintroduced, it must render and
+    // sample the ACTUAL painted pixel behind the control.
+
+    /// <summary>Every TextBlock whose colour is under <paramref name="floor"/> against the nearest
+    /// ancestor that actually paints a background.</summary>
+    static IEnumerable<(System.Windows.Controls.TextBlock Tb, double Ratio, string Fg, string Bg, string Owner)>
+        WeakText(System.Windows.DependencyObject root, double floor)
+    {
+        foreach (var tb in Descendants(root).OfType<System.Windows.Controls.TextBlock>())
+        {
+            if (!tb.IsVisible || string.IsNullOrWhiteSpace(tb.Text)) continue;
+            if (tb.Foreground is not System.Windows.Media.SolidColorBrush fg) continue;
+            // Skip anything FADED (mid entrance, or deliberately dimmed): its contrast measures the
+            // animation clock, not the colour.
+            if (Opacityish(tb) < 0.95) continue;
+            var (bg, owner) = NearestBackground(tb);
+            if (bg is null) continue;
+            var flat = Flatten(fg.Color, fg.Opacity * Opacityish(tb));
+            var r = Contrast(flat, bg.Value);
+            if (r < floor) yield return (tb, r, flat.ToString(), bg.Value.ToString(), owner);
+        }
+    }
+
+    static double Opacityish(System.Windows.FrameworkElement e)
+    {
+        var o = 1.0;
+        for (System.Windows.DependencyObject? d = e; d is not null; d = System.Windows.Media.VisualTreeHelper.GetParent(d))
+            if (d is System.Windows.UIElement u) o *= u.Opacity;
+        return o;
+    }
+
+    static (System.Windows.Media.Color? Color, string Owner) NearestBackground(System.Windows.DependencyObject e)
+    {
+        for (var d = System.Windows.Media.VisualTreeHelper.GetParent(e); d is not null; d = System.Windows.Media.VisualTreeHelper.GetParent(d))
+        {
+            // Only elements that actually PAINT a fill: a templated Control's Background carries the
+            // default style's value even when its template never draws it. The template's own
+            // Borders are in the visual tree and get found on the way up anyway.
+            var brush = d switch
+            {
+                System.Windows.Controls.Border b => b.Background,
+                System.Windows.Controls.Panel p => p.Background,
+                _ => null,
+            };
+            var owner = (d as System.Windows.FrameworkElement)?.Name is { Length: > 0 } n
+                ? $"{d.GetType().Name} '{n}'" : d.GetType().Name;
+            // Only a substantially OPAQUE fill counts as "the background": hover washes are overlays
+            // that are absent most of the time, and translucent rows fall through to the card anyway.
+            if (brush is System.Windows.Media.SolidColorBrush s && s.Color.A >= 0xC0) return (Flatten(s.Color, 1), owner);
+        }
+        return (null, "");
+    }
+
+    // Composite over the opaque card so an alpha brush is judged on what it actually looks like.
+    static System.Windows.Media.Color Flatten(System.Windows.Media.Color c, double extraOpacity)
+    {
+        var a = c.A / 255.0 * Math.Clamp(extraOpacity, 0, 1);
+        var under = System.Windows.Application.Current.Resources["GlassOpaque"] as System.Windows.Media.SolidColorBrush;
+        var b = under?.Color ?? System.Windows.Media.Colors.Black;
+        return System.Windows.Media.Color.FromRgb(
+            (byte)(a * c.R + (1 - a) * b.R), (byte)(a * c.G + (1 - a) * b.G), (byte)(a * c.B + (1 - a) * b.B));
+    }
+
+    static double Contrast(System.Windows.Media.Color a, System.Windows.Media.Color b)
+    {
+        static double L(System.Windows.Media.Color c)
+        {
+            static double Ch(double v) { v /= 255.0; return v <= 0.03928 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
+            return 0.2126 * Ch(c.R) + 0.7152 * Ch(c.G) + 0.0722 * Ch(c.B);
+        }
+        var (l1, l2) = (L(a), L(b));
+        if (l1 < l2) (l1, l2) = (l2, l1);
+        return (l1 + 0.05) / (l2 + 0.05);
+    }
+
+    static IEnumerable<System.Windows.DependencyObject> Descendants(System.Windows.DependencyObject root)
+    {
+        var n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < n; i++)
+        {
+            var c = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            yield return c;
+            foreach (var d in Descendants(c)) yield return d;
+        }
+    }
+
+    // Proves the Library note is selectable + copyable TOP TO BOTTOM: selects the whole document
+    // (what a drag + Ctrl+C does) and checks the captured text contains every part.
     static int CopyTest()
     {
         var m = new MeetingRecord

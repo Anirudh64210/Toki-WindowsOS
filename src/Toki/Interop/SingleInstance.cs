@@ -6,17 +6,9 @@ using System.Threading;
 namespace Toki.Interop;
 
 /// <summary>
-/// Single-instance guard + "show me" signal, hardened against local named-object squatting.
-///
-/// Two problems with a plain <c>new Mutex(true, "Toki.SingleInstance")</c>: (1) the name is global and
-/// guessable, so any unprivileged process in the session can pre-create it - with a hostile ACL it can
-/// DoS Toki into never starting, or (for the show-signal) drive the UI; (2) treating "the object already
-/// exists" as an unconditional "another Toki is running" is exactly what the squatter exploits.
-///
-/// Fixes: names are salted with the current user's SID (a different user can't even see them); the
-/// objects are created with a DACL granting ONLY the current user; and "already exists" is verified
-/// against a real running Toki process before we defer to it - a squat with no real Toki present is
-/// logged and we take over instead of exiting.
+/// Single-instance guard + "show me" signal, hardened against named-object squatting: names are
+/// salted with the current user's SID, objects carry a DACL granting only the current user, and
+/// "already exists" is verified against a real running Toki process before deferring to it.
 /// </summary>
 public sealed class SingleInstance : IDisposable
 {

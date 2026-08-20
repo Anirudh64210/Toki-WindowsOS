@@ -9,11 +9,8 @@ namespace Toki.Views;
 
 /// <summary>
 /// Shared, code-built pieces for the calendar surfaces (Home "COMING UP" glance + the Calendar page),
-/// so both read identically. Premium agenda language (owner's reference designs): a coloured accent
-/// bar per event, title + "time · place", overlapping attendee initials, an amber relative-time hint
-/// when imminent, and an obvious Join. Everything pulls colours/fonts from Theme.xaml by key, so a
-/// live theme swap recolours it (rows are rebuilt on ThemeChanged). No provider-specific types here -
-/// only <see cref="CalEvent"/>.
+/// so both read identically. Colours/fonts come from Theme.xaml by key (rows are rebuilt on
+/// ThemeChanged). No provider-specific types here, only <see cref="CalEvent"/>.
 /// </summary>
 static class CalendarRows
 {
@@ -22,9 +19,9 @@ static class CalendarRows
     static FontFamily Icons => (FontFamily)Application.Current.Resources["IconFont"];
 
     // ── per-event accent bar + per-person avatar colours ──
-    // Deterministic (string.GetHashCode is randomised per process - never use it for a stable colour).
-    // Coral is deliberately absent: it means record/destructive only. Amber on events would collide
-    // with the imminent treatment, so it's only in the person palette.
+    // Deterministic: string.GetHashCode is randomised per process, never use it for a stable colour.
+    // Coral is absent (record/destructive only); amber on events would collide with the imminent
+    // treatment, so it's only in the person palette.
 
     static readonly string[] EventPalette = { "Pink", "Blue", "Green", "Purple" };
     static readonly string[] PersonPalette = { "Pink", "Blue", "Green", "Purple", "Amber" };
@@ -43,7 +40,7 @@ static class CalendarRows
         Width = 3, CornerRadius = new CornerRadius(1.5), Background = EventAccent(e), Margin = margin,
     };
 
-    // ── attendee avatars: overlapping initial circles (no photos on-device - initials are honest) ──
+    // ── attendee avatars: overlapping initial circles (derived, never fetched) ──
 
     /// <summary>Up to <paramref name="max"/> overlapping initial circles + a "+N" bubble for the rest.</summary>
     public static FrameworkElement AvatarStack(IEnumerable<CalAttendee> people, double size = 16, int max = 3)
@@ -85,11 +82,9 @@ static class CalendarRows
     // ── Home "COMING UP" glance row: accent bar · title / avatars + "day · time · place" · Join ──
 
     /// <summary>
-    /// A COMING UP row in the 2026-08 redesign's shape (figma 293:1912 "list-item-bordered"):
-    /// a bare DATE COLUMN outside the capsule (day numeral 16 Black over month 8 Bold at 50%), then a
-    /// glass capsule (r12) holding the 3px accent line, the title (12 Semibold, TextHi), the time
-    /// (10, TextLow), and on the right either the countdown + white Join pill or a quiet "in 3 days".
-    /// The date lives OUTSIDE the capsule so a column of rows reads as a calendar down its left edge.
+    /// A COMING UP row: a bare date column, then a glass capsule holding the accent line, title,
+    /// time, and either the countdown + Join pill or a quiet relative time. The date lives OUTSIDE
+    /// the capsule so a column of rows reads as a calendar down its left edge.
     /// </summary>
     public static FrameworkElement GlanceRow(CalEvent e, Action onOpen)
     {
@@ -159,9 +154,8 @@ static class CalendarRows
         return Clickable(row, onOpen);
     }
 
-    /// <summary>The row's right edge: an imminent meeting gets "in 9 min" + the white Join pill; a
-    /// distant one gets a quiet "in 3 days". The pill is WHITE with dark text - the one loud element
-    /// in the card, because joining is the one thing the card exists to make instant.</summary>
+    /// <summary>The row's right edge: an imminent meeting gets the countdown + Join pill;
+    /// a distant one gets a quiet relative time.</summary>
     static FrameworkElement GlanceRight(CalEvent e)
     {
         var until = e.Until;
@@ -211,14 +205,12 @@ static class CalendarRows
         return $"in {(int)Math.Round(until.TotalDays)} day{((int)Math.Round(until.TotalDays) == 1 ? "" : "s")}";
     }
 
-    /// <summary>The capsule's accent line colour - stable per event, from the redesign's line set.
-    /// StableHash, never GetHashCode: string.GetHashCode is randomised per process, and an event that
-    /// changed colour on every launch would read as a different meeting.</summary>
+    /// <summary>The capsule's accent line colour, stable per event. StableHash, never GetHashCode:
+    /// an event that changed colour every launch would read as a different meeting.</summary>
     static readonly string[] RedesignAccents = { "AccentAmber", "AccentTeal", "Blue", "Green", "Purple" };
     static Brush AccentBrush(CalEvent e) => Br(RedesignAccents[StableHash(e.Id) % RedesignAccents.Length]);
 
-    // The subtitle line: meta text + the attendee stack beside it (reference: avatars under the title,
-    // so the right edge stays reserved for the Join affordance).
+    // The subtitle line: meta text + the attendee stack beside it.
     static FrameworkElement SubRow(CalEvent e, string text)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
@@ -287,8 +279,7 @@ static class CalendarRows
         Grid.SetColumn(mid, 2);
         grid.Children.Add(mid);
 
-        // Join is always visible (joining must never require discovery); the copy glyph beside it makes
-        // SHARING the Meet link just as discoverable; the amber countdown gives it urgency when imminent.
+        // Join is always visible - joining must never require discovery.
         var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (e.HasMeetLink)
         {
@@ -300,18 +291,17 @@ static class CalendarRows
         Grid.SetColumn(right, 3);
         grid.Children.Add(right);
 
-        // Hover reveals an inline action strip (Vercel/Wispr style) below the row. Indent 52 (the time
-        // gutter), NOT the title x - the full set of links must fit the page width.
+        // Hover reveals an inline action strip below the row. Indent = the time gutter, NOT the
+        // title x: the full set of links must fit the page width.
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
         if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
-        // Share: copy the JOINABLE Google Meet link - the only link worth sharing. (The calendar-page
-        // link is pointless to send someone; "Open in Google" below already covers viewing the event.)
+        // Share copies the JOINABLE Meet link - the only link worth sending someone.
         if (e.HasMeetLink && e.MeetLink is { Length: > 0 } meetUrl)
             strip.Children.Add(CopyLink(meetUrl));
         strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
         strip.Children.Add(ActionLink("Delete", true, onDelete));
-        // The last link's trailing margin would push its own right edge past the strip, where the row
-        // clips it - so the right third of "Delete" looked pressable and was not.
+        // Drop the last link's trailing margin, or the row clips its right edge and part of the
+        // link looks pressable but is not.
         if (strip.Children[^1] is FrameworkElement last)
             last.Margin = new Thickness(0);
 
@@ -375,11 +365,8 @@ static class CalendarRows
             { EasingFunction = growing ? Motion.EaseOut : Motion.EaseIn });
     }
 
-    // A text-link action (brightens on hover) - the strip's buttons.
-    //
-    // The label lives inside a HitTarget box. It used to BE the TextBlock, with the click handler on the
-    // text itself, which meant only the glyphs responded: you had to aim between the letters of "Delete".
-    // The box is the button.
+    // A text-link action (brightens on hover). The label lives inside a HitTarget box:
+    // the box is the button, never the glyphs alone.
     static FrameworkElement ActionLink(string label, bool danger, Action action)
     {
         var restKey = danger ? "Danger" : "TextDim";
@@ -396,15 +383,12 @@ static class CalendarRows
         return box;
     }
 
-    // "Copy link" → puts the meeting URL on the clipboard, then flips to "Copied ✓" (green) for a beat so
-    // the action is confirmed. Never throws (the clipboard can be momentarily locked by another app).
+    // "Copy link" puts the meeting URL on the clipboard, then flips to "Copied ✓" for a beat.
+    // Never throws: the clipboard can be momentarily locked by another app.
     static FrameworkElement CopyLink(string url)
     {
         var tb = new TextBlock
         {
-            // "Copy link", not "Copy Meet link": the four links plus their new hit-target padding no
-            // longer fit the 360px notch, and a clipped "Dele" is worse than a shorter word. The row
-            // only ever offers this when there IS a Meet link, so "Meet" was never carrying meaning.
             Text = "Copy link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
             Foreground = Br("TextDim"),
         };
@@ -428,9 +412,8 @@ static class CalendarRows
         return box;
     }
 
-    // The ALWAYS-VISIBLE share affordance: a small copy glyph beside Join on rows that have a Meet
-    // link. Click → link on the clipboard, glyph flips to a green ✓ for a beat. Quiet (TextDim at
-    // rest) so it doesn't compete with Join; the hover strip's "Copy Meet link" stays for wordy folks.
+    // Always-visible share affordance: a small copy glyph beside Join on rows with a Meet link.
+    // Quiet at rest so it doesn't compete with Join.
     static FrameworkElement CopyIcon(string url)
     {
         var tb = new TextBlock
@@ -525,8 +508,7 @@ static class CalendarRows
         return $"{s.ToString(startFmt, CultureInfo.InvariantCulture)} – {en.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
     }
 
-    // Agenda sub-line: duration · place. (People are no longer words here - the avatar stack beside
-    // this text carries them; "Meet" as a venue would be redundant next to the Join button.)
+    // Agenda sub-line: duration · place. People are carried by the avatar stack, not words.
     static string SubtitleText(CalEvent e)
     {
         var parts = new List<string>();
@@ -573,11 +555,11 @@ static class CalendarRows
         return b;
     }
 
-    // Web links ONLY - calendar data (a conferenceData join link on any invite) is
+    // Web links ONLY: calendar data (a conferenceData join link on any invite) is
     // attacker-influenceable, so every open goes through the one shell choke point.
     public static void OpenUrl(string? url) => Toki.Interop.SafeShell.OpenUrl(url);
 
-    // Smooth opacity fade (Motion.Micro, ease-out) - hover reveals appear/vanish gently.
+    // Smooth opacity fade for hover reveals.
     static void Fade(UIElement el, double to) =>
         el.BeginAnimation(UIElement.OpacityProperty,
             new System.Windows.Media.Animation.DoubleAnimation(to, Motion.Dur(Motion.Micro))

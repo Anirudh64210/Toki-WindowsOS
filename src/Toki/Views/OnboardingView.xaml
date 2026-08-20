@@ -17,7 +17,7 @@
                        HorizontalAlignment="Center"/>
             <TextBlock Text="What should I call you?" Style="{StaticResource Dim}" FontSize="12"
                        HorizontalAlignment="Center" Margin="0,3,0,0"/>
-            <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0" Margin="0,14,0,0"
+            <Border x:Name="NameFieldRim" Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0" Margin="0,14,0,0"
                     BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                 <TextBox x:Name="NameBox" Background="Transparent" BorderThickness="0"
                          Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"

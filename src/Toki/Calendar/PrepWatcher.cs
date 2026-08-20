@@ -53,11 +53,9 @@ public sealed class PrepWatcher
         if (!CalendarService.Instance.IsConnected) return;
         WarmCache();                     // keep UpcomingCache fresh (coalesced by its 60s TTL)
 
-        // Disarm a card whose meeting is behind us - otherwise hovering the peek would keep opening a
-        // stale prep card instead of Home. Never while recording: the card (and its scratchpad) has to
-        // stay reachable from the recording page for the whole meeting, which is the point of N4.
-        // Note this does NOT touch PrepScratch - what the user typed outlives the card, and N5 decides
-        // whether to keep it.
+        // Disarm a card whose meeting is behind us, but never while recording: the card must stay
+        // reachable from the recording page for the whole meeting. Typed scratch text is untouched -
+        // it outlives the card.
         if (!App.IsRecording && App.State.Current != PillState.PrepCard
             && App.CurrentPrep is { } cp && cp.Event.EndUtc < DateTimeOffset.UtcNow)
             App.CurrentPrep = null;
@@ -84,14 +82,8 @@ public sealed class PrepWatcher
         _shown.Add(cand.Id);
         var mins = (int)(cand.StartUtc - now).TotalMinutes;
 
-        // …and SURFACE it once, quietly (owner, 2026-08-06: "meeting is about to start, user gets auto
-        // prompted to take a look at his notes"). This was removed a day earlier when the card was made
-        // hover-only, and removing it took the "your meeting is starting" nudge with it - notes you have
-        // to remember to go and look at are notes you don't look at.
-        //
-        // Restraint is still the design, so it opens ONLY when opening it costs nothing: the notch must
-        // be idle (never interrupt a recording, an answer, or a page the user navigated to), and never
-        // over a fullscreen app. If the moment isn't right the card simply stays armed, one hover away.
+        // ...and surface it once, quietly, ONLY when opening it costs nothing: notch idle, never over
+        // a fullscreen app. If the moment isn't right the card stays armed, one hover away.
         if (Surfaceable())
         {
             App.State.TryGo(PillState.PrepCard);

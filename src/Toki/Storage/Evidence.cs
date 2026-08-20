@@ -6,16 +6,9 @@ using Toki.Transcription;
 namespace Toki.Storage;
 
 /// <summary>
-/// Links a written note line back to the moment in the transcript that produced it (N7).
-///
-/// Why it exists: a small on-device model phrases things less elegantly than a cloud one, and users
-/// forgive that completely once they can check the source in one click. Toki already keeps the whole
-/// transcript, so this closes most of the perceived-quality gap for free - the competitors' loudest
-/// complaint is having no way to verify what the AI claims.
-///
-/// Deterministic word overlap, no model, no embeddings. The floor matters more than the recall: a
-/// link that jumps to the WRONG line is worse than no link at all, because it makes the note look
-/// like it's citing something it isn't. When in doubt, return null and show nothing.
+/// Links a note line back to the transcript moment that produced it. Deterministic word overlap,
+/// no model. A link to the WRONG line is worse than no link, so below the match floor return null
+/// and show nothing.
 /// </summary>
 public static class Evidence
 {
@@ -50,19 +43,9 @@ public static class Evidence
         BestRange(bullet, transcript)?.First;
 
     /// <summary>
-    /// The RANGE of consecutive transcript lines a note bullet came from - inclusive indices, trimmed
-    /// so both ends actually contain evidence.
-    ///
-    /// This exists because the scoring works on a WINDOW of up to three lines while the first version
-    /// returned only the window's first index, and the audio player then played only that line. Two
-    /// ways that made clips nonsense, both heard in a real meeting: a point spread across three lines
-    /// played only the first third, and - worse - the first line of a winning window can contribute
-    /// NOTHING to the match (the union picks its words up from the lines after it), so the clip was a
-    /// stray "That." with the actual evidence in the two lines never played.
-    ///
-    /// So the window is trimmed to [first line with a matching word .. last line with a matching word]
-    /// before it is returned, which is also what makes the clip's from/to times honest: they are the
-    /// bounds of the words that earned the link, not of a scoring artefact.
+    /// The inclusive range of consecutive transcript lines a bullet came from, trimmed so both ends
+    /// actually contain evidence words. The trim keeps the clip's from/to times honest: they bound the
+    /// words that earned the link, not a scoring-window artefact.
     /// </summary>
     public static (int First, int Last)? BestRange(string? bullet, IReadOnlyList<TranscriptSegment>? transcript)
     {

@@ -4,15 +4,10 @@ using System.Text.RegularExpressions;
 namespace Toki.Llm;
 
 /// <summary>
-/// The GENERAL conversation path of the dialogue brain: turns that aren't about the meetings
-/// ("what's a mutex?", "I'm stressed about tomorrow", "help me phrase this email") are answered by
-/// the model from its OWN knowledge - warm, brief, honest - with the recent conversation and the
-/// user profile in context. NO retrieval, NO citations: forcing these turns through notes search is
-/// exactly what made Toki feel like a first-gen chatbot (deny-or-fabricate).
-///
-/// Works identically over both backends (local Qwen3-4B or the BYO API model): the prompt is plain
-/// system+user text, and the multi-turn memory is carried as a short transcript inside the user
-/// prompt - the pattern that works with a single-exchange chat-template call.
+/// The GENERAL conversation path: turns that aren't about the meetings are answered from the
+/// model's OWN knowledge, with NO retrieval and NO citations. Works identically over both
+/// backends: multi-turn memory rides as a short transcript inside the user prompt, the pattern
+/// that works with a single-exchange chat-template call.
 /// </summary>
 public static class GeneralChat
 {
@@ -70,7 +65,7 @@ public static class GeneralChat
             }
         }
         sb.AppendLine().Append("User: ").AppendLine(question.Trim());
-        sb.Append("Reply:");   // NOT "Reply as Toki:" - that made the model prepend a literal "Toki:" label
+        sb.Append("Reply:");   // "Reply as Toki:" makes the model prepend a literal "Toki:" label
         return sb.ToString();
     }
 
@@ -79,9 +74,8 @@ public static class GeneralChat
 
     // A leading speaker label the small model sometimes prepends ("Toki: …", "Assistant: …").
     static readonly Regex LeadLabel = new(@"^\s*(toki|assistant|ai|bot|reply)\s*[:\-]\s*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    // Emoji / pictographs: astral-plane surrogate pairs (🚀 etc.) + the common BMP symbol blocks + the
-    // variation selector and ZWJ used to compose them. The notch/answer voice is plain text (BuildSystem
-    // bans these; this enforces it in code, since a small model still slips one in - CLAUDE.md lesson 8).
+    // Emoji / pictographs: astral-plane surrogate pairs + common BMP symbol blocks + the variation
+    // selector and ZWJ. BuildSystem bans these; enforced in code because a small model still slips one in.
     static readonly Regex Emoji = new(
         @"[\uD800-\uDBFF][\uDC00-\uDFFF]|[←-⇿⌀-➿☀-⛿⬀-⯿️‍]",
         RegexOptions.Compiled);
@@ -100,17 +94,15 @@ public static class GeneralChat
     }
 
     /// <summary>
-    /// Em dashes out, plain hyphens in. Owner call (2026-08-06): they read as ugly in Toki's surfaces.
-    ///
-    /// Enforced in CODE and not only in the prompt, for the same reason emojis are: a small model asked
-    /// nicely will still produce one every so often, and the one it produces is the one the user sees.
-    /// Applied to every path that turns model output into text a person reads.
+    /// Em dashes out, plain hyphens in - enforced in code, not just the prompt, because a small
+    /// model asked nicely still emits one. Applied to every path that turns model output into
+    /// text a person reads.
     /// </summary>
     public static string PlainDashes(string? text)
     {
         if (string.IsNullOrEmpty(text)) return text ?? "";
-        // Em dash and the "horizontal bar" that some models emit instead. The EN dash is left alone:
-        // it's correct in a range ("9:41 - 10:11" is Toki's own formatting, not the model's).
+        // Em dash and the "horizontal bar" some models emit instead. The EN dash is left alone:
+        // it's correct in a range.
         return text.Replace('—', '-').Replace('―', '-');
     }
 }

@@ -9,19 +9,10 @@ using System.Text.Json;
 namespace Toki.Calendar;
 
 /// <summary>
-/// Microsoft identity sign-in for Outlook / Microsoft 365 calendars: the same loopback-redirect + PKCE
-/// flow as <see cref="GoogleAuth"/>, so both connections behave identically and neither needs a server.
-///
-/// ── ONE REAL DIFFERENCE FROM GOOGLE, AND IT MATTERS ──
-/// There is NO client secret. Microsoft registers this kind of app as a "public client", where a secret
-/// is not merely unnecessary but rejected - PKCE is the whole proof. That removes the one piece of
-/// Toki's Google setup that looks like a secret and isn't (see the note in GoogleAuth about installed-app
-/// credentials), so the Outlook side is simply a client id.
-///
-/// The "common" tenant is deliberate: it accepts both work/school accounts and personal outlook.com
-/// ones, which is the whole population of people who would press a button labelled Outlook.
-///
-/// Tokens are never logged, exactly as on the Google path.
+/// Microsoft identity sign-in for Outlook calendars: the same loopback + PKCE flow as
+/// <see cref="GoogleAuth"/>. One real difference: a "public client" has NO client secret (Microsoft
+/// rejects one; PKCE is the whole proof). The "common" tenant is deliberate - it accepts both
+/// work/school and personal accounts. Tokens are never logged.
 /// </summary>
 public static class MicrosoftAuth
 {
@@ -30,12 +21,9 @@ public static class MicrosoftAuth
     static string TokenEndpoint => $"{Authority}/token";
 
     /// <summary>
-    /// Read and write the user's own calendar, plus enough to say "Connected as ...".
-    ///
-    /// <c>offline_access</c> is what makes a refresh token come back at all - without it Microsoft
-    /// returns an access token that dies in an hour and the connection silently stops working the next
-    /// morning. Calendars.ReadWrite rather than .Read because Toki creates and edits events; asking for
-    /// read-only now would only force a second consent screen later.
+    /// <c>offline_access</c> is what makes a refresh token come back at all - without it the access
+    /// token dies in an hour and the connection silently stops working. Calendars.ReadWrite because
+    /// Toki creates and edits events; read-only now would force a second consent later.
     /// </summary>
     public const string Scopes = "offline_access openid email profile https://graph.microsoft.com/Calendars.ReadWrite";
 

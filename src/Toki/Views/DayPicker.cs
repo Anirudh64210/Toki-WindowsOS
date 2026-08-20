@@ -8,19 +8,8 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// A month calendar, in Toki's own language - the control every calendar app opens when you click a date.
-///
-/// WHY IT REPLACED A LIST OF DAYS. The first version offered the next fourteen days as text rows. That
-/// is fine for "tomorrow" and useless for everything else: a meeting three weeks out was simply
-/// unreachable, and the list gave no sense of WHICH DAY of the week you were picking, which is most of
-/// what people are actually deciding. Outlook and Google both open a month grid because a month grid
-/// answers "is that a Friday", "is that the week after next" and "what date is the 3rd Tuesday" at a
-/// glance, and a list answers none of them.
-///
-/// Shape follows the reference the owner supplied: month name and year, arrows to step months, a
-/// weekday header, six rows so the grid never changes height as you page, today ringed, the chosen day
-/// filled, and a Today shortcut. Days from the neighbouring months are shown and dimmed rather than
-/// left blank, so the grid reads as a continuous calendar.
+/// A month calendar in Toki's own language: arrows to step months, a weekday header, always six rows,
+/// today ringed, the chosen day filled, a Today shortcut. Neighbouring-month days are shown dimmed.
 /// </summary>
 public static class DayPicker
 {
@@ -32,7 +21,9 @@ public static class DayPicker
         {
             PlacementTarget = anchor, Placement = PlacementMode.Bottom,
             StaysOpen = false, AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade,
-            VerticalOffset = 6, HorizontalOffset = -8,
+            // The card is inset inside its own shadow gutter; both offsets give that back.
+            VerticalOffset = 6 - Theme.GlassCard.ShadowGutter,
+            HorizontalOffset = -8 - Theme.GlassCard.ShadowGutter,
         };
 
         popup.Child = BuildCalendar(selected, day =>
@@ -48,9 +39,8 @@ public static class DayPicker
     }
 
     /// <summary>
-    /// The calendar itself, independent of the popup - which is what lets the render harness draw it
-    /// into a PNG. A control that only exists inside an open Popup is a control no screenshot can see,
-    /// and unseeable UI is how the 14-day list shipped in the first place.
+    /// The calendar itself, independent of the popup, so the render harness can draw it into a PNG;
+    /// a control that only exists inside an open Popup is one no screenshot can see.
     /// </summary>
     internal static FrameworkElement BuildCalendar(DateTime selected, Action<DateTime> pick)
     {
@@ -71,14 +61,12 @@ public static class DayPicker
         }
         Render();
 
-        var box = new Border
+        // Day cells are deliberately NOT re-radiused to the card: they are separate pills with air
+        // around them, not a panel seated against the card's inner edge, so no concentric pair applies.
+        return new Theme.GlassCard(14)
         {
-            CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 10, 12, 8),
-            BorderThickness = new Thickness(1), Child = host,
+            CardPadding = new Thickness(12, 10, 12, 8), Content = host,
         };
-        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
-        return box;
     }
 
     // ── the pieces ──
@@ -108,9 +96,8 @@ public static class DayPicker
         return grid;
     }
 
-    /// <summary>A real Button, never a Border with a mouse handler - inside a StaysOpen=false popup the
-    /// mouse-UP is swallowed as the popup closes, so a Border's handler silently never fires. Click
-    /// does. The same trap is documented in <see cref="NotePicker"/>, and it has been paid for twice.</summary>
+    /// <summary>A real Button, never a Border with a mouse handler: inside a StaysOpen=false popup the
+    /// mouse-up is swallowed as the popup closes, so only Click fires (see <see cref="NotePicker"/>).</summary>
     static Button Arrow(string glyph, string tip, Action go)
     {
         var text = new TextBlock
@@ -135,8 +122,7 @@ public static class DayPicker
     static FrameworkElement WeekdayRow()
     {
         var row = new UniformGrid { Columns = 7, Margin = new Thickness(0, 0, 0, 4) };
-        // Start the week where this machine's culture starts it - a Monday-first user reading a
-        // Sunday-first grid misreads every date on it.
+        // Start the week where this machine's culture starts it.
         var first = (int)CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
         var names = CultureInfo.CurrentCulture.DateTimeFormat.ShortestDayNames;
         for (var i = 0; i < 7; i++)
@@ -162,8 +148,8 @@ public static class DayPicker
         var offset = ((int)month.DayOfWeek - firstOfWeek + 7) % 7;
         var start = month.AddDays(-offset);
 
-        // ALWAYS six rows. A month that needs five would otherwise make the popup jump in height as
-        // you page through the year, which turns "next month" into a moving target under the cursor.
+        // ALWAYS six rows, or the popup jumps in height while paging and "next month" becomes
+        // a moving target under the cursor.
         for (var i = 0; i < 42; i++) grid.Children.Add(Day(start.AddDays(i), month.Month, selected, pick));
         return grid;
     }
@@ -181,8 +167,7 @@ public static class DayPicker
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         text.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
-        // A day from the month either side stays readable but recedes - blank cells would break the
-        // sense that this is one continuous calendar rather than a grid of one month.
+        // Neighbouring-month days stay readable but recede.
         text.SetResourceReference(TextBlock.ForegroundProperty,
             isSelected ? "Ink" : otherMonth ? "TextDim" : "Text");
         if (otherMonth && !isSelected) text.Opacity = 0.55;
@@ -191,13 +176,16 @@ public static class DayPicker
         {
             Width = 32, Height = 30, CornerRadius = new CornerRadius(9), Child = text,
             Margin = new Thickness(1),
-            // Today is RINGED, the chosen day is FILLED. Two different facts, two different marks -
-            // if both were fills you could not tell which day you had actually picked.
+            // Today is RINGED, the chosen day is FILLED: two different facts, two different marks.
             BorderThickness = new Thickness(isToday && !isSelected ? 1 : 0),
         };
         if (isSelected) surface.SetResourceReference(Border.BackgroundProperty, "Pink");
         else surface.Background = Brushes.Transparent;
-        if (isToday && !isSelected) surface.SetResourceReference(Border.BorderBrushProperty, "Pink");
+        if (isToday && !isSelected)
+        {
+            surface.SetResourceReference(Border.BorderBrushProperty, "Pink");
+            Theme.GlassSurface.CrispRim(surface);   // only the ringed cell has a rim to snap
+        }
 
         var b = Bare(surface, day.ToString("dddd d MMMM", CultureInfo.CurrentCulture), () => pick(day));
         if (!isSelected)

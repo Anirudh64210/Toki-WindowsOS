@@ -6,18 +6,11 @@ using System.Windows.Threading;
 namespace Toki.Views;
 
 /// <summary>
-/// A tiny registry of dropdown popups that logically belong to the notch. A WPF Popup is its OWN
-/// top-level window, so when a model/provider list drops BELOW the notch, the notch's click-outside
-/// dismiss + idle-tuck would treat the cursor as "off the notch" and retract it - right as you try to
-/// pick an option. PillWindow consults this so an open dropdown counts as PART of the notch: scroll
-/// and click freely, the notch stays put. (Harmless when a dropdown lives in another window - the
-/// pill only reacts while it is the one on screen.)
-///
-/// THREADING: the consumers are the low-level mouse-hook callbacks, which run on the hook thread -
-/// where touching any DependencyObject (Popup.IsOpen, ActualWidth, PointToScreen) throws. So the
-/// screen rects are computed ON THE UI THREAD whenever a popup opens/closes/lays out, and the hook
-/// thread only ever reads a plain snapshot array. (The old direct-read version threw on every
-/// click/wheel while a dropdown was open - the hit test never actually worked.)
+/// Registry of dropdown popups that belong to the notch. A WPF Popup is its own top-level window,
+/// so PillWindow consults this to treat an open dropdown as part of the notch (no tuck/dismiss).
+/// THREADING: consumers are low-level mouse-hook callbacks on the hook thread, where touching any
+/// DependencyObject throws; screen rects are computed on the UI thread and the hook thread only
+/// reads a plain snapshot array.
 /// </summary>
 public static class NotchPopups
 {

@@ -143,6 +143,77 @@ public sealed class NameCorrectorTests
         Assert.Equal("we had a greg of a time", TextOf(result)[0]);
     }
 
+    // ── the 2026-08-17 regression: pinned names ate the transcript ──
+    //
+    // Two real meetings that day were saved with "wait for a day or two" rewritten to "wait for a
+    // Toki or two", "my last working day" to "my last working Toki", "I didn't get you" to
+    // "I didn't Craig you", "the service portal" to "the Slack Portal", and a real person named
+    // David to "Toki". Every case below is from those logs.
+
+    [Fact]
+    public void Ordinary_words_are_never_pulled_into_pinned_names()
+    {
+        var trusted = new[] { "Toki", "Craig", "Mac", "Slack", "Lily" };
+        var lines = new[]
+        {
+            Them("I think wait for a Day or two and then reply"),
+            You("check the Mail folder and the Service Portal"),
+            Them("well I am the team Lead here"),
+        };
+        var result = NameCorrector.Correct(lines, trusted: trusted);
+        Assert.Equal(lines.Select(l => l.Text), TextOf(result));
+        Assert.Empty(result.Fixes);
+    }
+
+    [Fact]
+    public void A_real_person_is_never_rewritten_into_a_pinned_product_name()
+    {
+        // "David->Toki" happened on a real meeting. keys TFT vs TK are two edits apart on a
+        // four-letter word - the trusted reach must not stretch that far.
+        var result = NameCorrector.Correct(
+            [Them("and David said he would check with the team")],
+            trusted: ["Toki"]);
+        Assert.Contains("David", TextOf(result)[0]);
+        Assert.Empty(result.Fixes);
+    }
+
+    [Fact]
+    public void A_short_name_is_never_matched_to_a_trusted_name_far_away()
+    {
+        // "Kirtana->Craig" from the same logs: five raw edits on a five-letter target.
+        var result = NameCorrector.Correct(
+            [Them("so Kirtana can you check that")],
+            trusted: ["Craig"]);
+        Assert.Contains("Kirtana", TextOf(result)[0]);
+        Assert.Empty(result.Fixes);
+    }
+
+    [Fact]
+    public void A_lowercase_occurrence_survives_even_when_the_capitalised_form_is_corrected()
+    {
+        // The old rewrite was case-insensitive: one capitalised "Greg" put every lowercase "greg"
+        // in the meeting at risk. Correction applies only where the capital said "this is a name".
+        var corpus = new Dictionary<string, int> { ["Craig"] = 6, ["Greg"] = 1 };
+        var result = NameCorrector.Correct(
+            [Them("Yes, Greg, I will tell greg about it.")], corpus: corpus);
+        Assert.Equal("Yes, Craig, I will tell greg about it.", TextOf(result)[0]);
+    }
+
+    [Fact]
+    public void A_sentence_opening_word_is_only_corrected_when_it_is_also_a_name_mid_sentence()
+    {
+        var corpus = new Dictionary<string, int> { ["Craig"] = 6, ["Greg"] = 1 };
+        // "Greg" appears ONLY at sentence starts: there is no mid-sentence evidence it is a name
+        // here, so the grammar capital is left alone.
+        var opener = NameCorrector.Correct([Them("Greg said so. Greg, agreed.")], corpus: corpus);
+        Assert.Equal("Greg said so. Greg, agreed.", TextOf(opener)[0]);
+
+        // With mid-sentence evidence, the opener is corrected along with the rest.
+        var evidenced = NameCorrector.Correct(
+            [Them("ask Greg first. Greg, are you there?")], corpus: corpus);
+        Assert.Equal("ask Craig first. Craig, are you there?", TextOf(evidenced)[0]);
+    }
+
     [Fact]
     public void Punctuation_and_spacing_survive_a_rewrite()
     {

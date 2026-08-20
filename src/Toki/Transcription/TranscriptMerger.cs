@@ -3,15 +3,11 @@ using System.Text;
 namespace Toki.Transcription;
 
 /// <summary>
-/// Merges the "you" (mic) and "them" (loopback) transcripts into one timeline and
-/// removes echo. The mic physically hears the far end through the speakers, so a
-/// remote utterance can appear on BOTH streams. The clean copy is on "them"
-/// (loopback), so we drop the "you" copy that duplicates a "them" line within a
-/// small time window (brief §8, lesson 6).
-///
-/// Guard: for short lines (&lt;3 significant words) require an EXACT normalized
-/// match - fuzzy-matching interjections like "yeah"/"okay" would wrongly delete
-/// real things the user said.
+/// Merges the "you" (mic) and "them" (loopback) transcripts into one timeline and removes echo:
+/// the mic hears the far end through the speakers, so a remote utterance can appear on BOTH
+/// streams; the clean copy is "them", so the duplicating "you" copy within a small window is
+/// dropped. Short lines (&lt;3 significant words) require an EXACT normalized match -
+/// fuzzy-matching interjections would delete real things the user said.
 /// </summary>
 public static class TranscriptMerger
 {
@@ -47,17 +43,10 @@ public static class TranscriptMerger
     }
 
     /// <summary>
-    /// Move a short backchannel out of the middle of someone else's sentence.
-    ///
-    /// The two streams are transcribed separately and merged by start time, so a listener's "yeah" that
-    /// lands mid-sentence is inserted BETWEEN two halves of the speaker's thought:
-    ///     You:  "did Craig mention ask"
-    ///     Them: "idea."
-    ///     You:  "you to like do this?"
-    /// Nothing is wrong with the timestamps - that really is when it was said - but it makes the
-    /// transcript read as gibberish and it stops the two halves ever being joined. So a very short
-    /// interjection that sits inside a continuing sentence is shifted to just after it. Its timestamp is
-    /// untouched, only its position, and only when the speaker demonstrably carries straight on.
+    /// Move a short backchannel out of the middle of someone else's sentence: streams merge by
+    /// start time, so a listener's "yeah" lands BETWEEN two halves of a thought and stops them
+    /// being joined. Only its position moves (never its timestamp), and only when the speaker
+    /// demonstrably carries straight on.
     /// </summary>
     static List<TranscriptSegment> Deinterleave(List<TranscriptSegment> segs)
     {
@@ -83,13 +72,8 @@ public static class TranscriptMerger
     }
 
     /// <summary>
-    /// Join consecutive lines from the same person into one turn.
-    ///
-    /// Parakeet emits a segment per breath group, which gave 182 segments for an 8-minute meeting - one
-    /// every 2.6 seconds. Rendered, that is a wall of two-word paragraphs each with its own speaker
-    /// label; read by the note writer, it is a transcript chopped at every pause. Joining them costs
-    /// nothing (the timestamps of the first and last are kept, so evidence links still resolve) and
-    /// makes every downstream consumer better at once.
+    /// Join consecutive lines from the same person into one turn - Parakeet emits a segment per
+    /// breath group. The first and last timestamps are kept, so evidence links still resolve.
     /// </summary>
     static List<TranscriptSegment> JoinTurns(List<TranscriptSegment> segs)
     {
@@ -131,13 +115,9 @@ public static class TranscriptMerger
     }
 
     /// <summary>
-    /// Same person, for the purposes of joining and de-interleaving.
-    ///
-    /// This MUST NOT be a plain <c>a.Speaker == b.Speaker</c>. That enum only says which stream the audio
-    /// came from, so every remote participant answers to "Them" - and two different people talking back
-    /// to back with a short gap (the single most ordinary thing that happens in a group call) would be
-    /// welded into one turn attributed to whoever happened to be first. Once diarisation has run, the
-    /// resolved identity is the thing that decides.
+    /// Same person, for joining and de-interleaving. MUST NOT be plain Speaker equality: the enum
+    /// only says which stream, so every remote participant is "Them" and two people talking back
+    /// to back would be welded into one turn. The diarised identity (Tag) decides.
     /// </summary>
     static bool SameVoice(TranscriptSegment a, TranscriptSegment b) =>
         a.Speaker == b.Speaker && string.Equals(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase);
@@ -170,15 +150,21 @@ public static class TranscriptMerger
         return false;
     }
 
-    /// <summary>Shared words as a fraction of the SHORTER line - catches echo where
-    /// one transcript picked up extra/misheard words around the same phrase.</summary>
-    static double Containment(string[] a, string[] b)
+    /// <summary>
+    /// How much of the YOU line's vocabulary the THEM line accounts for. The direction is the
+    /// point: an echo is the mic's degraded COPY of the loopback's words, so the you-line must be
+    /// mostly contained in the them-line. A long line is never an echo of a short one.
+    /// </summary>
+    static double Containment(string[] you, string[] them)
     {
-        var aset = new HashSet<string>(a);
-        var bset = new HashSet<string>(b);
-        var shared = aset.Count(bset.Contains);
-        var min = Math.Min(aset.Count, bset.Count);
-        return min == 0 ? 0 : (double)shared / min;
+        var yset = new HashSet<string>(you);
+        var tset = new HashSet<string>(them);
+        if (yset.Count == 0 || tset.Count == 0) return 0;
+        // A you-line substantially LONGER than the them-line is not a copy of it: a couple of
+        // extra mis-heard words is what a real echo looks like, a paragraph is not.
+        if (yset.Count > tset.Count + 2) return 0;
+        var shared = yset.Count(tset.Contains);
+        return (double)shared / Math.Min(yset.Count, tset.Count);
     }
 
     /// <summary>Lowercase, strip punctuation, collapse whitespace.</summary>

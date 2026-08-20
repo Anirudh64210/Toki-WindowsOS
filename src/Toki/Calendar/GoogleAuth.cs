@@ -23,13 +23,9 @@ public sealed class GoogleAuthException : Exception
 }
 
 /// <summary>
-/// Google OAuth 2.0 for an installed (desktop) app: the loopback-redirect flow with PKCE.
-/// The user's own browser talks directly to Google; Google redirects to a one-shot HttpListener
-/// on 127.0.0.1; we exchange the code for tokens. Nothing routes through a Toki server - the whole
-/// flow is browser ↔ Google ↔ localhost, so hard constraint #1 ($0 upkeep, no backend) holds.
-///
-/// Networking style mirrors <see cref="Toki.Llm.ApiLlm"/>: one static HttpClient, System.Text.Json,
-/// short human error strings. Tokens (access, refresh, id_token, the auth code) are NEVER logged.
+/// Google OAuth 2.0 for an installed app: loopback-redirect flow with PKCE. The browser talks
+/// directly to Google, which redirects to a one-shot HttpListener on 127.0.0.1; nothing routes
+/// through a Toki server. Tokens (access, refresh, id_token, the auth code) are NEVER logged.
 /// </summary>
 public static class GoogleAuth
 {
@@ -44,15 +40,11 @@ public static class GoogleAuth
 
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    // ── OAuth client credentials ──
-    // For an installed app Google's client_id + client_secret are, in Google's own words, "not treated
-    // as a secret" - they ship in every desktop app (rclone, gcloud, Google's own libraries). Real
-    // security comes from PKCE + the exact loopback redirect + the user consenting to THEIR OWN data;
-    // a leaked secret buys an attacker nothing without a user clicking consent. Do NOT "fix" this into
-    // a backend - that would break the $0-upkeep constraint. Resolved in order:
-    //   1. env vars TOKI_GOOGLE_CLIENT_ID / TOKI_GOOGLE_CLIENT_SECRET (dev),
-    //   2. %APPDATA%\Toki\google_client.json (the file Google's console hands you - drop it in),
-    //   3. the embedded consts below (filled at ship time).
+    // OAuth client credentials. For an installed app the client_id + client_secret are not secrets
+    // (they ship in every desktop app); real security is PKCE + the exact loopback redirect + user
+    // consent. Do NOT "fix" this into a backend - that breaks the $0-upkeep constraint. Resolved in
+    // order: env vars TOKI_GOOGLE_CLIENT_ID / TOKI_GOOGLE_CLIENT_SECRET, then
+    // %APPDATA%\Toki\google_client.json, then the embedded consts below (filled at ship time).
     const string EmbeddedClientId = "";
     const string EmbeddedClientSecret = "";
 
@@ -248,9 +240,8 @@ public static class GoogleAuth
 
                 var q = ParseQuery(ctx.Request.Url?.Query);
                 // STATE FIRST: only a request carrying the state WE generated is Google's redirect.
-                // Anything else - favicon, a port-scanning browser tab firing ?error=x at loopback
-                // ports, a stray local process - is served a neutral page and IGNORED, so a bogus
-                // hit can no longer tear down the listener while the real redirect is in flight.
+                // Anything else (favicon, stray local hits) gets a neutral page and is ignored, so a
+                // bogus hit cannot tear down the listener while the real redirect is in flight.
                 if (!q.TryGetValue("state", out var gotState) || !FixedEquals(gotState, expectedState))
                 {
                     await WritePage(ctx, Page("One moment…", "You can return to Toki.")).ConfigureAwait(false);
@@ -310,8 +301,7 @@ public static class GoogleAuth
             using (resp) raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw new GoogleAuthException("Google sign-in timed out.", needsReconnect: false); }
-        // HttpClient's OWN timeout (caller's ct not cancelled) must also map to the documented
-        // GoogleAuthException contract - a raw TaskCanceledException flew past every caller.
+        // HttpClient's OWN timeout (caller's ct not cancelled) must also map to GoogleAuthException.
         catch (OperationCanceledException) { throw new GoogleAuthException("Google didn't respond - check your connection.", needsReconnect: false); }
         catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google (network error).", needsReconnect: false); }
 

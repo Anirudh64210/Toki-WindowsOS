@@ -7,8 +7,14 @@
          peeking upside-down Toki simply means "I'm recording". Hover for the timer + Stop. -->
     <Grid Background="Transparent" MouseLeftButtonUp="OnExpand" Cursor="Hand"
           ToolTip="Recording - hover for the timer &amp; stop" ClipToBounds="True">
-        <Viewbox x:Name="TokiBox" Width="30" VerticalAlignment="Top" HorizontalAlignment="Center"
-                 Margin="0,-13,0,0" RenderTransformOrigin="0.5,0.5">
+        <!-- The eyes have to be BELOW the top of the 14px card, not on it. Flipped, the eye row sits
+             near the bottom of the blob's box, so Width 30 with a -13 top margin put it at y -2.9 to
+             +3.9 - the top half of both eyes fell outside the card and ClipToBounds cut them off. 27
+             wide with a -8 top puts the eye row at +1.1 to +7.2 and still tucks the body's bottom at
+             12.96, inside the 14px card. Numbers, not eyeballing: this peek is 14px tall and 3px of
+             eye is most of it. -->
+        <Viewbox x:Name="TokiBox" Width="27" VerticalAlignment="Top" HorizontalAlignment="Center"
+                 Margin="0,-8,0,0" RenderTransformOrigin="0.5,0.5">
             <Viewbox.RenderTransform>
                 <TransformGroup>
                     <RotateTransform x:Name="Flip"/>

@@ -12,9 +12,8 @@ public static class ProcessResolver
     public static uint? FindPid(DetectedApp app)
     {
         // Packaged (Store) apps: the consent-store key IS the package family name, so ask
-        // Windows which processes belong to that package instead of guessing a process name
-        // from the AUMID prefix. The guess broke on new Teams ("MSTeams_8wekyb3d8bbwe" runs
-        // as ms-teams.exe → GetProcessesByName("MSTeams") found nothing → mic-only meeting).
+        // Windows which processes belong to that package. Guessing a process name from the
+        // AUMID prefix fails when they differ (e.g. new Teams runs as ms-teams.exe).
         if (app.Packaged)
         {
             var packagedPids = PidsInPackage(app.Id);

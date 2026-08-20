@@ -5,17 +5,9 @@ using System.Windows.Media.Animation;
 namespace Toki.Theme;
 
 /// <summary>
-/// Central MOTION TOKENS - the one place that defines how fast things move and how they ease, so the whole
-/// app reads as a single motion system instead of a pile of scattered literals (from docs/ui-revamp-
-/// research.md §1/§3e, the Glass / Material / Fluent / Carbon consensus).
-///
-/// The rule that makes it feel premium: **arriving / expanding motion decelerates (ease-OUT)**; leaving /
-/// collapsing motion accelerates away (ease-IN); ease-in-out only for something transforming in place.
-/// Durations sit in the researched sweet spots (micro-feedback ~100–150ms, component transitions
-/// ~150–250ms, container/view transitions ~250–400ms; nothing over ~350ms reads as sluggish).
-///
-/// Character/mascot animation (TokiBlob) is deliberately EXEMPT - personality motion may be springy or
-/// longer; only functional UI motion is standardised here.
+/// Central motion tokens. The rule: arriving/expanding motion decelerates (ease-OUT), leaving/
+/// collapsing motion accelerates away (ease-IN), ease-in-out only for in-place transforms.
+/// Character animation (TokiBlob) is deliberately exempt; only functional UI motion lives here.
 /// </summary>
 public static class Motion
 {
@@ -37,18 +29,17 @@ public static class Motion
     /// <summary>Only for an element transforming in place (rare); prefer EaseOut for reveals.</summary>
     public static IEasingFunction EaseInOut => new CubicEase { EasingMode = EasingMode.EaseInOut };
 
-    // ── the researched curves (the motion-and-feel skill, 2026-08-13) ──
-    // WPF's stock CubicEase is the "too weak built-in" every motion system warns about; these are the
-    // strong curves the premium overlay class actually ships (cubic-bezier control points, expressed as
-    // a KeySpline-equivalent Bezier easing). ArriveStrong ~= Emil Kowalski's ease-out workhorse
-    // (0.23,1,0.32,1); Depart ~= M3 emphasized-accelerate; Drawer = the iOS sheet / Dynamic Island
-    // settle (0.32,0.72,0,1) - the curve the notch morph should ride.
+    // Strong bezier curves (WPF's stock CubicEase is too weak for overlay-class motion).
+    // Drawer is the iOS sheet / Dynamic Island settle - the curve the notch morph rides.
     /// <summary>Strong ease-out for entering elements - fast start, soft landing.</summary>
     public static IEasingFunction ArriveStrong => new BezierEase(0.23, 1.00, 0.32, 1.00);
     /// <summary>Accelerating exit - things leave without ceremony.</summary>
     public static IEasingFunction Depart => new BezierEase(0.30, 0.00, 0.80, 0.15);
     /// <summary>The sheet/notch settle curve (Dynamic Island's) - use for the window size morph.</summary>
     public static IEasingFunction Drawer => new BezierEase(0.32, 0.72, 0.00, 1.00);
+    /// <summary>Something already on screen transforming IN PLACE (a glyph turning over, a row
+    /// sliding across) - eased at both ends, because it neither arrives nor leaves.</summary>
+    public static IEasingFunction Move => new BezierEase(0.77, 0.00, 0.175, 1.00);
 
     /// <summary>The standard "arrive" translate distance for entering content (opacity 0→1 + rise).</summary>
     public const double EnterRise = 10;
@@ -63,8 +54,8 @@ public sealed class BezierEase : EasingFunctionBase
     public BezierEase(double x1, double y1, double x2, double y2)
     {
         _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2;
-        // The bezier encodes the WHOLE curve (CSS semantics). EasingFunctionBase's default mode is
-        // EaseOut, which would MIRROR it (1 - f(1-t)); EaseIn is the raw passthrough to EaseInCore.
+        // The bezier encodes the WHOLE curve (CSS semantics); EasingMode.EaseIn is the raw
+        // passthrough to EaseInCore (the default EaseOut would mirror it).
         EasingMode = EasingMode.EaseIn;
     }
     protected override Freezable CreateInstanceCore() => new BezierEase(_x1, _y1, _x2, _y2);

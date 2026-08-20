@@ -7,26 +7,11 @@ namespace Toki.Transcription;
 public sealed record SpeakerSpan(int Speaker, float StartSec, float EndSec);
 
 /// <summary>
-/// Tells the remote participants apart.
-///
-/// Only <c>them.wav</c> ever needs this. The microphone is its own stream, so the person using Toki is
-/// already perfectly separated - better than general diarisation achieves - and that also gives us a
-/// free, correctly-labelled sample of their voice.
-///
-/// Two routes are implemented because they cost wildly different amounts:
-///
-///   <see cref="Full"/>       the textbook pipeline. A segmentation model sweeps the whole file in
-///                            1-second hops, an embedding is computed per hop, and those are clustered.
-///                            Thorough, and it can split two speakers inside one utterance.
-///
-///   <see cref="ByUtterance"/> the shortcut. Toki ALREADY knows when each utterance starts and ends,
-///                            from the ASR timestamps - information the textbook pipeline throws away
-///                            and recomputes. So: one embedding per utterance, then cluster those. For
-///                            an hour that is a few hundred embeddings instead of a few thousand, and
-///                            no segmentation pass at all.
-///
-/// `--diartest` measures both on real audio, because which one to ship is a question about wall-clock
-/// on the owner's actual machine, not about which is more elegant.
+/// Tells the remote participants apart. Only them.wav ever needs this: the mic is its own stream,
+/// so the Toki user is already perfectly separated. Two routes with very different costs:
+/// <see cref="Full"/> is the textbook pipeline (segmentation sweep + per-hop embeddings +
+/// clustering); <see cref="ByUtterance"/> reuses the ASR timestamps - one embedding per utterance,
+/// no segmentation pass. `--diartest` measures both on real audio.
 /// </summary>
 public static class SpeakerDiariser
 {
@@ -104,17 +89,11 @@ public static class SpeakerDiariser
     // ── clustering ──
 
     /// <summary>
-    /// Agglomerative clustering on cosine distance, over a few hundred utterances rather than a few
-    /// thousand hops - which is what makes the memory and the time collapse.
-    ///
-    /// AVERAGE linkage, not complete. sherpa uses complete internally and it over-splits badly on real
-    /// meeting audio: complete linkage asks that EVERY pair in a cluster be close, so a single bad pair
-    /// (one moment of network drop, one sentence said further from the mic) permanently splits a person
-    /// in two. Measured on a real 8-minute call with ONE remote speaker, complete linkage produced 5
-    /// clusters at the default threshold and never fewer than 2 even at 0.95. Average linkage asks that
-    /// a cluster be close ON THE WHOLE, which is the right question for "is this the same voice".
+    /// Agglomerative clustering on cosine distance. AVERAGE linkage, not complete: complete asks
+    /// that EVERY pair be close, so one bad pair (network drop, off-mic sentence) permanently
+    /// splits a person in two; average asks that a cluster be close ON THE WHOLE.
     /// </summary>
-    static int[] Cluster(List<float[]> vectors, int expected, double threshold)
+    internal static int[] Cluster(List<float[]> vectors, int expected, double threshold)
     {
         var n = vectors.Count;
         var labels = new int[n];
@@ -140,8 +119,10 @@ public static class SpeakerDiariser
                 }
 
             if (bestA < 0) break;
-            // Stop on the count when we know it, else on the distance threshold.
-            if (expected > 0 ? active.Count <= expected : bestD > threshold) break;
+            // Two voices closer than the threshold ALWAYS merge - the attendee count may never
+            // force a split the audio does not support. The count only works the other way:
+            // merging may continue a little past the threshold, never stop early at the count.
+            if (bestD > threshold && (expected <= 0 || active.Count <= expected)) break;
 
             members[bestA].AddRange(members[bestB]);
             members.Remove(bestB);
@@ -158,27 +139,15 @@ public static class SpeakerDiariser
     }
 
     /// <summary>
-    /// Cosine distance above which two voices are treated as different people, used only when the
-    /// attendee count is unknown. Model-dependent and the single most important number here.
-    ///
-    /// Measured on two real meetings, average linkage:
-    ///
-    ///     threshold   a 1:1 (truth 1)   an 11-person call (truth ~10)
-    ///        0.55            5                      7
-    ///        0.65            4                      5
-    ///        0.80            1  correct             2
-    ///
-    /// No value serves both, so the choice is which way to be wrong. **Under-splitting is today's
-    /// behaviour** - several people share one label, which reads as coarse. **Over-splitting invents
-    /// colleagues who were never in the room**, puts words in their mouths, and is the kind of wrong
-    /// that destroys trust in the whole transcript. 0.55 did exactly that on first contact with a real
-    /// recording: one person reading announcements came back as SIX speakers. So the default leans
-    /// conservative, and the real answer comes from the attendee count when a calendar supplies one.
+    /// Cosine distance above which two voices are different people, used only when the attendee
+    /// count is unknown. Model-dependent and the single most important number here. Deliberately
+    /// conservative: under-splitting reads as coarse, but over-splitting invents colleagues who
+    /// were never in the room. The attendee count is the real answer when a calendar supplies one.
     /// </summary>
     public const double Threshold = 0.80;
 
-    /// <summary>The exploratory value the sweep started from. Kept only so `--diartest` can reproduce
-    /// the table above; never used to label a real transcript.</summary>
+    /// <summary>The exploratory value the threshold sweep started from. Kept only so `--diartest`
+    /// can reproduce it; never used to label a real transcript.</summary>
     public const double ExploratoryThreshold = 0.55;
 
     static double Linkage(List<float[]> v, List<int> a, List<int> b)

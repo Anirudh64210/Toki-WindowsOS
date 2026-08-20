@@ -24,12 +24,8 @@ public sealed record CalEvent(
     string? Description = null)
 {
     /// <summary>
-    /// Which account this came from. Toki can hold Google and Outlook at the same time and shows one
-    /// merged agenda, so an edit or a delete has to be sent back to the account that owns the event -
-    /// and an id from one service means nothing to the other.
-    ///
-    /// Defaults to Google so every existing construction site, test fixture and render sample keeps
-    /// compiling and keeps meaning what it meant.
+    /// Which account this came from: edits/deletes must route to the owning account (an id from one
+    /// service means nothing to the other). Defaults to Google for existing construction sites.
     /// </summary>
     public CalendarProvider Provider { get; init; } = CalendarProvider.Google;
 

@@ -3,20 +3,16 @@ using NAudio.Wave;
 namespace Toki.Audio;
 
 /// <summary>
-/// Streaming PCM format converter: decodes capture buffers from one WAV format and
-/// re-encodes them in another (channel remix + linear-interpolation resample). Used
-/// when the default mic changes MID-recording and the replacement device records in
-/// a different format than the WAV writer was opened with - the alternative (a new
-/// file per device) breaks the one-WAV-per-stream transcription contract.
-///
-/// Linear interpolation is deliberate: ASR-grade fidelity at a few lines of code,
-/// stateful across buffers (carries the last frame + fractional position) so there
-/// are no seams between callbacks.
+/// Streaming PCM converter (channel remix + linear-interpolation resample), stateful across
+/// buffers so there are no seams between callbacks. Used when the default mic changes
+/// mid-recording: the one-WAV-per-stream transcription contract forbids a new file per device.
 /// </summary>
 public sealed class BufferConverter
 {
-    // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT - how a WaveFormatExtensible says "32-bit float".
+    // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT / _PCM - how a WaveFormatExtensible says what it holds.
     static readonly Guid IeeeFloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
+    internal static Guid IeeeFloatSubFormatId => IeeeFloatSubFormat;
+    internal static readonly Guid PcmSubFormatId = new("00000001-0000-0010-8000-00aa00389b71");
 
     readonly WaveFormat _from, _to;
     readonly double _step;          // source frames consumed per output frame
@@ -121,7 +117,10 @@ public sealed class BufferConverter
         var bytesPerSample = _to.BitsPerSample / 8;
         var frameBytes = bytesPerSample * _to.Channels;
         var buf = new byte[frames.Count * frameBytes];
-        var isFloat = _to.Encoding == WaveFormatEncoding.IeeeFloat;
+        // Must mirror the decode-side float test: Encoding==IeeeFloat alone misses
+        // Extensible-wrapped float and would write int PCM bytes under a float header.
+        var isFloat = _to.Encoding == WaveFormatEncoding.IeeeFloat
+                   || (_to is WaveFormatExtensible toExt && toExt.SubFormat == IeeeFloatSubFormat);
         var o = 0;
         foreach (var frame in frames)
         {

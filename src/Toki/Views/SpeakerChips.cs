@@ -8,17 +8,8 @@ using Toki.Transcription;
 namespace Toki.Views;
 
 /// <summary>
-/// The row of people above a transcript, each one renameable.
-///
-/// This is the correction half of speaker naming, and it is not optional garnish. Toki names voices by
-/// reading the conversation, which is right most of the time and wrong some of the time; a feature that
-/// is usually right and impossible to fix is worse than one that never guesses. So: one click, type the
-/// name, and it applies to every line that voice said - the same "assign once, applies across the whole
-/// transcript" affordance every notetaker that ships automatic naming provides.
-///
-/// A rename is a plain text update. There is no voice model to correct and nothing to remember for next
-/// time, which is precisely why it is instant, and why renaming someone here tells Toki nothing about
-/// how to recognise them tomorrow.
+/// The row of people above a transcript, each one renameable. A rename applies to every line that
+/// voice said, as a plain text update: there is no voice model to correct and nothing remembered.
 /// </summary>
 public static class SpeakerChips
 {
@@ -44,8 +35,7 @@ public static class SpeakerChips
     static FrameworkElement Chip(string name, Action<string, string> rename)
     {
         // A real Button, not a Border with a mouse handler: this sits inside a read-only RichTextBox,
-        // which swallows mouse-up on anything that is not a control. The template picker learned this
-        // the hard way and was silently dead for a while.
+        // which swallows mouse-up on anything that is not a control.
         var btn = new Button
         {
             Style = (Style)Application.Current.FindResource("PillButton"),
@@ -72,6 +62,7 @@ public static class SpeakerChips
         box.SetResourceReference(TextBoxBase.CaretBrushProperty, "Text");
 
         var field = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Child = box };
+        Theme.GlassSurface.CrispRim(field);   // whole device pixels, or a rounded rim reads as soft
         field.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
         field.SetResourceReference(Border.BorderBrushProperty, "Hairline");
 
@@ -86,6 +77,7 @@ public static class SpeakerChips
         row.Children.Add(save);
 
         var shell = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Child = row };
+        Theme.GlassSurface.CrispRim(shell);
         shell.SetResourceReference(Border.BackgroundProperty, "Surface");
         shell.SetResourceReference(Border.BorderBrushProperty, "Hairline");
 

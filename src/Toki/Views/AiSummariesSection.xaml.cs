@@ -13,10 +13,9 @@ using Toki.Transcription;
 namespace Toki.Views;
 
 /// <summary>
-/// The AI-summaries settings block - mode (On-device / Heuristic / My API key) plus the whole
-/// BYO-API-key flow (provider wheel, key, model wheel, Test connection). Moved WHOLE from the notch
-/// SettingsView (2026-08-04 consolidation) so it lives in exactly one place: the Library's Settings
-/// page. All logic is the original SettingsView logic - same one-path persistence via AppSettings.
+/// The AI-summaries settings block: mode (On-device / Heuristic / My API key) plus the BYO-API-key
+/// flow (provider, key, model, Test connection). Lives only on the Library's Settings page;
+/// persistence goes through AppSettings.
 /// </summary>
 public partial class AiSummariesSection : UserControl
 {
@@ -42,13 +41,15 @@ public partial class AiSummariesSection : UserControl
     public AiSummariesSection()
     {
         InitializeComponent();
+        // Rounded 1px rims, snapped to whole device pixels (see GlassSurface.Hairline).
+        Theme.GlassSurface.CrispRim(ApiBaseUrlRim);
+        Theme.GlassSurface.CrispRim(ApiKeyRim);
         ProviderHost.Content = _providerDrop;
         ModelHost.Content = _modelDrop;
         _providerDrop.Changed += (_, _) => OnProviderChanged();
         _modelDrop.Changed += (_, _) => OnModelChanged();
-        // No model fetch at construction - the LibraryWindow is pre-warmed off-screen at startup, and
-        // a hidden settings page must not fire network calls. The page's open (LoadLibrarySettings)
-        // does the full Refresh.
+        // No model fetch at construction: the LibraryWindow is pre-warmed off-screen at startup, and a
+        // hidden settings page must not fire network calls. Opening the page does the full Refresh.
         Refresh(refreshModels: false);
     }
 
@@ -213,9 +214,8 @@ public partial class AiSummariesSection : UserControl
 
     // ── segmented mode control ──
 
-    /// <summary>One segment of the mode selector. Sized for a window, not the notch: a real tap target
-    /// with side margins so the three never sit shoulder-to-shoulder, a hover fill on the inactive ones,
-    /// and the selected chip fading in (Motion.Micro) rather than snapping when the mode changes.</summary>
+    /// <summary>One segment of the mode selector: a real tap target with side margins, a hover fill
+    /// on inactive segments, and the selected chip fading in rather than snapping.</summary>
     Border SegButton(string label, NotesMode mode, NotesMode current)
     {
         var on = mode == current;
@@ -231,8 +231,9 @@ public partial class AiSummariesSection : UserControl
         var b = new Border
         {
             Background = on ? (Brush)FindResource("Chip") : Brushes.Transparent,
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(14, 11, 14, 11),   // was 0,7 - no side padding at all
+            // Concentric with the track it sits in: its r14 minus the 5px padding.
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(14, 11, 14, 11),
             Margin = new Thickness(2, 0, 2, 0),        // the gap that stops them touching
             Cursor = System.Windows.Input.Cursors.Hand, Child = text,
         };
@@ -245,8 +246,7 @@ public partial class AiSummariesSection : UserControl
         }
         else if (!App.Headless)
         {
-            // The control is rebuilt on every mode change, so "fade the selected chip in" is just an
-            // opacity ramp on the new one - reads as the selection moving, not the panel redrawing.
+            // The control is rebuilt on every mode change; the opacity ramp reads as the selection moving.
             b.Opacity = 0;
             b.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Micro))
             {

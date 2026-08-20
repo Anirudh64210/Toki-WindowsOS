@@ -14,8 +14,8 @@ public sealed class AppState
         [PillState.Collapsed]     = [PillState.Home, PillState.MeetingPrompt, PillState.Hidden, PillState.PrepCard],
         [PillState.MeetingPrompt] = [PillState.RecordingBar, PillState.Hidden],
         [PillState.RecordingBar]  = [PillState.RecordingOpen, PillState.Summarizing],
-        // RecordingOpen ⇄ PrepCard: mid-meeting you can pull up the prep card (and its scratchpad)
-        // from the recording page and come straight back - owner flow, 2026-08-05.
+        // RecordingOpen ⇄ PrepCard: mid-meeting the prep card (and its scratchpad) stays reachable
+        // from the recording page, and comes straight back.
         [PillState.RecordingOpen] = [PillState.RecordingBar, PillState.Summarizing, PillState.PrepCard],
         [PillState.Summarizing]   = [PillState.Notes, PillState.NoSpeech],
         [PillState.Notes]         = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Library],
@@ -27,8 +27,8 @@ public sealed class AppState
         [PillState.Calendar]      = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.Settings],
         [PillState.PrepCard]      = [PillState.RecordingBar, PillState.RecordingOpen, PillState.Hidden, PillState.Calendar, PillState.Home, PillState.Collapsed, PillState.Summarizing],
         [PillState.ManualNote]    = [PillState.Hidden, PillState.Home, PillState.Library],
-        // Push-to-talk Ask (entered by force from anywhere). Without this entry, ANY CanGo/TryGo call
-        // while the notch is up threw KeyNotFound - e.g. a "start taking notes" command mid-Ask.
+        // Push-to-talk Ask is entered by force from anywhere; without this entry, any CanGo/TryGo
+        // call made mid-Ask throws KeyNotFound.
         [PillState.Ask]           = [PillState.Hidden, PillState.Home, PillState.Collapsed, PillState.RecordingBar],
         // First-run onboarding (forced in at startup). Finishing it lands in Home (the greeting then
         // proves the name they just gave), or the user can dismiss to the resting peek.
@@ -60,9 +60,15 @@ public sealed class AppState
         var old = Current;
         var wasRecording = old is PillState.RecordingBar or PillState.RecordingOpen;
         var isRecording = next is PillState.RecordingBar or PillState.RecordingOpen;
-        if (isRecording && !wasRecording)
+        // Set the clock only when no recording is in flight: the session keeps recording while the
+        // pill detours through Ask or the prep card, so re-entering a recording state must not
+        // restart it. The clock is cleared by RecordingEnded(), never by a transition.
+        if (isRecording && !wasRecording && RecordingStartedAt is null)
             RecordingStartedAt = DateTimeOffset.UtcNow;
         Current = next;
         StateChanged?.Invoke(old, next);
     }
+
+    /// <summary>The stop flow read its wall-clock; the next recording starts a fresh one.</summary>
+    public void RecordingEnded() => RecordingStartedAt = null;
 }

@@ -5,19 +5,12 @@ using NAudio.Wave.SampleProviders;
 namespace Toki.Transcription;
 
 /// <summary>
-/// INCREMENTAL (live) transcription. Instead of one whole-file Parakeet pass after Stop - which
-/// took ~10 minutes on a 25-minute meeting - this transcribes DURING the meeting: each capture
-/// stream is tapped, resampled to 16 kHz mono, and a single background worker decodes it in
-/// ~15-second windows (cut at quiet points, so never mid-word) as the audio arrives. By the time
-/// you hit Stop, almost everything is already transcribed; only the final short remainder is left.
-///
-/// One recognizer, serialized through <see cref="TranscriptionService.DecodeLive"/> (concurrent
-/// sherpa-onnx decode corrupts output). The worker runs BelowNormal so the live meeting never
-/// stutters. Same slice-decode path as the whole-file decode, so transcript quality is identical.
-///
-/// Fail-safe: this never touches the WASAPI capture logic (it only observes the buffers already
-/// being written to WAV), and if it produces nothing the caller falls back to the whole-file pass -
-/// so a meeting is never lost.
+/// INCREMENTAL (live) transcription: capture streams are tapped, resampled to 16 kHz mono, and a
+/// single BelowNormal worker decodes ~15-second windows cut at quiet points (never mid-word), so
+/// Stop only has the final short remainder left. One recognizer, serialized through
+/// <see cref="TranscriptionService.DecodeLive"/> (concurrent sherpa-onnx decode corrupts output).
+/// Fail-safe: only observes buffers already written to WAV; if it produces nothing the caller
+/// falls back to the whole-file pass - a meeting is never lost.
 /// </summary>
 public sealed class LiveTranscriber
 {
@@ -108,25 +101,39 @@ public sealed class LiveTranscriber
         {
             var did = false;
             // Guarded: an escaping exception on a raw background thread would take down the
-            // whole PROCESS mid-meeting. Log, breathe, keep transcribing - the whole-file
-            // pass at stop still covers anything a bad window missed.
+            // whole PROCESS mid-meeting. Log and keep transcribing.
             try
             {
-                foreach (var pipe in _pipes)
+                // ROUND-ROBIN: one window per stream per pass, never a stream's whole backlog -
+                // a long catch-up on one stream lets the other's buffer overflow, and overflowed
+                // audio is words the user said, gone.
+                bool any;
+                do
                 {
-                    lock (_decodeGate)
+                    any = false;
+                    foreach (var pipe in _pipes)
                     {
-                        pipe.Drain();
-                        // Decode as many full windows as have piled up (with lookahead room for the quiet-cut search).
-                        while (!_stop && pipe.Accum.Count >= (WinSec + 2 * SearchSec) * Rate)
-                            did |= DecodeWindow(pipe, finalFlush: false);
+                        lock (_decodeGate)
+                        {
+                            pipe.Drain();
+                            if (!_stop && pipe.Accum.Count >= (WinSec + 2 * SearchSec) * Rate)
+                            {
+                                did |= DecodeWindow(pipe, finalFlush: false);
+                                any = true;
+                            }
+                        }
                     }
-                }
+                } while (any && !_stop);
             }
             catch (Exception ex) { App.Log($"live worker error (recovered): {ex.Message}"); }
             if (!did) Thread.Sleep(PollMs);
         }
     }
+
+    /// <summary>Seconds of audio whose live decode FAILED (threw), summed across streams. The
+    /// caller compares this against a tolerance at stop: a transcript with a hole in it is worse
+    /// than paying for the whole-file pass.</summary>
+    public double LostSeconds { get; private set; }
 
     bool DecodeWindow(StreamPipe pipe, bool finalFlush)
     {
@@ -144,10 +151,17 @@ public sealed class LiveTranscriber
         }
 
         var segs = _service.DecodeLive(arr, 0, cut, pipe.DecodedSec, pipe.Speaker);
+        if (segs is null)
+        {
+            // The decode THREW. The window must still leave the buffer (never retry a poison
+            // input forever), but count the loss so Stop can judge the live transcript.
+            LostSeconds += cut / (double)Rate;
+            App.Log($"live window lost ({pipe.Speaker}, {cut / (double)Rate:F0}s) - {LostSeconds:F0}s lost total");
+        }
         pipe.DecodedSec += cut / (double)Rate;
         pipe.Accum.RemoveRange(0, cut);
 
-        if (segs.Count > 0)
+        if (segs is { Count: > 0 })
         {
             lock (_lock) (pipe.Speaker == Speaker.You ? _you : _them).AddRange(segs);
             foreach (var s in segs) { try { SegmentFinalized?.Invoke(s); } catch { } }

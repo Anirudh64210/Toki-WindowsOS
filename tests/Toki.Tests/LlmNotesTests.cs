@@ -93,6 +93,62 @@ public class LlmNotesTests
     }
 
     [Fact]
+    public async Task BulletedHeadersStillParse()
+    {
+        // MUTATION PROBE (meeting 101, 2026-08-19): the model wrote the whole note as one bullet
+        // list, headers included ("- SUMMARY: ..."). The strict parser matched no header, the
+        // answer was dropped, and a real meeting shipped the heuristic floor. The bullet-header
+        // rescue must recover exactly this shape.
+        var llm = new FakeLlm(user =>
+            user.Contains("Write a title") ? "Grant Email Review"
+            : user.Contains("KEY POINTS") ?
+                "- TITLE: Grant Email Review\n"
+                + "- SUMMARY: The team drafted the Cloudbreak grant email and cleaned the ops tracker.\n"
+                + "- KEY POINTS:\n"
+                + "- Ask for ten thousand dollars, pending research\n"
+                + "- ACTION ITEMS:\n"
+                + "- Update column A | owner: Kritika | due: tonight"
+            : "NONE");
+
+        var transcript = new TranscriptSegment[]
+        {
+            new(Speaker.Them, 0, 3000, "Kritika, update column A in the ops tracker tonight."),
+            new(Speaker.You, 3100, 6000, "The Cloudbreak email should ask for ten thousand dollars."),
+        };
+        var notes = await new LlmNoteWriter(llm).WriteAsync(transcript);
+        Assert.True(notes.FromModel);
+        Assert.Equal("Grant Email Review", notes.Title);
+        Assert.Contains("Cloudbreak", notes.Tldr);
+        Assert.Contains(notes.EffectiveSections().SelectMany(s => s.Bullets), b => b.Contains("ten thousand"));
+        Assert.Single(notes.Actions, a => a.Text.Contains("column A") && a.Owner == "Kritika" && a.Due == "tonight");
+    }
+
+    [Fact]
+    public async Task UnparseableFinalPassIsRetriedOnce()
+    {
+        // MUTATION PROBE: fluent but headerless prose from the final pass is a formatting miss,
+        // not a verdict on the meeting. It must trigger exactly one retry (sampling makes the
+        // second answer a different one), not a silent heuristic fallback.
+        var finalCalls = 0;
+        var llm = new FakeLlm(user =>
+        {
+            if (user.Contains("Write a title")) return "Ship Thursday";
+            if (!user.Contains("KEY POINTS")) return "NONE";
+            finalCalls++;
+            return finalCalls == 1
+                ? "The meeting covered shipping plans and analytics in general terms, with no clear "
+                  + "structure to report beyond that. People talked at length about timelines and "
+                  + "what remains before launch."
+                : "SUMMARY\nThe team agreed to ship Thursday.\n\nKEY POINTS\n- Ship on Thursday";
+        });
+
+        var notes = await new LlmNoteWriter(llm).WriteAsync(Transcript);
+        Assert.Equal(2, finalCalls);
+        Assert.True(notes.FromModel);
+        Assert.Contains("Thursday", notes.Tldr);
+    }
+
+    [Fact]
     public async Task DegenerateOutputFallsBackToHeuristic()
     {
         // Model spews CJK for every pass → each section falls back to heuristic.

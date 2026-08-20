@@ -21,13 +21,9 @@ public sealed class ModelManager
         RequiredFiles: ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]);
 
     /// <summary>
-    /// Speaker segmentation (pyannote 3.0, MIT, (c) 2022 CNRS). Finds WHO is talking WHEN, before any
-    /// identity is attached.
-    ///
-    /// The exact filename matters more than usual here: the same GitHub release also contains
-    /// `sherpa-onnx-reverb-diarization-v1/v2`, which are under Rev's **non-production** licence and
-    /// cannot ship in a paid app. They are one line away in any copy-paste, so the safe name is pinned
-    /// here and nowhere else.
+    /// Speaker segmentation (pyannote 3.0, MIT, (c) 2022 CNRS): WHO is talking WHEN. The exact
+    /// filename is pinned here and nowhere else: the same GitHub release also carries
+    /// sherpa-onnx-reverb-diarization-v1/v2 under Rev's NON-PRODUCTION licence - cannot ship.
     /// </summary>
     public static readonly ModelSpec Segmentation = new(
         Id: "pyannote-segmentation-3-0",
@@ -69,6 +65,18 @@ public sealed class ModelManager
     public static bool EmbedInstalled => File.Exists(EmbedPath);
     public static Task EnsureEmbedAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
         EnsureFileAsync(EmbedUrl, EmbedPath, progress, ct);
+
+    /// <summary>
+    /// Voice activity detection: Silero VAD v5 (MIT), ~2MB. Gates ASR so Parakeet is never fed
+    /// near-silence (it returns confident nonsense, not nothing). Runs through the sherpa-onnx
+    /// runtime already shipping here - no second ONNX runtime (Microsoft.ML.OnnxRuntime conflicts).
+    /// </summary>
+    public const string VadUrl =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx";
+    public static string VadPath => Path.Combine(ModelsRoot, "silero_vad.onnx");
+    public static bool VadInstalled => File.Exists(VadPath);
+    public static Task EnsureVadAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(VadUrl, VadPath, progress, ct);
 
     /// <summary>Absolute path to a file inside an installed model (e.g. the encoder).</summary>
     public static string PathTo(ModelSpec spec, string file) =>

@@ -1,0 +1,18 @@
+# Reference for docs/wer-eval.md - what the script SAYS, written the way a clean transcript
+# reads (digits for dates, times, years and percentages, because the readability pass converts
+# spoken numbers to digits before scoring).
+#names: Priya, Craig, Abhishek, Sita, Deepika
+
+Hi everyone, thanks for joining. Quick agenda before we start: the migration status, the budget,
+and then handover planning. Priya, can you go first?
+
+Sure. The database migration finished on August 21st at 3:30 pm, about two days ahead of
+schedule. We validated 50% of the tables on Friday and the rest over the weekend. Craig found
+one issue with the invoice table, but Abhishek patched it the same evening.
+
+Great. On budget: we are at 70% of the quarterly allocation, which leaves some room for the
+vendor renewal in September. The contract runs to March 2027, so nothing is urgent, but let's
+decide before the 15th of October.
+
+Last thing. Sita is taking over the reporting dashboard from next Monday. Deepika will shadow
+her for the first week. Any questions? No? Alright, I will send the notes today. Thanks all.

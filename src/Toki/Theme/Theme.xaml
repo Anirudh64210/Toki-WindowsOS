@@ -16,10 +16,9 @@
     <SolidColorBrush x:Key="Chip" Color="#2C2C2E"/>
     <SolidColorBrush x:Key="Text" Color="#F5F5F4"/>
     <SolidColorBrush x:Key="TextSoft" Color="#DDDDDB"/>
-    <SolidColorBrush x:Key="TextDim" Color="#8E8E8E"/>
+    <SolidColorBrush x:Key="TextDim" Color="#A8A8AD"/>
     <SolidColorBrush x:Key="Ink" Color="#141414"/>
     <SolidColorBrush x:Key="Notch" Color="#000000"/>
-    <SolidColorBrush x:Key="NotchGlass" Color="#BF0F0F13"/>  <!-- glassier: more of the desktop shows through -->
     <SolidColorBrush x:Key="NotchBorder" Color="#33000000"/>
     <SolidColorBrush x:Key="WhiteBtn" Color="#F2F2F2"/>
     <SolidColorBrush x:Key="CtaText" Color="#141414"/>
@@ -50,27 +49,67 @@
          frost, a 10% white rim, radius 24. Text is WHITE AT AN OPACITY (90/50/25), never a grey hex -
          that is what keeps it legible over any glass tint. The opaque values approximate the glass
          reading for when acrylic is off/unavailable. Keep in step with ThemeManager.Palette. -->
-    <SolidColorBrush x:Key="Glass" Color="#80211E1E"/>          <!-- card fill over acrylic -->
+    <SolidColorBrush x:Key="Glass" Color="#D9211E1E"/>          <!-- card fill; 85% so contrast never depends on the wallpaper -->
     <SolidColorBrush x:Key="GlassOpaque" Color="#2B2828"/>      <!-- same reading, no acrylic -->
     <SolidColorBrush x:Key="GlassCapsule" Color="#66211E1E"/>   <!-- inner rows/capsules, r12 -->
     <SolidColorBrush x:Key="GlassCapsuleOpaque" Color="#252222"/>
     <SolidColorBrush x:Key="GlassBorder" Color="#1AFFFFFF"/>    <!-- the 1px rim -->
+    <!-- Glass ON glass: a control resting on the card is a STEP OF LIGHT above it, never the card's
+         own tint again. Hover BRIGHTENS (Control Center lightens under the pointer); press brightens
+         further. In the light theme these invert to low-alpha blacks, because more white on a
+         near-white capsule is a change nobody can see. Source of truth: ThemeManager.Palette.
+
+         WHICH HOVER BRUSH A CONTROL TAKES (2026-08-18). Every interactive style now fades a sibling
+         overlay in and out, but they do not all fade the same brush, and that is deliberate:
+           · GlassFillHover/Press - only for a control that is its own FREE-FLOATING GLASS CARD over
+             the desktop (GlassPill, RoundPuck). It is a small step because the thing it lights is
+             already a plate over a wallpaper that could be any brightness.
+           · HoverOverlay/PressOverlay - for every control resting ON a surface (the pills, chips,
+             rows, icon buttons, checks, the switch). 22% white is not a taste: it is the measured
+             value from the day a 12% wash on the dark notch (1.15:1) was mistaken for a broken
+             input layer. Do not quietly lower it to match the glass tokens. -->
+    <SolidColorBrush x:Key="GlassFill" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="GlassFillHover" Color="#21FFFFFF"/>
+    <SolidColorBrush x:Key="GlassFillPress" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="GlassRim" Color="#17FFFFFF"/>
+    <!-- The three rings of a floating capsule's soft shadow (widest and faintest first). Stacked
+         translucent shapes rather than a DropShadowEffect: these pills live inside the notch's
+         scale-animated content host, and an Effect in an animated subtree renders it in software on
+         every frame (motion skill §1.3). -->
+    <SolidColorBrush x:Key="Shadow1" Color="#0D000000"/>
+    <SolidColorBrush x:Key="Shadow2" Color="#12000000"/>
+    <SolidColorBrush x:Key="Shadow3" Color="#18000000"/>
+    <SolidColorBrush x:Key="ShimmerTrack" Color="#14FFFFFF"/>   <!-- the loader sliver's track -->
+    <SolidColorBrush x:Key="SidebarButton" Color="#3C3837"/>   <!-- a control resting on the sidebar card -->
+    <SolidColorBrush x:Key="RowFill" Color="#14FFFFFF"/>        <!-- Library list row, at rest -->
+    <SolidColorBrush x:Key="RowFillHover" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="MascotBubble" Color="#D9F4F7FB"/>   <!-- the disc Toki floats in -->
+    <SolidColorBrush x:Key="MascotBubbleRim" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="TextHi" Color="#E6FFFFFF"/>         <!-- white 90% -->
-    <SolidColorBrush x:Key="TextMid" Color="#80FFFFFF"/>        <!-- white 50% -->
-    <SolidColorBrush x:Key="TextLow" Color="#40FFFFFF"/>        <!-- white 25% -->
+    <SolidColorBrush x:Key="TextMid" Color="#A6FFFFFF"/>        <!-- white 65% -->
+    <SolidColorBrush x:Key="TextLow" Color="#73FFFFFF"/>        <!-- white 45% -->
     <SolidColorBrush x:Key="AccentAmber" Color="#F5A05C"/>      <!-- event accent line / "n open" -->
     <SolidColorBrush x:Key="AccentTeal" Color="#32C7D3"/>       <!-- event accent line / actions -->
     <SolidColorBrush x:Key="JoinPill" Color="#E6FFFFFF"/>       <!-- white pill, black label -->
     <SolidColorBrush x:Key="JoinPillText" Color="#E6000000"/>
-    <SolidColorBrush x:Key="StopRed" Color="#FF2D55"/>          <!-- Stop & summarize -->
+    <!-- Stop, and nothing else. Apple's system red, which is the clean red the owner asked for
+         (2026-08-19). The token here used to hold Apple's systemPink, which read as magenta beside
+         the coral CTA, and nothing consumed it. -->
+    <SolidColorBrush x:Key="StopRed" Color="#FF453A"/>
 
-    <!-- Accents that stay constant across themes (Coral CTA, Toki pink, purple). -->
+    <!-- Coral CTA, Toki pink, purple. These were documented as "constant across themes" and had no
+         light values at all, which meant pastels drawn for a near-black card were being painted onto
+         a near-white one: Pink measured 1.66:1 on a light chip. They are theme-swapped now, in
+         ThemeManager.Palette - anything painted as TEXT needs both ends of that table. -->
     <SolidColorBrush x:Key="Coral" Color="#FF6F61"/>
     <SolidColorBrush x:Key="Pink" Color="#F09CC7"/>
     <SolidColorBrush x:Key="Purple" Color="#C08AF0"/>
-    <!-- Destructive action (Delete). A clean, professional crimson (Radix red 9) - reads as a
-         serious action, not the loud orange-coral it was. Subtle tint behind it. Constant across themes. -->
-    <SolidColorBrush x:Key="Danger" Color="#E5484D"/>
+    <!-- Destructive action (Delete). Raised from #E5484D, which measured 3.56:1 as text on the dark
+         card - under the 4.5 bar. It is only ever used as a LABEL, never as a fill. -->
+    <SolidColorBrush x:Key="Danger" Color="#FF6B6B"/>
+    <!-- The label on a Coral fill. Dark theme: coral is a light salmon, so the label is near-black
+         (white on it measured 2.73:1). Light theme: coral is a deep red, so the label is white. -->
+    <SolidColorBrush x:Key="CoralText" Color="#24100D"/>
     <SolidColorBrush x:Key="DangerTint" Color="#1AE5484D"/>
 
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
@@ -102,33 +141,63 @@
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="13"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                        <!-- A separate OVERLAY layer carries the hover, because the fill alone can't.
-                             Plenty of buttons here are deliberately Background="Transparent" (Later,
-                             Cancel, Disconnect, "Library ›"), and dimming the opacity of something
-                             transparent is invisible - so those buttons had no hover at all and read as
-                             bare text you had to aim at. The overlay draws the rounded box exactly where
-                             the button can be clicked. -->
-                        <Border x:Name="Hl" CornerRadius="13" Background="Transparent"
-                                Padding="{TemplateBinding Padding}">
-                            <!-- Centred on the CAP HEIGHT, not on the line box. WPF centres the line box,
-                                 which reserves descender space the letters do not use, so a label centred
-                                 by layout sits visibly low. OpticalCenter reads the real font metrics and
-                                 nudges by the exact amount, scaled to the font size - the previous fixed
-                                 fixed 1px nudge was right at one size and wrong everywhere else
-                                 (measured: every pill label still sat 1.7px low). The hittest self-test
-                                 fails above 1.5px. -->
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              theme:OpticalCenter.Enabled="True"/>
-                        </Border>
+                        <Grid>
+                            <!-- A separate OVERLAY layer carries the hover, because the fill alone can't.
+                                 Plenty of buttons here are deliberately Background="Transparent" (Later,
+                                 Cancel, Disconnect, "Library ›"), and dimming the opacity of something
+                                 transparent is invisible - so those buttons had no hover at all and read as
+                                 bare text you had to aim at. The overlay draws the rounded box exactly where
+                                 the button can be clicked.
+                                 It is a SIBLING of the content, not its parent, and it FADES (130ms in,
+                                 90ms out - motion skill §2/§3: hover is a real fill change, and exits run
+                                 at ~70% of enters). As the content's parent it could not fade at all
+                                 without taking the label with it, which is why this used to be an instant
+                                 swap plus an opacity dim on the whole button - and that dim is what greyed
+                                 a translucent fill instead of brightening it. -->
+                            <Border x:Name="Hl" CornerRadius="13" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <Border Padding="{TemplateBinding Padding}">
+                                <!-- Centred on the CAP HEIGHT, not on the line box. WPF centres the line box,
+                                     which reserves descender space the letters do not use, so a label centred
+                                     by layout sits visibly low. OpticalCenter reads the real font metrics and
+                                     nudges by the exact amount, scaled to the font size - the previous fixed
+                                     fixed 1px nudge was right at one size and wrong everywhere else
+                                     (measured: every pill label still sat 1.7px low). The hittest self-test
+                                     fails above 1.5px. -->
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  theme:OpticalCenter.Enabled="True"/>
+                            </Border>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource HoverOverlay}"/>
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
+                            <!-- The one place an opacity change survives: a momentary press dip. It is what
+                                 gives the opaque CTAs (the white "Open Library", the coral record button) a
+                                 press cue that a white wash on a near-white fill cannot. -->
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.94"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -165,13 +234,292 @@
     </Style>
 
     <Style x:Key="CoralButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
-        <Setter Property="Background" Value="{StaticResource Coral}"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="{DynamicResource Coral}"/>
+        <Setter Property="Foreground" Value="{DynamicResource CoralText}"/>
     </Style>
 
     <Style x:Key="WhiteButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
         <Setter Property="Background" Value="{DynamicResource WhiteBtn}"/>
         <Setter Property="Foreground" Value="{DynamicResource CtaText}"/>
+    </Style>
+
+    <!-- ═══ The compact notch pills (redesign, the six "Menu Bar" frames) ═══
+         These states are NOT drawn on the big glass card - each one IS its own free-floating
+         capsule over the desktop. So each pill is a MINI CARD and carries the card's whole
+         material: the plate gradient (lighter at the top), the gradient rim (brightest at the top),
+         and a soft shadow underneath.
+
+         THE SHADOW IS THREE STACKED TRANSLUCENT SHAPES, NOT AN EFFECT (2026-08-18). The comment
+         that used to sit here claimed a DropShadowEffect was "safe because these pills do not
+         animate their own subtree" - and then no shadow was ever drawn at all, so the claim was
+         never tested. It is also wrong twice over: the pill compresses on press (a ScaleTransform),
+         and the whole view lives inside the notch's Host, which scale-animates on every state
+         morph. An Effect in either subtree renders it in SOFTWARE, every frame (motion skill §1.3).
+         Rings instead: widest and faintest at the back, offset downward, opacity rising as they
+         tighten (skill §5). They are Rectangles rather than Borders on purpose: the hittest self-test measures
+         label centring against the largest BORDER that paints a fill, and a shadow ring is not the
+         button's visible box. -->
+    <Style x:Key="GlassPill" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource TextHi}"/>
+        <Setter Property="Background" Value="{DynamicResource CardPlate}"/>
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Padding" Value="12,0"/>
+        <Setter Property="MinHeight" Value="40"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Rectangle RadiusX="21" RadiusY="21" Margin="-3,2,-3,-4" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
+                        <Rectangle RadiusX="21" RadiusY="21" Margin="-2,2,-2,-3" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
+                        <Rectangle RadiusX="21" RadiusY="21" Margin="-1,2,-1,-2" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="24"
+                            BorderBrush="{DynamicResource CardRim}" BorderThickness="1"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <Grid>
+                            <!-- Hover is a real fill change that BRIGHTENS, faded in over 130ms - not an
+                                 opacity dim, which greys a translucent plate instead of lighting it. -->
+                            <Border x:Name="Hl" CornerRadius="23" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource GlassFillHover}"/>
+                            <Border Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  theme:OpticalCenter.Enabled="True"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource GlassFillPress}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="0.97" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="0.97" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The 24px round control on the recording bar (stop), and the 20px close puck. The whole
+         disc is the hit target, not the glyph - a clickable thing is a Button, and the box IS
+         the button. Icons compress harder than pills (0.94) per the motion rules. -->
+    <Style x:Key="RoundPuck" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource GlassCapsule}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <!-- The same three-ring soft shadow as GlassPill, as ELLIPSES (a Shape, so the
+                             hit-target harness never mistakes a shadow for the button's visible box). -->
+                        <Ellipse Margin="-2,1,-2,-3" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
+                        <Ellipse Margin="-1,1,-1,-2" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
+                        <Ellipse Margin="0,1,0,-1" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="100"
+                                BorderBrush="{DynamicResource GlassRim}" BorderThickness="1"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <!-- Brightens on hover (130ms), brighter still on press - a fill change, never a dim. -->
+                        <Border x:Name="Hl" CornerRadius="100" Opacity="0" IsHitTestVisible="False"
+                                Background="{DynamicResource GlassFillHover}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource GlassFillPress}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="0.94" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="0.94" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The 20px round chip an evidence link's play control sits in, INSIDE a note's document.
+         Same grammar as every other glass control (a 1px rim, a hover overlay that FADES in at 130ms
+         and out at 90ms, a press that compresses the box) rather than the instant background swap it
+         used to do, which was the one control in a note that did not feel like the rest of Toki.
+         It is small on purpose: it is an aside beside a sentence, not an action bar. -->
+    <Style x:Key="EvidenceChip" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource Chip}"/>
+        <Setter Property="Width" Value="20"/>
+        <Setter Property="Height" Value="20"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10"
+                                BorderBrush="{DynamicResource GlassRim}" BorderThickness="1"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Border x:Name="Hl" CornerRadius="10" Opacity="0" IsHitTestVisible="False"
+                                Background="{DynamicResource HoverOverlay}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="0.94" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="0.94" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="1" Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.4"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Filter/toggle chip: an outlined pill (glyph + label) that fills when active. The single
@@ -191,17 +539,50 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextBlock.LineStackingStrategy="BlockLineHeight" TextBlock.LineHeight="{TemplateBinding FontSize}"/>
+                        <Grid>
+                            <!-- Hover BRIGHTENS, as a fading sibling of the label (130ms in, 90ms out).
+                                 It used to be Opacity 0.82 on the whole button, which fades the LABEL as
+                                 well and greys a translucent chip instead of lighting it - and on a chip
+                                 whose fill is Transparent by default there was nothing for a dim to act
+                                 on at all, so the resting state had no hover to speak of.
+                                 The padding moved onto an inner Border so the overlay can cover the whole
+                                 box: a highlight inset by the padding is a lie about where the chip is. -->
+                            <Border x:Name="Hl" CornerRadius="9" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <Border Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  TextBlock.LineStackingStrategy="BlockLineHeight" TextBlock.LineHeight="{TemplateBinding FontSize}"/>
+                            </Border>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.82"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -253,17 +634,46 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="12"
-                            Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                            RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        <Grid>
+                            <!-- The row's fill is a fading OVERLAY, not a swap of Bd's own Background: an
+                                 instant swap pops, and the row's resting fill is Transparent so there was
+                                 nothing to transition between. Same grammar as every other control - a
+                                 brighten in 130ms, out in 90. -->
+                            <Border x:Name="Hl" CornerRadius="12" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <Border Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <!-- A full-width row compresses LESS than a pill (0.985) - big things are heavy. -->
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -288,6 +698,72 @@
                                         <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
                                                          To="1" Duration="0:0:0.2">
                                             <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.3"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ═══ BareButton: press feedback with NO box ═══
+         For the one case where the thing you click IS the artwork - Toki himself. He is a soft
+         drawn character with his own silhouette, and putting a grey rounded rectangle behind him
+         on hover draws a box around a shape that is deliberately not a box (owner, 2026-08-14, with
+         a screenshot: "the toki symbol when you hover over has a button background, that was not
+         there before and shouldnt be, its just the mascot").
+
+         It is still a Button, because it still has to press: the alternative is the Border-with-a-
+         mouse-handler that this project has shipped five times, which gives no feedback at all. So
+         the hover and press FILLS are dropped and only the compress is kept. The affordance is the
+         hand cursor plus Toki reacting when you poke him, which is a better one than a grey box. -->
+    <Style x:Key="BareButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <!-- Background stays the TemplateBinding (normally Transparent) in every state, so
+                         the whole box is hit-testable edge to edge without ever being visible. -->
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- Deeper than a row's 0.985: with no box to squash, the compress has to be
+                             visible on the artwork itself to register as a press at all. -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="0.93" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="0.93" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                         To="1" Duration="0:0:0.24">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.5"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         To="1" Duration="0:0:0.24">
+                                            <DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.5"/></DoubleAnimation.EasingFunction>
                                         </DoubleAnimation>
                                     </Storyboard>
                                 </BeginStoryboard>
@@ -341,7 +817,7 @@
 
     <!-- Rounded-square action button (stop) -->
     <Style x:Key="SquareButton" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource Coral}"/>
+        <Setter Property="Background" Value="{DynamicResource Coral}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="Template">
@@ -350,14 +826,43 @@
                     <Border x:Name="Bd" Background="{TemplateBinding Background}"
                             CornerRadius="9" Width="28" Height="28" RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Grid>
+                            <!-- Its fill is an OPAQUE CTA (coral), so the wave-1 exception applies: the
+                                 hover is still the fading brighten overlay, and the only opacity change
+                                 left is the momentary press dip - a white wash on a saturated fill is a
+                                 weak press cue on its own, and dimming on HOVER makes a live button look
+                                 disabled. -->
+                            <Border x:Name="Hl" CornerRadius="9" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.88"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Opacity" Value="0.75"/>
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.94"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -412,15 +917,42 @@
                          is invisible to hit testing, which leaves only the glyph itself clickable. -->
                     <Border x:Name="Bd" Background="Transparent" CornerRadius="10" RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Grid>
+                            <!-- Bd's own Background stays Transparent in every state - it is what makes
+                                 the whole 34px box hit-testable - and the highlight is this fading
+                                 sibling instead. Swapping Bd's fill meant the box appeared instantly
+                                 under the pointer, which is the one thing a glass surface never does. -->
+                            <Border x:Name="Hl" CornerRadius="10" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
                             <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource Text}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -612,17 +1144,44 @@
                             Background="Transparent" BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
                             SnapsToDevicePixels="True" RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform x:Name="BoxScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
-                        <Path x:Name="Tick" Width="12" Height="12" Stretch="None" Opacity="0"
-                              Stroke="#101012" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                              Data="M 1.5,6 L 4.6,9 L 10.5,2.6"/>
+                        <Grid>
+                            <!-- The wash is a fading sibling UNDER the tick, concentric with the box
+                                 (r5 minus its 1.5 rim). As a Background setter on Box it could not fade,
+                                 and the checked state's own Background setter won the tie - so hovering a
+                                 ticked box gave no feedback at all. -->
+                            <Border x:Name="Hl" CornerRadius="3.5" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <Path x:Name="Tick" Width="12" Height="12" Stretch="None" Opacity="0"
+                                  Stroke="#101012" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  Data="M 1.5,6 L 4.6,9 L 10.5,2.6"/>
+                        </Grid>
                     </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource CheckBorderHover}"/>
-                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Box" Property="Background" Value="{DynamicResource Green}"/>
@@ -666,17 +1225,42 @@
                                 Background="Transparent" BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
                                 SnapsToDevicePixels="True" RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform><ScaleTransform x:Name="BoxScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
-                            <Path x:Name="Tick" Width="12" Height="12" Stretch="None" Opacity="0"
-                                  Stroke="White" StrokeThickness="1.8"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                  Data="M 1.5,6 L 4.6,9 L 10.5,2.6"/>
+                            <Grid>
+                                <!-- Same fading wash as the square check, concentric with the ring
+                                     (r9 minus its 1.5 rim). -->
+                                <Border x:Name="Hl" CornerRadius="7.5" Opacity="0" IsHitTestVisible="False"
+                                        Background="{DynamicResource HoverOverlay}"/>
+                                <Path x:Name="Tick" Width="12" Height="12" Stretch="None" Opacity="0"
+                                      Stroke="White" StrokeThickness="1.8"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      Data="M 1.5,6 L 4.6,9 L 10.5,2.6"/>
+                            </Grid>
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource CheckBorderHover}"/>
-                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentTeal}"/>
@@ -717,11 +1301,42 @@
                     <Border x:Name="Track" Width="36" Height="21" CornerRadius="10.5"
                             VerticalAlignment="Center"
                             Background="{DynamicResource Chip}" SnapsToDevicePixels="True">
-                        <Border x:Name="Thumb" Width="15" Height="15" CornerRadius="7.5"
-                                Background="{DynamicResource WhiteBtn}" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                        <Grid>
+                            <!-- The switch was the one interactive control in the app with NO hover state:
+                                 nothing happened until you clicked it. Same grammar as everything else - a
+                                 fading brighten over the track, under the thumb, so the thumb keeps its
+                                 own contrast. (r10.5 = the track's own capsule radius; it has no rim to
+                                 sit inside.) -->
+                            <Border x:Name="Hl" CornerRadius="10.5" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <Border x:Name="Thumb" Width="15" Height="15" CornerRadius="7.5"
+                                    Background="{DynamicResource WhiteBtn}" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                        </Grid>
                     </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.13">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.09">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Track" Property="Background" Value="{DynamicResource Green}"/>
                             <Setter TargetName="Thumb" Property="Margin" Value="18,0,0,0"/>

@@ -5,21 +5,10 @@ using Toki.Transcription;
 namespace Toki.Llm;
 
 /// <summary>
-/// Works out who owns a to-do, once the speakers have been told apart. No model call.
-///
-/// The insight that makes this free: every to-do already has an **evidence link** - the transcript line
-/// it came from, computed by <see cref="Evidence"/>. The moment that line knows who spoke it, the owner
-/// of a to-do somebody volunteered for is sitting right there. No second LLM pass, no extra wait, and it
-/// is deterministic, which matters for something that puts a person's name against a commitment.
-///
-/// **The rule that keeps it honest: only a FIRST-PERSON commitment names its speaker.**
-///
-///     "I'll send the deck by Friday"      said by Devi  ->  owner: Devi     (they volunteered)
-///     "Craig will send the deck"          said by Devi  ->  owner: nobody   (Devi is reporting)
-///
-/// Getting that backwards would attribute other people's work to whoever happened to mention it, which is
-/// worse than an unowned to-do - the same asymmetry that governs the name corrections and the evidence
-/// links themselves. When the line is not a volunteer, this leaves the owner blank and says nothing.
+/// Infers to-do owners from the spoken transcript line behind each evidence link. No model call,
+/// deterministic. The rule: only a FIRST-PERSON commitment ("I'll send the deck") names its
+/// speaker as owner; a report ("Craig will send the deck") names nobody - misattributing work is
+/// worse than an unowned to-do, so when the line is not a volunteer the owner stays blank.
 /// </summary>
 public static class ActionOwners
 {

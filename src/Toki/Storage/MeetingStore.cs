@@ -74,10 +74,8 @@ public sealed partial class MeetingStore
         seed.CommandText = "UPDATE meetings SET sort_order = (SELECT COUNT(*) FROM meetings m2 WHERE m2.started_at > meetings.started_at) WHERE sort_order IS NULL;";
         seed.ExecuteNonQuery();
 
-        // Migration: who actually said each line, once the speakers have been told apart ("Priya",
-        // "Speaker 2"). Deliberately a SEPARATE column from `speaker`, which stays the stream the audio
-        // came from: the search prefixes and the people-count both key off that, and it is a fact rather
-        // than an inference. NULL = never diarised, and the transcript falls back to You/Them.
+        // speaker_tag = the resolved person; deliberately separate from `speaker`, which stays the
+        // audio stream (a fact, not an inference). NULL = never diarised, falls back to You/Them.
         if (!ColumnExists(c, "transcript", "speaker_tag"))
         {
             using var alterTag = c.CreateCommand();
@@ -85,11 +83,9 @@ public sealed partial class MeetingStore
             alterTag.ExecuteNonQuery();
         }
 
-        // Migration: template name + its flexible sections (JSON). Older rows have neither and fall
-        // back to the legacy decisions/questions tables via NoteSet.EffectiveSections.
-        // Migration: what Toki rewrote in this transcript (mis-heard names it unified, self-repairs it
-        // dropped), so the transcript can show the edit instead of quietly disagreeing with the room.
-        // NULL on every older row, which reads as "nothing was marked" and renders exactly as before.
+        // template/sections_json: older rows have neither and fall back to the legacy
+        // decisions/questions tables via NoteSet.EffectiveSections. corrections_json: what Toki
+        // rewrote in the transcript; NULL on older rows reads as "nothing was marked".
         foreach (var col in new[] { "template", "sections_json", "corrections_json" })
             if (!ColumnExists(c, "meetings", col))
             {
@@ -167,14 +163,10 @@ public sealed partial class MeetingStore
         catch (Exception ex) { App.Log($"FTS reindex {id}: {ex.Message}"); }
     }
 
-    /// <summary>Best-matching MEETING ids for a free-text query, ranked by BM25 (title weighted). Empty
-    /// if FTS is unavailable or nothing matches - the caller then falls back to keyword/recent.</summary>
-    /// <summary>The ONE FTS5 query builder. Parameter binding does NOT protect a MATCH argument - the
-    /// bound value is still parsed by FTS5's own grammar (AND/OR/NOT/NEAR/quotes/column filters), so a
-    /// raw <c>"</c> or <c>*</c> could throw or alter the query. Safety comes from reducing every term to
-    /// alphanumerics and emitting a grammar-free prefix-OR. Returns "" when nothing usable remains (the
-    /// caller must then skip the MATCH entirely - an empty MATCH is a syntax error). Public + static so
-    /// it is the single, testable choke point for anything that reaches a MATCH clause.</summary>
+    /// <summary>The ONE FTS5 query builder - the single choke point for anything reaching a MATCH
+    /// clause. Parameter binding does not protect a MATCH argument (FTS5 parses the bound value), so
+    /// every term is reduced to alphanumerics and emitted as grammar-free prefix-OR. Returns "" when
+    /// nothing usable remains; the caller must then skip the MATCH (an empty MATCH is a syntax error).</summary>
     public static string ToFtsQuery(string? query)
     {
         var terms = (query ?? "")
@@ -210,12 +202,9 @@ public sealed partial class MeetingStore
         return ids;
     }
 
-    /// <summary>Meetings whose TITLE contains any of the given terms (case-insensitive substring),
-    /// newest first. The recall backstop for the Ask retrieval: on a small corpus a query term
-    /// appearing in a meeting's title is near-certain relevance (BM25F-style field priority), and it
-    /// must never be drowned by prefix-OR BM25 noise - the live "meeting regarding Amazon" miss.
-    /// Terms should already be content-filtered (no stop/ask words); this method additionally ignores
-    /// terms shorter than 3 chars so a fragment can't over-match.</summary>
+    /// <summary>Meetings whose title contains any given term (case-insensitive substring), newest
+    /// first. Recall backstop for Ask retrieval: a title hit is near-certain relevance and must not
+    /// drown in BM25 noise. Terms under 3 chars are ignored so a fragment can't over-match.</summary>
     public List<long> TitleMatchIds(IEnumerable<string> terms)
     {
         var ts = (terms ?? []).Where(t => !string.IsNullOrWhiteSpace(t) && t.Trim().Length > 2)
@@ -311,13 +300,8 @@ public sealed partial class MeetingStore
         return list;
     }
 
-    /// <summary>Every distinct action-item owner name across all meetings (done or not) - the closed
-    /// vocabulary the Ask person-filter resolves against ("what did Mac have as action items?"). A
-    /// query word only counts as a PERSON when it matches a name that actually exists in the data, so
-    /// the filter can't fire on an arbitrary word.</summary>
-    /// <summary>Every transcript line ever recorded, for building the name lexicon. Capped, because the
-    /// point is a frequency vote and the newest meetings carry it - not a full corpus scan on a machine
-    /// that may have thousands of them.</summary>
+    /// <summary>Recent transcript lines for building the name lexicon. Capped: the point is a
+    /// frequency vote carried by the newest meetings, not a full corpus scan.</summary>
     public List<string> TranscriptLines(int limit = 20000)
     {
         var list = new List<string>();
@@ -352,6 +336,8 @@ public sealed partial class MeetingStore
         return list;
     }
 
+    /// <summary>Every distinct action-item owner name - the closed vocabulary the Ask person-filter
+    /// resolves against, so a query word only counts as a person when the name exists in the data.</summary>
     public List<string> ActionOwners()
     {
         var list = new List<string>();
@@ -600,7 +586,10 @@ public sealed partial class MeetingStore
 
     public void UpdateTitleAndBody(long id, string title, string? body)
     {
+        // FTS reindex must share the transaction: a crash between UPDATE and reindex leaves search
+        // finding the old title forever (the startup self-heal only compares row counts).
         using var c = Open();
+        using var tx = c.BeginTransaction();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "UPDATE meetings SET title=$t, body=$b WHERE id=$id";
         cmd.Parameters.AddWithValue("$t", title);
@@ -608,11 +597,13 @@ public sealed partial class MeetingStore
         cmd.Parameters.AddWithValue("$id", id);
         cmd.ExecuteNonQuery();
         ReindexFts(c, id);
+        tx.Commit();
     }
 
     public void Delete(long id)
     {
         using var c = Open();
+        using var tx = c.BeginTransaction();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "DELETE FROM meetings WHERE id=$id";
         cmd.Parameters.AddWithValue("$id", id);
@@ -626,6 +617,7 @@ public sealed partial class MeetingStore
                 fdel.ExecuteNonQuery();
             }
             catch (Exception ex) { App.Log($"FTS delete {id}: {ex.Message}"); }
+        tx.Commit();
     }
 
     // ---- helpers ----
@@ -639,8 +631,7 @@ public sealed partial class MeetingStore
         else if (s.StartsWith("them:", StringComparison.OrdinalIgnoreCase)) { speaker = "Them"; s = s[5..].Trim(); }
         if (s.Length == 0) return ("", null, null);
 
-        // Escape LIKE wildcards so a literal % or _ in the search box matches itself
-        // (TitleMatchIds already does this - the two paths had diverged).
+        // Escape LIKE wildcards so a literal % or _ in the search box matches itself.
         s = s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
         var transcriptFilter = speaker is null
             ? "SELECT 1 FROM transcript t WHERE t.meeting_id=m.id AND t.text LIKE $term ESCAPE '\\'"
@@ -697,13 +688,8 @@ public sealed partial class MeetingStore
         return list;
     }
 
-    /// <summary>
-    /// Write the resolved speaker names onto a saved transcript, by position.
-    ///
-    /// Used twice: once when diarisation finishes in the background, and again every time the user
-    /// renames a speaker. Renaming is a plain text update - there is no voice model to retrain and
-    /// nothing to remember for next time, which is exactly why a rename is instant and free.
-    /// </summary>
+    /// <summary>Write the resolved speaker names onto a saved transcript, by position. Called when
+    /// diarisation finishes and on user rename; a rename is a plain text update, nothing to retrain.</summary>
     public void SetSpeakerTags(long meetingId, IReadOnlyList<string?> tagsInOrder)
     {
         try
@@ -725,12 +711,8 @@ public sealed partial class MeetingStore
     }
 
     /// <summary>
-    /// Replace a saved meeting's transcript and its record of what Toki rewrote.
-    ///
-    /// The re-clean pass ("Re-clean saved transcripts") is the only caller. It rewrites the TRANSCRIPT
-    /// and nothing else: the summary, the sections and the to-dos a person may have ticked, edited or
-    /// come to rely on are left exactly as they are. That is the owner's rule and it is the reason
-    /// re-cleaning is safe to offer - it can improve a transcript and cannot damage a note.
+    /// Replace a saved meeting's transcript and its record of what Toki rewrote. Rewrites the
+    /// TRANSCRIPT only: summary, sections and to-dos (which hold a person's edits) are never touched.
     /// </summary>
     public void ReplaceTranscript(long meetingId, IReadOnlyList<TranscriptSegment> segments,
         IReadOnlyList<TextFix> corrections)
@@ -795,6 +777,15 @@ public sealed partial class MeetingStore
             cmd.Parameters.AddWithValue("$from", from);
             cmd.Parameters.AddWithValue("$m", meetingId);
             cmd.ExecuteNonQuery();
+
+            // The to-dos carry the same labels ("Speaker 2 owns this"); renaming the voice and not
+            // the owner leaves the note pointing at a person who no longer exists in the transcript.
+            using var owners = c.CreateCommand();
+            owners.CommandText = "UPDATE action_items SET owner=$to WHERE meeting_id=$m AND owner=$from";
+            owners.Parameters.AddWithValue("$to", to.Trim());
+            owners.Parameters.AddWithValue("$from", from);
+            owners.Parameters.AddWithValue("$m", meetingId);
+            owners.ExecuteNonQuery();
         }
         catch (Exception ex) { App.Log($"rename speaker: {ex.Message}"); }
     }

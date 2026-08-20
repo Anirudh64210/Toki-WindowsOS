@@ -21,18 +21,10 @@ public enum NoteBlockKind
 public sealed record NoteBlock(NoteBlockKind Kind, string Text, bool Done = false);
 
 /// <summary>
-/// Markdown ⇄ note-block model for the hand-written note editor.
-///
-/// Markdown is the STORAGE FORMAT on purpose: Toki already mirrors every note as a real .md file in
-/// <c>%APPDATA%\Toki\Notes\</c>, so a hand-written note stays openable in Obsidian or any text editor
-/// instead of becoming a proprietary blob - that's the "all data local, and yours" promise, kept.
-/// It also gives us exactly the feature set the owner asked for and no more: sizes (#/##), checkboxes
-/// (- [ ]), lists, and blank-line spacing. There is deliberately NO font-family or colour syntax,
-/// because those aren't offered (owner, 2026-08-05: "nothing outside normal text… just size,
-/// templates, spacing, freedom").
-///
-/// This type is PURE - no WPF - so the round-trip is unit-testable. <see cref="Views.NoteEditor"/>
-/// turns these blocks into a FlowDocument and back.
+/// Markdown ⇄ note-block model for the hand-written note editor. Markdown is the storage format so
+/// notes stay plain .md files; the syntax is deliberately limited to #/##, checkboxes, lists, and
+/// blank lines. Pure (no WPF) so the round-trip is unit-testable; <see cref="Views.NoteEditor"/>
+/// maps blocks to a FlowDocument and back.
 /// </summary>
 public static class NoteMarkdown
 {
@@ -56,14 +48,8 @@ public static class NoteMarkdown
     }
 
     /// <summary>
-    /// Does this line START with one of Toki's markers, and if so which kind is it and what comes after?
-    ///
-    /// THE single definition of "this text looks like a list item / heading / tick box". Three callers
-    /// need to agree exactly: <see cref="Parse"/> (reading a file), <see cref="Write"/> (which strips a
-    /// marker the text carries so the Kind's own marker can never be written twice), and the editor
-    /// (which promotes "- " into a real bullet as you type). They used to disagree, and the result was
-    /// the reported bug: a line the user typed a dash in front of came back as "- - thing", growing a
-    /// marker every time the note was saved and reloaded.
+    /// THE single definition of a marker line. <see cref="Parse"/>, <see cref="Write"/>, and the
+    /// editor must agree exactly, or saved notes grow duplicate markers on every round-trip.
     /// </summary>
     public static bool TryMarker(string? line, out NoteBlockKind kind, out string rest, out bool done)
     {
@@ -100,10 +86,8 @@ public static class NoteMarkdown
 
             var text = (b.Text ?? "").Trim();
 
-            // A marked block carries its marker in its KIND, so the text must not carry one too. Strip
-            // exactly ONE - the precise inverse of the one Parse consumes - so writing and reading are
-            // a fixed point. Without this a bullet reading "- two" was written as "- - two" and grew
-            // another dash on every save ("bullets are created by themselves").
+            // The Kind carries the marker, so strip exactly one from the text (the precise inverse of
+            // what Parse consumes) to keep write/read a fixed point.
             if (b.Kind is not (NoteBlockKind.Body or NoteBlockKind.Blank)
                 && TryMarker(text, out _, out var bare, out _)) text = bare;
 
@@ -125,18 +109,9 @@ public static class NoteMarkdown
     }
 
     /// <summary>
-    /// Remove list-marker GLYPHS that a previous version leaked into a line's own text, so notes written
-    /// by it come back clean instead of carrying the damage forever.
-    ///
-    /// The bug (fixed 2026-08-06): the editor built bullets from WPF's native <c>List</c>, and
-    /// <c>TextRange.Text</c> on a paragraph inside a list includes the list's marker, serialised as
-    /// "•\t". So reading a line gave back "•\tAgenda item", which was then written as "- •\tAgenda item",
-    /// re-read as "•\t•\tAgenda item"… one more bullet on every single save. The owner's note reached
-    /// seven.
-    ///
-    /// The TAB is what makes this safe to strip: it's how WPF serialises a marker, and it is not
-    /// something a person types at the start of a note line. A "•" followed by a space is left alone -
-    /// that's someone writing a bullet by hand, and their text is not ours to edit.
+    /// Strip WPF List marker glyphs ("•\t", "1.\t") leaked into line text by older saves. The TAB is
+    /// what makes stripping safe: WPF serialises markers with it and people don't type it at line
+    /// start; a hand-typed "• " is left alone.
     /// </summary>
     static string Heal(string text)
     {
@@ -187,14 +162,9 @@ public static class NoteMarkdown
         return true;
     }
 
-    /// <summary>The Markdown for one of Toki's note templates, ready to insert: a heading per section
-    /// with a blank line under it to type into, and an Action items section that starts with an empty
-    /// to-do. Used by the editor's "Template" button so a hand-written note can take the same shape as
-    /// an AI-written one.
-    ///
-    /// Summary and Action items are added here because a <see cref="Llm.NoteTemplate"/> only declares
-    /// the sections IN BETWEEN - the AI writer adds those two implicitly, so a hand-written note has to
-    /// as well, or the two kinds of note wouldn't look like the same product.</summary>
+    /// <summary>Template skeleton for a hand-written note. Summary and Action items are added here
+    /// because <see cref="Llm.NoteTemplate"/> declares only the middle sections; the AI writer adds
+    /// those two implicitly, and both note kinds must share one shape.</summary>
     public static string TemplateSkeleton(Llm.NoteTemplate template)
     {
         var sb = new StringBuilder();

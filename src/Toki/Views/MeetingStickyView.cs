@@ -7,18 +7,10 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// A meeting's STICKY NOTE, shown inside the meeting's own note - between the summary and the
-/// transcript, behind a button at the top.
-///
-/// This replaces the version that put a Keep/Discard card in the Library list. The owner's verdict on
-/// that was blunt and correct: a row you can't open, sitting among meetings it isn't one of, reads as
-/// clutter. Your own writing about a meeting belongs with that meeting, not next to it.
-///
-/// What it is, precisely: your private page. It never steers the summary (see
-/// <see cref="Llm.LlmNoteWriter"/>), it isn't in the search index, and Toki never writes a word in it.
-/// It saves itself as you type - the app has no Save buttons anywhere else and shouldn't grow one here -
-/// and Delete is two-step, because this is text a person typed by hand and one stray click must not
-/// lose it.
+/// A meeting's sticky note, shown inside the meeting's own note. The user's private page: it never
+/// steers the summary (see <see cref="Llm.LlmNoteWriter"/>), isn't in the search index, and Toki
+/// never writes a word in it. Auto-saves as you type; Delete is two-step (hand-typed text must not
+/// be lost to one stray click).
 /// </summary>
 public sealed class MeetingStickyView : Border
 {
@@ -74,10 +66,10 @@ public sealed class MeetingStickyView : Border
         stack.Children.Add(header);
         stack.Children.Add(_slot);
 
-        // An amber hairline, not a filled box - it's yours and it's different, but it isn't a warning.
-        // (Dividers, not boxes: the one box on this page earns it by being a different KIND of content.)
+        // An amber hairline, not a filled box: different content, not a warning.
         BorderBrush = B("Amber");
         BorderThickness = new Thickness(1);
+        Theme.GlassSurface.CrispRim(this);   // whole device pixels, or the r12 rim reads as soft
         CornerRadius = new CornerRadius(12);
         Padding = new Thickness(14, 12, 14, 14);
         Margin = new Thickness(0, 6, 0, 6);
@@ -87,10 +79,8 @@ public sealed class MeetingStickyView : Border
         // panel's padding would fall through to the read-only document behind it and take focus away.
         Background = Brushes.Transparent;
 
-        // Clicking anywhere in the panel puts the caret in the note. Belt and braces alongside the
-        // focus-after-layout fix in Reveal: this panel is hosted INSIDE a read-only RichTextBox, which is
-        // a control that very much wants keyboard focus back, and a click that lands on the panel's
-        // padding or its header would otherwise leave you typing into something that eats keystrokes.
+        // Clicking anywhere in the panel puts the caret in the note: this panel is hosted INSIDE a
+        // read-only RichTextBox, which reclaims keyboard focus and eats keystrokes.
         PreviewMouseLeftButtonDown += (_, e) =>
         {
             if (_editor is null || e.OriginalSource is DependencyObject src && IsInside(src, _delete)) return;
@@ -106,11 +96,8 @@ public sealed class MeetingStickyView : Border
     Button? _toggle;
 
     /// <summary>
-    /// The button that opens this note, sitting at the TOP of the meeting note, just under the title.
-    ///
-    /// It lives here rather than in the Copy/Delete toolbar for two reasons: a sticky note is CONTENT,
-    /// not an action performed on the note, and the toolbar is already at its width - adding a fourth
-    /// button there squeezed the template picker down to "Template · Dec".
+    /// The button that opens this note, at the top of the meeting note. Not in the Copy/Delete
+    /// toolbar: a sticky note is content, not an action performed on the note.
     /// </summary>
     public FrameworkElement ToggleButton
     {
@@ -118,7 +105,7 @@ public sealed class MeetingStickyView : Border
         {
             if (_toggle is not null) return _toggle;
 
-            // Segoe MDL2 "Pinned" - ties the button to the amber-edged panel it opens.
+            // Segoe MDL2 "Pinned", tying the button to the amber-edged panel it opens.
             var pin = new TextBlock
             {
                 Text = "", FontSize = 11, Foreground = B("Amber"),
@@ -176,14 +163,9 @@ public sealed class MeetingStickyView : Border
         { EasingFunction = Theme.Motion.EaseOut });
         BringIntoView();
 
-        // Focus AFTER layout, never in the same breath as adding the editor.
-        //
-        // This was the "I click Add a sticky note and typing does nothing" bug. `Focus()` on a control
-        // that is not yet in a laid-out visual tree returns false and does nothing - silently. Keyboard
-        // focus therefore stayed on the read-only RichTextBox that HOSTS this panel, and a read-only
-        // RichTextBox swallows every keystroke without a sound. The editor itself was fine the whole
-        // time, which is why `--notetest` passed 20 checks while the feature was unusable: the defect
-        // was in the hosting, not the control. `--stickytest` drives it where it actually lives.
+        // Focus AFTER layout, never in the same breath as adding the editor: Focus() on a control not
+        // yet in a laid-out visual tree silently returns false, leaving keyboard focus on the hosting
+        // read-only RichTextBox, which swallows every keystroke.
         Dispatcher.BeginInvoke(new Action(FocusEditorNow), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
@@ -203,8 +185,8 @@ public sealed class MeetingStickyView : Border
 
     public void Hide() { Flush(); Visibility = Visibility.Collapsed; }
 
-    /// <summary>Self-test seams: open the panel the way the button does, and reach the editor inside it,
-    /// so `--stickytest` can drive the sticky note where it really lives - inside the meeting document.</summary>
+    /// <summary>Self-test seams: open the panel the way the button does, and reach the editor
+    /// inside it, so `--stickytest` can drive the sticky note inside the meeting document.</summary>
     internal void DebugReveal() { _stickyId ??= DebugId; Reveal(); }
     internal NoteEditor? DebugEditor => _editor;
 
@@ -225,12 +207,12 @@ public sealed class MeetingStickyView : Border
         else Reveal();
     }
 
-    /// <summary>Write pending edits now - on closing the window, switching notes, or hiding the panel.
-    /// Called from every exit, because "I typed it and it wasn't there" is unforgivable.</summary>
     /// <summary>The id <see cref="DebugSeed"/> uses. Negative, so it can never collide with a real
-    /// AUTOINCREMENT row, and every write path checks for it.</summary>
+    /// AUTOINCREMENT row; every write path checks for it.</summary>
     const long DebugId = -1;
 
+    /// <summary>Write pending edits now. Called from every exit (closing the window, switching notes,
+    /// hiding the panel).</summary>
     public void Flush()
     {
         _save.Stop();
@@ -247,8 +229,8 @@ public sealed class MeetingStickyView : Border
         catch (Exception ex) { App.Log($"sticky save failed: {ex.Message}"); }
     }
 
-    /// <summary>Two-step, and it really deletes: the note and every link to it. Anything less would
-    /// leave orphan rows behind, which is exactly the kind of quiet mess this rework existed to end.</summary>
+    /// <summary>Two-step, and it really deletes: the note and every link to it,
+    /// or orphan rows are left behind.</summary>
     void OnDelete()
     {
         if (!_deleteArmed)

@@ -40,7 +40,7 @@
             <!-- Only when Provider = Custom: the address is otherwise set for you. -->
             <StackPanel x:Name="CustomEndpointRow" Visibility="Collapsed">
                 <TextBlock Text="Address" Style="{StaticResource BodyStrong}" Margin="0,14,0,6"/>
-                <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0"
+                <Border x:Name="ApiBaseUrlRim" Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0"
                         BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                     <TextBox x:Name="ApiBaseUrlBox" Background="Transparent" BorderThickness="0"
                              Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
@@ -53,7 +53,7 @@
             </StackPanel>
 
             <TextBlock Text="Your API key" Style="{StaticResource BodyStrong}" Margin="0,14,0,6"/>
-            <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0"
+            <Border x:Name="ApiKeyRim" Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="11,0"
                     BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                 <PasswordBox x:Name="ApiKeyBox" Background="Transparent" BorderThickness="0"
                              Foreground="{DynamicResource Text}" Height="34" FontSize="11.5"
@@ -70,7 +70,7 @@
                 <Button x:Name="TestApiButton" Style="{StaticResource PillButton}" Content="Test connection"
                         Padding="18,8" Click="OnTestApi"/>
                 <Button x:Name="RemoveKeyButton" Style="{StaticResource PillButton}" Background="Transparent"
-                        Foreground="{StaticResource Coral}" Content="Remove key" Padding="14,8" Margin="8,0,0,0"
+                        Foreground="{DynamicResource Coral}" Content="Remove key" Padding="14,8" Margin="8,0,0,0"
                         ToolTip="Delete your key and go back to the on-device model" Click="OnRemoveKey"/>
             </StackPanel>
             <TextBlock x:Name="ApiTestStatus" Style="{StaticResource Dim}" FontSize="11" LineHeight="15"

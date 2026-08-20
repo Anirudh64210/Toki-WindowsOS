@@ -1,7 +1,7 @@
 namespace Toki.State;
 
 /// <summary>
-/// Every state the pill can be in. Ported exactly from the macOS app:
+/// Every state the pill can be in:
 /// hidden → meetingPrompt → recordingBar ⇄ recordingOpen → summarizing → notes | noSpeech,
 /// plus home, library, settings.
 /// </summary>

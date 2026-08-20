@@ -6,9 +6,8 @@ namespace Toki.Llm;
 public sealed record NoteTemplate(string Name, string When, string[] Sections);
 
 /// <summary>
-/// The fixed set of note shapes Toki auto-detects between (owner-chosen full set). The writer picks
-/// the best fit for each meeting, writes it in that shape, and the user can override it. General is
-/// the safe default when nothing else clearly fits.
+/// The fixed set of note shapes Toki auto-detects between. The writer picks the best fit,
+/// the user can override it. General is the safe default when nothing else clearly fits.
 /// </summary>
 public static class NoteTemplates
 {

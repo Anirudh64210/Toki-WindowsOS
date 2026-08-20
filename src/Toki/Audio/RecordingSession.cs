@@ -28,6 +28,11 @@ public sealed class RecordingSession
     /// <summary>The transcript built LIVE during the meeting (merged + echo-de-duped), or null if live
     /// transcription didn't run - in which case the caller does the whole-file pass. Set by <see cref="Stop"/>.</summary>
     public IReadOnlyList<TranscriptSegment>? LiveTranscript { get; private set; }
+
+    /// <summary>Seconds of audio the live decoder failed on (see LiveTranscriber.LostSeconds).
+    /// Above a few seconds the live transcript has a hole and the whole-file pass is the honest
+    /// choice, whatever it costs in wait.</summary>
+    public double LiveLostSeconds => _live?.LostSeconds ?? 0;
     /// <summary>The live transcriber (for wiring a live-preview handler), available after <see cref="Start"/>.</summary>
     public LiveTranscriber? Live => _live;
 
@@ -57,11 +62,16 @@ public sealed class RecordingSession
         try
         {
             _mic.Prepare(YouWavPath);
-            if (_live is not null && _mic.Format is not null)
-            {
-                _live.AddStream(Speaker.You, _mic.Format);
-                _mic.OnBuffer = (buf, n) => _live!.Feed(Speaker.You, buf, n);
-            }
+            var fmt = _mic.Format;
+            if (_live is not null && fmt is not null) _live.AddStream(Speaker.You, fmt);
+            if (fmt is not null)
+                _mic.OnBuffer = (buf, n) =>
+                {
+                    // Level measured on the SAME buffer that reaches the WAV: the bar shows
+                    // what was actually captured.
+                    LevelMeter.Recording.Report(buf, n, fmt);
+                    _live?.Feed(Speaker.You, buf, n);
+                };
             _mic.Begin();
         }
         catch (Exception ex) { App.Log($"mic start failed: {ex.Message}"); }
@@ -75,12 +85,16 @@ public sealed class RecordingSession
                 try
                 {
                     ThemWavPath = Path.Combine(FolderPath, "them.wav");
-                    if (_live is not null)
+                    // Wire the tap BEFORE Start so no "them" audio is missed at the top of the call.
+                    var themFmt = ProcessLoopbackCapture.CaptureFormat;
+                    _live?.AddStream(Speaker.Them, themFmt);
+                    _loopback.OnBuffer = (buf, n) =>
                     {
-                        // Wire the tap BEFORE Start so no "them" audio is missed at the top of the call.
-                        _live.AddStream(Speaker.Them, ProcessLoopbackCapture.CaptureFormat);
-                        _loopback.OnBuffer = (buf, n) => _live!.Feed(Speaker.Them, buf, n);
-                    }
+                        // Same meter as the mic: the bar shows max(you, them), so the other
+                        // person talking moves it too.
+                        LevelMeter.Recording.Report(buf, n, themFmt);
+                        _live?.Feed(Speaker.Them, buf, n);
+                    };
                     _loopback.Start(p, ThemWavPath);
                     _loopbackRunning = true;
                     HasThemStream = true;
@@ -109,8 +123,8 @@ public sealed class RecordingSession
         }
         App.Log($"recording stopped: you peak {_mic.PeakLevel:P0}, them peak {_loopback.PeakLevel:P0}");
 
-        // Finalize live transcription (drains + decodes the last short remainder) - this is the whole
-        // point: almost everything was already transcribed during the meeting, so Stop is quick.
+        // Finalize live transcription (drains + decodes the last short remainder); almost
+        // everything was already transcribed during the meeting, so Stop is quick.
         try { LiveTranscript = _live?.Stop(); }
         catch (Exception ex) { App.Log($"live transcription stop failed: {ex.Message}"); LiveTranscript = null; }
 

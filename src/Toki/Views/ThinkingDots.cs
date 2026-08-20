@@ -6,16 +6,8 @@ using System.Windows.Media.Animation;
 namespace Toki.Views;
 
 /// <summary>
-/// Three pulsing dots, with a caption: Toki's one way of saying "still working on this".
-///
-/// The pattern was already in the notch's Ask view (staggered pulse, calm rather than spinning). This is
-/// the same thing extracted so the Library can use it too, because a second, different loading animation
-/// would read as a second, different kind of waiting.
-///
-/// It exists for a specific reason: notes now arrive in two waves. The summary and to-dos land as soon as
-/// the model has written them, and a few seconds later the speakers resolve and the names appear. Without
-/// something in the gap, the second wave looks like the note silently changing under the reader - which
-/// is unsettling in a way that a slower note never is. Showing the work makes the wait legible.
+/// Three pulsing dots with a caption - the app's single "still working" indicator. Shown in the gap
+/// while speaker names resolve so the second wave doesn't look like the note silently changing.
 /// </summary>
 public sealed class ThinkingDots : StackPanel
 {

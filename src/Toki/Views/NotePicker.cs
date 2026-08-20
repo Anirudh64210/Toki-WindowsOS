@@ -7,23 +7,15 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// Toki's own dropdown - never a native Windows menu (the Library's sort menu learned that the hard way,
-/// and Windows chrome on a notch that's meant to feel like one object is instantly wrong).
-///
-/// Two things here are load-bearing, both paid for in bugs:
-///   • Each row is a real <see cref="Button"/>, not a Border with a MouseLeftButtonUp handler. In a
-///     <c>StaysOpen=false</c> popup the mouse-up is swallowed as the popup closes, and every item is
-///     silently dead. Click fires; mouse-up doesn't.
-///   • The open popup registers with <see cref="NotchPopups"/>, so the notch counts it as "still being
-///     used" and doesn't retract out from under the menu the moment the pointer leaves the card.
+/// Toki's own dropdown - never a native Windows menu. Each row is a real <see cref="Button"/>:
+/// in a StaysOpen=false popup, mouse-up is swallowed as the popup closes, so Click is the only event
+/// that fires. The open popup registers with <see cref="NotchPopups"/> so the notch doesn't retract.
 /// </summary>
 public static class NotePicker
 {
     /// <summary>
-    /// Show a dropdown under <paramref name="anchor"/>. An item with a NULL action is a group heading
-    /// rather than a choice: it draws as a quiet label (with a hairline above it, unless it is first)
-    /// and cannot be clicked. That is how one button can hold two different questions - "what is this
-    /// line" and "how big is the text" - without the two sets of answers running together.
+    /// Show a dropdown under <paramref name="anchor"/>. An item with a NULL action is a
+    /// non-clickable group heading (drawn with a hairline above it, unless first).
     /// </summary>
     public static void Show(FrameworkElement anchor, IReadOnlyList<(string Label, Action? Pick)> items,
         string? selected = null)
@@ -36,7 +28,10 @@ public static class NotePicker
         {
             PlacementTarget = anchor, Placement = PlacementMode.Bottom,
             StaysOpen = false, AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade,
-            VerticalOffset = 4,
+            // The card is inset inside its own shadow gutter; both offsets give that back so the list
+            // still opens exactly under its anchor.
+            VerticalOffset = 4 - Theme.GlassCard.ShadowGutter,
+            HorizontalOffset = -Theme.GlassCard.ShadowGutter,
         };
 
         foreach (var (label, pick) in items)
@@ -88,7 +83,8 @@ public static class NotePicker
 
             var surface = new Border
             {
-                CornerRadius = new CornerRadius(7), Padding = new Thickness(11, 8, 20, 8),
+                // Concentric: the card is r14 with a 6px pad, so a row seated in it is r8.
+                CornerRadius = new CornerRadius(8), Padding = new Thickness(11, 8, 20, 8),
                 Background = Brushes.Transparent, Child = content,
             };
             var button = new Button
@@ -106,8 +102,7 @@ public static class NotePicker
             stack.Children.Add(button);
         }
 
-        // A long list (every half hour of a whole day) has to scroll rather than run off the screen.
-        // Short lists are unaffected: the ScrollViewer sizes to its content until it hits the cap.
+        // A long list must scroll rather than run off the screen; short lists size to content.
         var scroll = new ScrollViewer
         {
             Content = stack, MaxHeight = 320,
@@ -115,18 +110,13 @@ public static class NotePicker
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
-        // Open ON the current value, not at the top. A 48-row time list that always opens at midnight
-        // makes the user scroll to where they already are before they can change anything - which is
-        // most of why a long dropdown feels worse than a short one.
+        // Open ON the current value, not at the top.
         if (selectedRow is not null)
             scroll.Loaded += (_, _) => selectedRow.BringIntoView();
-        var box = new Border
+        var box = new Theme.GlassCard(14)
         {
-            CornerRadius = new CornerRadius(10), Padding = new Thickness(5),
-            BorderThickness = new Thickness(1), MinWidth = 176, Child = scroll,
+            CardPadding = new Thickness(6), CardMinWidth = 176, Content = scroll,
         };
-        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
         popup.Child = box;
 
         NotchPopups.Register(popup);

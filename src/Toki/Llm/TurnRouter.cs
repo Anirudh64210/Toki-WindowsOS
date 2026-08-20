@@ -4,27 +4,11 @@ using Toki.Storage;
 namespace Toki.Llm;
 
 /// <summary>
-/// The RAG-vs-parametric decision of the dialogue brain: is this turn about the user's MEETINGS
-/// (ground it in the notes) or a GENERAL question/statement the model should simply converse about
-/// from its own knowledge?
-///
-/// The old pipeline had no such decision - every utterance that survived the small-talk/persona
-/// filters was forced through notes retrieval, so "what is my name", chit-chat, world-knowledge
-/// questions and misheard commands all became document searches that either denied ("not in your
-/// notes") or, worse, fabricated a link to an unrelated meeting. That forced-retrieval design is a
-/// known failure mode: retrieval on a query the corpus can't serve injects irrelevant context that
-/// small models are the most easily misled by (Adaptive-RAG / Self-RAG: classify first, retrieve
-/// only when the query needs the corpus; the Google "sufficient context" line: RAG makes models
-/// answer instead of abstain).
-///
-/// The decision here is deterministic and ~0ms, two signals in order:
-///   1. MEETING-DOMAIN CUES in the wording ("meeting", "standup", "action items", "did we decide",
-///      "who said", …) → it's about the notes.
-///   2. Otherwise a RETRIEVAL PROBE: do the question's content terms actually hit anything in the
-///      store (title or FTS)? A hit → the user's own corpus has evidence → ground it. No hit → the
-///      notes cannot answer it, so retrieval could only mislead → let the model converse.
-/// (A judgment-call LLM classifier would also work here - Adaptive-RAG trains one - but at Toki's
-/// scale the cue set + probe covers the same decision with zero latency and full testability.)
+/// The RAG-vs-parametric decision: is this turn about the user's MEETINGS (ground it in the notes)
+/// or GENERAL (converse from the model's own knowledge)? Retrieval on a query the corpus cannot
+/// serve injects irrelevant context that misleads a small model, so retrieve only when the query
+/// needs the corpus. Deterministic, ~0ms, two signals in order: meeting-domain cues in the
+/// wording, else a retrieval probe (do the content terms hit the store's titles or FTS?).
 /// </summary>
 public static class TurnRouter
 {
@@ -44,11 +28,9 @@ public static class TurnRouter
     /// <summary>Does the wording itself place this turn in the user's meeting world?</summary>
     public static bool HasMeetingCue(string question) => MeetingCueRx.IsMatch(question ?? "");
 
-    // GENERAL-KNOWLEDGE SHAPE: definitional / how-to / creative / world-fact requests. These are
-    // parametric by nature ("what does OKR mean", "how do I write a PRD", "write me a haiku") and must
-    // NOT ground just because a content word incidentally prefix-matches a meeting ("...about mondays"
-    // hitting a "Monday standup"). "what is A/AN x" (a generic concept) is definitional; "what is THE x"
-    // is a specific thing and stays grounded, so the article is load-bearing.
+    // GENERAL-KNOWLEDGE SHAPE: definitional / how-to / creative / world-fact requests. Parametric by
+    // nature; must NOT ground just because a content word prefix-matches a meeting title.
+    // "what is A/AN x" is definitional; "what is THE x" stays grounded - the article is load-bearing.
     static readonly Regex GeneralKnowledgeRx = new(
         @"^\s*(what('s|\s+is|\s+are)\s+(a|an)\s+\w+"
         + @"|what\s+(does|do)\s+.+\bmean\b|define\s+\w+|what\s+(does|do)\s+\w+\s+stand\s+for"
@@ -80,9 +62,8 @@ public static class TurnRouter
         if (plan.PinnedMeetingIds is { Count: > 0 }) return false;
         if (HasMeetingCue(plan.Original)) return false;
 
-        // A clearly general-knowledge SHAPE (definition / how-to / creative / world fact) is parametric
-        // even when an incidental content word prefix-matches a meeting title - the probe below would
-        // otherwise wrongly ground "write me a haiku about mondays" on a "Monday standup".
+        // A general-knowledge SHAPE is parametric even when a content word prefix-matches a meeting
+        // title - the probe below would otherwise wrongly ground it.
         if (HasGeneralKnowledgeShape(plan.Original)) return true;
 
         // Topical anchor terms (for Analyze: minus the analytical vocabulary, which describes the

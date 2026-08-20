@@ -65,3 +65,9 @@ design-web/dist/
 
 # WPF temp project files (build artifacts, never commit)
 *_wpftmp.csproj
+
+# The demo film (Remotion). The footage and the build output are large and regenerable;
+# the composition source in video/src IS worth keeping.
+video/node_modules/
+video/out/
+video/public/raw.mp4

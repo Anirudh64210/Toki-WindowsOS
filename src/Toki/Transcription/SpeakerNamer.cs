@@ -11,37 +11,12 @@ public sealed record SpeakerLabel(int Cluster, string Name, double Score, string
 public readonly record struct NamedTurn(int Cluster, string Text);
 
 /// <summary>
-/// Puts names to the voices, WITHOUT storing anyone's voice.
-///
-/// Diarisation can say "these turns are the same person" but it can never say who that person is. The
-/// obvious way to close the gap is voice enrollment: keep a fingerprint per person, recognise them next
-/// time. Toki deliberately does not. Enrollment means storing biometric data for colleagues who never
-/// agreed to it, and it is the one thing in this whole area with active litigation attached. Wispr Flow
-/// shipped a notetaker in August 2026 that names speakers with no voiceprints at all, and states so as a
-/// product promise; the signals they use are the ones below, and Toki already has every one of them.
-///
-/// So the name comes from the conversation itself:
-///
-///   • <b>Self-introduction</b> - "I'm Priya", "Priya here". The strongest signal there is: the speaker
-///     is telling you. Trusted even for a name nobody supplied.
-///   • <b>Handover</b> - a turn that ENDS by addressing someone ("over to you, Priya", "Priya, thoughts?")
-///     names the person who speaks NEXT.
-///   • <b>Thanks</b> - a turn that STARTS by addressing someone ("thanks, Priya", "good point Priya")
-///     names the person who spoke BEFORE.
-///
-/// Three rules keep it from inventing people, all of them the same rule really - a wrong name is worse
-/// than no name, exactly as with the evidence links:
-///
-///   1. A name from the roster (calendar attendees, pinned names) is trusted. A name that is NOT on the
-///      roster has to be said at least twice before it counts, because a single capitalised word is more
-///      likely a mishearing than a new colleague.
-///   2. The local user's own name is never given to a remote voice. In a one-to-one the other person
-///      says your name constantly, and every one of those is about you, not about them.
-///   3. Below <see cref="Floor"/>, the cluster keeps its "Speaker 2" label. One name, one cluster: a
-///      name already spent cannot be assigned again.
-///
-/// Everything here is text. No audio, no model, no stored fingerprint - which is what makes it testable
-/// against a real transcript, and what makes it forget everyone the moment the meeting is over.
+/// Puts names to the voices from the conversation TEXT alone - no audio, no stored voiceprint
+/// (owner decision: enrollment stores biometric data colleagues never agreed to). Signals:
+/// self-introduction (strongest, trusted even off-roster), handover (names the NEXT speaker),
+/// thanks (names the PREVIOUS speaker). Guards, all one rule - a wrong name is worse than none:
+/// an off-roster name must be said at least twice; the local user's own name is never given to a
+/// remote voice; below <see cref="Floor"/> the cluster keeps "Speaker 2"; one name, one cluster.
 /// </summary>
 public static class SpeakerNamer
 {
@@ -53,18 +28,15 @@ public static class SpeakerNamer
     const double HandoverScore = 3.0;
     const double ThanksScore = 3.0;
 
-    // A first name as it survives a recogniser: one capital then lowercase letters. The lookahead is
-    // what stops "this is Craig's team" naming somebody "Craig" - a possessive is talking ABOUT a person,
-    // never introducing one. Deliberately no apostrophes or hyphens inside: allowing them let "I'm"
-    // itself match, and the names this has to catch in practice are first names.
+    // A first name as a recogniser leaves it: one capital then lowercase. The lookahead rejects
+    // possessives ("Craig's" talks ABOUT a person, never introduces one). No apostrophes or
+    // hyphens inside: allowing them let "I'm" itself match.
     const string NamePattern = @"([A-Z][a-z]{2,23})(?!['\u2019]s\b)";
 
     static readonly RegexOptions Opts = RegexOptions.CultureInvariant;
 
-    // The trigger phrases are matched case-INSENSITIVELY via inline (?i:) groups, while the name group
-    // stays case-SENSITIVE. Both halves matter: a sentence can start "Over to you, Priya" as easily as
-    // "over to you", and making the whole pattern case-insensitive would let any lowercase word be a name.
-    // (Getting this wrong is why the first version of these tests failed.)
+    // Trigger phrases match case-INSENSITIVELY via inline (?i:) groups while the name group stays
+    // case-SENSITIVE - a fully case-insensitive pattern would let any lowercase word be a name.
 
     // "I'm Priya" · "I am Priya" · "my name is Priya" · "Priya here" · "Priya, present" (a roll call).
     // "this is X" is deliberately absent - "this is Craig's account" is not an introduction.
@@ -109,9 +81,23 @@ public static class SpeakerNamer
     {
         if (turns.Count == 0) return [];
 
-        var known = new HashSet<string>(
-            (roster ?? []).Select(Clean).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+        // The roster arrives as calendar DISPLAY names ("Priya Devi", sometimes an email), but
+        // people are ADDRESSED by first name and the capture pattern yields one word - so index
+        // each word of each roster name, skipping what an email's domain would contribute.
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in roster ?? [])
+        {
+            var display = (r ?? "").Split('@')[0];   // "priya.devi@x.com" → "priya.devi"
+            foreach (var part in display.Split(new[] { ' ', '.', '_', ',', '-' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var w = Clean(part);
+                if (w.Length >= 3) known.Add(w);
+            }
+        }
         var own = Clean(ownName ?? "");
+        // The user's own name blocks its FIRST name too: "Sid" from "Sid Kumar" must never be
+        // pinned on a remote voice just because someone said "you there, Sid?".
+        var ownFirst = own.Split(' ').FirstOrDefault() ?? "";
 
         // How often each name is said anywhere. A name nobody supplied has to earn its place by being
         // repeated - one capitalised word is far more likely a mishearing than a colleague.
@@ -120,16 +106,9 @@ public static class SpeakerNamer
             foreach (Match m in Regex.Matches(t.Text ?? "", @"\b" + NamePattern + @"\b", Opts))
                 Count(mentions, Clean(m.Groups[1].Value));
 
-        // The strongest guard here, and the one that was missing when this first met a real meeting.
-        //
-        // A hand-written list of words-that-are-not-names is never finished. The first run against a
-        // real recording produced participants called "Please" and "Otherwise", from lines like
-        // "Please, please break out right away, everyone" - both perfectly good vocative shapes, neither
-        // a person. Extending the list would have fixed those two and missed the next two.
-        //
-        // So use the transcript itself: collect every word that appears in LOWERCASE anywhere in this
-        // meeting. "please", "otherwise", "great", "sorry" all do, constantly. A real name essentially
-        // never does. It costs one pass and it generalises to words no list would have thought of.
+        // The strongest guard: a word that appears in LOWERCASE anywhere in this meeting is a word,
+        // not a person ("please", "otherwise", "great"); a real name essentially never does. A
+        // hand-written not-a-name list is never finished - the transcript itself generalises.
         var seenLower = new HashSet<string>(StringComparer.Ordinal);
         foreach (var t in turns)
             foreach (Match m in Regex.Matches(t.Text ?? "", @"\b[a-z][a-z']{2,23}\b", Opts))
@@ -137,22 +116,19 @@ public static class SpeakerNamer
 
         var votes = new Dictionary<(int Cluster, string Name), (double Score, string Why)>();
 
-        // `selfSaid` marks a self-introduction, which is exempt from the say-it-twice rule: the speaker
-        // is telling you their own name, and needing them to do it twice would miss the commonest case
-        // in any meeting with a new face. Every other signal is an inference about someone ELSE, and
-        // those still have to clear the bar.
+        // A self-introduction (`selfSaid`) is exempt from the say-it-twice rule: the speaker is
+        // telling you their own name. Every other signal infers about someone ELSE and must clear it.
         void Vote(int cluster, string name, double score, string why, bool selfSaid = false, bool rosterOnly = false)
         {
             name = Clean(name);
             if (cluster < 0 || name.Length == 0) return;                  // the user is already known
             if (!NameCorrector.LooksLikeName(name)) return;               // "Great", "Thanks", "Monday"
             // The vocative shape ("Priya, can you...") is indistinguishable from a discourse marker
-            // ("Otherwise, folks can break out"), so it only counts for a name a human supplied. This
-            // is the residue the lowercase rule cannot catch: a word that happens never to be said in
-            // lowercase in this particular meeting. Measured, not assumed - "Otherwise" survived every
-            // other guard on a real recording.
+            // ("Otherwise, folks can break out"), so it only counts for a human-supplied name -
+            // the residue the lowercase rule cannot catch.
             if (rosterOnly && !known.Contains(name)) return;
             if (own.Length > 0 && name.Equals(own, StringComparison.OrdinalIgnoreCase)) return;
+            if (ownFirst.Length > 0 && name.Equals(ownFirst, StringComparison.OrdinalIgnoreCase)) return;
             // Said in lowercase elsewhere in this meeting? Then it is a word, not a person - unless a
             // human put it on the roster, in which case they know better than any heuristic.
             if (!known.Contains(name) && seenLower.Contains(name.ToLowerInvariant())) return;
@@ -172,10 +148,8 @@ public static class SpeakerNamer
                 foreach (Match m in rx.Matches(text))
                     Vote(turns[i].Cluster, m.Groups[1].Value, SelfIntroScore, $"introduced themselves: \"{Snippet(text)}\"", selfSaid: true);
 
-            // Addressing somebody names the person who ANSWERS - which is the next speaker who is not
-            // the one talking. Using "the next turn" instead attributes the name to the asker whenever
-            // they carry on, and they usually do: measured on a real 11-person call, "Yashtren, are you
-            // there?" labelled the chair Yashtren, because the chair's own next sentence came first.
+            // Addressing somebody names the person who ANSWERS - the next speaker who is not the
+            // one talking. "The next turn" would credit the asker whenever they carry on talking.
             var next = NextOther(turns, i);
             var prev = PrevOther(turns, i);
 
@@ -201,7 +175,12 @@ public static class SpeakerNamer
         var takenName = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var outp = new List<SpeakerLabel>();
 
-        foreach (var ((cluster, name), (score, why)) in votes.OrderByDescending(v => v.Value.Score).ThenBy(v => v.Key.Name, StringComparer.Ordinal))
+        // Cluster id is the final tie-break so equal-score votes resolve the same way every run -
+        // dictionary enumeration order must never decide who gets a name.
+        foreach (var ((cluster, name), (score, why)) in votes
+            .OrderByDescending(v => v.Value.Score)
+            .ThenBy(v => v.Key.Name, StringComparer.Ordinal)
+            .ThenBy(v => v.Key.Cluster))
         {
             if (score < Floor) continue;
             if (!takenCluster.Add(cluster)) continue;

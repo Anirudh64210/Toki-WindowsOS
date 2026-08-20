@@ -28,7 +28,7 @@ showing.
 - Blue #5AA9F9 - people, owners
 - Green #3DD68C - decisions, success, the ON switch
 - Pink #F09CC7 - open questions, selection accents
-- Coral #FF6F61 - the record CTA · Stop-red #FF2D55 - "Stop & summarize" only
+- Coral #FF6F61 - the record CTA · Stop-red #FF453A (light #FF3B30, Apple system red) - "Stop & summarize" only
 - Destructive elsewhere is red TEXT (#E5484D) on a neutral shape; red fill is the final confirm.
 
 ## The notch states (the frames)

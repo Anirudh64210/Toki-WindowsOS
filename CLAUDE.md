@@ -60,7 +60,8 @@ these rules are how we stay aligned:
 - **The material**: warm dark glass rgba(33,30,30,0.5) (opaque stand-in #2B2828), radius 24 cards
   with a 1px white-10% rim, text as WHITE OPACITIES (90/50/25), Segoe UI Variable. Radii are
   concentric: card 24 > inner 16 > capsule 12 > pill 999. One meaning one colour: amber=time/counts,
-  teal=actions, blue=people, green=decisions, pink=questions, coral=record CTA, #FF2D55=Stop only.
+  teal=actions, blue=people, green=decisions, pink=questions, coral=record CTA,
+  #FF453A/#FF3B30 (Apple system red)=Stop only.
   Tokens live in `Theme/Theme.xaml` + `Theme/ThemeManager.cs` (Color+brush pairs, theme-swapped).
 - **Motion & feel**: apply `.claude/skills/motion-and-feel/SKILL.md` on EVERY visual change. The
   short version: animate only transforms/opacity/clip; no Effect inside an animated subtree;
@@ -127,9 +128,14 @@ dotnet publish src/Toki/Toki.csproj -c Release -r win-x64 --self-contained true 
 Self-test flags on the built exe (headless, exit pass/fail) - run the relevant ones after every
 change, and ALL of the UI ones after visual work:
 `--hittest` (every clickable box, label centering) · `--uitest` (Library perf budgets vs the REAL
-db) · `--notetest` (note editor, 23 checks) · `--measuretest` (arranged heights) · `--stickytest`
+db) · `--notetest` (note editor, 23 checks) · `--measuretest` (arranged heights) · `--stickytest` · `--wavetest` (the waveform answers the mic level: rises fast, falls slow, rests at silence) · `--revealtest` (the notch's ENTRANCE on the real window: nothing that animates in may already be
+at its final value - the "Toki flickers before Toki renders" bug) · `--fpstest` (where the notch's animation frames go: transparency vs content vs the
+window morph - run it before optimising anything visual) · `--themetest` (walks every notch view in
+BOTH themes and fails on text that doesn't contrast with what's behind it - run it after any colour
+or code-built-view change)
 · `--render <dir>` / `--libshot <dir>` (PNG the views; the transparent overlay can't be
-screenshotted) · `--asrtest <file>` · `--notestest` · `--llmtest` · `--dbtest` · `--caltest` ·
+screenshotted) · `--asrtest <file>` · `--wertest <wav> <ref.txt>` (word error rate + per-name recall
+through the REAL pipeline; script + reference in `docs/wer-eval.md` - run it after ANY audio/ASR change) · `--notestest` · `--llmtest` · `--dbtest` · `--caltest` ·
 `--preptest` · `--diartest` · `--makeicon`. CI can never verify GPU/model/audio paths - those are
 run-on-a-real-PC jobs forever.
 

@@ -9,17 +9,14 @@ namespace Toki.Views;
 
 public partial class RecordingBarView : UserControl
 {
-    /// <summary>Play the dramatic flip-and-fall only when recording STARTS. On a hover-collapse from
-    /// the open screen Toki is already upside-down, so it should just settle - not re-flip (that read
-    /// as an abrupt "shut down"). Set by the pill before the peek is shown.</summary>
+    /// <summary>Play the flip-and-fall only when recording STARTS; on a hover-collapse Toki is
+    /// already upside-down and must just settle. Set by the pill before the peek is shown.</summary>
     public bool FlipOnShow { get; set; } = true;
 
     public RecordingBarView()
     {
         InitializeComponent();
-        // The bar is a PEEK (the floating bubble Toki is hidden), so ITS tiny Toki carries the
-        // state's mood: writing while the meeting is being taken down - the mascot narrates
-        // "transcribing" here the same way the bubble does on the open panel.
+        // The bar is a peek (the floating bubble Toki is hidden), so its tiny Toki carries the mood.
         BarToki.SetMood(Controls.TokiBlob.TokiMood.Writing);
         IsVisibleChanged += (_, e) =>
         {
@@ -27,8 +24,7 @@ public partial class RecordingBarView : UserControl
             if (FlipOnShow) PlayFlipAndFall();
             else
             {
-                // Already recording (collapsing back from the open screen): settle upside-down
-                // without re-animating, so the minimise reads as a clean zoom-out, not a flip.
+                // Collapsing back from the open screen: settle upside-down without re-animating.
                 Flip.BeginAnimation(RotateTransform.AngleProperty, null);
                 Fall.BeginAnimation(TranslateTransform.YProperty, null);
                 Flip.Angle = 180;
@@ -41,14 +37,17 @@ public partial class RecordingBarView : UserControl
     {
         Flip.Angle = 0;
         Fall.Y = -12;
-        // Tighter: flip over (0 → 180°) and drop in with a small bounce, settling upside-down
-        // so only the eyes peek over the edge (the body is tucked above it).
+        // Turn leads, fall follows 60ms late. Character motion is exempt from the 350ms cap
+        // (Motion.cs). Transforms only - nothing in this subtree may carry an Effect.
         Flip.BeginAnimation(RotateTransform.AngleProperty,
-            new DoubleAnimation(0, 180, TimeSpan.FromMilliseconds(420))
-            { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.3 } });
+            new DoubleAnimation(0, 180, TimeSpan.FromMilliseconds(520))
+            { EasingFunction = Theme.Motion.Move });
         Fall.BeginAnimation(TranslateTransform.YProperty,
             new DoubleAnimation(-12, 0, TimeSpan.FromMilliseconds(480))
-            { EasingFunction = new BounceEase { Bounces = 2, Bounciness = 2.6, EasingMode = EasingMode.EaseOut } });
+            {
+                BeginTime = TimeSpan.FromMilliseconds(60),
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 },
+            });
     }
 
     // Click also opens the controls (hover is the primary way, handled by the pill's poll).

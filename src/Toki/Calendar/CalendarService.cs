@@ -3,21 +3,11 @@ using Toki.Llm;
 namespace Toki.Calendar;
 
 /// <summary>
-/// The single facade every UI surface talks to - now over TWO independent calendar accounts.
-///
-/// ── WHY BOTH AT ONCE, RATHER THAN A CHOICE ──
-/// A great many people have a work Outlook calendar and a personal Google one, and a notetaker that
-/// only watches one of them misses half their meetings without ever saying so. So Google and Outlook
-/// are separate connections that can be on at the same time, and the agenda is the two merged and
-/// sorted by time. Connecting or disconnecting one never touches the other.
-///
-/// Each connection owns its own access token and refresh loop; the long-lived refresh tokens live
-/// DPAPI-encrypted in AppSettings and the access tokens are deliberately never persisted, so a restart
-/// costs one refresh and a stolen settings file yields nothing usable on another machine.
-///
-/// Every write routes by <see cref="CalEvent.Provider"/>. That is the whole reason the field exists:
-/// an event id from Graph means nothing to Google, and sending one to the other would fail in a way
-/// that looks like a broken Edit button rather than a routing mistake.
+/// The single calendar facade, over two independent accounts (Google and Outlook, both connectable
+/// at once, agenda merged by time; connecting or disconnecting one never touches the other).
+/// Refresh tokens live DPAPI-encrypted in AppSettings; access tokens are never persisted. Every
+/// write routes by <see cref="CalEvent.Provider"/> - an event id from one service means nothing
+/// to the other.
 /// </summary>
 public sealed class CalendarService
 {
@@ -250,9 +240,9 @@ public sealed class CalendarService
             var rt = outlook ? s.OutlookRefreshToken : s.GoogleRefreshToken;
             if (rt is null)
             {
-                // A stored blob that will not DECRYPT (Windows password force-reset, settings file
-                // copied to another account) used to keep IsConnected true forever while every fetch
-                // failed - a contradictory state that never healed. Clear it honestly.
+                // A stored blob that will not decrypt (password force-reset, settings copied to
+                // another account) must be cleared honestly, or IsConnected stays true forever
+                // while every fetch fails.
                 var protectedBlob = outlook ? s.OutlookRefreshTokenProtected : s.GoogleRefreshTokenProtected;
                 if (!string.IsNullOrEmpty(protectedBlob))
                 {
@@ -272,9 +262,8 @@ public sealed class CalendarService
                 if (outlook) _outlookToken = new TokenState(t.AccessToken, t.ExpiresUtc);
                 else _googleToken = new TokenState(t.AccessToken, t.ExpiresUtc);
 
-                // Google resends the refresh token only on rotation (rare); MICROSOFT ROTATES ON EVERY
-                // REFRESH and invalidates the previous one. Storing what comes back is therefore not an
-                // optimisation on the Outlook path - skip it and the connection dies at the next restart.
+                // Microsoft ROTATES the refresh token on every refresh and invalidates the old one;
+                // failing to store what comes back kills the Outlook connection at the next restart.
                 if (!string.IsNullOrEmpty(t.RefreshToken) && t.RefreshToken != rt)
                 {
                     if (outlook) s.OutlookRefreshToken = t.RefreshToken;

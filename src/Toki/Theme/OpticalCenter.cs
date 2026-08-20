@@ -5,33 +5,9 @@ using System.Windows.Media;
 namespace Toki.Theme;
 
 /// <summary>
-/// Puts a label in the OPTICAL middle of its button, computed from the font's real metrics.
-///
-/// **Why a label centred by layout still looks low.** WPF centres a text's *line box*. A line box is
-/// taller than the letters: it reserves room for descenders (g, y, p) and for internal leading, and that
-/// reserved space is not symmetric. Centre the box and the letters land below the middle, because the
-/// empty descender space below them is counted as if it were ink. The eye reads the middle of the
-/// CAP-HEIGHT band as the middle of a word, so that is what has to be centred.
-///
-/// **What this replaces.** The previous fix was `LineHeight = FontSize` plus a hard-coded
-/// `TranslateTransform Y="-1"`. Two problems: clamping the line box fights the font instead of measuring
-/// it, and a fixed 1px is only ever right at one font size - a correction that should scale with the em
-/// was frozen at whatever looked right on one button. Measured across the real notch, every pill label
-/// still sat **1.7px low**.
-///
-/// **The arithmetic**, all in fractions of an em, all read from the actual typeface:
-///
-///     line box height   = FontFamily.LineSpacing
-///     baseline from top = FontFamily.Baseline
-///     cap height        = GlyphTypeface.CapsHeight
-///
-///     optical middle of the letters = Baseline - CapsHeight/2   (from the top of the line box)
-///     middle of the line box        = LineSpacing / 2
-///     error (positive = too low)    = (Baseline - CapsHeight/2) - LineSpacing/2
-///
-/// The correction is `-error * FontSize`, so it scales with type size and adapts to any font - including
-/// whatever the coming design revamp switches to. Verified in pixels by <c>--hittest</c>, which measures
-/// the same thing independently and fails above 1.5px.
+/// Puts a label in the OPTICAL middle of its button: WPF centres the line box, but the eye centres
+/// the cap-height band, so layout-centred labels sit low. The nudge is -((Baseline - CapsHeight/2)
+/// - LineSpacing/2) * FontSize, from real font metrics. Verified in pixels by --hittest (fails >1.5px).
 /// </summary>
 public static class OpticalCenter
 {
@@ -69,15 +45,9 @@ public static class OpticalCenter
         var offset = OffsetFor(TextElement.GetFontFamily(el), TextElement.GetFontSize(el),
             TextElement.GetFontStyle(el), TextElement.GetFontWeight(el), TextElement.GetFontStretch(el));
 
-        // SNAP TO WHOLE DEVICE PIXELS. This is the difference between "centred" and "centred and crisp".
-        //
-        // The raw correction is about 0.77px at 12pt - a SUB-PIXEL vertical offset. A render transform is
-        // applied after layout rounding and is not itself rounded, so it drops every glyph off the device
-        // pixel grid: the text goes soft, and soft text reads as subtly wrong without looking obviously
-        // wrong. The whole point of the exercise is a label that looks right, so the nudge is rounded to
-        // a real pixel on the actual display - which is also why it has to be computed here, per element,
-        // rather than baked into a style: a 4K panel at 150% and an external monitor at 100% need
-        // different numbers, and Toki is per-monitor DPI aware.
+        // Snap to whole DEVICE pixels: a render transform is applied after layout rounding, so a
+        // sub-pixel nudge would soften every glyph. Computed per element because Toki is
+        // per-monitor DPI aware - different displays need different numbers.
         var scale = 1.0;
         try { var dpi = VisualTreeHelper.GetDpi(el); if (dpi.DpiScaleY > 0) scale = dpi.DpiScaleY; } catch { }
 

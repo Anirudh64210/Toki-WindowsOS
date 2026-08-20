@@ -3,12 +3,10 @@ using System.Text.RegularExpressions;
 namespace Toki.Llm;
 
 /// <summary>
-/// Tier 0.5: greetings, thanks, "how are you", identity, and goodbyes are answered with a short, warm,
-/// CANNED reply and NEVER sent to notes retrieval. This is what stops "Good morning" from returning a
-/// rambling meeting summary, and "who are you" from searching the notes - a meeting assistant shouldn't
-/// pretend everything is a document question. Anchored whole-utterance, so it only fires on PURE
-/// small-talk; a real question that merely contains a greeting word falls through to the Q&amp;A.
-/// (Capability - "what can you do" - is handled as the Help COMMAND upstream, not here.)
+/// Tier 0.5: greetings, thanks, identity, and goodbyes get a short CANNED reply and are NEVER
+/// sent to notes retrieval. Anchored whole-utterance, so it only fires on PURE small-talk; a real
+/// question that merely contains a greeting word falls through to the Q&amp;A.
+/// ("What can you do" is handled as the Help COMMAND upstream, not here.)
 /// </summary>
 public static class SmallTalk
 {
@@ -18,9 +16,8 @@ public static class SmallTalk
             new[] { "Hey! What do you want to know from your meetings?", "Hi there - ask me anything about your meetings.", "Hey! Ask away." }),
         (Whole(@"thanks?(\s+(a\s+lot|so\s+much|very\s+much|a\s+ton|man|toki))?|thank\s+you(\s+(so\s+much|very\s+much|a\s+lot|a\s+ton))?|thx|ty|appreciate\s+(it|that|you)|cheers|nice|cool|great|awesome|perfect|good\s+job|well\s+done|got\s+it"),
             new[] { "Anytime.", "You got it.", "Happy to help." }),
-        // Acknowledgements - "okay", "ok cool", "alright cool thanks", "sounds good", "makes sense".
-        // Whole-utterance only. Without this they fell through to notes retrieval and dug up a random,
-        // unrelated meeting (real screenshot: "okay cool" → a Verify-Attendance meeting).
+        // Acknowledgements ("okay", "ok cool", "sounds good"). Whole-utterance only; otherwise
+        // they fall through to retrieval and dig up an unrelated meeting.
         (Whole(@"(ok(ay)?|alright(y)?|k+|cool|nice|sweet|great|awesome|perfect|gotcha|right|sure|word|fair\s+enough|sounds\s+good|makes\s+sense|no\s+worries)(?:[\s,]+(ok(ay)?|cool|nice|sweet|great|awesome|perfect|thanks?|thank\s+you|then|man|got\s+it|makes\s+sense|no\s+worries|sounds\s+good|for\s+now))*"),
             new[] { "Cool.", "Sounds good.", "Anytime.", "You got it." }),
         // A dismissal that clarifies a prior throwaway ("no I just meant ok cool thanks") - ONLY when the
@@ -35,9 +32,7 @@ public static class SmallTalk
             new[] { "See you.", "Anytime - I'm here.", "Okay!" }),
         (Whole(@"are\s+you\s+there|you\s+there|are\s+you\s+listening|can\s+you\s+hear\s+me"),
             new[] { "I'm here - what do you need?" }),
-        // ── affection ("I love you, Toki" - a real live utterance). Without this tier it fell through
-        //    to notes retrieval and the model INVENTED a grounded-sounding ramble - the worst failure
-        //    class. Affection gets a warm canned reply and never touches the notes. ──
+        // Affection gets a warm canned reply and never touches the notes.
         (Whole(@"i\s+(really\s+|so\s+)?(love|luv|adore|like|miss)\s+(you|u|ya)(\s+(so\s+much|too|a\s+lot|man|buddy))?|love\s+(you|u|ya)|(you('re|\s+are)|ur)\s+(the\s+best|my\s+(favorite|favourite)|awesome|amazing|adorable|cute|sweet|lovely|wonderful|so\s+(cute|sweet|helpful))|best\s+(assistant|app)\s+ever|i\s+appreciate\s+you|will\s+you\s+marry\s+me|marry\s+me"),
             new[] { "Aw - right back at you. Now, what can I dig up from your meetings?", "That's sweet of you. I'm here whenever you need your meetings." }),
     };
@@ -52,12 +47,9 @@ public static class SmallTalk
     {
         var t0 = (input ?? "").Trim();
         if (t0.Length == 0) return null;
-        // Strip a LEADING "(hey) toki" address ("toki, hi" / "hey doki, thanks") - via the shared
-        // FUZZY wake-name (WakeName), because push-to-talk ASR renders "Toki" as Doki/Toky/Docie/….
         var t = WakeName.StripLeading(t0);
-        // Try the whole-utterance patterns BOTH as-is (keeps "what is toki") and with a trailing
-        // address stripped (keeps "good morning, toki" AND "I love you, Toky") - so the wake-name as
-        // a subject vs. an address both work. The original text is never mutated for the Q&A path.
+        // Try the patterns both as-is (keeps "what is toki") and with a trailing address stripped
+        // ("good morning, toki"). The original text is never mutated for the Q&A path.
         foreach (var cand in new[] { t, WakeName.StripTrailing(t) })
         {
             var c = cand.Trim('.', '!', '?', ',', ' ');

@@ -13,42 +13,25 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// The hand-written note editor - ONE control, reused by the Library's manual notes, the editable prep
-/// card and the in-meeting sticky note (owner regroup, 2026-08-05).
-///
-/// What it offers, and nothing more: three text SIZES, tickable TO-DOS, bullet and numbered LISTS,
-/// blank-line SPACING, and one-tap insertion of any of Toki's note TEMPLATES. There is deliberately no
-/// font-family and no colour - the owner ruled both out ("nothing outside normal text… just size,
-/// templates, spacing, freedom"), and leaving them out is also what keeps the Markdown mirror honest:
+/// The hand-written note editor - ONE control, reused by the Library's manual notes, the editable
+/// prep card and the in-meeting sticky note. Offers three text sizes, tickable to-dos, bullet and
+/// numbered lists, blank-line spacing, and template insertion; no font-family and no colour, so
 /// everything on screen survives a round-trip to a plain .md file.
 ///
-/// ── Structure, and why it changed (2026-08-06) ──
 /// Every line is a FLAT <see cref="Paragraph"/> in <c>Document.Blocks</c>, carrying its
-/// <see cref="NoteBlockKind"/> and - for a bullet, number or to-do - a leading marker held in an
-/// <see cref="InlineUIContainer"/> that is NOT part of the text.
+/// <see cref="NoteBlockKind"/> and (for a bullet, number or to-do) a leading marker held in an
+/// <see cref="InlineUIContainer"/> that is NOT part of the text. Never go back to WPF's native
+/// <see cref="List"/>: its paragraphs are not children of Document.Blocks (inserts throw, lines
+/// can't be lifted out), its marker is invisible to the text model (typed markers pile up in the
+/// Markdown), and a blank line splits the list and restarts numbering.
 ///
-/// The first version used WPF's native <see cref="List"/> for bullets and numbers, to get
-/// Enter-makes-the-next-item free. That turned out to be the source of the owner-reported bug
-/// ("bullets are created by themselves"), in three separate ways:
-///   1. A paragraph inside a ListItem is not a child of Document.Blocks, so inserting the next line
-///      after it threw, and the "Body" button could never lift a line back OUT of the list.
-///   2. The list's marker was invisible to the text model, so a marker the user TYPED ("- ") stayed in
-///      the text and was written to Markdown on top of the one the kind already implies - "- - two",
-///      growing another dash on every save.
-///   3. A blank line silently split one list into two, restarting the numbering.
-/// Flat paragraphs remove all three by construction: every line is addressable, every kind change is a
-/// local edit, the marker can never leak into the text, and numbering is recomputed from position on
-/// every change so it cannot go stale. Nesting is the only thing lost, and the Markdown format never
-/// supported it anyway.
-///
-/// <see cref="NoteMarkdown"/> owns the text format (including the single definition of what a marker
-/// is); this file owns only the visual shape of it.
+/// <see cref="NoteMarkdown"/> owns the text format (including the single definition of what a
+/// marker is); this file owns only the visual shape of it.
 /// </summary>
 public partial class NoteEditor : UserControl
 {
     /// <summary>Width of the marker gutter. Text hangs past it, so a wrapped bullet lines up under
-    /// itself instead of under its own dot. Wide enough for a tick box or "10." AND a clear gap after
-    /// it - at 21 the checkbox sat flush against the first letter.</summary>
+    /// itself instead of under its own dot. Wide enough for a tick box or "10." plus a clear gap.</summary>
     const double MarkerWidth = 26;
 
     /// <summary>The gap between a marker and the word after it. One number, so a bullet, a number and a
@@ -61,17 +44,10 @@ public partial class NoteEditor : UserControl
     public event EventHandler? Changed;
 
     /// <summary>
-    /// How big the note's text is, 1 to 12, as a comfort setting for the person WRITING.
-    ///
-    /// It scales the whole ramp - body, headings, list gutter and line spacing together - rather than
-    /// setting a point size on a selection. Two reasons, and both are the reason Bold/Italic is parked:
-    /// Markdown has no way to record "this word is 14pt", so a per-selection size could not survive a
-    /// save; and per-Run formatting on this surface is exactly what caused the mosquito-text data loss
-    /// (S8) - a line whose Run carried its own FontSize outranked its paragraph and was then written
-    /// out as an empty block. The LINE decides how its text looks; this decides how big a line is.
-    ///
-    /// So the ramp stays semantic (Title / Heading / Body, which are real Markdown and travel with the
-    /// file) and this is the dial on top of it.
+    /// How big the note's text is, 1 to 12. Scales the whole ramp (body, headings, gutter, leading)
+    /// together, never a point size on a selection: Markdown cannot record per-word size, and
+    /// per-Run FontSize outranks the paragraph and has caused data loss. The LINE decides how its
+    /// text looks; this decides how big a line is.
     /// </summary>
     public int TextSize
     {
@@ -88,19 +64,16 @@ public partial class NoteEditor : UserControl
     public const int MinTextSize = 1;
     public const int MaxTextSize = 12;
 
-    /// <summary>4 is 13px, which is the size this editor shipped at - so an existing note is unchanged
-    /// until somebody deliberately moves the dial.</summary>
+    /// <summary>4 is 13px: an existing note is unchanged until somebody moves the dial.</summary>
     public const int DefaultTextSize = 4;
 
     int _textSize = DefaultTextSize;
 
-    /// <summary>Body text in pixels for a step on the dial. Linear and gentle: 1 is 10px (dense, for a
-    /// long note in a small window), 12 is 21px (comfortable across the room).</summary>
+    /// <summary>Body text in pixels for a step on the dial: 1 is 10px, 12 is 21px.</summary>
     double BodySize => 9 + _textSize;
 
-    /// <summary>Compact toolbar for narrow hosts - the notch is 356px wide, where the full labelled
-    /// toolbar wraps onto two rows and eats the card. Same capabilities, glyphs instead of words, with
-    /// the three text sizes behind one "Aa" button.</summary>
+    /// <summary>Compact toolbar for narrow hosts, where the full labelled toolbar wraps onto two
+    /// rows. Same capabilities, glyphs instead of words.</summary>
     public bool Compact
     {
         get => _compact;
@@ -195,9 +168,8 @@ public partial class NoteEditor : UserControl
         return p;
     }
 
-    // The ramp is expressed as RATIOS of the body size, not as three fixed numbers, so the whole
-    // document scales together when the size dial moves. The ratios are the sizes it shipped with
-    // (19 and 15 against a 13px body), so at the default step nothing moves by a pixel.
+    // The ramp is RATIOS of the body size, not fixed numbers, so the whole document scales together;
+    // at the default step nothing moves by a pixel.
     const double HeadingRatio = 19.0 / 13.0;
     const double SubheadingRatio = 15.0 / 13.0;
 
@@ -221,17 +193,10 @@ public partial class NoteEditor : UserControl
                 p.FontWeight = FontWeights.SemiBold; p.Margin = new Thickness(0, 12, 0, 3);
                 break;
             case NoteBlockKind.Blank:
-                // A blank line is a BEAT, not a full empty row. Headings already carry a top margin,
-                // so rendering the user's blank at full body height stacked into a chasm between
-                // sections. LineHeight alone does the shrinking (the document's LineHeight wins
-                // otherwise). The FONT SIZE deliberately stays at body size: it used to be 6, and the
-                // first character typed into a blank line came out mosquito-sized.
-                //
-                // LineStackingStrategy is what makes the LineHeight actually count. WPF's default,
-                // MaxHeight, takes the LARGER of the requested line height and the font's natural
-                // height - so asking a 13px line for 9px of leading quietly got you 17px, and every
-                // blank line in a note was nearly twice the gap it was supposed to be. Sections drifted
-                // apart and the page read as loose rather than spaced.
+                // A blank line is a beat, not a full empty row - LineHeight does the shrinking.
+                // FONT SIZE must stay at body size or the first character typed into a blank comes
+                // out tiny. BlockLineHeight is required: WPF's default MaxHeight takes the LARGER of
+                // the requested line height and the font's natural height, silently inflating the gap.
                 p.FontSize = body;
                 p.LineHeight = Math.Round(body * 9.0 / 13.0);
                 p.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
@@ -248,9 +213,8 @@ public partial class NoteEditor : UserControl
                 break;
         }
 
-        // WPF stamps the CARET's formatting onto whatever you type, so a Run born inside a heading (or
-        // an old tiny blank line) carries its own explicit FontSize/FontWeight that then outranks the
-        // paragraph. Clear it: on this surface the LINE decides how its text looks, always.
+        // WPF stamps the CARET's formatting onto whatever you type, so a Run can carry its own
+        // FontSize/FontWeight that outranks the paragraph. Clear it: the LINE decides, always.
         foreach (var inline in p.Inlines)
             if (inline is Run r)
             {
@@ -287,14 +251,8 @@ public partial class NoteEditor : UserControl
             default: return null;
         }
 
-        // The marker is set RIGHT in its gutter, with one fixed gap before the text.
-        //
-        // Left-aligning it made every kind sit at the same left edge and therefore a different distance
-        // from its own words: a tick box nearly filled the gutter and looked attached, while a bullet
-        // dot is four pixels wide and floated a clear 20px away from the line it belonged to. Right
-        // alignment is how numbered lists have been set for centuries - "1." and "10." end flush - and
-        // it gives every marker the same relationship to its text while keeping one text column, so a
-        // list of bullets and to-dos still lines up down the page.
+        // The marker is set RIGHT in its gutter with one fixed gap before the text, so "1." and
+        // "10." end flush and every marker sits the same distance from its own words.
         child.HorizontalAlignment = HorizontalAlignment.Right;
         child.Margin = new Thickness(0, 0, MarkerGap, 0);
         var host = new Border
@@ -330,9 +288,8 @@ public partial class NoteEditor : UserControl
         var tagged = p.Tag as NoteBlockKind?;
         if (tagged is NoteBlockKind.Bullet or NoteBlockKind.Numbered or NoteBlockKind.Todo) return NoteBlockKind.Body;
 
-        // A blank line someone has typed into is not blank any more. Without this it stayed tagged Blank,
-        // kept the short spacing line-height, AND - far worse - NoteMarkdown.Write emits nothing for a
-        // Blank block, so the sentence they just typed was thrown away on the next save.
+        // A blank line someone has typed into is not blank any more. Without this,
+        // NoteMarkdown.Write emits nothing for a Blank block and the typed sentence is lost on save.
         if (tagged is NoteBlockKind.Blank && TextOf(p).Trim().Length > 0) return NoteBlockKind.Body;
 
         return tagged ?? NoteBlockKind.Body;
@@ -563,15 +520,8 @@ public partial class NoteEditor : UserControl
     {
         Toolbar.Children.Clear();
 
-        // STYLE and SIZE are two controls, not one dropdown with two sections.
-        //
-        // The first pass merged them behind a single "Aa" button with group headings inside, and the
-        // owner's critique was exact: no document editor on earth does that. Word has a Styles control
-        // and a Size control; Google Docs has a styles dropdown and a size stepper; they are separate
-        // because they are different KINDS of answer - style is per-line structure that travels with
-        // the file, size is how big the whole page is drawn. Merging them was tidiness at the cost of
-        // matching every editor the user has ever used, which is the one convention a toolbar must
-        // never spend.
+        // STYLE and SIZE are two controls, never one dropdown with sections: style is per-line
+        // structure that travels with the file, size is how big the whole page is drawn.
         if (_compact)
         {
             // Everything the full bar does, in one row that fits the notch. Tooltips carry the words.
@@ -600,16 +550,8 @@ public partial class NoteEditor : UserControl
 
     string StyleChipLabel() => _compact ? "¶" : "Style  ▾";
 
-    /// <summary>
-    /// Everything about how big text is, behind one "Aa" button - in two groups, because they are two
-    /// different questions and merging them would be the confusing kind of tidy.
-    ///
-    /// THIS LINE is structure: Title / Heading / Body are real Markdown, they travel with the file, and
-    /// they are per-line. TEXT SIZE is comfort: 1 to 12, applies to the whole note, and is remembered
-    /// for next time. See <see cref="TextSize"/> for why the numeric dial is not per-selection.
-    /// </summary>
-    /// <summary>The STYLE dropdown: what this line is. Anchored to its own chip, opened on the current
-    /// line's kind, exactly the shape of Word's Styles control.</summary>
+    /// <summary>The STYLE dropdown: what this line is. Anchored to its own chip,
+    /// opened on the current line's kind.</summary>
     void ShowStyles()
     {
         var current = CaretParagraph() is { } p ? DerivedKind(p) : NoteBlockKind.Body;
@@ -673,9 +615,8 @@ public partial class NoteEditor : UserControl
         };
         text.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
 
-        // The whole rounded box is the target, not the two characters inside it. In compact mode these
-        // labels are a single glyph ("•", "1.", "Aa"), which is why they need a floor on their size -
-        // aiming at a bullet point is not a thing anyone should have to do (owner, 2026-08-06).
+        // The whole rounded box is the target, not the characters inside it; compact-mode labels are
+        // a single glyph, hence the size floor.
         var b = new Border
         {
             Padding = new Thickness(10, 7, 10, 7), CornerRadius = new CornerRadius(9),

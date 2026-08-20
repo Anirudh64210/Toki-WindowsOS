@@ -29,10 +29,8 @@ public sealed class LlmService
         var s = AppSettings.Current;
         if (s.NotesMode == NotesMode.ApiKey)
         {
-            // Only hand back the API client when it can actually work; otherwise say why
-            // (never the key itself) and degrade one rung, not two: API → LOCAL model when
-            // it's installed (the user chose AI notes; a missing key shouldn't silently
-            // drop them all the way to heuristic) → heuristic only when there's no model.
+            // Only hand back the API client when it can actually work; otherwise log why (never
+            // the key itself) and degrade one rung, not two: API → local model → heuristic.
             var api = new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl);
             if (api.Ready) return api;
             var why = string.IsNullOrWhiteSpace(s.ApiKey) ? "no API key set"
@@ -72,7 +70,7 @@ public sealed class LlmService
         }
     }
 
-    /// <summary>Load the local model ahead of the first meeting (lesson 2), off the UI thread.</summary>
+    /// <summary>Load the local model ahead of the first meeting, off the UI thread.</summary>
     public void Warm()
     {
         if (AppSettings.Current.NotesMode == NotesMode.Local && ModelManager.QwenInstalled)
@@ -116,12 +114,9 @@ public sealed class LlmService
     }
 
     /// <summary>Write notes with the active model, or null to keep the heuristic notes. Pass
-    /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).
-    ///
-    /// The summary is written from the TRANSCRIPT alone. The user's own sticky note is deliberately not
-    /// an input (owner, 2026-08-06): it's their private thinking, sitting beside the summary rather than
-    /// inside it, and a note that quietly rewrites itself around what you jotted is a note you can no
-    /// longer trust to say what was actually said.</summary>
+    /// <paramref name="force"/> to write in a specific template (the manual override).
+    /// The summary is written from the TRANSCRIPT alone; the user's sticky note is deliberately
+    /// not an input - the note must say what was actually said.</summary>
     public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
         CancellationToken ct = default, NoteTemplate? force = null)
     {

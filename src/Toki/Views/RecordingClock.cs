@@ -4,8 +4,8 @@ using System.Windows.Threading;
 namespace Toki.Views;
 
 /// <summary>
-/// Shared helper: keeps a TextBlock showing elapsed recording time while its
-/// view is on screen. Wall-clock from AppState.RecordingStartedAt (lesson 10).
+/// Keeps a TextBlock showing elapsed recording time while its view is on screen.
+/// Wall-clock from AppState.RecordingStartedAt, never UI ticks.
 /// </summary>
 static class RecordingClock
 {

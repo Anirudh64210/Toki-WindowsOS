@@ -26,7 +26,10 @@
 
         <!-- Live state strip (listening waveform / thinking loader / hint) - sits just under the mascot. -->
         <StackPanel x:Name="StatusStrip" DockPanel.Dock="Top" Margin="0,8,0,0">
-            <Border x:Name="WaveHost" Height="24" HorizontalAlignment="Left" Margin="1,0,0,0"/>
+            <!-- THE waveform - the same control the recording bar uses, at 9 bars instead of 14.
+                 They used to be two unrelated things that looked nothing alike (owner, 2026-08-18). -->
+            <controls:VoiceWave x:Name="Wave" BarCount="9" Height="22"
+                                HorizontalAlignment="Left" Margin="1,0,0,0"/>
             <Border x:Name="LoaderHost" Visibility="Collapsed" HorizontalAlignment="Left" Margin="1,0,0,0"/>
             <TextBlock x:Name="HintText" Text="Hold Ctrl + Alt + Space and speak" Style="{StaticResource Dim}"
                        FontSize="9.5" Margin="1,6,0,0"/>
@@ -39,17 +42,21 @@
                           controls:SmoothScroll.Enabled="True">
                 <StackPanel x:Name="Thread"/>
             </ScrollViewer>
-            <Border x:Name="JumpPill" Visibility="Collapsed" Opacity="0"
+            <!-- A BUTTON, not a Border with a mouse handler (the same fix as the Library's copy of
+                 this pill). It is pill-shaped, wears the hand cursor and asks to be clicked, so it
+                 has to press like everything else. -->
+            <Button x:Name="JumpPill" Visibility="Collapsed" Opacity="0"
+                    Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
+                    BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                     HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"
-                    Background="{DynamicResource Chip}" BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
-                    CornerRadius="13" Padding="11,5" Cursor="Hand" MouseLeftButtonUp="OnJumpToLatest">
+                    Padding="11,5" Click="OnJumpToLatest">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9.5"
                                Foreground="{DynamicResource Pink}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <TextBlock Text="Latest" FontFamily="{StaticResource UiFont}" FontSize="10.5" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextSoft}" VerticalAlignment="Center"/>
                 </StackPanel>
-            </Border>
+            </Button>
         </Grid>
     </DockPanel>
 </UserControl>

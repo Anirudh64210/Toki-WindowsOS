@@ -41,6 +41,24 @@ public class NoteExtractorTests
     }
 
     [Fact]
+    public void TheFloorIsCappedAndDropsGrunts()
+    {
+        // MUTATION PROBE (meeting 101, 2026-08-19): with no caps, a 17-minute meeting shipped
+        // 92 raw "open questions" and 35 half-sentence to-dos as its note. The floor keeps the
+        // most substantial few and drops sub-4-word connection checks ("What?", "Is it good?").
+        var segs = new List<TranscriptSegment> { Them(0, "Is it good?"), Them(100, "What?") };
+        for (var i = 0; i < 40; i++)
+        {
+            segs.Add(Them(1000 + i * 100, $"Should we route the number {i} pipeline through the new tracker?"));
+            segs.Add(You(5000 + i * 100, $"I'll update the number {i} column in the ops tracker sheet."));
+        }
+        var n = NoteExtractor.Extract(segs);
+        Assert.True(n.Questions.Count <= 10, $"{n.Questions.Count} questions survived the cap");
+        Assert.True(n.Actions.Count <= 12, $"{n.Actions.Count} actions survived the cap");
+        Assert.DoesNotContain(n.Questions, q => q == "Is it good?" || q == "What?");
+    }
+
+    [Fact]
     public void TldrIsNonEmptyAndBounded()
     {
         var n = NoteExtractor.Extract(Planted);

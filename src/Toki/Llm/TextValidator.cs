@@ -3,10 +3,8 @@ using System.Text.RegularExpressions;
 namespace Toki.Llm;
 
 /// <summary>
-/// Guards against the ways a 4-bit local model degenerates (lesson 8): drifting
-/// into CJK/kana/Hangul, or collapsing into repeated characters like "!!!!!!".
-/// Never show the user degenerate output - reject, retry once, then fall back to
-/// the heuristic notes.
+/// Guards against 4-bit local-model degeneration: drifting into CJK/kana/Hangul or collapsing
+/// into repeated characters. Reject, retry once, then fall back to the heuristic notes.
 /// </summary>
 public static partial class TextValidator
 {

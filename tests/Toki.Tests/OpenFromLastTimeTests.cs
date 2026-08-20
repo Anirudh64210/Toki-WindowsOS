@@ -71,6 +71,27 @@ public sealed class OpenFromLastTimeTests : IDisposable
     }
 
     [Fact]
+    public void A_word_fragment_inside_another_title_is_not_a_match()
+    {
+        // The 2026-08-17 regression: a title containing "just" substring-matched "AdJUSTing
+        // Schedules", and "even" matched "EVENt Coverage" - each handing today's meeting an
+        // unrelated meeting's to-dos. Titles share ground on whole words only.
+        Save("Adjusting Schedules and Roles", DateTimeOffset.Now.AddDays(-5), Todo("draft the role matrix", "Lisa"));
+        var today = Save("Just the weekly check", DateTimeOffset.Now);
+        Assert.Null(OpenFromLastTime.Build(today, _store));
+    }
+
+    [Fact]
+    public void A_meeting_from_months_ago_is_too_old_to_be_last_time()
+    {
+        // A leftover seed record with 2023 due dates was handing its tasks to every later meeting
+        // that shared one title word. "Last time" for a recurring meeting means weeks, not years.
+        Save("Pricing sync", DateTimeOffset.Now.AddDays(-370), Todo("review revised project timeline"));
+        var today = Save("Pricing sync", DateTimeOffset.Now);
+        Assert.Null(OpenFromLastTime.Build(today, _store));
+    }
+
+    [Fact]
     public void A_completed_task_is_never_resurrected()
     {
         Save("Pricing sync", DateTimeOffset.Now.AddDays(-7), Todo("pull the bounce rate", done: true));

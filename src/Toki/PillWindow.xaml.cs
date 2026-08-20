@@ -10,54 +10,49 @@ using Toki.Views;
 
 namespace Toki;
 
-/// <summary>
-/// The single overlay: an opaque, hardware-accelerated, borderless window that IS
-/// the pill (DWM rounds its corners). It resizes to the current state's content
-/// and sits bottom-center. Not a layered/transparent window - that both forced
-/// slow software rendering AND conflicted with ghost mode (WDA_EXCLUDEFROMCAPTURE
-/// on a layered window produced the black-rectangle glitch).
-/// </summary>
+/// <summary>The single overlay: a borderless top-center notch window that morphs between states
+/// and hosts one view at a time, plus the floating mascot bubble beside the card.</summary>
 public partial class PillWindow : Window
 {
-    // Logical-pixel content sizes per state, from Toki-ProductDesign/.
+    // Logical-pixel content sizes per state. For AutoHeight pages the HEIGHT is only a fallback -
+    // the real height is measured from the content. Width is always used.
     static readonly Dictionary<PillState, (double W, double H)> Sizes = new()
     {
-        // Sizes trimmed smaller overall (owner: "make the notch smaller").
-        // NOTE: for the AutoHeight pages (Home/Settings/MeetingPrompt/NoSpeech/RecordingOpen) the
-        // HEIGHT below is only a fallback - the real height is measured from the content so every
-        // page is concise. Width is always used.
         [PillState.Collapsed]     = (52, 42),    // launcher peek (Toki alone)
-        [PillState.MeetingPrompt] = (288, 72),
-        [PillState.RecordingBar]  = (34, 14),    // TINY upside-down eyes-peek - never in the way of browser tabs / snip toolbar
-        [PillState.RecordingOpen] = (268, 76),   // Glass/Luma-tight: one header row (dot+timer · Stop) + live line
-        [PillState.Summarizing]   = (232, 66),   // small, cute working loader (mostly lives as a sliver)
+        [PillState.MeetingPrompt] = (169, 40),   // "Record this meeting" pill
+        [PillState.RecordingBar]  = (34, 14),    // TINY eyes-peek - never in the way of browser tabs / snip toolbar
+        [PillState.RecordingOpen] = (272, 48),   // recording bar. RecordingOpenView owns the live
+                                                 // width (IWidthAware): its chevron widens it to 344.
+        [PillState.Summarizing]   = (220, 50),   // "Tidying up your notes..." pill (lives mostly as a sliver)
         [PillState.Notes]         = (360, 320),  // scrollable window into the notes
         [PillState.NoSpeech]      = (300, 92),
-        [PillState.Home]          = (344, 190),   // widened 320→344 to fit the COMING UP list + Join pills (design ③)
+        [PillState.Home]          = (344, 190),   // fits the COMING UP list + Join pills
         [PillState.Library]       = (404, 440),
-        [PillState.Settings]      = (380, 208),   // FIXED height; UI/visibility-only now (AI/calendar/about moved to the Library Settings page)
+        [PillState.Settings]      = (380, 120),   // auto-height; 120 is only the floor
         [PillState.ManualNote]    = (392, 410),
         [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
         [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
-        [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short (design ④)
+        [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short
         [PillState.About]         = (380, 430),   // FIXED height + internal scroll (credits list) - mirrors Settings
-        [PillState.Onboarding]    = (330, 250),   // auto-height: steps (name/privacy/done) differ in height
+        [PillState.Onboarding]    = (330, 250),   // auto-height: steps differ in height
     };
 
-    // ── the HOVERING card (2026-08 redesign) ──
-    // The panel floats a little below the top edge instead of fusing to it, and the window is bigger
-    // than the card: a left zone where Toki floats beside it, and right/bottom room for the shadow.
-    // EVERY size in this file speaks CARD dimensions; the two conversion helpers below are the only
-    // place window dimensions are derived, so the pads can never be added twice.
-    // The hover: how far below the top edge the card hangs. Two exceptions (owner, 2026-08-13/14):
-    // RECORDING sits AT the top, non-invasive - a status strip, not a floating panel; and the
-    // COLLAPSED edge-summon peek is FLUSH with the edge - it drops out of the top of the screen
-    // when you hover there, so a gap above it reads as "too low", not as hovering.
+    // ── the HOVERING card ──
+    // The card floats a little below the top edge and the window is bigger than it: a left zone
+    // where Toki floats beside it, and right/bottom room for the shadow. EVERY size in this file
+    // speaks CARD dimensions; the two conversion helpers below are the only place window
+    // dimensions are derived, so the pads can never be added twice.
+    // Two flush exceptions: RECORDING sits AT the top (a status strip, not a floating panel), and
+    // the COLLAPSED edge-summon peek is FLUSH with the edge.
     const double TopGapDefault = 12;
     const double TopGapRecording = 2;
-    double TopGap => _state.Current switch
+    double TopGap => TopGapFor(_state.Current);
+
+    /// <summary>How far below the top edge a state's card hangs. Summarizing shares the flush arm:
+    /// the loader is the same session as the recording it follows and must not sit lower than it.</summary>
+    internal static double TopGapFor(PillState s) => s switch
     {
-        PillState.RecordingBar or PillState.RecordingOpen => TopGapRecording,
+        PillState.RecordingBar or PillState.RecordingOpen or PillState.Summarizing => TopGapRecording,
         PillState.Collapsed => 0,
         _ => TopGapDefault,
     };
@@ -67,7 +62,11 @@ public partial class PillWindow : Window
     const double CardPadR = 20;      // shadow room
     const double CardPadB = 24;      // shadow room
     static double WinW(double cardW) => cardW + CardPadL + CardPadR;
-    static double WinH(double cardH) => cardH + CardPadB;
+    // The window must always be tall enough to hold TOKI's 58px bubble, not just the card - a
+    // sliver-height card would otherwise clip the circle. The extra is transparent pad below the
+    // card; the card itself does not change size or position.
+    const double MascotZoneH = 58;   // must match MascotZone's Height in the XAML
+    static double WinH(double cardH) => Math.Max(cardH + CardPadB, MascotZoneH + 8);
     static double CardW(double winW) => Math.Max(1, winW - CardPadL - CardPadR);
     static double CardH(double winH) => Math.Max(1, winH - CardPadB);
 
@@ -78,27 +77,24 @@ public partial class PillWindow : Window
     const double GlassTopBleed = 8;
     int _topBleedPx;   // physical-px version of the current bleed (0 unless glass panel)
 
-    // Panels whose HEIGHT is sized to their actual content (measured), not a hardcoded number - so
-    // every page is concise with no dead space below it. The Sizes width is still used; the Sizes
-    // height is only a fallback. Scrollable/fixed pages (Notes, Library, ManualNote, Settings) and
-    // the peeks keep their fixed height on purpose.
-    //
-    // Settings is DELIBERATELY not auto-height: its content varies a lot between modes (the API-key
-    // view is far taller than the On-device view), and - the real bug - measuring its wrapping text
-    // out-of-tree BEFORE the view's first real layout under-reports the height, so the first open
-    // came up short (scrollbar) and every later re-open (after one arrange) came up full-size (big
-    // notch). A fixed height + the ScrollViewer already in SettingsView makes every open identical.
+    // Panels whose HEIGHT is measured from their actual content, so every page is concise with no
+    // dead space below it. The Sizes width is still used; the Sizes height is only a fallback.
+    // Scrollable/fixed pages (Notes, Library, ManualNote) and the peeks keep their fixed height on purpose.
     static readonly HashSet<PillState> AutoHeight =
-        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask, PillState.PrepCard, PillState.Onboarding];
+        [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask,
+         PillState.PrepCard, PillState.Onboarding, PillState.Settings];
 
-    // Click-outside dismisses ONLY these ephemeral popups (the launcher menu and the
-    // transient "nothing was said" toast). Everything with content you actually work
-    // with - Notes, Library, Settings, ManualNote - stays put until you close it with
-    // its own button or Esc; a stray click into your real work must never make it
-    // vanish. Recording/Summarizing/MeetingPrompt were never dismissable this way.
-    // Clicking into your real work fully tucks a stayable page away (→ Hidden). Until then it
-    // lives as a hover-able sliver. (Summarizing is excluded - it must stay to reach its
-    // result; recording/prompt have their own lifecycles.)
+    /// <summary>States whose VIEW draws the visible capsules itself (separate floating pills with
+    /// air between them) rather than sitting inside the one glass card. The window still supplies
+    /// the mascot bubble and the morph; it just stops drawing a surface.</summary>
+    static readonly HashSet<PillState> DrawsOwnCapsules = [PillState.MeetingPrompt];
+
+    /// <summary>Does this state draw its own capsules instead of sitting on the glass card? The
+    /// render harness has to ask, or its PNGs show a card the running app does not draw.</summary>
+    internal static bool IsCapsuleState(PillState s) => DrawsOwnCapsules.Contains(s);
+
+    // Click-outside fully tucks ONLY these pages away (→ Hidden, context kept). Summarizing is
+    // excluded - it must stay to reach its result; recording/prompt have their own lifecycles.
     static readonly HashSet<PillState> DismissOnClickOutside =
         [PillState.Home, PillState.Notes, PillState.NoSpeech, PillState.Settings, PillState.Calendar, PillState.About];
 
@@ -133,27 +129,33 @@ public partial class PillWindow : Window
         LocationChanged += (_, _) => CacheWindowRect();
         // A live theme swap must re-tint the frosted glass (dark frost ⇄ white frost) - the acrylic tint
         // is set via P/Invoke, not a DynamicResource, so it won't recolour on its own.
-        Theme.ThemeManager.ThemeChanged += () => Dispatcher.Invoke(() => { if (_blurOn) { EnableAcrylic(); ApplyBlur(true); } });
-        // Keep the pill anchored bottom-centre as it grows/shrinks - so an animated resize
-        // (the smooth recording expand) stays put instead of drifting from its top-left.
+        Theme.ThemeManager.ThemeChanged += () => Dispatcher.Invoke(() =>
+        {
+            if (_blurOn) { EnableAcrylic(); ApplyBlur(true); }
+            ApplyShadowDepth();   // the card's two shadows lighten in the light theme
+        });
+        ApplyShadowDepth();
+        // Keep the pill anchored top-centre as it grows/shrinks - an animated resize must stay
+        // put instead of drifting from its top-left.
         SizeChanged += (_, _) => { if (IsVisible && _hwnd != IntPtr.Zero) PlaceTopCenter(); CacheWindowRect(); if (_blurOn) ApplyRoundRegion(true); };
+        // The resting squircle clip and rim are built for the card's ARRANGED box, so rebuild them
+        // whenever that box changes. Root.SizeChanged covers all cases and never fires per
+        // animation frame - the window is sized twice per transition, not per frame.
+        Root.SizeChanged += (_, _) => ApplyCornerGeometry();
+        DpiChanged += (_, _) => ApplyCornerGeometry();   // a 1 DIP rim is a different number of device px
         // Fallback for a click that beats the 60ms hover tick: activate on press so the very first
-        // click on a button lands (and subsequent wheel/keys route here). Tunnels so it fires before
-        // the click reaches the button - activation happens, then the button gets its click.
+        // click on a button lands. Tunnels, so activation happens before the button gets its click.
         PreviewMouseDown += (_, _) => { if (NeedsInput(_state.Current)) TryActivateNotch(); };
+        // The tucked loader sliver and the "Notes ready" pill open on click only (see HoverTick).
+        MouseLeftButtonUp += (_, _) =>
+        {
+            if (_tucked && _state.Current is PillState.Summarizing or PillState.Notes) ExpandCurrent();
+        };
     }
 
-    /// <summary>
-    /// Log every click on the notch that does NOT land on a button, together with what it hit instead
-    /// and whether a button was sitting within a few pixels.
-    ///
-    /// Why this exists: the owner reported that notch buttons only respond on their text, and three
-    /// successive offline harnesses all said the buttons were fine. Each harness turned out to be an
-    /// unfaithful model of the real thing - a plain host window, then one without the reveal transform,
-    /// then one auditing mid-animation. Rather than build a fourth model, this measures the real window
-    /// on the real machine at the moment the real click happens. One line in %TEMP%\toki-m1.log per
-    /// missed click, nothing at all when buttons behave.
-    /// </summary>
+    /// <summary>Diagnostic: log every click on the notch that does NOT land on a button, with what
+    /// it hit and whether a button was nearby. Measures the real window at the real click - one line
+    /// in %TEMP%\toki-m1.log per missed click, nothing at all when buttons behave.</summary>
     void LogClicksThatMissAButton()
     {
         PreviewMouseDown += (_, e) =>
@@ -163,13 +165,9 @@ public partial class PillWindow : Window
                 var p = e.GetPosition(this);
                 var hit = System.Windows.Media.VisualTreeHelper.HitTest(this, p)?.VisualHit;
 
-                // Did the click land on something that ACTS like a button?
-                //
-                // ButtonBase alone is not enough, and assuming it was made this log cry wolf: the
-                // collapsed peek opens on a Border with a mouse handler, so clicking Toki's face -
-                // which works, and opened Home 65ms later - was written down as a missed click. A log
-                // that reports healthy behaviour as broken is worse than no log, because it is the
-                // thing the owner and I both reach for when something IS wrong.
+                // Did the click land on something that ACTS like a button? ButtonBase alone is not
+                // enough (the collapsed peek opens on a Border with a mouse handler) - a log that
+                // reports healthy behaviour as broken is worse than no log.
                 for (var q = hit; q is not null; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
                     if (q is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Documents.Hyperlink
                         || (q is FrameworkElement fe2 && fe2.Cursor == Cursors.Hand)) return;
@@ -178,8 +176,7 @@ public partial class PillWindow : Window
                 for (var q = hit; q is not null && chain.Count < 5; q = System.Windows.Media.VisualTreeHelper.GetParent(q))
                     chain.Add(q is FrameworkElement { Name.Length: > 0 } fe ? $"{q.GetType().Name}:{fe.Name}" : q.GetType().Name);
 
-                // Was a button NEARBY? If so the click was in a button's box but missed its hit area,
-                // which is exactly the reported symptom - and names the culprit.
+                // Was a button NEARBY? Then the click was in a button's box but missed its hit area.
                 var near = NearestButton(p);
                 App.Log($"click miss at ({p.X:F0},{p.Y:F0}) state={_state.Current} "
                     + $"hit=[{(chain.Count > 0 ? string.Join(" < ", chain) : "nothing")}]"
@@ -188,11 +185,8 @@ public partial class PillWindow : Window
             catch { /* diagnostics must never break a click */ }
         };
 
-        // And the same for HOVER, which is the current report: the click lands anywhere in the grey box
-        // but the box only LIGHTS UP over the glyphs. For a real WPF Button those two cannot differ -
-        // hover and click share one hit test - so either something other than the button is drawing that
-        // highlight, or the control is not the button it appears to be. This says which, from the real
-        // window, instead of another round of reasoning about templates.
+        // Same for HOVER: for a real WPF Button, hover and click share one hit test - if a point
+        // inside a button does not set IsMouseOver, something else is drawing the highlight.
         long lastHoverLog = 0;
         string? lastHoverKey = null;
         PreviewMouseMove += (_, e) =>
@@ -205,18 +199,11 @@ public partial class PillWindow : Window
                     if (!b.IsVisible || b.ActualWidth <= 0) continue;
                     Point local;
                     try { local = TranslatePoint(p, b); } catch { continue; }
-                    // INSET, not the raw rectangle. Toki's buttons are drawn with large corner radii,
-                    // so a point a pixel in from the left edge and seven up from the bottom is inside
-                    // the RECT and genuinely outside the SHAPE - WPF is right to ignore it and this
-                    // log was wrong to call it a miss. It reported exactly that twice while the owner
-                    // was using Home, which sent me hunting a bug that was not there.
-                    //
-                    // The inset is the corner radius, so only points that are unambiguously within the
-                    // drawn button count. Same lesson as --hittest v1, which probed literal corners.
+                    // INSET, not the raw rectangle: with large corner radii a point inside the RECT
+                    // can be genuinely outside the SHAPE - only unambiguous points count.
                     if (!WellInside(local, b)) continue;
 
-                    // Inside the button's box. Is the button itself aware of it? If not, the highlight
-                    // cannot be coming from this button, and THAT is the bug.
+                    // Inside the button's box. If the button itself is unaware, THAT is the bug.
                     if (b.IsMouseOver) return;
 
                     var key = $"{b.Name}|{b.Content as string}";
@@ -250,14 +237,8 @@ public partial class PillWindow : Window
         return null;
     }
 
-    /// <summary>
-    /// Is this point unambiguously within a rounded button, rather than merely within its rectangle?
-    ///
-    /// A pill button 36px tall carries a radius of up to half its height, so the rectangle overstates
-    /// the shape by a lot near the corners. The diagnostics inset by that radius: better to miss a
-    /// genuine edge case than to report a healthy button as broken, because the whole value of this log
-    /// is that a line in it means something.
-    /// </summary>
+    /// <summary>Is this point unambiguously within a rounded button, rather than merely within its
+    /// rectangle? Better to miss an edge case than to report a healthy button as broken.</summary>
     static bool WellInside(Point local, FrameworkElement b)
     {
         var inset = Math.Min(10, Math.Min(b.ActualWidth, b.ActualHeight) / 3);
@@ -289,6 +270,7 @@ public partial class PillWindow : Window
             ApplyGhost(); // works on this transparent window too
         }
         catch (Exception ex) { App.Log($"window setup failed (non-fatal): {ex.Message}"); }
+        ApplyCornerGeometry();   // the DPI is only knowable once the HWND exists
 
         _input = new Interop.InputMonitor(
             isArmed: () => DismissOnClickOutside.Contains(_state.Current)
@@ -303,9 +285,8 @@ public partial class PillWindow : Window
             onWheel: OnHookWheel);
     }
 
-    // A few px of slack so a click on the very EDGE of the notch still reads as "inside" - otherwise a
-    // borderline click was judged outside and tucked the panel away, which felt like buttons needing a
-    // dead-centre hit. Same slack widens the wheel-capture zone harmlessly.
+    // A few px of slack so a click on the very EDGE of the notch still reads as "inside" -
+    // otherwise a borderline click tucks the panel away. Same slack widens the wheel-capture zone.
     const int InsidePad = 6;
     bool PointInWindow(int x, int y) =>
         (_rectR <= _rectL) || (x >= _rectL - InsidePad && x <= _rectR + InsidePad && y >= _rectT - InsidePad && y <= _rectB + InsidePad)
@@ -365,11 +346,8 @@ public partial class PillWindow : Window
                         (_rectR - _rectL) / dpi.DpiScaleX, (_rectB - _rectT) / dpi.DpiScaleY);
     }
 
-    /// <summary>
-    /// Place the window TOP-centered (the virtual notch, flush to the top edge) using
-    /// PHYSICAL pixels (Win32) - robust to any resolution/DPI, and the top stays fixed so
-    /// the pill grows DOWNWARD (blooms out of the top) as it morphs.
-    /// </summary>
+    /// <summary>Place the window TOP-centered in PHYSICAL pixels (Win32). The top stays fixed so
+    /// the pill grows DOWNWARD as it morphs.</summary>
     void PositionTopCenter()
     {
         if (_hwnd == IntPtr.Zero) return;
@@ -389,8 +367,10 @@ public partial class PillWindow : Window
         int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi);
         int x = work.Left + ((work.Right - work.Left) - winW) / 2 - skew;
         int y = work.Top + gap - _topBleedPx;   // top edge fixed → height grows downward
-        // Skip the move when nothing changed - SizeChanged fires this on every frame of a size
-        // animation, but for a height-only morph x/y are constant, so the Win32 call is pure waste.
+        // Skip the move when nothing changed. NOTE this reads the window's CURRENT physical width,
+        // so it must only run when the Win32 size is already correct: right after setting WPF's
+        // Width (layout merely dirty) it centres for the OLD size - a visible sideways jump.
+        // SizeWindowNow exists for that case.
         if (x == _lastPlaceX && y == _lastPlaceY) return;
         _lastPlaceX = x; _lastPlaceY = y;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
@@ -442,11 +422,9 @@ public partial class PillWindow : Window
         return QuietFullscreen();
     }
 
-    /// <summary>True while a fullscreen app / game / presentation is up (the "do not disturb"
-    /// signal Windows itself uses for toasts). Shared by the edge-summon, PrepWatcher, and the
-    /// meeting-prompt gate - a notch popping over slide 3 of a deck is the overlay cardinal sin.
-    /// Suppression only DELAYS a prompt: the detector re-checks every poll and offers the
-    /// meeting the moment the user leaves fullscreen.</summary>
+    /// <summary>True while a fullscreen app / game / presentation is up (the signal Windows itself
+    /// uses for toasts). Shared by the edge-summon, PrepWatcher, and the meeting-prompt gate.
+    /// Suppression only DELAYS a prompt - the detector re-offers on the next poll.</summary>
     public static bool QuietFullscreen() =>
         SHQueryUserNotificationState(out var st) == 0 &&
         (st == QunsBusy || st == QunsRunningD3dFullScreen || st == QunsPresentationMode);
@@ -478,113 +456,230 @@ public partial class PillWindow : Window
         return v;
     }
 
+    /// <summary>Build the first peek/panel views and the mascot on an idle frame, before the first
+    /// expand needs them. WPF animation clocks are wall-clock, not frame-counted: 50-150ms of
+    /// synchronous cold build inside the transition means the head of the animation is never drawn.</summary>
+    internal void WarmFirstOpen()
+    {
+        if (App.Headless) return;
+        try
+        {
+            // Construct the mascot and render it once off-screen, so geometry, gradients and the
+            // bitmap cache are realised on an idle frame rather than the first frame of a morph.
+            if (MascotHost.Content is null)
+            {
+                var blob = new Controls.TokiBlob();
+                blob.Measure(new Size(44, 40));
+                blob.Arrange(new Rect(0, 0, 44, 40));
+                blob.UpdateLayout();
+                try
+                {
+                    var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                        44, 40, 96, 96, PixelFormats.Pbgra32);
+                    rtb.Render(blob);
+                }
+                catch (Exception ex) { App.Log($"notch warm (mascot raster, non-fatal): {ex.Message}"); }
+                MascotHost.Content = blob;
+            }
+
+            // The two views the first summon walks through. Only ones that are not already live -
+            // a view the notch is showing belongs to its parent's layout pass, not to ours.
+            foreach (var s in new[] { PillState.Collapsed, PillState.Home })
+            {
+                var v = ViewFor(s);
+                if (VisualTreeHelper.GetParent(v) is not null) continue;
+                var (w, h) = CardSize(s);
+                v.Measure(new Size(Math.Max(1, w - 2), double.PositiveInfinity));
+                v.Arrange(new Rect(new Point(0, 0), v.DesiredSize));
+                v.UpdateLayout();
+            }
+            App.Log("notch warm: first-open views and the mascot are built");
+        }
+        catch (Exception ex) { App.Log($"notch warm (non-fatal): {ex.Message}"); }
+    }
+
     void OnStateChanged(PillState old, PillState next)
     {
         if (next == PillState.Hidden)
         {
-            // A result (notes / nothing-was-said) is a ONE-SHOT announcement. Once it's closed,
-            // re-summoning must bring back Toki - never the dead result. Forgetting it here is what
-            // breaks the "click Okay → hover → nothing-was-said again → forever" loop.
+            // A result (notes / nothing-was-said) is a ONE-SHOT announcement: once closed,
+            // re-summoning must bring back Toki, never the dead result.
             if (old is PillState.Notes or PillState.NoSpeech) _context = PillState.Home;
-            // A short cooldown so a page that just closed off can't instantly re-summon a fresh
-            // Toki under a cursor still resting at the top edge (the "both open at once" collision).
+            // A short cooldown so a page that just closed can't instantly re-summon under a cursor
+            // still resting at the top edge.
             _edgeReadyTick = Environment.TickCount64 + EdgeReadyDelayMs;
-            // Disarm the edge-summon: after closing off, the cursor must drop back down into the page
-            // and make a fresh reach UP before Toki returns. Without this, a cursor primed earlier
-            // (while down in Chrome's content) would re-summon the moment it drifts back to the tabs.
+            // Disarm the edge-summon: the cursor must drop back down and make a fresh reach UP
+            // before Toki returns.
             _edgeArmed = false;
+            _shownState = next;
             StartHoverPoll(); HideAnimated(); return; // keep polling: watch the top edge to summon
         }
 
         var fromHidden = old == PillState.Hidden || !IsVisible;
         var view = ViewFor(next);
-        // The recording peek does its dramatic flip only when recording STARTS - on a hover-collapse
-        // from the open screen it just settles (see RecordingBarView.FlipOnShow), so minimising is clean.
+        // The recording peek flips only when recording STARTS - a hover-collapse just settles
+        // (see RecordingBarView.FlipOnShow).
         if (view is Views.RecordingBarView rbv) rbv.FlipOnShow = old != PillState.RecordingOpen;
-        Host.Children.Clear();
-        Host.Children.Add(view);
-        // Views whose text depends on live app state must be refreshed BEFORE the height is measured
-        // below - otherwise the reveal height is computed on stale text and longer text (a wrapped
-        // app name in the meeting prompt) renders cut off by the clip (a real live bug).
+
+        // Views whose text depends on live app state must be refreshed BEFORE the height is
+        // measured below - otherwise longer text renders cut off by a height computed on stale text.
         if (view is Views.MeetingPromptView mp) mp.Refresh();
+        // Onboarding is a FLOW held in a cached view: rewind it on entry, before the height
+        // measure, so the card is sized for step one.
+        if (view is Views.OnboardingView ob) ob.ResetToStart();
         if (view is Views.PrepCardView pc) pc.Refresh();   // paint from App.CurrentPrep BEFORE the height measure
-        if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
 
         var hoverMorph = !fromHidden && IsHoverPair(old, next);
         var collapsing = next is PillState.Collapsed or PillState.RecordingBar;
-
-        // While PEEKING (the resting/recording notch), drop the dark frosted box - Toki is just the
-        // character floating from the top edge. But on a hover-COLLAPSE into a peek we KEEP the dark
-        // surface and only drop it once the shrink finishes (deferPeekBg), so the box shrinks away
-        // smoothly WITH the panel instead of vanishing the instant you hover out (that read as abrupt).
-        if (next == PillState.Collapsed) _collapsedTick = Environment.TickCount64; // start the greeting grace
         var peek = next is PillState.Collapsed or PillState.RecordingBar;
         var deferPeekBg = peek && hoverMorph;
-        if (!deferPeekBg) SetSurface(peek);
 
-        // A reveal can enter directly as a SLIVER (peek) instead of full open. The LOADER works
-        // quietly as a sliver from the very first frame - it never flashes a panel in your face.
-        // RESULTS (notes / nothing-was-said) instead announce themselves: they open briefly, then
-        // tuck to a sliver on their own (handled below). A re-summon restores a page as a sliver too.
+        // A reveal can enter directly as a SLIVER instead of full open: the loader works quietly as
+        // a sliver from the first frame; results announce briefly then tuck (handled below).
         var enterTucked = (_revealTucked || next == PillState.Summarizing) && IsStayable(next);
         _revealTucked = false;
         _tucked = enterTucked;
 
-        var (w, h) = Sizes[next];
+        // A note fresh out of the loader ANNOUNCES itself instead of opening the full page over the
+        // user's work: the "Notes ready" pill stands for NotesReadyPeekMs, a click opens the note,
+        // and being ignored hands off to the ambient peek (the note stays one hover away).
+        var announce = next == PillState.Notes && old == PillState.Summarizing;
+        if (announce) _tucked = true;
+
+        // ═══ ALL MEASURING BEFORE ANY VISUAL CHANGE ═══
+        // ContentHeight builds and measures the NEXT view - a synchronous 50-150ms stall on a cold
+        // view. Measure while the OLD state still owns every pixel, then do all the visual
+        // mutations in one uninterrupted run so they compose in a single frame.
+        var (w, h) = CardSize(next);
+        if (announce) w = Views.NotesReadyView.CardWidth;
         var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
         var work = PhysicalWorkArea();
         // Never exceed the screen - tall panels clamp and scroll internally.
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
-        var fullH = enterTucked ? SliverH : Math.Min(ContentHeight(next, w, h), availH);
-        // Glass panels extend above the screen edge (see GlassTopBleed): grow the window by the bleed and
-        // push the content down by it, so the off-screen top hides the DWM top-corner rounding.
-        // The bleed existed to hide DWM's top-corner rounding on the FUSED sheet; the hovering card
-        // has a real gap above it, so bleeding upward would just eat the hover. Always zero now.
+        var fullH = announce ? Views.NotesReadyView.CardHeight
+                  : enterTucked ? SliverH : Math.Min(ContentHeight(next, w, h), availH);
+
+        // ═══ HIDE THE CONTENT BEFORE IT CAN BE SEEN ═══
+        // The sizing work below calls SetWindowPos - a synchronous Win32 call that can let the
+        // window paint. Zero the opacity BEFORE the view is added, so the finished panel can never
+        // flash for a frame at full size and opacity.
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.Opacity = 0;
+        Host.Children.Clear();
+        Host.Children.Add(view);
+        if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
+        App.Log($"transition {old}->{next} path={(fromHidden ? "reveal" : hoverMorph ? "hover-morph" : "in-place")}"
+              + $" visible={IsVisible} card={_cardW:F0}x{_cardH:F0}");
+
+        // While PEEKING, drop the dark frosted box - Toki is just the character floating from the
+        // top edge. On a hover-COLLAPSE into a peek, keep the surface until the shrink finishes
+        // (deferPeekBg) so the box shrinks away WITH the panel instead of vanishing instantly.
+        if (next == PillState.Collapsed) _collapsedTick = Environment.TickCount64; // start the greeting grace
+        if (!deferPeekBg) SetSurface(peek);
+
+        // The tucked LOADER hides the mascot too: the bubble is a SIBLING of the card, outside its
+        // clip, so slivering the card alone leaves him standing. Opacity, not Visibility -
+        // SetSurface owns Visibility, and its restore path puts him back.
+        if (next == PillState.Summarizing && _tucked)
+        {
+            MascotZone.BeginAnimation(OpacityProperty, null);
+            MascotZone.Opacity = 0;
+        }
+
+        if (announce) ShowNotesReady();   // the pill stands in for the page while it announces
+        // The glass top bleed hid DWM's top-corner rounding on a flush sheet; the hovering card has
+        // a real gap above it, so bleeding upward would just eat the hover. Always zero here.
         var bleed = 0.0;
         _topBleedPx = (int)Math.Round(bleed * dpi);
         Host.Margin = new Thickness(0, bleed, 0, 0);
         var targetH = fullH + bleed;
 
-        // A hover pill expand/collapse (tiny Toki ⇄ Home, or ⇄ recording controls) is
-        // animated so it GROWS/SHRINKS smoothly, not a hard size-snap. Other transitions stay instant.
+        // A hover pill expand/collapse is animated so it GROWS/SHRINKS smoothly, not a hard
+        // size-snap. Other transitions stay instant.
         if (hoverMorph)
         {
-            // This path animates size only (no clip). Drop any clip a just-interrupted reveal/conceal
-            // left behind, or it would cap this content (a source of the "text cut off" after fast cycling).
-            Root.Clip = null; _clipGen++;
-            // Collapsing (e.g. recording open → tiny peek) reads best as a smooth zoom-OUT: a slightly
-            // longer, eased size retract with the content cross-fading, not a hard snap.
-            const int collapseMs = 240;
-            AnimateSize(w, targetH, collapsing ? collapseMs : 300);   // SizeChanged re-centres each frame
-            Host.BeginAnimation(OpacityProperty, null);
-            Host.Opacity = 0;             // the new content fades in as the pill morphs (masks reflow)
-            Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 210 : 240))));
-            // Drop the dark surface only once the box has finished shrinking → it fades away with the panel.
-            if (deferPeekBg) ScheduleSurface(next, peek, collapseMs);
+            // The clip is NOT cleared here: it is the only record of WHERE THE CARD CURRENTLY IS,
+            // and a morph that interrupts another needs it or it snaps. PinContentForMorph replaces
+            // it (and clears it itself on the one path where it sets no new one).
+            _clipGen++;
+            // ═══ THE HAND-OFF LANDING (notes-ready flight → peek) ═══
+            // The flight already concealed the pill and the peek's surface is bare - there is NO
+            // card to morph. Make the card bare NOW, open it at the peek's geometry in one silent
+            // step, and cross-fade the peek's own Toki in under the zone's fade-out. The window
+            // recentre shifts window-anchored children, so the flyer's X is compensated.
+            if (old == PillState.Notes && next == PillState.Collapsed)
+            {
+                _cardBare = true;   // SettleCorners must not draw a rim around a card that is leaving
+                Root.Background = System.Windows.Media.Brushes.Transparent;
+                // The material stack is a CHILD of Root, not its Background - it must be hidden
+                // here too, or a faint card ghost stays at the landing spot until the deferred swap.
+                Material.Visibility = Visibility.Collapsed;
+                PinCorners();
+                Root.Clip = null;
+                // Computed, not read back: Window.Left updates asynchronously on WM_MOVE, so
+                // reading it right after the resize sees the OLD value.
+                var slide = (_cardW - w) / 2.0;
+                SetCardSize(w, targetH);
+                SizeWindowNow(w, targetH);
+                SettleCorners();
+                var flyerX = MascotShift.X;
+                MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+                MascotShift.X = flyerX - slide;
+                Host.BeginAnimation(OpacityProperty, null);
+                Host.Opacity = 0;
+                Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(210))));
+                MascotZone.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(0, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.Depart });
+                ScheduleSurface(next, peek, 240);
+            }
+            else
+            {
+                // Collapsing reads best as a smooth zoom-OUT: an eased size retract with the
+                // content cross-fading, not a hard snap.
+                const int collapseMs = 240;
+                AnimateSize(w, targetH, collapsing ? collapseMs : 300);   // card clip morphs; window holds still
+                Host.BeginAnimation(OpacityProperty, null);
+                Host.Opacity = 0;             // the new content fades in as the pill morphs (masks reflow)
+                Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 210 : 240))));
+                // Drop the dark surface only once the box has finished shrinking → it fades away with the panel.
+                if (deferPeekBg)
+                {
+                    // The mascot zone is a sibling of the card: without fading it here, the bubble
+                    // Toki and the peek's own Toki show side by side for the shrink, then the disc
+                    // pops off in one frame. He leaves WITH the card on the retract curve.
+                    // Opacity only: nothing here re-runs layout.
+                    MascotZone.BeginAnimation(OpacityProperty,
+                        new DoubleAnimation(0, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.Depart });
+                    ScheduleSurface(next, peek, collapseMs);
+                }
+            }
         }
         else if (fromHidden)
         {
-            // Drop DOWN out of the top edge, GPU-COMPOSITED. The old path animated the transparent
-            // layered window's Height 8→full, which forced a full window relayout AND a Win32
-            // re-center on EVERY frame (the "ugly open"). Now the window is sized to its final
-            // bounds ONCE, and the notch unfurls via an animated clip (render-only, no layout, no
-            // move) while the content pops in - a clean extend-out-of-the-edge, no jank.
+            // Drop DOWN out of the top edge, GPU-COMPOSITED: size the window to its final bounds
+            // ONCE, then unfurl via an animated clip (render-only). Never animate window bounds -
+            // that forces a relayout and a Win32 re-center on every frame.
             BeginAnimation(WidthProperty, null);
             BeginAnimation(HeightProperty, null);
             Width = WinW(w);
             Height = WinH(targetH);
-            // Clip to ZERO height and hide the content BEFORE Show(), so the very first composited frame
-            // is empty - not a full-height black box that then unfurls. That single un-clipped frame was
-            // the "black/white glitch" on hover-to-summon. RevealDown animates the clip open from here.
+            SetCardSize(w, targetH);
+            // Clip to ZERO height and hide the content BEFORE Show(), so the very first composited
+            // frame is empty - not a full-height box. RevealDown animates the clip open from here.
+            PinCorners();   // the entrance is an animated rounded-RECT clip; the squircle waits for the settle
             Root.Clip = new RectangleGeometry(new Rect(0, 0, w, 0));
             Host.Opacity = 0;
-            // Force the window to its FINAL physical size + centred position BEFORE Show. Coming from a
-            // previously-wider panel, the window was still at the OLD width/left when the first frame
-            // painted, so the notch surface flashed off-centre on the LEFT for a frame before snapping to
-            // the centred peek - the "asymmetric darker strip on the left" during the drop. Pre-sizing +
-            // pre-centring makes the first visible frame already correct.
-            PlaceExactTopCenter(w, targetH);
             PlaceMascot(targetH, 0);       // Toki starts at this state's spot - no glide on a fresh reveal
+            // Lay out and force the FINAL physical size/position BEFORE Show(): on a hidden window
+            // WPF has not applied Width/Height, so the first frame would carry the previous state's
+            // arrangement. (PlaceExactTopCenter, not SizeWindowNow: a hidden window has no pending
+            // layout pass to hand the resize to.)
+            UpdateLayout();
+            PlaceExactTopCenter(w, targetH);
+            // Snapshot what the entrance starts FROM at the instant the window is shown - sampling
+            // live races the wall-clock animation, so a busy machine fails a correct build.
+            _entranceArm = ((Root.Clip as RectangleGeometry)?.Rect.Height ?? -1,
+                            MascotZone.Opacity, MascotPop.ScaleX, Host.Opacity);
             Show(); ApplyGhost();          // re-apply WDA - hide/show can drop it
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
             if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent - re-assert glass
@@ -592,29 +687,23 @@ public partial class PillWindow : Window
         }
         else
         {
-            // In-place morph (visible → visible), no clip on this path - drop any leftover clip from an
-            // interrupted reveal/conceal so it can't cap the new content.
+            // In-place morph (visible → visible): drop any leftover clip from an interrupted
+            // reveal/conceal. PinCorners BEFORE the clip is dropped: at rest the squircle CLIP is
+            // the only thing rounding the plate, so unclipping first paints one frame of a hard
+            // rectangle (the settle runs after the render pass).
+            PinCorners();
             Root.Clip = null; _clipGen++;
-            BeginAnimation(WidthProperty, null);   // clear any in-flight resize animation
-            BeginAnimation(HeightProperty, null);
-            Width = WinW(w);
-            Height = WinH(targetH);
+            SetCardSize(w, targetH);
             PlaceMascot(targetH, Theme.Motion.Morph);   // glide to this state's spot with the morph
-            PositionTopCenter();   // physical-pixel placement, DPI-proof (top-anchored notch)
+            SizeWindowNow(w, targetH);   // ONE Win32 call, sized and centred from the target
+            SettleCorners();             // no morph on this path - the card is at rest immediately
             MorphContent();
         }
         CacheWindowRect();
-        // Re-assert ghost on EVERY state change, not just the hidden→shown reveal. The hover-morph and
-        // in-place-morph paths above never re-applied it, and the surface work for panel states
-        // (SetSurface → ApplyBlur/ApplyRoundRegion: WCA_ACCENT_POLICY + DWM corner/region changes) can
-        // drop WDA_EXCLUDEFROMCAPTURE - which is why ghost held on the recording peek but fell off the
-        // Ask/Calendar/Home panels. SetWindowDisplayAffinity is cheap and idempotent.
+        // Re-assert ghost on EVERY state change: the surface work (WCA_ACCENT_POLICY + DWM
+        // corner/region changes) can drop WDA_EXCLUDEFROMCAPTURE. Cheap and idempotent.
         ApplyGhost();
 
-        // Poll runs while tucked (Hidden - watch the top edge to summon) and on the peeks
-        // (Collapsed launcher peek, recording peek ⇄ open). NOT on Home: Home is a deliberate
-        // panel that stays until Esc/click-away - auto-collapsing it would make an explicit
-        // summon (launch/hotkey, cursor not on it) vanish instantly.
         // The poll runs while tucked (Hidden - edge summon), on the peeks, and on stayable
         // pages (to detect the hover that brings a tucked sliver back).
         if (next is PillState.Collapsed or PillState.RecordingBar or PillState.RecordingOpen || IsStayable(next))
@@ -627,55 +716,217 @@ public partial class PillWindow : Window
             // The loader is a PERSISTENT working sliver: it must not hide itself, it waits for the
             // result (Notes / NoSpeech) to replace it. Everything else counts down.
             if (next == PillState.Summarizing) { StopIdle(); StopAutoHide(); }
+            else if (announce) ArmNotesPeek();   // the announcement dwells, then yields the screen
             else if (enterTucked) ArmAutoHide(); // entered as a sliver → count down to fully hide
             else ArmIdle();                      // fully open → tuck to a sliver after a beat
         }
         else { StopIdle(); StopAutoHide(); }
+        _shownState = next;   // GrowToContent's gate: this state's transition has now been processed
     }
 
-    /// <summary>Smoothly animate the window's size (the pill morph) with a gentle ease.
-    /// Animates from the CURRENT actual size (explicit From) so a morph that interrupts an
-    /// in-flight one can't get stuck holding the old target.</summary>
-    /// <summary>Animate the window to hold a CARD of (w,h) - the pads are added here, once.</summary>
+    // The state whose transition OnStateChanged last processed. AppState notifies its subscribers in
+    // order, so between "the state changed" and "this window reacted" there is a gap in which view
+    // refreshes must not size the box (see GrowToContent).
+    PillState _shownState = PillState.Hidden;
+
+    /// <summary>Morph the notch to hold a CARD of (w,h); the window's pads are added here, once.
+    /// The card animates; the WINDOW does not - animating window bounds is a Win32 move plus a
+    /// layered-surface reallocation per frame.</summary>
     void AnimateSize(double w, double h, int ms)
     {
         PlaceMascot(h, ms);
-        w = WinW(w); h = WinH(h);
-        // The DRAWER curve (0.32,0.72,0,1) - the iOS-sheet / Dynamic-Island settle - replaces the
-        // stock CubicEase: fast launch, long soft landing. This is THE curve for the notch morph
-        // (motion-and-feel skill §2); the old built-in ease read mechanical.
-        var ease = Theme.Motion.Drawer;
-        var dur = new Duration(TimeSpan.FromMilliseconds(ms));
-        var fromW = ActualWidth > 0 ? ActualWidth : w;
-        var fromH = ActualHeight > 0 ? ActualHeight : h;
-        // The shadow caster carries the window's only Effect; resizing it per frame would software-
-        // re-render the blur on EVERY frame of the morph (the jank triad, skill §1.3). Hide it for
-        // the ride and fade it back once the size settles - a shadow that arrives a beat after the
-        // panel reads as the panel settling into place, not as a missing shadow.
+        var fromW = ActualWidth > 0 ? ActualWidth : WinW(w);
+        var fromH = ActualHeight > 0 ? ActualHeight : WinH(h);
+        // The shadow caster carries the window's only Effect; resizing it per frame would
+        // software-re-render the blur every frame. Hide it for the ride, fade it back on settle.
         ShadowCaster.BeginAnimation(OpacityProperty, null);
         ShadowCaster.Opacity = 0;
-        var wAnim = new DoubleAnimation(fromW, w, dur) { EasingFunction = ease };
-        wAnim.Completed += (_, _) =>
+
+        // THE WINDOW IS SIZED ONCE, TO THE UNION of where it is and where it is going, then held
+        // still for the whole transition - bounds set twice per transition (here and at the end)
+        // instead of on every frame.
+        var unionCardW = Math.Max(CardW(fromW), w);
+        var unionCardH = Math.Max(CardH(fromH), h);
+
+        // THE CLIP GOES ON BEFORE THE WINDOW GROWS: SizeWindowNow ends in SetWindowPos, which is
+        // synchronous and can let the window paint - unclipped, that paints the whole panel at
+        // full size one frame before the motion begins.
+        PinContentForMorph(unionCardW, unionCardH, w, h, ms);
+        SizeWindowNow(unionCardW, unionCardH);
+
+        var gen = _pinGen;
+        var settle = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render)
+            { Interval = TimeSpan.FromMilliseconds(ms + 20) };
+        settle.Tick += (_, _) =>
         {
-            // Only if THIS morph is still the live one (an interrupting morph re-hides and re-arms).
-            if (Math.Abs(ActualWidth - w) < 2 && ShadowCaster.Visibility == Visibility.Visible)
+            settle.Stop();
+            if (gen != _pinGen) return;   // a newer morph owns the window now
+            // Settle onto the exact target: one resize, after the motion has finished.
+            SizeWindowNow(w, h);
+            // The squircle waits for THIS resize: until the window is on its target the card is
+            // still centred in the union box, and a shape built there is built for the wrong size.
+            SettleCorners();
+            if (ShadowCaster.Visibility == Visibility.Visible)
                 ShadowCaster.BeginAnimation(OpacityProperty,
                     new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
         };
-        BeginAnimation(WidthProperty, wAnim);
-        BeginAnimation(HeightProperty, new DoubleAnimation(fromH, h, dur) { EasingFunction = ease });
+        settle.Start();
     }
 
-    /// <summary>Glide Toki's bubble to where the CURRENT state's Figma frame draws him: vertically
-    /// centered on a compact pill, bottom-left (overlapping the corner) on the expanded recording
-    /// panel, level with the header on tall panels. Composition-only (translate), never Margin.</summary>
+    /// <summary>Resize and re-centre the window in ONE Win32 call, computed from the TARGET card
+    /// size. Setting WPF's Width only marks layout dirty, so positioning from GetWindowRect right
+    /// after centres for the stale size and jumps sideways a frame later.</summary>
+    void SizeWindowNow(double cardW, double cardH)
+    {
+        BeginAnimation(WidthProperty, null);
+        BeginAnimation(HeightProperty, null);
+        Width = WinW(cardW);
+        Height = WinH(cardH);
+        // Move to where a card of this size BELONGS, computed from the target rather than read back
+        // from the window, then let WPF's own pending layout pass do the resize. Computing x from
+        // the target needs neither a GetWindowRect readback (stale width, sideways jump) nor a
+        // synchronous UpdateLayout (dropped frames).
+        MoveTopCenterFor(cardW);
+    }
+
+    /// <summary>Move (never resize) the window to where a card of <paramref name="cardW"/> sits
+    /// top-centred. Position comes from the TARGET size, so this is correct before WPF has applied
+    /// it - unlike <see cref="PlaceTopCenter"/>, which reads the window's current bounds.</summary>
+    void MoveTopCenterFor(double cardW)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        var work = PhysicalWorkArea();
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int pw = Math.Max(1, (int)Math.Round(WinW(cardW) * dpi.DpiScaleX));
+        int gap = (int)Math.Round(TopGap * dpi.DpiScaleY);
+        // Centre the CARD, not the window: the mascot pad makes the window asymmetric, so the window
+        // shifts left by half the pad difference to put the card on the screen's centreline.
+        int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi.DpiScaleX);
+        int x = work.Left + ((work.Right - work.Left) - pw) / 2 - skew;
+        int y = work.Top + gap - _topBleedPx;
+        if (x == _lastPlaceX && y == _lastPlaceY) return;
+        _lastPlaceX = x; _lastPlaceY = y;
+        SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    int _pinGen;
+
+    /// <summary>Hold the CONTENT at its final size while the card's clip animates, so the content is
+    /// laid out ONCE and the card simply uncovers it - animating window bounds re-runs layout every
+    /// frame and the content visibly reflows. Pin and clip are both released on completion, so the
+    /// settled panel is a normally-laid-out tree again.</summary>
+    void PinContentForMorph(double unionW, double unionH, double toW, double toH, int ms)
+    {
+        // The one path that sets no new clip: clear whatever is there so a stale one cannot cap the
+        // content (the caller no longer clears it, because clearing it destroys the current size).
+        if (unionW <= 1 || unionH <= 1) { PinCorners(); Root.Clip = null; SettleCorners(); return; }
+
+        // ═══ START FROM WHERE THE CARD ACTUALLY IS ═══
+        // _cardW/_cardH is written at the START of a morph, so while one is in flight it already
+        // claims the DESTINATION - a superseding morph must read the LIVE clip's Rect (its current
+        // animated value) or it produces a from==to animation and the card snaps.
+        var live = (Root.Clip as RectangleGeometry)?.Rect;
+        var fromW = live is { Width: > 1 } lw ? lw.Width : Math.Max(1, _cardW > 0 ? _cardW : toW);
+        var fromH = live is { Height: > 1 } lh ? lh.Height : Math.Max(1, _cardH > 0 ? _cardH : toH);
+        var gen = ++_pinGen;
+
+        // The content is laid out ONCE, at the union size, and never re-laid-out during the morph.
+        Host.Width = unionW;
+        Host.Height = unionH;
+        Host.HorizontalAlignment = HorizontalAlignment.Left;
+        Host.VerticalAlignment = VerticalAlignment.Top;
+
+        // The card is CENTRED horizontally in the union box and TOP-anchored: the clip is inset by
+        // half the slack on each side and grows downward.
+        static Rect Centred(double w, double h, double unionW) => new((unionW - w) / 2, 0, w, h);
+        var from = Centred(fromW, fromH, unionW);
+        var to = Centred(toW, toH, unionW);
+
+        // One log line per morph: says whether the card grew from where it was or simply appeared
+        // at its full size.
+        App.Log($"morph clip {from.Width:F0}x{from.Height:F0} -> {to.Width:F0}x{to.Height:F0}"
+              + $"  union {unionW:F0}x{unionH:F0}  ({ms}ms)");
+        var geo = new RectangleGeometry(from, CornerRadius, CornerRadius);
+        PinCorners();   // arc rim + arc corners for the ride; the squircle returns on the settle below
+        Root.Clip = geo;
+        _clipGen++;   // supersede any reveal/conceal clip still in flight
+
+        var anim = new RectAnimation(from, to, new Duration(TimeSpan.FromMilliseconds(ms)))
+        {
+            EasingFunction = Theme.Motion.Drawer,
+        };
+        anim.Completed += (_, _) =>
+        {
+            if (gen != _pinGen) return;   // a newer morph owns the content now
+            Host.Width = Host.Height = double.NaN;
+            Host.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Host.VerticalAlignment = VerticalAlignment.Stretch;
+            Root.Clip = null;
+            // No SettleCorners here: AnimateSize's settle timer owns it, once the window has
+            // actually reached the target size. And put Toki back: the shift is the clip's inset
+            // WHILE the window is held at the union size - once the clip is dropped it is nonsense,
+            // and leaving it parks the bubble on top of the card after any shrink.
+            MascotShift.BeginAnimation(TranslateTransform.XProperty, null);
+            MascotShift.X = 0;
+        };
+        geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
+
+        // Toki tracks the card's LEFT EDGE on the same curve, so the air gap stays constant.
+        // X here is the inset the clip introduces; PlaceMascot owns Y.
+        var mascotFrom = (unionW - fromW) / 2;
+        var mascotTo = (unionW - toW) / 2;
+        if (Math.Abs(mascotFrom - mascotTo) < 0.5)
+        {
+            MascotShift.BeginAnimation(TranslateTransform.XProperty, null);
+            MascotShift.X = mascotTo;
+        }
+        else
+        {
+            MascotShift.BeginAnimation(TranslateTransform.XProperty,
+                new DoubleAnimation(mascotFrom, mascotTo, new Duration(TimeSpan.FromMilliseconds(ms)))
+                { EasingFunction = Theme.Motion.Drawer });
+        }
+
+        _cardW = toW; _cardH = toH;
+    }
+
+    // The card's CURRENT size in DIPs - the thing the notch actually draws, as opposed to the
+    // window, which is now deliberately bigger than it and set only twice per transition.
+    double _cardW, _cardH;
+
+    /// <summary>The card fills the window's card area exactly (the normal, non-morphing case), so
+    /// there is no clip inset and Toki sits at his usual place against its left edge.</summary>
+    void SetCardSize(double w, double h)
+    {
+        _cardW = w; _cardH = h;
+        _pinGen++;                       // any in-flight morph no longer owns the geometry
+        Host.Width = Host.Height = double.NaN;
+        Host.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Host.VerticalAlignment = VerticalAlignment.Stretch;
+        MascotShift.BeginAnimation(TranslateTransform.XProperty, null);
+        MascotShift.X = 0;
+    }
+
+    /// <summary>The top bleed in DIPs. _topBleedPx is PHYSICAL pixels (used for SetWindowPos);
+    /// a RenderTransform is in DIPs, and mixing the two is off by the DPI scale.</summary>
+    double BleedDip => _topBleedPx <= 0 ? 0
+        : _topBleedPx / (_hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0);
+
+    /// <summary>Glide Toki's bubble to the current state's spot: centered on a compact pill,
+    /// bottom-left on the expanded recording panel, level with the header on tall panels.
+    /// Composition-only (translate), never Margin.</summary>
     void PlaceMascot(double cardH, int ms)
     {
         const double zone = 58;   // MascotZone height (XAML)
+        // The height test comes FIRST: the 48px recording bar wants Toki centred like every other
+        // compact pill; only the tall expanded panel drops him to the bottom-left corner.
         double y = _state.Current switch
         {
+            // Clamped to the TOP BLEED, never negative: a compact pill is shorter than the bubble,
+            // and a flush state pulls the window above the work area, so an unclamped offset cuts
+            // the top off the circle. A few pixels low beats a circle with a flat top.
+            _ when cardH <= 90      => Math.Max(BleedDip, (cardH - zone) / 2.0),   // compact pill: centred, never clipped
             PillState.RecordingOpen => Math.Max(0, cardH - zone + 8),      // corner overlap, pokes into the shadow pad
-            _ when cardH <= 90      => Math.Max(-4, (cardH - zone) / 2.0), // compact pill: centered on it
             _                       => 8,                                  // tall panel: level with the header row
         };
         if (ms <= 0)
@@ -692,41 +943,219 @@ public partial class PillWindow : Window
     /// the dark frosted box.</summary>
     void SetSurface(bool peek)
     {
-        if (peek)
+        // A CAPSULE state draws its own free-floating pills, so the window's card gets out of the
+        // way: no glass, no rim, no shadow. Unlike a peek, Toki still floats beside them.
+        var capsule = DrawsOwnCapsules.Contains(_state.Current);
+        _cardBare = peek || capsule;
+        if (peek || capsule)
         {
             Root.Background = System.Windows.Media.Brushes.Transparent;
-            Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
             ApplyBlur(false); ApplyRoundRegion(false);   // a peek is just Toki floating - no glass
         }
         else
         {
-            // The HOVERING card cannot use window-level DWM acrylic: the accent fills the whole
-            // rectangular window, and this window is now bigger than the card (mascot zone + shadow
-            // room), so the frost would paint the empty pads too. The glass reading comes from the
-            // card's own semi-transparent tint over the see-through window instead - "Glassy notch"
-            // now means the more transparent tint, off means the opaque approximation.
+            // The hovering card cannot use window-level DWM acrylic: the accent fills the whole
+            // rectangular window, so the frost would paint the mascot/shadow pads too. The glass
+            // reading comes from the card's own semi-transparent tint instead. Both modes get the
+            // full material; "Glassy notch" is purely a transparency switch.
             Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty,
-                Toki.Llm.AppSettings.Current.GlassyNotch ? "Glass" : "GlassOpaque");
-            Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "GlassBorder");
+                Toki.Llm.AppSettings.Current.GlassyNotch ? "CardPlate" : "CardPlateOpaque");
             ApplyBlur(false); ApplyRoundRegion(false);
         }
-        Root.BorderThickness = peek ? default : new Thickness(1);
-        // Toki floats beside the card on panel states; the peek carries its own Toki.
-        MascotZone.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
-        ShadowCaster.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        // The rim, corner radius, clip and Toki's disc rim are ONE decision (ApplyCornerGeometry).
+        // Setting BorderBrush here as well is how a double rim gets shipped.
+        ApplyCornerGeometry();
+        // Toki floats beside the card on panel AND capsule states; only the peek carries its own Toki.
+        var mascotWasHidden = MascotZone.Visibility != Visibility.Visible;
+        // ORDER MATTERS: park the entrance at its START values, THEN build the character, THEN make
+        // the zone visible, THEN animate - Visibility first paints Toki at his final state for a
+        // frame. Also un-pin a zone a finished collapse fade left at 0 (re-expand inside the
+        // deferred-surface window skips the deferred call). Only the already-showing case: a zone
+        // that WAS hidden is about to play the full armed entrance.
+        if (!peek && !mascotWasHidden)
+        {
+            MascotZone.BeginAnimation(OpacityProperty, null);
+            MascotZone.Opacity = 1;
+        }
+        if (!peek && mascotWasHidden) ArmMascotReveal();
         if (!peek && MascotHost.Content is null) MascotHost.Content = new Controls.TokiBlob();
-        // The floating Toki NARRATES the state: thinking while notes are written, writing while a
-        // recording runs, happy when the notes land (the redesign's Characters row).
+        MascotZone.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        if (!peek && mascotWasHidden) RevealMascot();
+        // A capsule state's pills cast their own shadows - the card-shaped caster must not add a
+        // second one behind the gaps between them.
+        ShadowCaster.Visibility = peek || capsule ? Visibility.Collapsed : Visibility.Visible;
+        // The floating Toki NARRATES the state.
         if (MascotHost.Content is Controls.TokiBlob blob)
             blob.SetMood(_state.Current switch
             {
-                PillState.Summarizing => Controls.TokiBlob.TokiMood.Thinking,
+                // Owner-set mapping: Toki WRITES while recording, holds the NOTE while transcribing.
                 PillState.RecordingBar or PillState.RecordingOpen => Controls.TokiBlob.TokiMood.Writing,
-                PillState.Notes => Controls.TokiBlob.TokiMood.Happy,
+                PillState.Summarizing => Controls.TokiBlob.TokiMood.Reading,
+                // First run and a finished note are the two moments Toki is genuinely pleased.
+                PillState.Notes or PillState.Onboarding => Controls.TokiBlob.TokiMood.Happy,
                 _ => Controls.TokiBlob.TokiMood.Idle,
             });
-        Sheen.Visibility = peek ? Visibility.Collapsed : Visibility.Visible;
+        Material.Visibility = _cardBare ? Visibility.Collapsed : Visibility.Visible;
         // Corner radius is a SINGLE value for both modes so toggling glass never changes the size/shape.
+    }
+
+    /// <summary>The card's rim, in DIPs, rounded to a WHOLE number of device pixels - a stroke on a
+    /// fraction of a pixel draws as two half-lit rows (a soft edge). Never
+    /// RenderOptions.EdgeMode=Aliased: that would harden the r24 curves as well.</summary>
+    double RimThickness()
+    {
+        var s = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleX : 1.0;
+        if (s <= 0) s = 1.0;
+        return Math.Max(1, Math.Round(s)) / s;
+    }
+
+    // ═══ THE CORNER HAS TWO MODES ═══
+    // At REST: a squircle (Theme/Squircle.cs) - a stroked Path outline plus a matching clip, since
+    // a Border's CornerRadius can only draw a circular arc. During a MORPH: plain arc corners -
+    // the animated RectangleGeometry clip would shave a squircle rim, and rebuilding a squircle per
+    // frame is a per-frame allocation. One method owns all four properties, so a double rim or a
+    // rimless frame is impossible by construction.
+    bool _cornersPinned = true;   // a morph owns the shape until something settles it
+    bool _cardBare = true;        // peek / capsule states draw no card at all
+    bool? _borderRimOn;           // avoids re-establishing the DynamicResource on every transition
+
+    /// <summary>Hand the card's shape to the morph machinery: arc rim, arc corners, no squircle.</summary>
+    void PinCorners() { _cornersPinned = true; ApplyCornerGeometry(); }
+
+    /// <summary>Hand the shape back AFTER the pending layout pass, never synchronously: every settle
+    /// point runs while a resize is still queued, so reading Root's arranged size here would build
+    /// the shape for the size the card is leaving. Idempotent with Root.SizeChanged.</summary>
+    void SettleCorners()
+    {
+        _cornersPinned = false;
+        Dispatcher.BeginInvoke(new Action(ApplyCornerGeometry), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    void ApplyCornerGeometry()
+    {
+        var rim = RimThickness();
+        MascotDisc.BorderThickness = new Thickness(rim);
+        Root.BorderThickness = _cardBare ? default : new Thickness(rim);
+
+        // A peek or a capsule state has no card: no rim either way, and no clip - the views draw
+        // their own free-floating pills right out to the corners of the box.
+        if (_cardBare)
+        {
+            Root.Clip = null;
+            Root.CornerRadius = new System.Windows.CornerRadius(CornerRadius);
+            SetBorderRim(false);
+            RimPath.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // The shape is built from Root's ARRANGED box, never from _cardW/_cardH: the arranged box is
+        // what WPF gave, and building from the request would inset the card by a fraction of a
+        // pixel on every edge (the soft-edge defect).
+        var rw = Root.ActualWidth;
+        var rh = Root.ActualHeight;
+        // ...but the arranged box is only trusted for the sub-pixel difference it absorbs. For a
+        // SLIVER the two differ by design (the card asks for 13px while Root sits on the window's
+        // bubble-floor at ~50), and building from the floor would un-clip the sliver back to a full
+        // card. More than a pixel of difference means the card is deliberately smaller: card wins.
+        if (_cardH > 0 && rh - _cardH > 1.0) rh = _cardH;
+        if (_cardW > 0 && rw - _cardW > 1.0) rw = _cardW;
+        if (_cornersPinned || rw <= 4 * rim || rh <= 4 * rim)
+        {
+            Root.CornerRadius = new System.Windows.CornerRadius(CornerRadius);
+            SetBorderRim(true);
+            RimPath.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var box = new Rect(0, 0, rw, rh);
+        Root.Clip = Theme.Squircle.Build(box, CornerRadius);
+        Root.CornerRadius = default;   // the clip is the only thing rounding the plate now
+        SetBorderRim(false);
+        RimPath.Data = Theme.Squircle.Outline(box, CornerRadius, rim);
+        RimPath.StrokeThickness = rim;
+        RimPath.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Root's own 1px border: the rim during a morph, invisible whenever RimPath draws it.
+    /// The thickness stays either way - it is what insets the material, so toggling it would shift
+    /// the whole card's content by a pixel on every settle.</summary>
+    void SetBorderRim(bool on)
+    {
+        if (_borderRimOn == on) return;
+        _borderRimOn = on;
+        if (on) Root.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "CardRim");
+        else Root.BorderBrush = System.Windows.Media.Brushes.Transparent;
+    }
+
+    /// <summary>Shadow weight per theme (light runs both casters at 70%). Set in code because a
+    /// DropShadowEffect's Opacity is a number, not a brush, and cannot follow a DynamicResource.</summary>
+    void ApplyShadowDepth()
+    {
+        var k = Theme.ThemeManager.Current == Theme.AppTheme.Light ? 0.70 : 1.0;
+        if (KeyShadow.Effect is System.Windows.Media.Effects.DropShadowEffect key) key.Opacity = 0.22 * k;
+        if (AmbientShadow.Effect is System.Windows.Media.Effects.DropShadowEffect amb) amb.Opacity = 0.12 * k;
+    }
+
+    // ── seams for --revealtest ──
+    // Read-only views of what must be at the START of the entrance when the notch becomes visible.
+    // The entrance cannot be screenshotted (layered window) and is over in a tenth of a second, so
+    // the only way to check it is to ask the real window.
+
+    /// <summary>The card's clip rect, or null if it is not clipped. Should be zero-height on reveal.</summary>
+    internal Rect? AuditCardClip() => (Root.Clip as RectangleGeometry)?.Rect;
+
+    /// <summary>Toki's opacity and scale at this instant. Both should be at their FROM on reveal.</summary>
+    internal (double Opacity, double Scale) AuditMascotEntrance() => (MascotZone.Opacity, MascotPop.ScaleX);
+
+    /// <summary>The content host's opacity. Should be 0 on reveal - it fades in behind the clip.</summary>
+    internal double AuditContentOpacity() => Host.Opacity;
+
+    // Clip height, mascot opacity, mascot scale and content opacity as they stood when the window
+    // was last shown. See --revealtest.
+    (double Clip, double MascotOpacity, double MascotScale, double Content) _entranceArm = (-1, -1, -1, -1);
+
+    /// <summary>What the last reveal STARTED from. Deterministic - captured at Show(), not sampled.</summary>
+    internal (double Clip, double MascotOpacity, double MascotScale, double Content) AuditEntranceArm() => _entranceArm;
+
+    /// <summary>The cached view for a state, so a test can drive the real one the notch will show.</summary>
+    internal UserControl AuditView(PillState s) => ViewFor(s);
+
+    /// <summary>Is the mascot zone showing? Must be false once the notch has hidden, or the window's
+    /// last composed frame keeps a picture of Toki in it (see ParkAfterHide).</summary>
+    internal bool AuditMascotShowing() => MascotZone.Visibility == Visibility.Visible;
+
+    /// <summary>Park Toki at the START of his entrance BEFORE anything makes him visible. A
+    /// BeginTime-delayed animation does not hold its From while waiting - the property shows the
+    /// BASE value - so anything animated with BeginTime needs its base value set to the From,
+    /// or the delay is a preview of the ending.</summary>
+    void ArmMascotReveal()
+    {
+        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        MascotZone.BeginAnimation(OpacityProperty, null);
+        MascotPop.ScaleX = MascotPop.ScaleY = RevealFromScale;
+        MascotZone.Opacity = 0;
+    }
+
+    const double RevealFromScale = 0.55;
+
+    // The card leads; Toki springs in ~90ms behind with a little overshoot. Scale and opacity only,
+    // so this stays on the composition thread.
+    void RevealMascot()
+    {
+        const int delayMs = 90;
+        var pop = new DoubleAnimation(RevealFromScale, 1, TimeSpan.FromMilliseconds(360))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(delayMs),
+            EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.55 },
+        };
+        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        MascotZone.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(delayMs),
+            EasingFunction = Theme.Motion.EaseOut,
+        });
     }
 
     /// <summary>Apply the peek surface after the collapse finishes, so the dark box shrinks away WITH
@@ -735,16 +1164,21 @@ public partial class PillWindow : Window
     {
         var t = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render)
             { Interval = TimeSpan.FromMilliseconds(ms) };
-        t.Tick += (_, _) => { t.Stop(); if (_state.Current == forState) SetSurface(peek); };
+        t.Tick += (_, _) =>
+        {
+            t.Stop();
+            if (_state.Current != forState) return;
+            SetSurface(peek);
+            // The collapse faded the mascot zone out and SetSurface has just hidden it. Park the
+            // entrance back at its START values here, or the next panel inherits a zero-opacity zone
+            // with a finished animation still holding it down and Toki never springs in again.
+            if (peek) ArmMascotReveal();
+        };
         t.Start();
     }
 
-    /// <summary>
-    /// Hide the pill from screen capture / sharing (WDA_EXCLUDEFROMCAPTURE) - the same
-    /// mechanism Electron's setContentProtection uses. It works fine on this transparent
-    /// window, but Windows can drop the affinity across hide→show, so we re-apply it
-    /// every time the pill is shown.
-    /// </summary>
+    /// <summary>Hide the pill from screen capture / sharing (WDA_EXCLUDEFROMCAPTURE). Windows can
+    /// drop the affinity across hide→show and composition writes, so re-apply on every show.</summary>
     void ApplyGhost()
     {
         if (_hwnd == IntPtr.Zero) return;
@@ -809,11 +1243,9 @@ public partial class PillWindow : Window
         }
         catch (Exception ex) { App.Log($"blur apply failed (non-fatal): {ex.Message}"); }
         finally { Marshal.FreeHGlobal(ptr); }
-        // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) re-composites the window and can drop the
-        // capture-exclusion affinity. Every surface swap (state change, theme swap, glass toggle,
-        // deferred peek-bg) funnels through here, so re-asserting ghost HERE keeps every notch state -
-        // Ask, Calendar, Home, PrepCard, Onboarding, MeetingPrompt, Notes, Summarizing - invisible to
-        // screen capture. Idempotent; also correctly applies WDA_NONE when ghost is off.
+        // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) re-composites the window and can drop
+        // the capture-exclusion affinity. Every surface swap funnels through here, so re-assert
+        // ghost HERE. Idempotent; also correctly applies WDA_NONE when ghost is off.
         ApplyGhost();
     }
 
@@ -835,19 +1267,14 @@ public partial class PillWindow : Window
             DwmSetWindowAttribute(_hwnd, DwmwaBorderColor, ref border, sizeof(int));
         }
         catch (Exception ex) { App.Log($"corner rounding failed (non-fatal): {ex.Message}"); }
-        // SetWindowRgn + the DWM corner/border attribute changes above are further composition changes
-        // that can shed WDA_EXCLUDEFROMCAPTURE - and this runs AFTER ApplyBlur in every surface swap,
-        // so it must re-assert ghost too (last writer wins).
+        // SetWindowRgn + the DWM attribute changes above are further composition changes that can
+        // shed WDA_EXCLUDEFROMCAPTURE - re-assert ghost here too (last writer wins).
         ApplyGhost();
     }
 
-    /// <summary>
-    /// Translucent glass surface. We do NOT use the DWM accent "acrylic" here: it fills
-    /// the whole rectangular window (ignoring our rounded corners), which showed as ugly
-    /// sharp black corners around the pill. Instead the translucency is the Border's own
-    /// semi-transparent fill on a transparent window - genuinely see-through, with clean
-    /// rounded corners and no black box. Ghost mode still hides it from capture.
-    /// </summary>
+    /// <summary>Window chrome for the glass look. The translucency itself is the Border's own
+    /// semi-transparent fill - DWM accent acrylic fills the whole rectangular window, ignoring
+    /// the rounded corners.</summary>
     void EnableAcrylic()
     {
         if (Environment.OSVersion.Version.Build < 22000) return;
@@ -861,10 +1288,8 @@ public partial class PillWindow : Window
 
     void MorphContent()
     {
-        // Buttery: content settles in with a soft pop + fade (window bg stays dark).
+        // Content settles in with a soft pop + fade.
         HostScale.ScaleX = HostScale.ScaleY = 0.97;
-        // ArriveStrong (0.23,1,0.32,1) - entering content rides a STRONG ease-out (skill §2); the
-        // stock CubicEase was the "too weak built-in" the research warns about.
         var ease = Theme.Motion.ArriveStrong;
         var dur = new Duration(TimeSpan.FromMilliseconds(200));
         HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, dur) { EasingFunction = ease });
@@ -876,8 +1301,7 @@ public partial class PillWindow : Window
     void HideAnimated()
     {
         // Retract UP into the top edge, GPU-COMPOSITED: only an animated clip + content fade run -
-        // the window is NOT resized per frame (the old close animated Window.Height → relayout every
-        // frame). Reads as the notch retracting cleanly into the edge, then hides.
+        // the window is never resized per frame.
         ConcealUp(CardW(ActualWidth), 170, Hide);
     }
 
@@ -889,6 +1313,7 @@ public partial class PillWindow : Window
     {
         var gen = ++_clipGen;
         var geo = new RectangleGeometry(new Rect(0, 0, w, 0));
+        PinCorners();
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, 0), new Rect(0, 0, w, h),
             new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Drawer };
@@ -902,6 +1327,7 @@ public partial class PillWindow : Window
         {
             if (gen != _clipGen) return;
             Root.Clip = null;
+            SettleCorners();
             if (ShadowCaster.Visibility == Visibility.Visible)
                 ShadowCaster.BeginAnimation(OpacityProperty,
                     new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
@@ -917,53 +1343,108 @@ public partial class PillWindow : Window
         var gen = ++_clipGen;
         var h = ActualHeight > 0 ? ActualHeight : Height;
         var geo = new RectangleGeometry(new Rect(0, 0, w, h));
+        PinCorners();   // and it stays pinned: ParkAfterHide leaves the clip shut, not squircled
         Root.Clip = geo;
         var anim = new RectAnimation(new Rect(0, 0, w, h), new Rect(0, 0, w, 0),
             new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Depart };
         // The shadow leaves FIRST (a shadow with no caster is the tell of a cheap fade).
         ShadowCaster.BeginAnimation(OpacityProperty,
             new DoubleAnimation(0, Theme.Motion.Dur(Math.Max(60, ms - 60))) { EasingFunction = Theme.Motion.Depart });
-        // Only finish the hide if this conceal is STILL the latest clip op. If a re-open (RevealDown)
-        // superseded it, this late Completed must NOT null the new reveal's clip and must NOT Hide() the
-        // window we just brought back - that was the "reopen right after close → blank/clipped notch" bug.
-        anim.Completed += (_, _) => { if (gen != _clipGen) return; Root.Clip = null; done(); };
+        // TOKI LEAVES WITH THE CARD: the clip masks only Root, and the mascot is a SIBLING of it,
+        // so without this fade the bubble stands at full opacity through the whole retract.
+        MascotZone.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, Theme.Motion.Dur(Math.Max(60, ms - 40))) { EasingFunction = Theme.Motion.Depart });
+        // Only finish the hide if this conceal is STILL the latest clip op: a superseding re-open's
+        // clip must not be nulled and its window must not be hidden.
+        //
+        // ═══ THE RETAINED-SURFACE STUB ═══
+        // Completed fires when the animation CLOCK ends - possibly a frame BEFORE the fully-shut
+        // clip has been composed into the layered surface Windows retains for this HWND. Hiding
+        // right then retains a card stub, which DWM replays for a frame on the next Show(). So:
+        // pin every leaving element at its parked value NOW, wait until the composition is
+        // genuinely empty, and only then hide. The gen re-check matters twice: a reveal that
+        // supersedes during that wait must keep its window.
+        _parkedEmptyFrame = false;
+        anim.Completed += (_, _) =>
+        {
+            if (gen != _clipGen) return;
+            geo.BeginAnimation(RectangleGeometry.RectProperty, null);
+            geo.Rect = new Rect(0, 0, w, 0);
+            Host.BeginAnimation(OpacityProperty, null); Host.Opacity = 0;
+            MascotZone.BeginAnimation(OpacityProperty, null); MascotZone.Opacity = 0;
+            ShadowCaster.BeginAnimation(OpacityProperty, null); ShadowCaster.Opacity = 0;
+            // A dispatcher hop is NOT enough: priorities only order UI-THREAD work, and the render
+            // THREAD presents asynchronously. CompositionTarget.Rendering is the honest signal -
+            // subscribing forces WPF to produce frames, so waiting two cannot stall. After the
+            // second, the surface Windows retains across Hide() truly holds nothing.
+            var frames = 0;
+            EventHandler? tick = null;
+            tick = (_, _) =>
+            {
+                if (gen != _clipGen) { System.Windows.Media.CompositionTarget.Rendering -= tick; return; }
+                if (++frames < 2) return;
+                System.Windows.Media.CompositionTarget.Rendering -= tick;
+                _parkedEmptyFrame = true;
+                done(); ParkAfterHide();
+            };
+            System.Windows.Media.CompositionTarget.Rendering += tick;
+        };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
         Host.BeginAnimation(OpacityProperty, null);
         Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(Math.Max(60, ms - 20)))));
     }
 
-    // Monotonic token: every clip animation (reveal / conceal) captures the current value; its Completed
-    // handler no-ops if a newer clip op has since bumped this. Prevents a stale animation that finishes
-    // late from clobbering the current clip (the corruption that built up across rapid open/close cycles).
+    /// <summary>Put the notch back to its "before it opens" state the moment it hides, so the last
+    /// thing the window ever composed is EMPTY - the layered surface Windows retains for this HWND
+    /// is replayed by DWM on the next Show() until the first new frame lands. Hiding the mascot here
+    /// is also what lets SetSurface re-arm his entrance on every open.</summary>
+    void ParkAfterHide()
+    {
+        // The clip is deliberately NOT cleared: it stays shut. Every path that shows this window
+        // sets its own clip first, so nothing depends on it being null while hidden.
+        ArmMascotReveal();
+        MascotZone.Visibility = Visibility.Collapsed;
+        ShadowCaster.BeginAnimation(OpacityProperty, null);
+        ShadowCaster.Opacity = 0;
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.Opacity = 0;
+    }
+
+    // Monotonic token: every clip animation captures the current value; its Completed handler
+    // no-ops if a newer clip op has since bumped this, so a late-finishing animation cannot
+    // clobber the current clip.
     int _clipGen;
+
+    // True once the conceal has composed a genuinely empty frame BEFORE Hide() - the layered surface
+    // Windows retains for this HWND then holds nothing, so the next Show() cannot flash a stale card
+    // stub. Audited by --revealtest.
+    bool _parkedEmptyFrame;
+    internal bool AuditParkedEmptyFrame() => _parkedEmptyFrame;
 
     void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape) App.CloseOverlay();   // recording-aware: never hides a live mic
     }
 
-    // ── Hover-to-expand while recording (WisprFlow-style) ──
-    // The recording pill is a tiny alive Toki; resting the pointer on it expands it to the
-    // timer + Stop, moving away collapses it back - no click, never in the way.
-    //
-    // We do NOT use WPF MouseEnter/Leave here: while the pill animates its size and
-    // repositions under a stationary cursor, WPF's hit-testing fires phantom leave/enter
-    // events, which flip-flopped it open/closed endlessly. Instead we poll the REAL cursor
-    // position against the pill's REAL rectangle. Because the expanded rect contains the
-    // collapsed one, that gives clean hysteresis: on it → open; off it → closed; no flicker.
+    // ── Hover-to-expand ──
+    // Do NOT use WPF MouseEnter/Leave here: while the pill animates its size under a stationary
+    // cursor, WPF's hit-testing fires phantom leave/enter events (endless open/close flip-flop).
+    // Poll the REAL cursor against the pill's REAL rectangle instead; the expanded rect contains
+    // the collapsed one, giving clean hysteresis.
     const int HoverPollMs = 60;
+    const int LoaderTuckGraceMs = 540; // the open loader tucks this long after the cursor leaves it
+    int _loaderOffMs;   // accumulated time the cursor has been off the open loader
     const int ExpandDwellMs = 260;   // recording peek → controls: quick (you want Stop fast)
-    const int OpenDwellMs = 850;     // launcher peek → Home: DELIBERATE. A brief hover just shows
-                                     // the peek; you must clearly wait (or click) to open the window.
+    const int OpenDwellMs = 850;     // launcher peek → Home: DELIBERATE - a brief hover just shows the peek
     const int CollapseDelayMs = 120; // close soon after leaving - closing should feel snappy
+    const int RecordingFoldMs = 2200; // the recording bar is opened by a CLICK, so it folds away on
+                                      // its own schedule, not the instant the pointer leaves it
     const int TuckDelayMs = 180;     // launcher peek tucks away this long after leaving edge+peek
     const int CollapsedGraceMs = 3000; // Toki peek greets for at least this long before it can tuck away
     long _collapsedTick;
 
-    // Phase 2 - reach the top-centre EDGE to summon the notch. Tuned to not fire when you're
-    // just reaching for browser tabs / window controls up top: a NARROW centre band, the
-    // ABSOLUTE top pixel row, a short dwell (press against the edge), and a velocity gate
-    // (ignore fast flings - only a deliberate settle summons it).
+    // Edge-summon tuning: must not fire when reaching for browser tabs / window controls - a
+    // NARROW centre band, the absolute top pixel row, a short dwell, and a velocity gate.
     const int EdgeBandHalf = 90;     // half-width of the reveal zone (centre only)
     const int EdgeTopPx = 2;         // within this many px of the very top edge
     const int EdgeDwellMs = 300;     // hold at the edge this long to summon (deliberate, not a passing tab click)
@@ -980,8 +1461,7 @@ public partial class PillWindow : Window
     bool _edgeArmed;   // true once the cursor has dropped clear of the top edge - a deliberate summon
                        // is a reach UP from the page body, never a cursor already parked up top.
 
-    // The two hover pairs: resting pill → revealed view. Same behaviour for the launcher
-    // (tiny Toki → Home) and recording (tiny Toki → timer+Stop).
+    // The two hover pairs: resting pill → revealed view.
     static PillState? ExpandTarget(PillState s) => s switch
     {
         PillState.Collapsed => PillState.Home,
@@ -994,9 +1474,16 @@ public partial class PillWindow : Window
         PillState.RecordingOpen => PillState.RecordingBar,
         _ => null,
     };
-    static bool IsHoverPair(PillState a, PillState b) =>
+    internal static bool IsHoverPair(PillState a, PillState b) =>
         ExpandTarget(a) == b || CollapseTarget(a) == b
-        || (a == PillState.Collapsed && IsStayable(b));   // Toki peek → the remembered page blooms open
+        // The peek BLOOMS into whatever it opens - the in-place path would snap to full size over
+        // a surface that has not unfurled.
+        || (a == PillState.Collapsed && b != PillState.Hidden)
+        // The loader's 13px sliver morphs into its result instead of snapping a full page open.
+        || (a == PillState.Summarizing && b is PillState.Notes or PillState.NoSpeech)
+        // The notes-ready hand-off: the flight lands and the zone cross-fades out over the peek's
+        // own Toki on the same spot (deferPeekBg).
+        || (a == PillState.Notes && b == PillState.Collapsed);
 
     void EnsureHoverPoll()
     {
@@ -1019,18 +1506,11 @@ public partial class PillWindow : Window
     }
 
     // ── Persistent, context-aware tucked sliver ──
-    // A "stayable" page (Home, Notes, the nothing-was-said toast, the loader) does NOT sit
-    // fully open on your screen and it does NOT rebuild every time. After ~5s without a hover
-    // it TUCKS to a thin sliver (a little showing under the top edge) - the view is kept
-    // intact behind it. Hover the sliver and the SAME page slides back down (no reload, state
-    // preserved). It stays like that until you click outside (→ fully tucked away / Hidden).
+    // A "stayable" page does NOT sit fully open forever: after idling it TUCKS to a thin sliver
+    // with the view kept intact behind it. Hovering the sliver slides the SAME page back down
+    // (no reload, state preserved) until a click outside fully tucks it away (Hidden).
     const double SliverH = 13;
-    // A page you OPENED ON PURPOSE gets long enough to be used.
-    //
-    // This was 2500. The owner opened Home, reached for a button, and the page closed itself before
-    // they got there - "can't check anything". Two and a half seconds is roughly one glance: it is
-    // enough for a result that announces itself, and far too little for a page somebody is reading,
-    // deciding on, or moving a mouse across. The tuck still happens, it just stops racing the user.
+    // A page you OPENED ON PURPOSE gets long enough to be used - a short interval races the user.
     const int IdleTuckMs = 9000;       // a deliberate page (Home/Settings) tucks this long after you stop hovering
     const int ResultShowMs = 2000;     // a result (Notes / nothing-was-said) announces itself this long, then tucks
     const int AutoHideMs = 9000;       // a tucked sliver fully hides after this (context remembered)
@@ -1042,19 +1522,16 @@ public partial class PillWindow : Window
     bool _tucked;
     bool _revealTucked;                // next reveal enters as a sliver (peek), not full open
     PillState _context = PillState.Home; // the page Toki remembers - re-summoning restores it
-    // Input priority (NOT the DispatcherTimer default of Background) - otherwise these get
-    // starved while the app is warming the ASR/LLM models at launch, so pages that show
-    // during warm-up (Home, the loader) never tucked. This was the "works in the demo but
-    // not in real use" bug.
+    // Input priority (NOT the DispatcherTimer default of Background) - Background timers get
+    // starved while the app warms the ASR/LLM models at launch, so pages shown during warm-up
+    // would never tuck.
     readonly System.Windows.Threading.DispatcherTimer _idle =
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(IdleTuckMs) };
     readonly System.Windows.Threading.DispatcherTimer _autoHide =
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(AutoHideMs) };
     bool _idleWired, _autoHideWired;
 
-    // PrepCard is stayable as of 2026-08-05: it stopped being a prompt that pops at you and became a
-    // page you open and write on, so it must stay put while you're on it (owner: "while hovering it
-    // stays open").
+    // PrepCard is stayable: it is a page you open and write on, so it must stay put while you're on it.
     static bool IsStayable(PillState s) =>
         s is PillState.Home or PillState.Notes or PillState.NoSpeech or PillState.Summarizing or PillState.Settings or PillState.Calendar or PillState.About or PillState.PrepCard;
 
@@ -1064,9 +1541,9 @@ public partial class PillWindow : Window
     static bool NeedsInput(PillState s) =>
         s is not (PillState.Hidden or PillState.Collapsed or PillState.RecordingBar);
 
-    // Bring the notch to the foreground so it receives wheel/keyboard/click input. Because the cursor is
-    // over our window we hold the "last input" right, so Activate() (SetForegroundWindow under the hood)
-    // is granted rather than merely flashing. Best-effort - never let a focus race throw.
+    // Bring the notch to the foreground for wheel/keyboard/click input. With the cursor over our
+    // window we hold the "last input" right, so Activate() is granted rather than merely flashing.
+    // Best-effort - never let a focus race throw.
     void TryActivateNotch()
     {
         try { if (!IsActive) Activate(); } catch { /* foreground-lock race - harmless */ }
@@ -1081,30 +1558,53 @@ public partial class PillWindow : Window
             {
                 _idle.Stop();
                 var cur = _state.Current;
-                if (!IsStayable(cur) || _tucked) return;
-                // Never tuck a page you're actively TYPING in - the cursor rests off the notch while you
-                // type in a field (the create composer, the API key box), and idle-tucking then would eat
-                // your input. Keep re-arming while a text field has focus.
-                if (PillHasFocusedInput()) { ArmIdle(); return; }
-                // Only tuck once you've stopped hovering - never yank a page away while you're
-                // reading it (hovering re-arms this timer in HoverTick).
-                if (CursorOverPill()) return;
+                switch (IdleDecision(cur, _tucked, PillHasFocusedInput(), CursorOverPill()))
+                {
+                    case IdleAction.Stand: return;
+                    case IdleAction.ReArm: ArmIdle(); return;
+                }
 
-                // Say WHY, with the numbers. When a page closes while somebody is using it, the whole
-                // question is "did the notch think the pointer had left, and was it right?" - and that
-                // took a log-reading session to answer once. One line answers it now.
+                // Say WHY, with the numbers: "did the notch think the pointer had left, and was it
+                // right?" answered in one log line.
                 if (GetCursorPos(out var c))
-                    App.Log($"idle tuck: {cur} after {IdleTuckMs}ms - cursor ({c.X},{c.Y}) "
+                    App.Log($"idle tuck: {cur} after {IdleIntervalMs(cur)}ms - cursor ({c.X},{c.Y}) "
                         + $"vs notch [{_rectL},{_rectT}..{_rectR},{_rectB}] (+{InsidePad}px slack)");
                 TuckCurrent();
             };
         }
-        // Results announce briefly (2s) then tuck; deliberate pages linger a touch longer.
-        _idle.Interval = TimeSpan.FromMilliseconds(
-            _state.Current is PillState.Notes or PillState.NoSpeech ? ResultShowMs : IdleTuckMs);
+        _idle.Interval = TimeSpan.FromMilliseconds(IdleIntervalMs(_state.Current));
         _idle.Stop();
         _idle.Start();
     }
+
+    /// <summary>What the idle timer does when it fires. Pure, so it can be tested without a window.</summary>
+    internal enum IdleAction
+    {
+        /// <summary>Nothing to tuck - let the single timer stay dead.</summary>
+        Stand,
+        /// <summary>Not now, but ask again - the timer MUST be restarted or it never fires again.</summary>
+        ReArm,
+        /// <summary>Tuck the page away.</summary>
+        Tuck,
+    }
+
+    /// <summary>The idle-tuck decision. There is ONE idle timer and it stops itself on every tick:
+    /// any branch that declines to tuck without re-arming kills it for the rest of the state.</summary>
+    internal static IdleAction IdleDecision(PillState cur, bool tucked, bool typing, bool hovering)
+    {
+        if (!IsStayable(cur) || tucked) return IdleAction.Stand;
+        // Never tuck a page you're actively TYPING in - the cursor rests off the notch while you
+        // type, and idle-tucking then would eat your input.
+        if (typing) return IdleAction.ReArm;
+        // Only tuck once you've stopped hovering - never yank a page away while you're reading it.
+        if (hovering) return IdleAction.ReArm;
+        return IdleAction.Tuck;
+    }
+
+    /// <summary>How long a state stays fully open before it tucks to a sliver. Results (and the
+    /// loader - a status, not a page to read) announce briefly; deliberate pages linger longer.</summary>
+    internal static int IdleIntervalMs(PillState s) =>
+        s is PillState.Notes or PillState.NoSpeech or PillState.Summarizing ? ResultShowMs : IdleTuckMs;
 
     void StopIdle() { if (_idle.IsEnabled) _idle.Stop(); }
 
@@ -1122,31 +1622,240 @@ public partial class PillWindow : Window
 
     void StopAutoHide() { if (_autoHide.IsEnabled) _autoHide.Stop(); }
 
+    /// <summary>How long the "Notes ready" announcement stands before Toki yields the screen.
+    /// Deliberately tight - the pill is an announcement, not a prompt, and the note stays one
+    /// hover away afterwards.</summary>
+    const int NotesReadyPeekMs = 2000;
+    readonly System.Windows.Threading.DispatcherTimer _notesPeek = new();
+    bool _notesPeekWired;
+
+    void ArmNotesPeek()
+    {
+        if (!_notesPeekWired)
+        {
+            _notesPeekWired = true;
+            _notesPeek.Tick += (_, _) =>
+            {
+                _notesPeek.Stop();
+                // Only the announcement it was armed for: a click already expanded it (_tucked
+                // false) or the state moved on - either way the timer's moment has passed.
+                if (_state.Current != PillState.Notes || !_tucked) return;
+                // Never yank the pill out from under the pointer - ask again in a beat.
+                if (CursorOverPill()) { _notesPeek.Start(); return; }
+                StartNotesHandoffFlight();
+            };
+        }
+        _notesPeek.Interval = TimeSpan.FromMilliseconds(NotesReadyPeekMs);
+        _notesPeek.Stop();
+        _notesPeek.Start();
+    }
+
+    // One-shot guard: the announce timer cannot fire twice, but nothing else may start a second
+    // flight while one is in the air.
+    bool _mascotFlying;
+    readonly System.Windows.Threading.DispatcherTimer _flightPark = new();
+    bool _flightParkWired;
+
+    /// <summary>How long Toki's notes-ready exit flight takes. Character motion (Motion.cs names the
+    /// exemption from the 350ms cap): long enough to read as a somersault, short enough that the
+    /// screen is his ~0.8s after the announce ends.</summary>
+    internal const int FlightMs = 560;
+
+    /// <summary>The notes-ready exit: the disc dissolves, the blob hops, somersaults once and flies
+    /// to exactly where the collapsed peek's own Toki rests, the pill concealing beneath him. On
+    /// landing the state flips to Collapsed (a hover pair, so the zones cross-fade on the same spot);
+    /// the note stays one click away. Transforms and opacity only - nothing here runs layout.</summary>
+    void StartNotesHandoffFlight()
+    {
+        if (_mascotFlying) return;
+        _mascotFlying = true;
+
+        // Where the peek's Toki will rest, in THIS window's coordinates: the Collapsed card is
+        // centred on the work area, TopGapDefault below its top, and CollapsedView centres a 28px
+        // Toki in it - so the flight also shrinks the 44px bubble blob to 28/44.
+        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleX : 1.0;
+        var workArea = PhysicalWorkArea();
+        var (_, ph) = CardSize(PillState.Collapsed);
+        var targetX = (workArea.Left + workArea.Right) / 2.0 / dpi;
+        var targetY = workArea.Top / dpi + TopGapDefault + ph / 2.0;
+        var toX = targetX - (Left + 29);   // zone is 58 wide at the window's left edge; centre = 29
+        var toY = targetY - Top - 29;
+        var fromY = MascotShift.Y;
+
+        // The disc AND its contact shadow (a sibling ellipse) dissolve under the hop, then go fully
+        // HIDDEN for the rest of the flight: a held opacity can be silently replaced by any restore
+        // path; Visibility cannot be resurrected by an opacity write. The park puts both back.
+        var dissolve = new DoubleAnimation(0, Theme.Motion.Dur(140)) { EasingFunction = Theme.Motion.Depart };
+        dissolve.Completed += (_, _) =>
+        {
+            if (!_mascotFlying) return;
+            MascotDisc.Visibility = Visibility.Hidden;
+            MascotLift.Visibility = Visibility.Hidden;
+        };
+        MascotDisc.BeginAnimation(OpacityProperty, dissolve);
+        MascotLift.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, Theme.Motion.Dur(140)) { EasingFunction = Theme.Motion.Depart });
+
+        var glide = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty,
+            new DoubleAnimation(toX, Theme.Motion.Dur(FlightMs)) { EasingFunction = glide });
+
+        // A small hop DOWN first (out of the bubble), then the rise to the edge.
+        var hop = new DoubleAnimationUsingKeyFrames { Duration = new Duration(TimeSpan.FromMilliseconds(FlightMs)) };
+        hop.KeyFrames.Add(new EasingDoubleKeyFrame(fromY + 10,
+            KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(110)),
+            new QuadraticEase { EasingMode = EasingMode.EaseOut }));
+        hop.KeyFrames.Add(new EasingDoubleKeyFrame(toY,
+            KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(FlightMs)),
+            new CubicEase { EasingMode = EasingMode.EaseInOut }));
+        hop.Completed += (_, _) =>
+        {
+            _mascotFlying = false;
+            if (_state.Current == PillState.Notes && _tucked)
+            {
+                // Land: hand the character to the Collapsed peek. The zone fades out over the
+                // peek's own Toki fading in on this very spot; once the deferred surface swap has
+                // hidden the zone (ScheduleSurface, 240ms), the timer below parks the flight
+                // transforms. MascotPop is NOT parked here - ArmMascotReveal owns it from the swap.
+                _state.TryGo(PillState.Collapsed);
+                _flightPark.Interval = TimeSpan.FromMilliseconds(320);
+                _flightPark.Stop();
+                _flightPark.Start();
+            }
+            else
+            {
+                // The state moved on mid-flight (a click or hover opened the note): put the bubble
+                // straight back together in its gutter - no arm ran, so the scale is ours to fix.
+                ParkFlightTransforms(restoreScale: true);
+            }
+        };
+        MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, hop);
+
+        // One full somersault on the way up, and the shrink to the peek's 28px.
+        MascotFlip.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty,
+            new DoubleAnimation(-360, Theme.Motion.Dur(FlightMs)) { EasingFunction = glide });
+        var shrink = new DoubleAnimation(28.0 / 44.0, Theme.Motion.Dur(FlightMs)) { EasingFunction = glide };
+        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
+        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
+
+        if (!_flightParkWired)
+        {
+            _flightParkWired = true;
+            _flightPark.Tick += (_, _) => { _flightPark.Stop(); ParkFlightTransforms(restoreScale: false); };
+        }
+
+        // The pill conceals under him while he flies - card, content and shadow only; the zone IS
+        // the flight. The landing transition replaces this clip through its own generation bump.
+        _clipGen++;
+        var cw = CardW(ActualWidth);
+        var chh = ActualHeight > 0 ? ActualHeight : Height;
+        var geo = new RectangleGeometry(new Rect(0, 0, cw, chh));
+        PinCorners();
+        Root.Clip = geo;
+        geo.BeginAnimation(RectangleGeometry.RectProperty,
+            new RectAnimation(new Rect(0, 0, cw, chh), new Rect(0, 0, cw, 0),
+                new Duration(TimeSpan.FromMilliseconds(380))) { EasingFunction = Theme.Motion.Depart });
+        ShadowCaster.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, Theme.Motion.Dur(300)) { EasingFunction = Theme.Motion.Depart });
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(340))));
+    }
+
+    /// <summary>Put the flight's transforms away. The somersault angle, the sideways shift and the
+    /// disc are always the flight's own to park; the POP SCALE belongs to ArmMascotReveal once a
+    /// landing's surface swap has armed the next entrance, so only an aborted flight restores it.</summary>
+    void ParkFlightTransforms(bool restoreScale)
+    {
+        MascotFlip.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty, null);
+        MascotFlip.Angle = 0;
+        MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+        MascotShift.X = 0;
+        MascotDisc.BeginAnimation(OpacityProperty, null);
+        MascotDisc.Opacity = 1;
+        MascotDisc.Visibility = Visibility.Visible;
+        MascotLift.BeginAnimation(OpacityProperty, null);
+        MascotLift.Opacity = 1;
+        MascotLift.Visibility = Visibility.Visible;
+        if (restoreScale)
+        {
+            MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            MascotPop.ScaleX = MascotPop.ScaleY = 1;
+        }
+    }
+
     void TuckCurrent()
     {
-        // The LOADER and a READY NOTE keep a hover-able sliver rather than closing off:
-        //  • the loader's sliver is its "I'm working" heartbeat (persistent until the result);
-        //  • a ready note tucks to a sliver you can leave, go do something, then come back and hover
-        //    to read again - but it self-clears after a generous while so it can't block the next
-        //    meeting forever.
+        // The LOADER and a READY NOTE keep a hover-able sliver rather than closing off: the
+        // loader's sliver is its "working" heartbeat; a ready note stays retrievable but
+        // self-clears after a while so it can't block the next meeting.
         if (_state.Current is PillState.Summarizing or PillState.Notes)
         {
             _tucked = true;
+            if (_state.Current == PillState.Notes)
+            {
+                // A ready note tucks to the "Notes ready >" pill rather than a blank 13px strip.
+                ShowNotesReady();
+                AnimateSize(Views.NotesReadyView.CardWidth, Views.NotesReadyView.CardHeight, 200);
+                ArmAutoHide(NotesSliverHideMs);
+                return;
+            }
+            // Toki leaves WITH the card: tucked, the loader is just the top line (see OnStateChanged).
+            MascotZone.BeginAnimation(OpacityProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(0, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.Depart });
             AnimateSize(CardW(ActualWidth), SliverH, 200);   // retract to a sliver (CARD dims in, pads re-added inside)
-            if (_state.Current == PillState.Notes) ArmAutoHide(NotesSliverHideMs);
             return;
         }
-        // EVERYTHING ELSE closes off completely (context kept) rather than leaving a sliver
-        // hanging in your way while you work in another app. You bring it back - as whatever
-        // Toki was showing - by hovering the top-centre edge. Workflow stays undisturbed.
+        // EVERYTHING ELSE closes off completely (context kept); the top-centre edge brings it back.
         App.CloseOverlay();   // recording-aware: a live session collapses to the bar, never vanishes
+    }
+
+    /// <summary>The DESIGN card size for a state, straight from the table and with no live view
+    /// override - so a test can measure a view's art against the box it has to fit inside.</summary>
+    internal static (double W, double H) DesignCardSize(PillState s) => Sizes[s];
+
+    /// <summary>The card size for a state: the Sizes table, except that a cached view implementing
+    /// <see cref="Views.IWidthAware"/> owns its own width. Never builds a view.</summary>
+    (double W, double H) CardSize(PillState s)
+    {
+        var (w, h) = Sizes[s];
+        if (_views.TryGetValue(s, out var v) && v is Views.IWidthAware wa) w = wa.CardWidth;
+        return (w, h);
+    }
+
+    // The tucked "Notes ready" pill. Deliberately NOT a PillState of its own: the state stays
+    // Notes (so the note, scroll position and Keep-or-Discard choice survive the tuck) - only what
+    // the card DRAWS changes while tucked.
+    Views.NotesReadyView? _notesReady;
+
+    void ShowNotesReady()
+    {
+        // A click anywhere on the pill opens the note - the window-level handler (constructor)
+        // covers it; hover never opens it (HoverTick).
+        _notesReady ??= new Views.NotesReadyView();
+        Host.Children.Clear();
+        Host.Children.Add(_notesReady);
+    }
+
+    /// <summary>Put the real view back if the "Notes ready" pill is standing in for it.</summary>
+    void RestoreTuckedView()
+    {
+        if (_notesReady is null || !Host.Children.Contains(_notesReady)) return;
+        Host.Children.Clear();
+        Host.Children.Add(ViewFor(_state.Current));
     }
 
     void ExpandCurrent()
     {
         _tucked = false;
         StopAutoHide();
-        var (w, h) = Sizes[_state.Current];
+        // The tucked loader hid Toki's bubble (just the top line); opening it brings him back with
+        // the card, on the arrive curve.
+        if (_state.Current == PillState.Summarizing)
+            MascotZone.BeginAnimation(OpacityProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(1, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.EaseOut });
+        RestoreTuckedView();
+        var (w, h) = CardSize(_state.Current);
         var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
         var work = PhysicalWorkArea();
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
@@ -1167,20 +1876,15 @@ public partial class PillWindow : Window
             var v = ViewFor(state);
             v.Measure(new Size(Math.Max(1, width - 2), double.PositiveInfinity));   // −2 for the L/R border
             var m = v.DesiredSize.Height;
-            // The design height is a MINIMUM, never a cap (research §3d: measured content grows past it).
-            // The content MEASURES accurately (verified via --measuretest), but the notch was still
-            // rendering a hair short of it - DPI physical-pixel rounding + the surface chrome shave a few
-            // px off the bottom, clipping the last row (the account footer's email + Library button). So
-            // add a small, honest bottom breathing pad: enough that the final line always fits with a
-            // little air, cheap on pages that don't need it.
+            // The design height is a MINIMUM, never a cap. DPI rounding + the surface chrome shave
+            // a few px off the bottom, so add breathing room or the last row is clipped.
             return m > 8 ? Math.Max(fallback, Math.Ceiling(m) + BottomBreath) : fallback;
         }
         catch { return fallback; }
     }
 
-    // Bottom breathing room added to every auto-height page's measured content (see ContentHeight). The
-    // content measures correctly; this covers the few px lost to DPI rounding + the notch's bottom chrome
-    // so the last line is never clipped and sits with a touch of air above the rounded bottom edge.
+    // Bottom breathing room added to every auto-height page's measured content (see ContentHeight):
+    // covers the few px lost to DPI rounding + the notch's bottom chrome.
     const double BottomBreath = 14;
 
     /// <summary>Re-measure the current AUTO-HEIGHT view and smoothly grow/shrink the notch to fit - for
@@ -1189,21 +1893,27 @@ public partial class PillWindow : Window
     bool _growing;
     public void GrowToContent()
     {
-        // Re-entrancy guard: GrowToContent → ContentHeight → ViewFor could, if a view triggers a grow
-        // from its own constructor (before it's cached), recurse forever building duplicate views. Never
-        // let this method re-enter itself.
+        // Re-entrancy guard: a view triggering a grow from its own constructor (before it's cached)
+        // would recurse forever building duplicate views.
         if (_growing) return;
         var s = _state.Current;
+        // Never size for a state whose TRANSITION has not run yet: AppState notifies subscribers in
+        // order and view-refresh handlers run BEFORE this window's OnStateChanged, so a
+        // refresh-triggered grow would morph the box to the next state's size while surface and
+        // content are still the old state's. A grow is only an ADJUSTMENT to the state on screen.
+        if (s != _shownState) return;
         if (!AutoHeight.Contains(s)) return;
         _growing = true;
         try
         {
-            var (w, h) = Sizes[s];
+            var (w, h) = CardSize(s);
             var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
             var work = PhysicalWorkArea();
             var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
             var target = Math.Min(ContentHeight(s, w, h), availH);
-            if (Math.Abs(target - ActualHeight) < 2) return;
+            // Width as well as height: the recording bar's chevron widens the card without
+            // changing its height, and comparing height alone would swallow that.
+            if (Math.Abs(target - ActualHeight) < 2 && Math.Abs(WinW(w) - ActualWidth) < 2) return;
             AnimateSize(w, target, 150);   // snappy so it keeps up as the answer streams in patches
         }
         finally { _growing = false; }
@@ -1216,16 +1926,38 @@ public partial class PillWindow : Window
         // Tucked away: watch the top-centre edge to summon the peek.
         if (cur == PillState.Hidden) { EdgeTick(); return; }
 
-        var over = CursorOverPill();
+        // A PEEK is judged against the few pixels it actually draws; a panel against the whole
+        // window (see CursorOverVisiblePeek for why the two rules differ).
+        var isPeek = cur is PillState.Collapsed or PillState.RecordingBar;
+        var over = isPeek ? CursorOverVisiblePeek() : CursorOverPill();
 
         // Stayable pages: tuck to a sliver after idle; hover the sliver to bring the SAME
         // page back; keep it up while you're on it. Context is preserved (no rebuild).
         if (IsStayable(cur))
         {
-            if (_tucked) { if (over) ExpandCurrent(); }               // hover the sliver → same page back
-            else if (over && cur != PillState.Summarizing) ArmIdle(); // hovering keeps a page open (loader tucks regardless)
+            if (_tucked)
+            {
+                // The loader's sliver and the "Notes ready" pill open on CLICK only - they sit in
+                // the top-centre band every cursor crosses on the way to browser tabs. A page the
+                // user tucked themselves re-opens on hover: that hover is a deliberate return.
+                if (over && cur is not (PillState.Summarizing or PillState.Notes)) ExpandCurrent();
+            }
+            else if (cur == PillState.Summarizing)
+            {
+                // The open loader tucks when the cursor LEAVES, on a short grace - a status strip
+                // has nothing to read for long. The idle timer stays as a backstop.
+                _loaderOffMs = over ? 0 : _loaderOffMs + HoverPollMs;
+                if (_loaderOffMs >= LoaderTuckGraceMs)
+                {
+                    _loaderOffMs = 0;
+                    App.Log("loader tuck: cursor left the loader");
+                    TuckCurrent();
+                }
+            }
+            else if (over) ArmIdle();               // hovering keeps a page open
             return;
         }
+        _loaderOffMs = 0;
 
         // Cute: Toki blinks the moment the pointer lands on the resting peek.
         if (over && !_wasOver && (cur == PillState.Collapsed || cur == PillState.RecordingBar)) BlinkCurrentToki();
@@ -1233,18 +1965,18 @@ public partial class PillWindow : Window
 
         if (ExpandTarget(cur) is PillState expand)
         {
-            // The Toki peek opens your REMEMBERED page (_context, default Home) - deliberately
-            // (long dwell, or a click → CollapsedView.OnOpen). The recording peek opens quickly.
-            var dwell = cur == PillState.Collapsed ? OpenDwellMs : ExpandDwellMs;
+            // The RECORDING peek opens on CLICK only (RecordingBarView.OnExpand): a bar unfolding
+            // because the pointer passed the top of the screen mid-meeting is an interruption.
+            // The launcher peek keeps its long deliberate dwell.
+            var hoverOpens = cur == PillState.Collapsed;
             _offMs = 0;
-            _overMs = over ? _overMs + HoverPollMs : 0;
-            if (_overMs >= dwell)
+            _overMs = over && hoverOpens ? _overMs + HoverPollMs : 0;
+            if (hoverOpens && _overMs >= OpenDwellMs)
             {
                 _overMs = 0;
-                // Hovering the resting peek opens your remembered page - UNLESS a prep card is armed
-                // for a meeting that's about to start, in which case that's obviously what you came
-                // for. This IS the "hover only" surfacing: the card never takes the screen by itself
-                // any more (owner, 2026-08-05), so hover is the only way it appears before a meeting.
+                // Hovering the resting peek opens the remembered page - UNLESS a prep card is armed
+                // for a meeting about to start. The card never takes the screen by itself; hover is
+                // the only way it appears before a meeting.
                 if (cur == PillState.Collapsed)
                     _state.ForceForDemo(Calendar.PrepWatcher.Armed ? PillState.PrepCard : _context);
                 else _state.TryGo(expand);
@@ -1265,7 +1997,10 @@ public partial class PillWindow : Window
         {
             _overMs = 0;
             _offMs = over ? 0 : _offMs + HoverPollMs;
-            if (_offMs >= CollapseDelayMs) { _offMs = 0; _state.TryGo(collapse); }
+            // The recording bar is opened on purpose, so it must not slam shut the instant the
+            // pointer drifts off. It folds away after a couple of seconds; a click closes it now.
+            var delay = cur == PillState.RecordingOpen ? RecordingFoldMs : CollapseDelayMs;
+            if (_offMs >= delay) { _offMs = 0; _state.TryGo(collapse); }
         }
         else StopHoverPoll(); // not a hover state anymore
     }
@@ -1278,10 +2013,9 @@ public partial class PillWindow : Window
         var work = PhysicalWorkArea();
         int cx = work.Left + (work.Right - work.Left) / 2;
 
-        // Re-arm the summon only once the cursor has dropped clear of the top edge. A real summon is
-        // a reach UP to the notch from the page - NOT a cursor that just lives up on the browser's
-        // tab strip. This is what makes "close off" actually STICK: right after Toki closes off your
-        // cursor is still up top (on Chrome's tabs), and without this it would instantly re-summon.
+        // Re-arm only once the cursor has dropped clear of the top edge: a real summon is a reach
+        // UP from the page, not a cursor living on the browser's tab strip - without this a
+        // just-closed Toki instantly re-summons.
         if (p.Y > work.Top + EdgeReArmBelowPx) _edgeArmed = true;
 
         // Brief cooldown right after a close-off. Still track motion so the dwell starts clean after.
@@ -1299,8 +2033,8 @@ public partial class PillWindow : Window
             {
                 _edgeMs = 0;
                 _edgeArmed = false;   // consume it - the cursor must drop back down before summoning again
-                // If Toki is mid-task (writing your notes), reaching the edge brings that back so you
-                // can check on it - "access whatever Toki is doing". Otherwise Toki peeks first.
+                // If Toki is mid-task (writing notes), reaching the edge brings that back;
+                // otherwise Toki peeks first.
                 _state.ForceForDemo(_context == PillState.Summarizing ? PillState.Summarizing : PillState.Collapsed);
             }
         }
@@ -1335,16 +2069,9 @@ public partial class PillWindow : Window
         return null;
     }
 
-    // The physical cursor position, tested against the pill's cached physical rectangle.
-    /// <summary>
-    /// Is the pointer on (or near) the notch? Used to decide whether a page may tuck itself away.
-    ///
-    /// It uses the SAME edge slack as <see cref="PointInWindow"/>, and the two disagreeing is a bug
-    /// worth naming: a click a pixel outside the notch was forgiven as "inside", while the pointer a
-    /// pixel outside was judged "gone" and the page closed itself. The forgiving rule is the right one
-    /// in both places - a page vanishing while somebody is moving towards it is the single most
-    /// hostile thing this window can do, and being a touch slow to tuck costs nothing.
-    /// </summary>
+    /// <summary>Is the pointer on (or near) the notch? Decides whether a page may tuck itself away.
+    /// Must use the SAME edge slack as <see cref="PointInWindow"/> - a page vanishing while somebody
+    /// is moving towards it is the most hostile thing this window can do.</summary>
     bool CursorOverPill()
     {
         // While a notch dropdown is open, keep the panel "held" - the cursor is likely down in the
@@ -1352,6 +2079,32 @@ public partial class PillWindow : Window
         if (Views.NotchPopups.AnyOpen) return true;
         if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
         return PointInWindow(p.X, p.Y);
+    }
+
+    /// <summary>Is the pointer on the peek's own drawn pixels, not the (much larger) window around
+    /// them? A peek judged by the window drops open when the pointer is nowhere near it. Panels keep
+    /// the forgiving window test - the mascot gutter is genuinely part of them.</summary>
+    bool CursorOverVisiblePeek()
+    {
+        if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
+        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this) : new DpiScale(1, 1);
+        var padL = (int)Math.Round(CardPadL * dpi.DpiScaleX);
+        var padR = (int)Math.Round(CardPadR * dpi.DpiScaleX);
+
+        // The CARD, not the window's card area: during a transition the window is held at the
+        // union of both sizes, so the window alone would report a peek the size of the panel it
+        // just collapsed out of.
+        var areaL = _rectL + padL;
+        var areaW = Math.Max(1, (_rectR - padR) - areaL);
+        var cardWpx = _cardW > 0 ? (int)Math.Round(_cardW * dpi.DpiScaleX) : areaW;
+        var cardHpx = _cardH > 0 ? (int)Math.Round(_cardH * dpi.DpiScaleY) : (_rectB - _rectT);
+        var left = areaL + Math.Max(0, (areaW - cardWpx) / 2);   // the card is centred in that area
+
+        // Half the slack a panel gets: enough that the very edge of a small peek is still reachable,
+        // not so much that the gutter comes back.
+        const int slack = 3;
+        return p.X >= left - slack && p.X <= left + cardWpx + slack
+            && p.Y >= _rectT - slack && p.Y <= _rectT + cardHpx + slack;
     }
 
     // True while the user is typing in a field inside the notch (create composer, API key, …) - used to

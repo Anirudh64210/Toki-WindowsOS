@@ -36,6 +36,8 @@ public partial class CalendarView : UserControl
     public CalendarView()
     {
         InitializeComponent();
+        // Rounded 1px rim, snapped to whole device pixels (see GlassSurface.Hairline).
+        Theme.GlassSurface.CrispRim(ActionBar);
         _addMeet = _lastAddMeet;
         UpdateMeetChip();
         _parseDebounce.Tick += (_, _) => { _parseDebounce.Stop(); ReparseComposer(); };
@@ -105,11 +107,9 @@ public partial class CalendarView : UserControl
         var now = DateTimeOffset.Now;
         var upcoming = all.Where(e => e.EndUtc > now).OrderBy(e => e.StartUtc).ToList();
 
-        // Render-key: skip the whole rebuild when nothing changed. The page refreshes from several sources
-        // (snapshot + fetch, cache events, the 60s tick); rebuilding + re-staggering identical rows is what
-        // flickered. Today's date is in the key so a midnight rollover forces one rebuild.
-        // Theme is in the key too: the rows are code-built and capture their brushes, so a light↔dark swap
-        // MUST rebuild them - otherwise the dedup keeps the old theme's text colour (black text on dark).
+        // Render-key: skip the rebuild when nothing changed (the page refreshes from several sources,
+        // and re-staggering identical rows flickers). Today's date is in the key so a midnight rollover
+        // rebuilds once; theme too, because code-built rows capture their brushes and MUST rebuild on a swap.
         var sig = string.Join(",", upcoming.Select(e => $"{e.Id}:{e.StartUtc.Ticks}:{e.Summary}:{e.HasMeetLink}"))
                   + "#" + DateTime.Today.Ticks + "@" + Theme.ThemeManager.Current;
         if (sig == _lastRenderSig && StatePanel.Visibility != Visibility.Visible) return;
@@ -194,7 +194,7 @@ public partial class CalendarView : UserControl
             FontFamily = (FontFamily)FindResource("UiFont"),
         };
         Grid.SetColumn(t, 0);
-        // A coral dot at the left end + the line (the Amie "now" marker).
+        // A coral dot at the left end + the line.
         var col1 = new Grid();
         col1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         col1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -342,8 +342,7 @@ public partial class CalendarView : UserControl
     void ShowEmpty()
     {
         Days.Children.Clear();
-        // A quiet calendar glyph, NOT a second Toki - the floating bubble beside this panel is the
-        // one mascot on any surface (owner rule, 2026-08-14).
+        // A quiet calendar glyph, NOT a second Toki: one mascot per surface.
         SetState(EmptyGlyph(), "Nothing coming up - all clear.", ("＋ Plan something", () => OnNew(this, new RoutedEventArgs())));
     }
 
@@ -373,9 +372,7 @@ public partial class CalendarView : UserControl
     void ShowDisconnected()
     {
         Days.Children.Clear();
-        // Whichever provider is set up gets the button. When both are, Google leads simply because it
-        // is the one Toki has shipped longest - the full choice lives on the Settings page, which is
-        // where somebody with two calendars will go anyway.
+        // Whichever provider is set up gets the button; the full choice lives on the Settings page.
         var svc = CalendarService.Instance;
         var google = svc.IsConfiguredFor(CalendarProvider.Google);
         var outlook = svc.IsConfiguredFor(CalendarProvider.Outlook);
@@ -420,7 +417,7 @@ public partial class CalendarView : UserControl
 
     void HideState() { StatePanel.Visibility = Visibility.Collapsed; Scroller.Visibility = Visibility.Visible; }
 
-    // (Was a second TokiBlob - the one-mascot rule retired it; the floating bubble is the character.)
+    // One mascot per surface: never a second TokiBlob here.
     static UIElement TokiArt() => EmptyGlyph();
 
     // ── navigation: one continuous scroll (no week paging) ──
@@ -429,8 +426,8 @@ public partial class CalendarView : UserControl
 
     void OnToday(object s, RoutedEventArgs e) => Scroller.ScrollToTop();
 
-    // The header subtitle tracks whatever week is at the top of the viewport; the Today pill appears only
-    // once you've scrolled away from the top (Amie style).
+    // The header subtitle tracks whatever week is at the top of the viewport; the Today pill
+    // appears only once you've scrolled away from the top.
     void OnScroll(object s, ScrollChangedEventArgs e)
     {
         UpdateSubtitleFromScroll();
@@ -472,16 +469,15 @@ public partial class CalendarView : UserControl
         _editing = null;
         _durationMin = 30; UpdateDurationChip();
         _addMeet = _lastAddMeet; UpdateMeetChip();
-        Composer.Visibility = Visibility.Visible;
+        ShowComposer(true);
         PeopleBox.Text = "";
-        // Prefilled, the way every calendar app prefills: today, at the next half hour. A blank form
-        // asks the user to answer a question the app could have answered, and a wrong-but-visible
-        // default is easier to correct than an empty box is to fill.
+        // Prefilled: today, at the next half hour. A wrong-but-visible default is easier to
+        // correct than an empty box is to fill.
         TitleBox.Text = "";
         DateBox.Text = DayOptionLabel(DateTime.Today);
         TimeBox.Text = NextSlot().ToString("h:mm tt");
         ComposerHint.Text = "Type a day and time, or pick them";
-        ComposerHint.Foreground = (Brush)FindResource("TextDim");
+        ComposerHint.SetResourceReference(ForegroundProperty, "TextMid");
         ParsePreview.Visibility = Visibility.Collapsed;
         ComposerCreate.Content = "Create";
         _parsed = null; UpdateCreateEnabled();
@@ -496,9 +492,9 @@ public partial class CalendarView : UserControl
         _addMeet = ev.HasMeetLink; UpdateMeetChip();
         var emails = ev.Attendees.Where(a => !a.IsSelf && a.Email is not null).Select(a => a.Email!).ToList();
         PeopleBox.Text = string.Join(", ", emails);
-        Composer.Visibility = Visibility.Visible;
+        ShowComposer(true);
         ComposerHint.Text = "Edit the title, or type a new day/time to move it.";
-        ComposerHint.Foreground = (Brush)FindResource("TextDim");
+        ComposerHint.SetResourceReference(ForegroundProperty, "TextMid");
         ComposerCreate.Content = "Save";
         // Day/Time start EMPTY on edit: the fallback in ReparseComposer keeps the event's original time
         // (shown in the preview), so leaving them blank means "keep the time"; typing a day/time moves it.
@@ -511,7 +507,7 @@ public partial class CalendarView : UserControl
     /// <summary>Render-harness hook: open the composer with sample text so its state is verifiable in a PNG.</summary>
     internal void DebugOpenComposer(string text)
     {
-        Composer.Visibility = Visibility.Visible;
+        ShowComposer(true);
         PeopleBox.Text = "ana@work.com";
         TitleBox.Text = "Design sync"; DateBox.Text = "tomorrow"; TimeBox.Text = "2pm";
         ReparseComposer();
@@ -519,9 +515,24 @@ public partial class CalendarView : UserControl
 
     void CloseComposer()
     {
-        Composer.Visibility = Visibility.Collapsed;
+        ShowComposer(false);
         TitleBox.Text = ""; DateBox.Text = ""; TimeBox.Text = ""; PeopleBox.Text = "";
         _editing = null;
+    }
+
+    /// <summary>
+    /// Enter or leave the create/edit MODE: the agenda goes away, the header says what you are
+    /// doing, and the New button steps aside because the thing it opens is already open.
+    /// </summary>
+    void ShowComposer(bool on)
+    {
+        Composer.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        AgendaHost.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        NewButton.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        if (on) TodayButton.Visibility = Visibility.Collapsed;
+        HeaderTitle.Text = on ? (_editing is null ? "New meeting" : "Edit meeting") : "Calendar";
+        if (!on) UpdateSubtitleFromScroll();
+        else Subtitle.Text = _editing is null ? "Fill it in and press Create" : "Change it and press Save";
     }
 
     void OnComposerCancel(object s, RoutedEventArgs e) => CloseComposer();
@@ -536,21 +547,10 @@ public partial class CalendarView : UserControl
         PeoplePlaceholder.Visibility = PeopleBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     // ── the composer's two pickers ──
-    //
-    // Both fields still take typed words, because "tomorrow" is genuinely faster than hunting a date.
-    // The chevron exists for the other half of the problem: a bare text box gives no clue what it will
-    // accept, and being wrong about that is silent. Google and Outlook both solve it this way - type or
-    // pick, same field, and the picker doubles as documentation of what the field understands.
+    // Both fields take typed words ("tomorrow" beats hunting a date); the picker doubles as
+    // documentation of what the field understands.
 
-    /// <summary>
-    /// The day field opens a MONTH CALENDAR, not a list of days.
-    ///
-    /// The first version offered the next fourteen days as text rows, and the owner was right to call
-    /// it dumb: a meeting three weeks out was simply unreachable, and a flat list answers none of the
-    /// questions a person is actually weighing - "is that a Friday", "is that the week after next".
-    /// Outlook and Google both open a month grid for exactly this reason (owner-supplied reference
-    /// screenshots, 2026-08-13). See <see cref="DayPicker"/>.
-    /// </summary>
+    /// <summary>The day field opens a month calendar (see <see cref="DayPicker"/>), never a flat list of days.</summary>
     void OnPickDay(object s, RoutedEventArgs e)
     {
         var current = ComposerStart()?.Date ?? DateTime.Today;
@@ -562,10 +562,8 @@ public partial class CalendarView : UserControl
     }
 
     /// <summary>
-    /// Every half hour of the WHOLE day. The first version ran 7am to 9pm, which quietly asserted that
-    /// nobody books outside office hours - a call with another timezone at 6am or a 10pm standup with a
-    /// US team was unpickable. A time picker's job is to offer the times that exist, and the picker
-    /// opens scrolled to the current value so the full day costs nothing to navigate.
+    /// Every half hour of the WHOLE day - a time picker's job is to offer the times that exist.
+    /// Opens scrolled to the current value so the full day costs nothing to navigate.
     /// </summary>
     void OnPickTime(object s, RoutedEventArgs e)
     {
@@ -643,16 +641,21 @@ public partial class CalendarView : UserControl
         {
             var end = s.AddMinutes(_durationMin);
             ParsePreview.Text = $"{DayLabel(s)} · {s:h:mm} – {end:h:mm tt}";
-            ParsePreview.Foreground = (Brush)FindResource("Green");
+            // Resource REFERENCE, not a captured brush: this line outlives a theme switch.
+            ParsePreview.SetResourceReference(ForegroundProperty, "Green");
             ParsePreview.Visibility = Visibility.Visible;
         }
         else if (whenText.Length > 0)
         {
             ParsePreview.Text = "Add a day and a time (e.g. “tomorrow” · “2pm”).";
-            ParsePreview.Foreground = (Brush)FindResource("TextDim");
+            ParsePreview.SetResourceReference(ForegroundProperty, "TextMid");
             ParsePreview.Visibility = Visibility.Visible;
         }
         else ParsePreview.Visibility = Visibility.Collapsed;
+
+        // One line, not two: once the preview exists the hint is noise. The hint is the empty state.
+        ComposerHint.Visibility = ParsePreview.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
         UpdateCreateEnabled();
     }
 
@@ -668,17 +671,8 @@ public partial class CalendarView : UserControl
         ComposerCreate.IsEnabled = _parsed is { Start: not null } && !string.IsNullOrWhiteSpace(_parsed.Summary);
 
     /// <summary>
-    /// The third field is the END TIME, not an abstract duration.
-    ///
-    /// The history, because it is the story of this whole composer: v1 was a chip that CYCLED
-    /// 30 -> 60 -> 90, which hid four of its six options. v2 was a duration dropdown, better, but it
-    /// still made the user do arithmetic - "2:00 plus 45 minutes ends when?" - and the owner's Outlook
-    /// reference shows why real calendars never ask that: they show `6:00 PM - 6:30 PM`, both ends,
-    /// as facts. Google's end-time dropdown then annotates each option with the duration it implies.
-    ///
-    /// So this does both: the chip READS as the end time, and each row in its picker is
-    /// "2:30 PM (30 min)" - the time for people who think in times, the length for people who think in
-    /// lengths, one control.
+    /// The third field is the END TIME, not an abstract duration: the chip reads as the end time,
+    /// and each picker row is "2:30 PM (30 min)" - time and length in one control.
     /// </summary>
     static readonly int[] DurationChoices = [15, 30, 45, 60, 90, 120];
 
@@ -703,8 +697,7 @@ public partial class CalendarView : UserControl
     static string EndOptionLabel(DateTime? start, int minutes) =>
         start is { } s ? $"{s.AddMinutes(minutes):h:mm tt}  ({DurLabel(minutes)})" : DurLabel(minutes);
 
-    // The chip shows where the meeting ENDS - the dash before it already says what it is, the way
-    // Outlook's "6:00 PM - 6:30 PM" reads. Falls back to the bare length until a start resolves.
+    // The chip shows where the meeting ENDS; falls back to the bare length until a start resolves.
     void UpdateDurationChip() =>
         DurationChip.Content = ComposerStart() is { } s
             ? $"{s.AddMinutes(_durationMin):h:mm tt}  ▾"
@@ -712,9 +705,7 @@ public partial class CalendarView : UserControl
 
     static string DurLabel(int min) => min < 60 ? $"{min} min" : min == 60 ? "1 hour" : min % 60 == 0 ? $"{min / 60} hours" : $"1 h {min - 60} m";
 
-    // A labelled switch, not a chip. A chip that fills in when active is asking the reader to work out
-    // whether the fill means "this is on" or "press me to turn it on" - fine for a filter, wrong for a
-    // setting that changes what gets created. The switch says which, and the label says what.
+    // A labelled switch, not a chip: a filled chip is ambiguous between "on" and "press to turn on".
     void OnToggleMeet(object s, RoutedEventArgs e)
     {
         _addMeet = MeetToggle.IsChecked == true;
@@ -752,8 +743,12 @@ public partial class CalendarView : UserControl
 
     void CreateFailed(string message)
     {
+        // An error OUTRANKS the parse preview. The hint line is hidden whenever the preview is up,
+        // so failing without re-showing it would report the problem into a collapsed TextBlock.
         ComposerHint.Text = message;
-        ComposerHint.Foreground = (Brush)FindResource("Coral");
+        ComposerHint.SetResourceReference(ForegroundProperty, "Danger");
+        ComposerHint.Visibility = Visibility.Visible;
+        ParsePreview.Visibility = Visibility.Collapsed;
     }
 
     static IEnumerable<string> SplitEmails(string? s) =>

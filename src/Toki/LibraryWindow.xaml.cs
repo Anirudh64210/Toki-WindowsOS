@@ -41,13 +41,30 @@ public partial class LibraryWindow : Window
     static bool _dirty = true;
     public static void MarkDirty() => _dirty = true;
 
-    /// <summary>
-    /// Open the Library - must feel INSTANT. The window is created once and kept warm
-    /// (Hidden between opens, never destroyed), and is pre-warmed off-screen at startup
-    /// (<see cref="Warm"/>), so a click never pays window-create + full-layout cost. That
-    /// slow, visible "the window builds while the pill is still up, then the pill closes"
-    /// handoff was the clunk - a warm window just appears.
-    /// </summary>
+    /// <summary>Open the Library on Settings, scrolled to the CALENDARS block - the Google/Outlook
+    /// sign-in rows live here, so "Connect a calendar" must land on them.</summary>
+    public static void ShowLibrarySettings(Rect? fromRect = null)
+    {
+        ShowLibrary(fromRect: fromRect, page: "settings");
+        var w = _open;
+        if (w is null) return;
+        // After layout: the page has just been switched, so the row has no position yet.
+        w.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            // A beat after the page lands, then GLIDE - the page must be on screen and settled
+            // before travelling across it.
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                try { Controls.SmoothScroll.GlideTo(w.SettingsPage, w.LibGoogleRow); } catch { }
+            };
+            t.Start();
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Open the Library - must feel INSTANT. The window is created once, kept warm (Hidden
+    /// between opens, never destroyed), and pre-warmed off-screen at startup (<see cref="Warm"/>).</summary>
     public static void ShowLibrary(long? focusMeetingId = null, Rect? fromRect = null, string? page = null)
     {
         EnsureCreated();
@@ -61,8 +78,7 @@ public partial class LibraryWindow : Window
         if (wasHidden) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
         else w.Show();
         // An explicit page (assistant command) wins; a specific note → the Library page showing it;
-        // otherwise the Ask landing (fresh greeting). This is what makes "take me to the library" land
-        // on the actual notes LIST instead of the Ask page (the wrong-page bug).
+        // otherwise the Ask landing.
         w.ShowPage(page ?? (focusMeetingId is not null ? "library" : "ask"), animate: false);
         w.BringToFront();
     }
@@ -77,7 +93,19 @@ public partial class LibraryWindow : Window
         Focus();
     }
 
-    /// <summary>Dev: render the hub's three pages to PNGs (Library window isn't in the pill harness).</summary>
+    /// <summary>Dev seam for --themetest: an offscreen hub whose pages can be walked. The ctor and
+    /// ShowPage stay private (there is exactly one hub); the audit gets its own door.</summary>
+    internal static LibraryWindow ForAudit()
+    {
+        var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 1040, Height = 700, ShowActivated = false, ShowInTaskbar = false };
+        w.Show();
+        w.UpdateLayout();
+        return w;
+    }
+
+    internal void AuditPage(string key) { ShowPage(key, animate: false); UpdateLayout(); UpdateLayout(); }
+
+    /// <summary>Dev: render the hub's pages to PNGs (--libshot).</summary>
     internal static void RenderShots(string dir)
     {
         System.IO.Directory.CreateDirectory(dir);
@@ -89,9 +117,10 @@ public partial class LibraryWindow : Window
         catch { }
         var w = new LibraryWindow { Left = -32000, Top = -32000, Width = 960, Height = 640, ShowActivated = false, ShowInTaskbar = false };
         w.Show();
+        // The page's surface is the WINDOW's background and these shots render RootGrid, which has
+        // none - paint it here (harness only, by resource reference so it follows the theme).
+        w.RootGrid.SetResourceReference(BackgroundProperty, "Ink");
         w.Reload(App.CurrentMeeting?.Id);
-        // "settings" joined the hub in v1-iter2/iter3 (name, AI summaries + API key, calendar, about) -
-        // it renders like any other page, and a design review needs it as much as the rest.
         foreach (var page in new[] { "ask", "library", "templates", "settings" })
         {
             w.ShowPage(page, animate: false);
@@ -99,9 +128,7 @@ public partial class LibraryWindow : Window
             Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, $"hub-{page}.png"));
         }
 
-        // The Calendars block sits well below the fold on the Settings page, so a plain shot of that
-        // page never shows the two connection rows - which are exactly what a design review of this
-        // change needs to see.
+        // The Calendars block sits below the fold on Settings - scroll so the shot shows the rows.
         w.ShowPage("settings", animate: false);
         w.UpdateLayout();
         w.SettingsPage.ScrollToEnd();
@@ -109,8 +136,8 @@ public partial class LibraryWindow : Window
         Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-settings-calendars.png"));
         w.SettingsPage.ScrollToHome();
 
-        // Nav hover: proves the whole rounded row is the target, not the label (there is no way to
-        // move a real pointer in a headless render, so the state is set directly).
+        // Nav hover: proves the whole rounded row is the target, not the label (no real pointer in
+        // a headless render, so the state is set directly).
         w.ShowPage("library", animate: false);
         if (w._navButtons.TryGetValue("templates", out var hovered))
             hovered.SetResourceReference(Border.BackgroundProperty, "HoverOverlay");
@@ -131,10 +158,9 @@ public partial class LibraryWindow : Window
         w.UpdateLayout();
         Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-library-sticky.png"));
 
-        // A hand-written note, which is the page the owner called "very AI generated". Rendered from an
-        // IN-MEMORY record with a negative id: RenderManual only reads what it is handed, so nothing is
-        // created, and the debounced auto-save is never scheduled because nothing is typed. A render
-        // harness must never be able to write to the real note store.
+        // A hand-written note, rendered from an IN-MEMORY record with a negative id: nothing is
+        // created and no auto-save is scheduled. A render harness must never be able to write to
+        // the real note store.
         w.ShowPage("library", animate: false);
         w.RenderManual(new MeetingRecord
         {
@@ -197,13 +223,9 @@ public partial class LibraryWindow : Window
         };
     }
 
-    /// <summary>
-    /// Pre-create + fully lay out the window OFF-SCREEN at startup, so even the first real
-    /// open is instant (the expensive part is the first measure/arrange/render of the whole
-    /// visual tree - we pay it once, off the critical path). No flash: it's shown far off
-    /// every monitor and hidden again within the same tick, without activating or a taskbar
-    /// button.
-    /// </summary>
+    /// <summary>Pre-create + fully lay out the window OFF-SCREEN at startup, so even the first real
+    /// open is instant. No flash: shown far off every monitor and hidden again within the same
+    /// tick, without activating or a taskbar button.</summary>
     public static void Warm()
     {
         if (_open is not null) return;
@@ -228,12 +250,8 @@ public partial class LibraryWindow : Window
     Rect? _originRect;
     bool _closing;
 
-    /// <summary>
-    /// Grow the window out of the notch: the content scales up from the pill's location with a
-    /// fade - GPU-composited (a RenderTransform + element Opacity on RootGrid), smooth and cheap.
-    /// NOT the window's Opacity (that forces a layered window + CPU re-blit → stutter). Runs after
-    /// Show, non-blocking, so it adds nothing to the instant open cost.
-    /// </summary>
+    /// <summary>Grow the window out of the notch: a RenderTransform + element Opacity on RootGrid,
+    /// GPU-composited. NOT the window's Opacity - that forces a layered window + CPU re-blit.</summary>
     void PlayOpen(Rect? fromRect)
     {
         _closing = false;
@@ -322,9 +340,8 @@ public partial class LibraryWindow : Window
         PlayClose(() =>
         {
             Hide();
-            // Restore from REALITY, not a hardcoded Home: a recording bar or a Summarizing
-            // loader on the pill must survive the Library closing - forcing Home over them
-            // hid a live mic (and orphaned the loader's pending result).
+            // Restore from REALITY, not a hardcoded Home: a recording bar or Summarizing loader
+            // must survive the Library closing - forcing Home over them hides a live mic.
             var cur = App.State.Current;
             if (cur is PillState.RecordingBar or PillState.RecordingOpen or PillState.Summarizing) return;
             App.State.ForceForDemo(App.IsRecording ? PillState.RecordingBar : PillState.Home);
@@ -361,11 +378,10 @@ public partial class LibraryWindow : Window
     {
         InitializeComponent();
         BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
-        // Stick-to-bottom for the chat thread (same rule as the notch AskView): auto-follow the newest
-        // text only while you're already parked at the bottom, so a streaming answer never yanks you down
-        // while you've scrolled up to re-read. A user scroll (ExtentHeightChange == 0) updates the flag -
-        // ~120px threshold, matching AskView (8px was hair-trigger: sub-pixel extent wobble un-anchored
-        // the reader). The "↓ Latest" pill shows whenever you've drifted up and there's more below.
+        // Stick-to-bottom for the chat thread: auto-follow the newest text only while already parked
+        // at the bottom, so a streaming answer never yanks the reader down. A user scroll
+        // (ExtentHeightChange == 0) updates the flag; ~120px threshold (a tight one is hair-trigger
+        // under sub-pixel extent wobble). The "↓ Latest" pill shows when drifted up with more below.
         ChatScroll.ScrollChanged += (_, e) =>
         {
             if (e.ExtentHeightChange == 0 && (e.VerticalChange != 0 || e.ViewportHeightChange != 0))
@@ -374,37 +390,36 @@ public partial class LibraryWindow : Window
         };
         try { _chats = _chatStore.Load(); } catch { _chats = new(); }   // past Ask conversations
         SourceInitialized += (_, _) => StyleChrome();
-        // Soften the maximise/restore snap (the "min-to-max sizer" clunk): ease the content into
-        // the new size on every WindowState change instead of a hard pop.
+        // Soften the maximise/restore snap: ease the content into the new size instead of a hard pop.
         StateChanged += (_, _) => PlayStateSettle();
-        // The list cards + note detail are built in code (FindResource brushes), so they don't
-        // recolour on their own - rebuild them (and re-apply the title-bar theme) on a theme swap.
         // Code-built UI (list cards, note detail, nav, templates) captures brushes → rebuild on a theme swap.
         Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() =>
         {
-            StyleChrome(); BuildHub(); Reload();
+            StyleChrome(); BuildHub(); Reload(); ApplyShadowDepth();
             if (_page == "settings") LoadLibrarySettings(refreshModels: false);   // recolour only - no network fetch on a theme flip
         });
+        ApplyShadowDepth();
+        // Rims in whole DEVICE pixels. On Loaded (and on DPI change) because until the window is in
+        // a tree there is no DPI to ask about.
+        Loaded += (_, _) => ApplyRims();
+        DpiChanged += (_, _) => ApplyRims();
         _manualDebounce.Tick += (_, _) => { _manualDebounce.Stop(); _manualFlush?.Invoke(); };
         _searchDebounce.Tick += (_, _) => { _searchDebounce.Stop(); LoadList(); };
-        // NOTE: no Loaded→Reload. Show() raises Loaded, and both Warm() and ShowLibrary()
-        // already call Reload() explicitly - a Loaded handler here made every open rebuild
-        // the whole list+detail TWICE.
+        // NOTE: no Loaded→Reload. Show() raises Loaded, and Warm()/ShowLibrary() already call
+        // Reload() explicitly - a Loaded handler here rebuilds the whole list+detail TWICE per open.
 
         // The list builds its rows with our own Card(), one at a time, only for rows it realises.
         Cards.Build = o => Card((MeetingSummary)o);
 
-        // Notes arrive in two waves: the summary and to-dos as soon as the model has written them, then
-        // the speaker names a few seconds later. When the second wave lands for the note that is OPEN,
-        // re-read it from the store so the loader is replaced by the real thing in place.
+        // Notes arrive in two waves (notes first, speaker names later). When the second wave lands
+        // for the note that is OPEN, re-read it from the store so the loader is replaced in place.
         App.SpeakersResolved += id =>
         {
             if (_selected != id || _page != "library") return;
             if (App.Store.Get(id) is { } fresh) RenderMeeting(fresh);
         };
 
-        // Restore the saved list sort. (A settings file still saying "Manual" from before drag-reorder
-        // was removed simply fails to parse and lands on Newest, which is what we want.)
+        // Restore the saved list sort (an unknown stored value fails to parse and lands on Newest).
         if (Enum.TryParse<LibrarySort>(Llm.AppSettings.Current.LibrarySort, out var savedSort)) _sort = savedSort;
         UpdateSortButton();
 
@@ -413,6 +428,29 @@ public partial class LibraryWindow : Window
         AskPage.Visibility = Visibility.Visible;
         LibraryPage.Visibility = Visibility.Collapsed;
         TemplatesPage.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Sidebar shadow weight per theme (light runs both casters at 70%, matching the notch
+    /// card). In code because a DropShadowEffect's Opacity cannot follow a DynamicResource.</summary>
+    void ApplyShadowDepth()
+    {
+        var k = Toki.Theme.ThemeManager.Current == Toki.Theme.AppTheme.Light ? 0.70 : 1.0;
+        if (SidebarKeyShadow.Effect is System.Windows.Media.Effects.DropShadowEffect key) key.Opacity = 0.22 * k;
+        if (SidebarAmbientShadow.Effect is System.Windows.Media.Effects.DropShadowEffect amb) amb.Opacity = 0.12 * k;
+    }
+
+    /// <summary>Every 1px rim on a rounded surface in this window, snapped to whole device pixels -
+    /// see <see cref="Toki.Theme.GlassSurface.Hairline"/> for why a fractional one reads as soft.</summary>
+    void ApplyRims()
+    {
+        var t = new Thickness(Toki.Theme.GlassSurface.Hairline(this));
+        SidebarCard.BorderThickness = t;
+        SearchCapsule.BorderThickness = t;
+        AskCapsule.BorderThickness = t;
+        SortRim.BorderThickness = t;
+        NameCard.BorderThickness = t;
+        AppearanceCard.BorderThickness = t;
+        PinnedCard.BorderThickness = t;
     }
 
     bool _wndProcHooked;
@@ -427,15 +465,17 @@ public partial class LibraryWindow : Window
             DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // title bar follows theme (DWMWA_USE_IMMERSIVE_DARK_MODE)
             int borderColor = light ? 0x00E2E2E2 : 0x00161616;      // window border matches the theme
             DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR (COLORREF 0x00BBGGRR)
-            // The Library is an ordinary window: it is NOT hidden from screen capture. (The pill has
-            // an opt-in ghost toggle; the Library deliberately does not - owner decision.)
 
-            // Maximise cleanly. On a per-monitor-DPI-aware app with a manually-placed window,
-            // WPF's default maximise mis-sizes (jumps, or spills under the taskbar) - that was
-            // the glitch. Handling WM_GETMINMAXINFO pins the maximised bounds to the current
-            // monitor's WORK AREA, so maximise snaps to exactly the right rectangle.
-            // Once only: StyleChrome re-runs on every theme swap, and AddHook does not
-            // de-duplicate - each toggle silently appended another copy of WndProc.
+            StripTitleBarIcon(hwnd);
+            // ...and AGAIN after layout: WPF applies its own icon after SourceInitialized, which
+            // puts the icon straight back.
+            Dispatcher.BeginInvoke(new Action(() => { try { StripTitleBarIcon(hwnd); } catch { } }),
+                                   System.Windows.Threading.DispatcherPriority.Loaded);
+            // The Library is deliberately NOT hidden from screen capture (owner decision).
+
+            // On a per-monitor-DPI-aware app with a manually-placed window, WPF's default maximise
+            // mis-sizes; WM_GETMINMAXINFO pins the maximised bounds to the monitor's WORK AREA.
+            // Hook once only: StyleChrome re-runs on every theme swap and AddHook does not de-duplicate.
             if (!_wndProcHooked)
             {
                 _wndProcHooked = true;
@@ -443,6 +483,20 @@ public partial class LibraryWindow : Window
             }
         }
         catch { }
+    }
+
+    /// <summary>No icon in the title bar. WPF has no ShowIcon property: WS_EX_DLGMODALFRAME alone is
+    /// NOT enough - the title bar draws whatever icon the window holds, so both icon slots are
+    /// cleared too and the frame is told it changed. The taskbar/alt-tab keep the process icon.</summary>
+    void StripTitleBarIcon(IntPtr hwnd)
+    {
+        const int GwlExStyle = -20, WsExDlgModalFrame = 0x0001;
+        const int WmSetIcon = 0x0080, IconSmall = 0, IconBig = 1;
+        const uint NoMove = 0x0002, NoSize = 0x0001, NoZOrder = 0x0004, FrameChanged = 0x0020;
+        SetWindowLong(hwnd, GwlExStyle, GetWindowLong(hwnd, GwlExStyle) | WsExDlgModalFrame);
+        SendMessage(hwnd, WmSetIcon, IconSmall, IntPtr.Zero);
+        SendMessage(hwnd, WmSetIcon, IconBig, IntPtr.Zero);
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, NoMove | NoSize | NoZOrder | FrameChanged);
     }
 
     void Reload(long? focus = null)
@@ -465,7 +519,9 @@ public partial class LibraryWindow : Window
     // Cards.Children - is the answer to "what's in the Library" and "which one is first".
     IReadOnlyList<MeetingSummary> _items = [];
     bool _listLoaded;                        // has LoadList run? (was "are there any card visuals?")
-    readonly Dictionary<string, Border> _navButtons = new();
+    readonly Dictionary<string, Button> _navButtons = new();
+    readonly Dictionary<string, TextBlock> _navIcons = new();
+    readonly Dictionary<string, TextBlock> _navLabels = new();
     static readonly Random _rng = new();
     System.Windows.Threading.DispatcherTimer? _typer;
 
@@ -489,39 +545,39 @@ public partial class LibraryWindow : Window
     void BuildNav()
     {
         Nav.Children.Clear();
-        _navButtons.Clear();
+        _navButtons.Clear(); _navIcons.Clear(); _navLabels.Clear();
         Nav.Children.Add(NavItem("ask", (char)0xE8BD, "Ask"));       // chat bubble
         Nav.Children.Add(NavItem("library", (char)0xE8F1, "Library"));// stacked books
         Nav.Children.Add(NavItem("templates", (char)0xE8A5, "Templates")); // document
         Nav.Children.Add(NavItem("settings", (char)0xE713, "Settings"));   // gear
     }
 
-    /// <summary>
-    /// One sidebar nav row. The whole full-width rounded box is the button, not the word inside it.
-    ///
-    /// It always WAS the whole box (a transparent Border spans the rail), but at rest nothing was drawn,
-    /// so an inactive item read as a floating icon and label with no button around them, and there was no
-    /// hover state to prove otherwise - owner, 2026-08-06: "the library button is still a button for the
-    /// word, it can be a box with the library text". Now the box lights on hover, exactly where it can be
-    /// clicked, so what you can hit is what you can see.
-    /// </summary>
-    Border NavItem(string key, char glyph, string label)
+    /// <summary>One sidebar nav row. The whole full-width rounded box is the button (it lights on
+    /// hover), not the word inside it - what you can hit is what you can see.</summary>
+    Button NavItem(string key, char glyph, string label)
     {
-        var icon = new TextBlock { Text = glyph.ToString(), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 15, VerticalAlignment = VerticalAlignment.Center, Width = 22, TextAlignment = TextAlignment.Center };
-        var text = new TextBlock { Text = label, FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12.5, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0) };
+        // A real Button, never a Border with a mouse handler (--hittest only audits ButtonBase).
+        var icon = new TextBlock
+        {
+            Text = glyph.ToString(), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 17,
+            VerticalAlignment = VerticalAlignment.Center, Width = 24, TextAlignment = TextAlignment.Center,
+        };
+        var text = new TextBlock
+        {
+            Text = label, FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 16,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
+        };
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(icon); row.Children.Add(text);
-        var b = new Border
+        var b = new Button
         {
-            CornerRadius = new CornerRadius(10), Padding = new Thickness(11, 10, 11, 10),
-            Margin = new Thickness(0, 0, 0, 4), MinHeight = 40, Cursor = Cursors.Hand,
-            Background = Brushes.Transparent, Child = row,
+            Style = (Style)FindResource("RowButton"),
+            Padding = new Thickness(12, 0, 12, 0), Height = 44, Margin = new Thickness(0, 0, 0, 6),
+            HorizontalContentAlignment = HorizontalAlignment.Left, Content = row,
         };
-        // Hover only when this ISN'T the current page - the active row already carries its own fill and
-        // must not flicker to a lighter one under the pointer.
-        b.MouseEnter += (_, _) => { if (_page != key) b.SetResourceReference(Border.BackgroundProperty, "HoverOverlay"); };
-        b.MouseLeave += (_, _) => { if (_page != key) b.Background = Brushes.Transparent; };
-        b.MouseLeftButtonUp += (_, _) => OnNavClick(key);
+        b.Click += (_, _) => OnNavClick(key);
+        _navIcons[key] = icon;
+        _navLabels[key] = text;
         _navButtons[key] = b;
         return b;
     }
@@ -565,10 +621,18 @@ public partial class LibraryWindow : Window
         foreach (var (key, b) in _navButtons)
         {
             var active = key == _page;
-            if (active) b.Background = (Brush)FindResource("Chip"); else b.Background = Brushes.Transparent;
-            if (b.Child is StackPanel sp)
-                foreach (var c in sp.Children.OfType<TextBlock>())
-                    c.SetResourceReference(TextBlock.ForegroundProperty, active ? "Text" : "TextDim");
+            // The frame separates the current page from the rest three ways at once - a fill, a
+            // brighter colour and a heavier weight - because on a dark rail any one of them alone is
+            // too quiet to find at a glance.
+            if (active) b.SetResourceReference(BackgroundProperty, "HoverOverlay");
+            else b.Background = Brushes.Transparent;
+            if (_navIcons.TryGetValue(key, out var icon))
+                icon.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextHi" : "TextMid");
+            if (_navLabels.TryGetValue(key, out var label))
+            {
+                label.SetResourceReference(TextBlock.ForegroundProperty, active ? "TextHi" : "TextMid");
+                label.FontWeight = active ? FontWeights.SemiBold : FontWeights.Medium;
+            }
         }
     }
 
@@ -639,14 +703,9 @@ public partial class LibraryWindow : Window
     }
 
     // ── Settings page: pinned names ──
-    //
-    // The roster behind speaker naming (T8) and name correction (T2). `AppSettings.PinnedNames` has been
-    // READ by NameLexicon since T2, but nothing could write it - the escape hatch existed with no handle
-    // on it, so the one fix for a name the library cannot settle by frequency was hand-editing a JSON
-    // file. A name typed here is TRUSTED: correction may reach further towards it, and the namer will
-    // attach it to a voice on evidence that would not be enough for a name nobody vouched for.
-    //
-    // Stored verbatim as typed; NameLexicon.Trusted splits on commas, semicolons and newlines.
+    // The roster behind speaker naming and name correction. A name typed here is TRUSTED:
+    // correction may reach further towards it, and the namer attaches it to a voice on less
+    // evidence. Stored verbatim; NameLexicon.Trusted splits on commas, semicolons and newlines.
 
     void LoadPinnedSettings()
     {
@@ -677,8 +736,8 @@ public partial class LibraryWindow : Window
         catch (Exception ex) { App.Log($"save pinned names: {ex.Message}"); }
 
         LibPinnedActions.Visibility = Visibility.Collapsed;
-        // Count what Toki will actually use, not what was typed - trailing commas and blank lines are
-        // easy to leave behind, and "3 names" confirms the parse as well as the save.
+        // Count what Toki will actually use, not what was typed - "3 names" confirms the parse
+        // as well as the save.
         var n = Transcription.NameLexicon.Trusted().Count;
         LibPinnedSavedText.Text = n switch
         {
@@ -694,12 +753,8 @@ public partial class LibraryWindow : Window
     void OnLibPinnedCancel(object sender, RoutedEventArgs e) => LoadPinnedSettings();
 
     // ── Settings page: re-clean saved transcripts ──
-    //
-    // A button, not a startup job. See Storage/TranscriptCleanup for the reasoning. Everything here is
-    // about being honest while it runs: the button disables so it cannot be double-started, the status
-    // line counts up so a large library does not look frozen, and the result says how many meetings
-    // actually changed - including "nothing to change", which is the good outcome and should read that
-    // way rather than as a failure.
+    // A button, not a startup job (see Storage/TranscriptCleanup). Honest while it runs: the button
+    // disables, the status counts up, and the result says how many meetings actually changed.
     bool _recleaning;
 
     async void OnLibReclean(object sender, RoutedEventArgs e)
@@ -739,14 +794,9 @@ public partial class LibraryWindow : Window
         }
     }
 
-    // ── Settings page: everything else (the notch-settings consolidation - DONE 2026-08-04) ──
-    //
-    // This page is THE home for preferences. All of it goes through the existing one-path
-    // App/service calls (no duplicated persistence): theme (App.SwitchTheme), glassy notch
-    // (App.SetGlassyNotch), ghost (App.SetGhostMode), Google Calendar (CalendarService.Instance),
-    // About (PillState.About), and the AI-summaries mode + BYO-API-key flow - moved WHOLE from the
-    // notch into the reusable Views.AiSummariesSection control hosted below. The notch Settings is
-    // now UI/visibility only (owner: "the notch should only have the visibility, UI settings").
+    // ── Settings page: everything else ──
+    // THE home for preferences. Everything goes through the existing one-path App/service calls
+    // (no duplicated persistence). The notch Settings is UI/visibility only (owner decision).
 
     bool _settingsLoading;
     void LoadLibrarySettings(bool refreshModels = true)
@@ -783,10 +833,8 @@ public partial class LibraryWindow : Window
     }
 
     // ── Settings page: the two calendar connections ──
-    //
-    // Google and Outlook are independent and can both be on. One method draws either row, so the two
-    // can never drift into behaving differently - which is the failure mode when a second provider is
-    // bolted on beside a first.
+    // Google and Outlook are independent and can both be on. One method draws either row, so the
+    // two can never drift into behaving differently.
     void RefreshLibGoogle()
     {
         var svc = Toki.Calendar.CalendarService.Instance;
@@ -823,9 +871,8 @@ public partial class LibraryWindow : Window
             ? "Not connected. Sign in to see upcoming meetings and let Toki prep you."
             : $"{provider.ShortName()} needs a one-time setup first - the button explains.";
         connect.Content = $"Connect {provider.ShortName()}";
-        // ENABLED even when the sign-in is not configured. A greyed-out button is indistinguishable
-        // from a broken one (the owner's exact report), and it cannot say what is missing. Clicking
-        // it explains and opens the setup guide instead.
+        // ENABLED even when the sign-in is not configured: a greyed-out button is indistinguishable
+        // from a broken one and cannot say what is missing. Clicking it explains instead.
         connect.IsEnabled = true;
         connect.Padding = new Thickness(20, 9, 20, 9);
     }
@@ -841,10 +888,8 @@ public partial class LibraryWindow : Window
         var svc = Toki.Calendar.CalendarService.Instance;
         if (!svc.IsConfiguredFor(provider))
         {
-            // Say exactly what is missing and where the fix lives. The one-time setup is registering
-            // Toki with the provider (free, ~10 min) - the same step Google needed before its button
-            // could work. A greyed button or a bare "not set up" is just a nicer way of being broken;
-            // this at least names the next step.
+            // Say exactly what is missing and where the fix lives - a bare "not set up" is just a
+            // nicer way of being broken.
             status.Text = provider == Toki.Calendar.CalendarProvider.Outlook
                 ? "One-time setup: register Toki with Microsoft (free, ~10 min) - see docs\\outlook-setup.md, then this button works."
                 : "One-time setup: create Toki's Google OAuth client (free) - see docs\\google-setup.md, then this button works.";
@@ -871,15 +916,9 @@ public partial class LibraryWindow : Window
         finally { button.IsEnabled = true; RefreshLibGoogle(); }
     }
 
-    // The "Built with" credits live on the notch's About screen (one canonical copy of the licence
-    // list) - this row summons it, same as the notch Settings row does.
-    void OnLibOpenSource(object sender, MouseButtonEventArgs e) => App.State.ForceForDemo(PillState.About);
-
-    void OnLibAboutHover(object sender, MouseEventArgs e)
-    { if (sender is Border b) b.SetResourceReference(Border.BackgroundProperty, "Chip"); }
-
-    void OnLibAboutUnhover(object sender, MouseEventArgs e)
-    { if (sender is Border b) b.Background = Brushes.Transparent; }
+    // The "Built with" credits live on the notch's About screen (one canonical copy of the
+    // licence list) - this row summons it.
+    void OnLibOpenSource(object sender, RoutedEventArgs e) => App.State.ForceForDemo(PillState.About);
 
     // ── Ask landing: hero mascot on a soft glow, a typed greeting, one identity line, chips ──
 
@@ -929,7 +968,7 @@ public partial class LibraryWindow : Window
     }
 
     // The landing hero mascot reacts to a poke, same as the sidebar one.
-    void OnLandingMascotClick(object sender, MouseButtonEventArgs e) => LandingToki.React();
+    void OnLandingMascotClick(object sender, RoutedEventArgs e) => LandingToki.React();
 
     // Reveal the greeting one character at a time - slow and smooth, like it's being written.
     void TypeText(TextBlock tb, string full)
@@ -945,9 +984,7 @@ public partial class LibraryWindow : Window
 
     void BuildSuggestions()
     {
-        // BACK by the redesign (figma 348:5438 draws exactly this 2x2 chip block; the earlier veto
-        // was about the old oval look, reversed with the frame). Four invitations that show the RANGE
-        // of what Ask can do - commitments, owners, summaries, decisions.
+        // Four invitations that show the RANGE of what Ask can do.
         Suggestions.Children.Clear();
         Suggestions.MaxWidth = 560;
         foreach (var q in new[]
@@ -961,8 +998,8 @@ public partial class LibraryWindow : Window
         Suggestions.Visibility = Visibility.Visible;
     }
 
-    // Suggestion chips: quiet capsules that light on hover. Real BUTTONS (a Border with a mouse-up
-    // inside a page of real buttons is the mistake this codebase has made three times).
+    // Suggestion chips: quiet capsules that light on hover. Real BUTTONS - never a Border with a
+    // mouse handler.
     Button SuggestionChip(string text)
     {
         var b = new Button
@@ -988,14 +1025,14 @@ public partial class LibraryWindow : Window
             case Llm.AppCommand.OpenLibrary:   ShowPage("library"); break;
             case Llm.AppCommand.OpenAsk:       ShowPage("ask"); break;
             case Llm.AppCommand.OpenTemplates: ShowPage("templates"); break;
-            case Llm.AppCommand.OpenSettings:  ShowPage("settings"); break;   // settings live HERE now
+            case Llm.AppCommand.OpenSettings:  ShowPage("settings"); break;
             case Llm.AppCommand.NewNote:       OnNewNote(this, new RoutedEventArgs()); break;
             case Llm.AppCommand.NewChat:       OnNewChat(this, new RoutedEventArgs()); break;
             case Llm.AppCommand.GoHome:
             case Llm.AppCommand.Close:         HideToPill(); break;
             case Llm.AppCommand.StartRecording:
-                // Start the manual recording on the notch; the Library stays put (hiding it here would
-                // race the pill's state change - the recording bar appearing IS the confirmation).
+                // Start the manual recording on the notch; the Library stays put - hiding it here
+                // would race the pill's state change.
                 if (App.IsRecording) { CommandReply(q, "Already recording - the bar's up top."); break; }
                 App.StartRecordingFromCommand();
                 CommandReply(q, "Recording - the bar's up top. Click it when you're done.");
@@ -1045,8 +1082,8 @@ public partial class LibraryWindow : Window
         var q = AskBox.Text?.Trim();
         if (string.IsNullOrEmpty(q) || _asking) return;
         AskBox.Text = "";
-        // Tier 0: a little assistant command ("open templates", "new note", "go home") runs instantly;
-        // a question (even one mentioning those words) falls through to the Q&A (the router vetoes questions).
+        // Tier 0: an assistant command runs instantly; a question (even one mentioning command
+        // words) falls through to the Q&A - the router vetoes questions.
         if (Llm.CommandRouter.TryMatch(q) is Llm.AppCommand lc && lc != Llm.AppCommand.ShowTasks)
         { ExecuteLibraryCommand(lc, q); return; }
         EnsureConversation();
@@ -1158,7 +1195,10 @@ public partial class LibraryWindow : Window
         var popup = new System.Windows.Controls.Primitives.Popup
         {
             PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
-            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade, VerticalOffset = 6,
+            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade,
+            // The card is inset inside its own shadow gutter; both offsets give that back.
+            VerticalOffset = 6 - Toki.Theme.GlassCard.ShadowGutter,
+            HorizontalOffset = -Toki.Theme.GlassCard.ShadowGutter,
         };
         foreach (var c in convos.Take(20))
         {
@@ -1166,8 +1206,10 @@ public partial class LibraryWindow : Window
             title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
             var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 1, 0, 0) };
             var textCol = new StackPanel { Children = { title, when } };
-            var del = new Button { Content = "✕", Style = St("PillButton"), Background = Brushes.Transparent, FontSize = 10, Padding = new Thickness(7, 4, 7, 4), VerticalAlignment = VerticalAlignment.Center };
-            del.SetResourceReference(ForegroundProperty, "TextDim");
+            // The cross is the house PATH, not a "✕" character - a font glyph's weight and size come
+            // from whichever font the machine falls back to, and this one sat beside a 1.6px stroked
+            // cross everywhere else in the app.
+            var del = new Button { Content = Views.PillParts.Outline(Views.PillParts.Cross(), "TextDim"), Style = St("PillButton"), Background = Brushes.Transparent, Padding = new Thickness(7, 4, 7, 4), VerticalAlignment = VerticalAlignment.Center };
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1192,10 +1234,8 @@ public partial class LibraryWindow : Window
             stack.Children.Add(row);
         }
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 360, Content = stack };
-        var box = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(6), BorderThickness = new Thickness(1), MinWidth = 280, Child = scroll };
-        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
-        popup.Child = box;
+        // The card material - plate, top-bright rim, three-ring lift - like every other floating card.
+        popup.Child = new Toki.Theme.GlassCard(14) { CardPadding = new Thickness(6), CardMinWidth = 280, Content = scroll };
         popup.IsOpen = true;
     }
 
@@ -1392,7 +1432,7 @@ public partial class LibraryWindow : Window
         ChatJumpPill.BeginAnimation(OpacityProperty, anim);
     }
 
-    void OnChatJumpToLatest(object sender, MouseButtonEventArgs e)
+    void OnChatJumpToLatest(object sender, RoutedEventArgs e)
     {
         _chatStick = true;
         ChatScroll.ScrollToEnd();   // SmoothScroll is enabled on ChatScroll, so this glides
@@ -1541,10 +1581,6 @@ public partial class LibraryWindow : Window
         return c;
     }
 
-    // ── clickable mascot: a different fun reaction every poke (squish / hop / wobble / wink / spin /
-    //    big-eyes / nod), cycled inside TokiBlob so it feels alive rather than one canned bounce. ──
-    void OnMascotClick(object sender, MouseButtonEventArgs e) => SideToki.React();
-
     // ── "My notes" filter: show only the notes you wrote by hand ──
     void OnToggleMyNotes(object sender, RoutedEventArgs e) { _myNotesOnly = !_myNotesOnly; UpdateMyNotesToggle(); LoadList(); }
 
@@ -1559,8 +1595,7 @@ public partial class LibraryWindow : Window
     void BuildTemplatesPage()
     {
         TemplatesList.Children.Clear();
-        // Same PageTitle / PageSubtitle as Settings - the two pages used to pick their own sizes and
-        // weights, and the mismatch read as a different typeface.
+        // Same PageTitle / PageSubtitle as Settings so the two pages share one typographic ramp.
         TemplatesList.Children.Add(new TextBlock { Text = "Templates", Style = St("PageTitle") });
         TemplatesList.Children.Add(new TextBlock
         {
@@ -1570,7 +1605,6 @@ public partial class LibraryWindow : Window
 
         // Default shape for NEW meetings: Auto-detect, or force one for every meeting.
         var defRow = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
-        // The ramp's own overline style, not a hand-rolled 9px Bold.
         defRow.Children.Add(new TextBlock { Text = "DEFAULT SHAPE FOR NEW MEETINGS", Style = St("SectionHeader"), Margin = new Thickness(2, 0, 0, 5) });
         var defDrop = new Views.SearchableDropdown { Width = 240, HorizontalAlignment = HorizontalAlignment.Left };
         defDrop.SetItems(new[] { "Auto-detect" }.Concat(Llm.NoteTemplates.All.Select(t => t.Name)),
@@ -1611,9 +1645,8 @@ public partial class LibraryWindow : Window
     }
 
     // ── per-note template picker (manual override → Toki re-writes the note in the chosen shape) ──
-    // A real Button that opens the SAME themed popup as Copy (ShowMenu). The old SearchableDropdown was
-    // a Border+MouseLeftButtonUp, which the read-only RichTextBox (the note now lives in) SWALLOWS - so it
-    // was "stuck". Real Buttons' Click fires fine inside the document, matching Copy/Delete.
+    // A real Button opening the same themed popup as Copy (ShowMenu): the read-only RichTextBox the
+    // note lives in SWALLOWS a Border's mouse-up, but a real Button's Click fires fine inside it.
     FrameworkElement TemplatePicker(MeetingRecord m, TextBlock status)
     {
         var btn = new Button
@@ -1655,15 +1688,12 @@ public partial class LibraryWindow : Window
         if (_myNotesOnly) items = items.Where(m => m.Kind == MeetingKind.Manual).ToList();
         items = SortItems(items);
 
-        CountLabel.Text = _myNotesOnly ? $"{items.Count} · my notes" : $"{items.Count} · all on this PC";
+        CountLabel.Text = items.Count.ToString();
+        ScopeLabel.Text = _myNotesOnly ? "my notes" : "all on this PC";
 
-        // (A sticky note used to appear here as its own Keep/Discard card. The owner's verdict was that
-        // a row you can't open, sitting among meetings it isn't one of, is just confusing - so a sticky
-        // note now lives INSIDE its meeting's note, behind the "Sticky note" button. See RenderMeeting.)
-        //
-        // Handing the list over is the whole "build" now: MeetingList calls Card() only for the rows it
-        // actually realises. The list is kept in _items because the visuals are no longer a reliable
-        // census of what's in the Library - most rows have none.
+        // Handing the list over is the whole "build": MeetingList calls Card() only for the rows it
+        // actually realises. The list is kept in _items because under virtualization the visuals are
+        // not a reliable census of what's in the Library.
         _items = items;
         _listLoaded = true;
         _cardFills.Clear();   // rebuilt rows register fresh inner-card fills; stale ones must not linger
@@ -1676,8 +1706,8 @@ public partial class LibraryWindow : Window
         CardsEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // Sort the list per the chosen mode. OpenTasks filters to meetings that HAVE open tasks and ranks
-    // by how many. (There was a "Manual" mode holding the drag-reorder order; it went with drag.)
+    // Sort the list per the chosen mode. OpenTasks filters to meetings that HAVE open tasks and
+    // ranks by how many.
     IReadOnlyList<MeetingSummary> SortItems(IReadOnlyList<MeetingSummary> items) => _sort switch
     {
         LibrarySort.Oldest => items.OrderBy(m => m.StartedAt).ToList(),
@@ -1697,8 +1727,7 @@ public partial class LibraryWindow : Window
         ("Most open tasks", LibrarySort.OpenTasks),
     };
 
-    // Toki's own themed popup (never the Win32 ContextMenu chrome) - same surface as the Copy menu,
-    // with a check on the active mode.
+    // Toki's own themed popup (never the Win32 ContextMenu chrome), with a check on the active mode.
     void OnSortMenu(object sender, RoutedEventArgs e)
     {
         var current = SortModes.First(m => m.Mode == _sort).Label;
@@ -1752,12 +1781,9 @@ public partial class LibraryWindow : Window
         if (App.Store.Get(id) is { } m) { RenderMeeting(m); UpdateLayout(); }
     }
 
-    /// <summary>Repaint just the selection, by walking the cards already on screen (each carries its
-    /// meeting id in Tag). O(visible rows) brush assignments instead of a full rebuild.
-    ///
-    /// Only REALISED rows are touched, because off-screen meetings have no visual to paint. That is why
-    /// the selected id lives in <c>_selected</c> and <see cref="Card"/> reads it when a row is built:
-    /// scrolling the selected meeting back into view rebuilds it already highlighted.</summary>
+    /// <summary>Repaint just the selection by walking the realised cards (id in Tag) - O(visible
+    /// rows) brush assignments instead of a full rebuild. Off-screen rows have no visual, which is
+    /// why <see cref="Card"/> reads <c>_selected</c> when a row is built.</summary>
     void HighlightSelectedCard()
     {
         foreach (var row in Cards.Realised())
@@ -1766,47 +1792,49 @@ public partial class LibraryWindow : Window
             // The fill lives on the INNER card (the redesign's date column sits OUTSIDE it and must
             // never highlight); the outer host is only the hit target + id carrier.
             if (_cardFills.TryGetValue(id, out var fill))
-                fill.Background = id == _selected ? (Brush)FindResource("Chip") : Brushes.Transparent;
+                fill.SetResourceReference(Border.BackgroundProperty, id == _selected ? "Chip" : "RowFill");
         }
     }
 
-    /// <summary>
-    /// A list row in the redesign's shape (figma 349:6743): the DATE lives OUTSIDE the card as bare
-    /// type (day 16 Black over month 8 Bold at 50%), so the list's left edge reads as a calendar;
-    /// the card carries a per-meeting accent bar, the title, a meta line, a two-line snippet, and the
-    /// "n open" / "n people" chips. Only the selected card has a fill; hover shows a soft one.
-    /// </summary>
+    /// <summary>A list row: the DATE lives OUTSIDE the card as bare type (the list's left edge reads
+    /// as a calendar); the card carries an accent bar, title, meta line, snippet, and chips.</summary>
     Border Card(MeetingSummary m)
     {
         var selected = _selected == m.Id;
 
         // The bare date column, outside the card.
         var date = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 0, 0), Width = 30 };
-        date.Children.Add(new TextBlock
+        // SetResourceReference, not a captured brush: this label does not go through a Style, so a
+        // captured brush would not recolour on a theme swap.
+        var dayNum = new TextBlock
         {
             Text = m.StartedAt.Day.ToString(), FontFamily = (FontFamily)FindResource("UiFont"),
-            FontSize = 16, FontWeight = FontWeights.Black, Foreground = (Brush)FindResource("Text"),
+            FontSize = 20, FontWeight = FontWeights.Black,
             HorizontalAlignment = HorizontalAlignment.Center,
-        });
+        };
+        dayNum.SetResourceReference(TextBlock.ForegroundProperty, "TextHi");
+        date.Children.Add(dayNum);
         date.Children.Add(new TextBlock
         {
-            Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 8,
-            FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center,
+            Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 11,
+            FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 0),
         });
 
-        // The per-meeting accent bar inside the card (stable colour per id).
+        // The accent bar inside the card - blue for a recorded meeting, purple for a manual note.
         var accent = new Border
         {
             Width = 3, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(0, 2, 10, 2),
-            Background = (Brush)FindResource(CardAccentKey(m.Id)), VerticalAlignment = VerticalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
         };
+        // Resource reference, not a captured brush - the bar has to repaint on a theme switch.
+        accent.SetResourceReference(Border.BackgroundProperty, CardAccentKey(m.Kind));
 
         var content = new StackPanel();
-        content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
-        content.Children.Add(new TextBlock { Text = CardMeta(m), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
+        content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
+        content.Children.Add(new TextBlock { Text = CardMeta(m), Style = St("Dim"), FontSize = 12, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 4, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 10.5, TextWrapping = TextWrapping.Wrap, MaxHeight = 30, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0) });
+            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxHeight = 34, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 8, 0, 0) });
 
         var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0) };
         if (m.OpenActions > 0) chips.Children.Add(Chip($"{m.OpenActions} open", "Amber", "AmberDark"));
@@ -1820,14 +1848,16 @@ public partial class LibraryWindow : Window
         Grid.SetColumn(content, 1);
         inner.Children.Add(content);
 
+        // EVERY row gets a fill, not just the selected one - a list of cards reads as a list.
+        // Selection is then a BRIGHTER fill.
         var card = new Border
         {
-            Background = selected ? (Brush)FindResource("Chip") : Brushes.Transparent,
-            CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 11, 12, 12),
+            CornerRadius = new CornerRadius(16), Padding = new Thickness(12),
             Cursor = Cursors.Hand, Child = inner,
         };
+        card.SetResourceReference(Border.BackgroundProperty, selected ? "Chip" : "RowFill");
 
-        var row = new Grid { Margin = new Thickness(0, 0, 2, 3), Tag = m.Id };
+        var row = new Grid { Margin = new Thickness(0, 0, 2, 12), Tag = m.Id };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1835,11 +1865,11 @@ public partial class LibraryWindow : Window
         Grid.SetColumn(card, 2);
         row.Children.Add(card);
 
-        // The OUTER border keeps the id-Tag contract every consumer relies on (selection highlight,
-        // perf test, hover) - and the whole row is the click target, date column included.
+        // The OUTER border keeps the id-Tag contract every consumer relies on - and the whole row
+        // is the click target, date column included.
         var host = new Border { Background = Brushes.Transparent, Child = row, Tag = m.Id, Cursor = Cursors.Hand };
-        host.MouseEnter += (_, _) => { if (_selected != m.Id) card.Background = (Brush)FindResource("SurfaceHi"); };
-        host.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
+        host.MouseEnter += (_, _) => { if (_selected != m.Id) card.SetResourceReference(Border.BackgroundProperty, "RowFillHover"); };
+        host.MouseLeave += (_, _) => { if (_selected != m.Id) card.SetResourceReference(Border.BackgroundProperty, "RowFill"); };
         host.PreviewMouseLeftButtonUp += (_, _) => Select(m.Id);
         _cardFills[m.Id] = card;   // the highlight paints the INNER card, not the outer host
         return host;
@@ -1849,14 +1879,9 @@ public partial class LibraryWindow : Window
     // background must stay transparent or the date column would highlight too).
     readonly Dictionary<long, Border> _cardFills = new();
 
-    static readonly string[] CardAccents = { "AccentAmber", "AccentTeal", "Blue", "Green", "Pink", "Purple" };
-    static string CardAccentKey(long id) => CardAccents[(int)(((id % 6) + 6) % 6)];
-
-    // (Drag-to-reorder lived here. Removed 2026-08-12 - owner: "it does not add much productivity as I
-    //  thought it would". It was also the one feature virtualization silently breaks, because it walked
-    //  Cards.Children BY INDEX, and under virtualization those are positions in the realised window
-    //  rather than in the list. The stored `sort_order` column and MeetingStore.Reorder are left alone;
-    //  nothing writes them now, and the "Manual (drag order)" sort mode went with the feature.)
+    /// <summary>The colour of a card's left bar says WHAT THE NOTE IS: blue = a recorded meeting,
+    /// purple = a manual note. One meaning, one colour - never a decorative rotation.</summary>
+    internal static string CardAccentKey(MeetingKind kind) => kind == MeetingKind.Manual ? "Purple" : "Blue";
 
     Border Chip(string text, string fgKey, string bgKey) => new()
     {
@@ -1888,10 +1913,9 @@ public partial class LibraryWindow : Window
     bool _viewedByUser;             // true when the USER chose it (click / focus) - not an auto-select
     static bool _warming;           // true during the off-screen startup pre-warm (nothing is "on screen")
 
-    /// <summary>The meeting note ACTUALLY on the user's screen right now: the Library window is visible
-    /// (not the off-screen warm-up), the rendered note is a real meeting (not a manual note), and the
-    /// user chose it (a click or an explicit open - never the list's silent auto-select, which is what
-    /// made "this meeting" ground on a note nobody had looked at). Derived, so it can't go stale.</summary>
+    /// <summary>The meeting note ACTUALLY on the user's screen: the window is visible (not the
+    /// off-screen warm-up), the note is a real meeting, and the user chose it - never the list's
+    /// silent auto-select. Derived, so it can't go stale.</summary>
     internal static MeetingRecord? VisibleMeeting =>
         _open is { } w && w.IsVisible && !_warming && w._viewedByUser
         && w._viewedRecord is { Kind: MeetingKind.Meeting } m ? m : null;
@@ -1903,10 +1927,8 @@ public partial class LibraryWindow : Window
         // demote a note the user genuinely opened.
         _viewedByUser = byUser || (_viewedByUser && _viewedRecord?.Id == id);
         _selected = id;
-        // Move the highlight, do NOT rebuild the list. This used to call LoadList(), so every click on a
-        // note re-queried the store and re-created ~500 visual elements for 52 meetings in order to
-        // change one background brush. That single line was most of the "slow and clunky" the owner
-        // reported (2026-08-11).
+        // Move the highlight, do NOT rebuild the list - a full LoadList() here re-queries the store
+        // and re-creates the whole visual tree just to change one background brush.
         HighlightSelectedCard();
         var m = App.Store.Get(id);
         if (m is null) { _viewedRecord = null; return; }
@@ -1929,26 +1951,26 @@ public partial class LibraryWindow : Window
 
     void RenderMeeting(MeetingRecord m)
     {
-        // (Screen-aware Ask grounding is DERIVED from _viewedRecord/_viewedByUser - see VisibleMeeting.)
-        // The action toolbar (Template left · Copy/Delete right) rides at the TOP of the scroll document,
-        // so the whole note - toolbar, title, body - is one scroll from the very top of the pane.
+        // The action toolbar rides at the TOP of the scroll document, so the whole note - toolbar,
+        // title, body - is one scroll from the very top of the pane.
         var toolbar = new StackPanel();
         var row = new DockPanel { LastChildFill = false };
-        // The sticky note lives inside this note (owner, 2026-08-06). Built BEFORE the document, which
-        // places its button under the title and the note itself before the transcript.
+        // The sticky note lives inside this note. Built BEFORE the document, which places its
+        // button under the title and the note itself before the transcript.
         _sticky = new Views.MeetingStickyView(m.Id, App.Store.StickyForMeeting(m.Id));
 
-        // The redesign's action group (figma 348:2933, top-right): ONE rounded container holding icon
-        // buttons - copy (opens the copy menu, flashes a green check after copying) and a RED trash.
-        // Text-label buttons are gone from this pane; the icons carry tooltips.
+        // The action group (top-right): ONE rounded container holding icon buttons - copy (opens
+        // the copy menu, flashes a green check) and a RED trash. Icons carry tooltips.
         var group = new StackPanel { Orientation = Orientation.Horizontal };
         var groupShell = new Border
         {
-            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), Padding = new Thickness(3),
+            // r13: the icon buttons inside round at 10 on a 3px pad, so 13 keeps the shell concentric.
+            CornerRadius = new CornerRadius(13), BorderThickness = new Thickness(1), Padding = new Thickness(3),
             Child = group, VerticalAlignment = VerticalAlignment.Top,
         };
-        groupShell.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        groupShell.SetResourceReference(Border.BorderBrushProperty, "Hairline");
+        // Glass on glass: a step of light above the note pane rather than another opaque tint.
+        groupShell.SetResourceReference(Border.BackgroundProperty, "GlassFill");
+        groupShell.SetResourceReference(Border.BorderBrushProperty, "GlassRim");
 
         Button ToolIcon(string glyph, string tip, string? fgKey = null)
         {
@@ -1957,8 +1979,8 @@ public partial class LibraryWindow : Window
                 Text = glyph, FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             };
-            // An explicit Foreground on the GLYPH (not the button) survives the style's hover
-            // recolour - the trash must stay red under the pointer.
+            // Foreground on the GLYPH (not the button) survives the style's hover recolour -
+            // the trash must stay red under the pointer.
             if (fgKey is not null) tb.SetResourceReference(TextBlock.ForegroundProperty, fgKey);
             var b = new Button { Content = tb, Style = (Style)FindResource("IconButton"), Width = 32, Height = 30, ToolTip = tip };
             group.Children.Add(b);
@@ -2010,8 +2032,8 @@ public partial class LibraryWindow : Window
             resolving: App.IsResolvingSpeakers(m.Id),
             renameSpeaker: (from, to) =>
             {
-                // One rename, every line that voice said. Re-read from the store rather than patching
-                // the in-memory copy, so what is on screen is what was actually written.
+                // One rename, every line that voice said. Re-read from the store so what is on
+                // screen is what was actually written.
                 App.Store.RenameSpeaker(m.Id, from, to);
                 if (App.Store.Get(m.Id) is { } fresh) { MarkdownMirror.Write(fresh); RenderMeeting(fresh); }
             });
@@ -2021,38 +2043,19 @@ public partial class LibraryWindow : Window
             Dispatcher.BeginInvoke(new Action(() => rtb.ScrollToHome()), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    /// <summary>
-    /// A hand-written note, laid out as a DOCUMENT rather than a form.
-    ///
-    /// The owner's note on the old version was that it looked machine-made, and the reasons were
-    /// structural rather than decorative:
-    ///
-    ///   • It ran the full width of the pane. A line of text 900px long is genuinely hard to read - the
-    ///     eye loses its place returning to the left edge. Every word processor solves this the same
-    ///     way, with a fixed MEASURE and margins either side, and that is most of what makes a page
-    ///     look like a page. The column is capped and centred.
-    ///   • A hard rule sat under the title, which is what a FORM does between fields. A document
-    ///     separates its title from its body with space, and puts the quiet facts (when, how long)
-    ///     under the title instead.
-    ///   • Delete sat immediately after the last line of writing, so the document appeared to end in a
-    ///     button. It now lives in a footer, past a generous gap, with the save state beside it.
-    ///
-    /// Everything here is spacing, measure and hierarchy - no new colours, no boxes. The full design
-    /// and haptics revamp is still coming, and this is the layer underneath it that has to be right
-    /// whatever it looks like afterwards.
-    /// </summary>
+    /// <summary>A hand-written note, laid out as a DOCUMENT rather than a form: a capped, centred
+    /// reading measure, space (not a rule) between title and body, and Delete in a footer well
+    /// clear of the writing.</summary>
     void RenderManual(MeetingRecord m)
     {
-        // (A manual note never grounds Ask - VisibleMeeting filters on Kind == Meeting.)
         // Stretch + MaxWidth is WPF's way of saying "centred, up to this measure".
         var page = new StackPanel
         {
             MaxWidth = MeasureWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
-        // The title, at the same 22/SemiBold a meeting note uses, so an open note looks the same
-        // whoever wrote it. A placeholder sits behind it rather than seeding the box with the words
-        // "Untitled note" - text you have to delete before you can type is a small hostile act.
+        // Same title type as a meeting note. A placeholder sits behind the box rather than seeding
+        // it with "Untitled note" - text you have to delete before typing is a small hostile act.
         var titleBox = new TextBox
         {
             Text = m.Title == "Untitled note" ? "" : m.Title,
@@ -2073,7 +2076,7 @@ public partial class LibraryWindow : Window
         titleLayer.Children.Add(titleBox);
         page.Children.Add(titleLayer);
 
-        // The quiet facts, where a document keeps them: under the title, small, dim, never bold.
+        // The quiet facts: under the title, small, dim, never bold.
         var meta = new TextBlock
         {
             Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
@@ -2081,15 +2084,13 @@ public partial class LibraryWindow : Window
         };
         page.Children.Add(meta);
 
-        // The real editor (N1): sizes, tickable to-dos, lists, spacing, template insertion. The gap
-        // above it is the space that replaced the old rule - a document breathes between its title and
-        // its first line, it does not draw a border there.
+        // The real editor: sizes, tickable to-dos, lists, spacing, template insertion. A document
+        // breathes between its title and its first line - no rule there.
         var bodyBox = new Views.NoteEditor { MinHeight = 420, Margin = new Thickness(0, 26, 0, 0) };
         bodyBox.Markdown = m.Body ?? "";
         page.Children.Add(bodyBox);
 
-        // The footer, well clear of the writing. Save state on the left where it is glanceable, the
-        // destructive action on the right where nobody reaches by accident.
+        // The footer: save state on the left, the destructive action on the right.
         var status = new TextBlock
         {
             Style = St("Dim"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
@@ -2132,13 +2133,8 @@ public partial class LibraryWindow : Window
         bodyBox.Changed += (_, _) => Schedule();   // covers typing AND ticking a box
     }
 
-    /// <summary>
-    /// The reading measure for a written note, in device-independent pixels.
-    ///
-    /// Typography's rule of thumb is 45-75 characters a line; at Toki's body size that lands near 700.
-    /// Wider than this and the eye starts losing its place on the carriage return, which is the single
-    /// biggest difference between text that feels composed and text that feels dumped on a page.
-    /// </summary>
+    /// <summary>The reading measure for a written note, in DIPs (45-75 characters a line lands
+    /// near 700 at Toki's body size).</summary>
     const double MeasureWidth = 720;
 
     // Show a status word, then let it fade out - "saved" should reassure, not linger as chrome.
@@ -2168,14 +2164,14 @@ public partial class LibraryWindow : Window
         Reload(id);
     }
 
-    // Typing "pricing" used to run SEVEN full-text queries and seven complete list rebuilds, one per
-    // letter, each one throwing away the visual tree it had just built. Now the keystrokes settle first.
+    // Debounce search so each keystroke does not run a full-text query + complete list rebuild.
     // 180ms is under the ~200ms that reads as instant, and above a fast typist's inter-key gap.
     readonly System.Windows.Threading.DispatcherTimer _searchDebounce =
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(180) };
 
     void OnSearch(object sender, TextChangedEventArgs e)
     {
+        SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         _searchDebounce.Stop();
         _searchDebounce.Start();
     }
@@ -2185,17 +2181,9 @@ public partial class LibraryWindow : Window
         try { Clipboard.SetText(NoteRenderer.TranscriptText(m)); } catch (Exception ex) { App.Log($"copy failed: {ex.Message}"); }
     }
 
-    // Copy button → a clean THEMED dropdown (never the Win32 ContextMenu): Summary+to-dos, Transcript,
-    // or reveal the note's markdown file on disk.
-    /// <summary>
-    /// Copy, as ONE split button: a single rounded pill with a hairline seam between the label and the
-    /// caret.
-    ///
-    /// It used to be two separate pills a pixel apart, which read as two buttons that happened to be
-    /// touching (owner, 2026-08-06: "ugly"). One container with an internal divider is the standard
-    /// split-button shape and says what it is - one action, with more options behind the arrow. Each
-    /// half still lights independently on hover so it's obvious they do different things.
-    /// </summary>
+    /// <summary>Copy, as ONE split button: a single rounded pill with a hairline seam between the
+    /// label and the caret. Each half lights independently on hover - one action, more options
+    /// behind the arrow.</summary>
     FrameworkElement CopyButton(MeetingRecord m)
     {
         var mainLabel = new TextBlock
@@ -2285,21 +2273,23 @@ public partial class LibraryWindow : Window
         t.Start();
     }
 
-    // A rounded, outlined, THEMED popup of hover-able rows - our own menu, matching the app.
-    // With `selected`, rows carry a leading check column and the active row shows a pink tick
-    // (the sort/filter menu) - still dividers-not-boxes, never the Win32 menu chrome.
+    // A rounded, THEMED popup of hover-able rows - never the Win32 menu chrome. With `selected`,
+    // rows carry a leading check column and the active row shows a pink tick.
     void ShowMenu(FrameworkElement anchor, List<(string Label, Action Act)> items, string? selected = null)
     {
         var stack = new StackPanel();
         var popup = new System.Windows.Controls.Primitives.Popup
         {
             PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
-            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade, VerticalOffset = 4,
+            StaysOpen = false, AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade,
+            // The card is inset inside its own shadow gutter; both offsets give that back.
+            VerticalOffset = 4 - Toki.Theme.GlassCard.ShadowGutter,
+            HorizontalOffset = -Toki.Theme.GlassCard.ShadowGutter,
         };
         foreach (var (label, act) in items)
         {
-            // A real Button, not a Border+MouseLeftButtonUp: Click fires reliably inside a StaysOpen=false
-            // popup (the mouse-up-on-Border approach got swallowed when the popup closed → dead menu items).
+            // A real Button, not a Border+MouseLeftButtonUp: Click fires reliably inside a
+            // StaysOpen=false popup; a Border's mouse-up gets swallowed when the popup closes.
             var t = new TextBlock { Text = label, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
             t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
             FrameworkElement content = t;
@@ -2319,7 +2309,8 @@ public partial class LibraryWindow : Window
                 g.Children.Add(t);
                 content = g;
             }
-            var row = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(11, 8, 22, 8), Background = Brushes.Transparent, Child = content };
+            // Concentric: the card is r14 with a 6px pad, so a row seated in it is r8.
+            var row = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(11, 8, 22, 8), Background = Brushes.Transparent, Child = content };
             var btn = new Button { Content = row, Cursor = Cursors.Hand, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Focusable = false };
             btn.Template = TransparentButtonTemplate();
             btn.MouseEnter += (_, _) => row.SetResourceReference(Border.BackgroundProperty, "Chip");
@@ -2328,10 +2319,8 @@ public partial class LibraryWindow : Window
             btn.Click += (_, _) => { popup.IsOpen = false; captured(); };
             stack.Children.Add(btn);
         }
-        var box = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(5), BorderThickness = new Thickness(1), MinWidth = 176, Child = stack };
-        box.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        box.SetResourceReference(Border.BorderBrushProperty, "Hairline");
-        popup.Child = box;
+        // The card material - plate, top-bright rim, three-ring lift - like every other floating card.
+        popup.Child = new Toki.Theme.GlassCard(14) { CardPadding = new Thickness(6), CardMinWidth = 176, Content = stack };
         popup.IsOpen = true;
     }
 
@@ -2357,9 +2346,8 @@ public partial class LibraryWindow : Window
         return false;
     }
 
-    // Toki already mirrors every note to a Markdown file - surface it (file export the easy way).
-    // Reveal only inside the Notes dir (the path is app-generated, but the choke point makes that a
-    // guarantee, not an assumption).
+    // Every note is mirrored to a Markdown file - surface it. Reveal only inside the Notes dir:
+    // the choke point makes the app-generated path a guarantee, not an assumption.
     void RevealNoteFile(MeetingRecord m)
     {
         try
@@ -2376,8 +2364,7 @@ public partial class LibraryWindow : Window
         if (!Views.ConfirmDialog.Show(this, "Delete this?",
                 $"“{m?.Title}” and its audio will be removed for good. This can't be undone.")) return;
         // The dialog promises the AUDIO goes too - DiscardMeeting is the one true delete
-        // (DB row + Markdown mirror + recording folder). A bare Store.Delete left the WAVs
-        // and the full-transcript mirror on disk after the user was told they were gone.
+        // (DB row + Markdown mirror + recording folder). A bare Store.Delete leaves both on disk.
         if (m is not null) App.DiscardMeeting(m);
         else App.Store.Delete(id);
         if (_selected == id) { _selected = null; _viewedRecord = null; _viewedByUser = false; }
@@ -2388,9 +2375,8 @@ public partial class LibraryWindow : Window
 
     Style St(string key) => (Style)FindResource(key);
 
-    // The "Back to Toki" content, composed so BOTH the chevron and the label are vertically centered.
-    // The chevron is the icon-font ChevronLeft glyph (designed centered on the em), not the "‹" text
-    // character (which Segoe sets low). Foreground is inherited from the button.
+    // "Back to Toki", composed so both chevron and label are vertically centered. The chevron is
+    // the icon-font glyph (centered on the em), not the "‹" text character (Segoe sets it low).
     static UIElement BackButtonInner()
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
@@ -2456,6 +2442,10 @@ public partial class LibraryWindow : Window
     [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECTL rcMonitor, rcWork; public int dwFlags; }
 
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd, int index, int newLong);
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
     [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 }

@@ -8,8 +8,10 @@
   --tk-surface: #0E0E10;                   /* main panel background */
   --tk-surface-hi: #1C1C1E;                /* raised surface / input field */
   --tk-chip: #2C2C2E;                      /* chips, secondary buttons */
-  --tk-glass: rgba(33, 30, 30, 0.50);      /* the hovering card (over wallpaper) */
-  --tk-glass-opaque: #2B2828;              /* no-acrylic stand-in for the same card */
+  --tk-glass: rgba(33, 30, 30, 0.50);      /* SOURCE value (Figma) - needs the blur we cannot run */
+  --tk-glass-opaque: #2B2828;              /* what the app actually paints: the baked result */
+  /* The card carries NO fill beyond the plate: a tiled grain read as texture, and the broad
+     low-alpha gradient that replaced it banded. Depth comes from the rim, sheen and shadows. */
   --tk-glass-capsule: rgba(33, 30, 30, 0.40); /* inner rows / capsules on glass */
   --tk-glass-border: rgba(255, 255, 255, 0.10); /* the 1px light rim */
   --tk-hairline: rgba(255, 255, 255, 0.094);
@@ -32,7 +34,7 @@
   --tk-pink: #F09CC7;                      /* open questions / selection */
   --tk-purple: #C08AF0;
   --tk-coral: #FF6F61;                     /* record CTA */
-  --tk-stop-red: #FF2D55;                  /* Stop & summarize */
+  --tk-stop-red: #FF453A;                  /* Stop & summarize (Apple system red; light #FF3B30) */
   --tk-danger: #E5484D;                    /* destructive text */
   --tk-join-pill: rgba(255, 255, 255, 0.90);
   --tk-join-pill-text: rgba(0, 0, 0, 0.90);

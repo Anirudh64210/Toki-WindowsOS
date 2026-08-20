@@ -15,11 +15,8 @@ public static class CalendarClient
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
     const string Base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-    /// <summary>The ONE send/read/error-map path for every Calendar call. The four public methods
-    /// used to carry their own copies, which had already diverged (Delete lost the error body,
-    /// Insert lost sendUpdates) - and the HttpClient 30s timeout leaked out as a raw
-    /// TaskCanceledException past callers that (per the documented contract) catch only
-    /// GoogleAuthException. All of that is mapped here, once.</summary>
+    /// <summary>The ONE send/read/error-map path for every Calendar call. Maps HttpClient's own
+    /// timeout and network errors to GoogleAuthException so callers' documented catch contract holds.</summary>
     static async Task<(System.Net.HttpStatusCode Status, string Body)> SendAsync(
         HttpMethod method, string url, string accessToken, object? jsonBody, CancellationToken ct)
     {
@@ -37,15 +34,14 @@ public static class CalendarClient
         catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google Calendar (network error).", needsReconnect: false); }
     }
 
-    /// <summary>Upcoming events on the primary calendar for the next <paramref name="days"/> days,
-    /// soonest first, recurring events expanded into instances. Cancelled instances are dropped.
-    /// Follows nextPageToken to completion: a single daily standup expands to ~30 instances over
-    /// the 31-day horizon, and rendering only the first page made weeks 2–4 silently look empty.</summary>
+    /// <summary>Upcoming events on the primary calendar, soonest first, recurring events expanded,
+    /// cancelled instances dropped. Follows nextPageToken to completion: a daily recurring event
+    /// fills a page, and stopping at page one makes later weeks silently look empty.</summary>
     public static async Task<IReadOnlyList<CalEvent>> ListUpcomingAsync(string accessToken, int days, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
-        // URL-encode the timestamps: RFC3339 ends in "+00:00", and a raw '+' in a query string means a
-        // space - Google then sees a malformed date and returns HTTP 400. EscapeDataString → %2B.
+        // URL-encode the timestamps: RFC3339 ends in "+00:00", and a raw '+' in a query string
+        // means a space, so Google sees a malformed date and returns HTTP 400.
         var timeMin = Uri.EscapeDataString(Rfc3339(now));
         var timeMax = Uri.EscapeDataString(Rfc3339(now.AddDays(Math.Max(1, days))));
         var baseUrl = $"{Base}?timeMin={timeMin}&timeMax={timeMax}" +
@@ -80,9 +76,8 @@ public static class CalendarClient
         if (ev.AttendeeEmails is { Count: > 0 })
         {
             body["attendees"] = ev.AttendeeEmails.Select(e => new { email = e }).ToArray();
-            // Same as Patch: guests supplied at CREATE time must get their invitation email -
-            // Google's insert default is sendUpdates=none, so without this the event just
-            // silently appeared on their calendars.
+            // Google's insert default is sendUpdates=none: without this, invited guests get no
+            // invitation email and the event just silently appears on their calendars.
             query.Add("sendUpdates=all");
         }
         if (ev.AddMeet)

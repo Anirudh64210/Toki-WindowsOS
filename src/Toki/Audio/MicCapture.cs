@@ -6,17 +6,9 @@ using NAudio.Wave;
 namespace Toki.Audio;
 
 /// <summary>
-/// Captures the default microphone (WASAPI shared mode) to a WAV file - the
-/// "you" stream. Reports the peak level so a self-test can prove real audio
-/// (not silence) was recorded.
-///
-/// Mid-recording resilience: if the default communications mic CHANGES (headset
-/// plugged in / unplugged, Bluetooth drop) the capture rebuilds itself on the new
-/// default device and keeps writing to the SAME WAV - buffers are converted to the
-/// original writer format when the new device's format differs. Without this, a
-/// device switch silently killed the "you" stream for the rest of the meeting.
-/// The WAV header is also re-finalized every few seconds so a crash or power loss
-/// mid-meeting leaves a playable file instead of a zero-length RIFF header.
+/// Captures the default microphone (WASAPI shared mode) to a WAV - the "you" stream.
+/// If the default communications mic changes mid-recording, capture rebuilds on the new
+/// device and keeps writing the SAME WAV (format-converted when the device format differs).
 /// </summary>
 public sealed class MicCapture : IDisposable
 {
@@ -148,15 +140,27 @@ public sealed class MicCapture : IDisposable
         }
     }
 
+    /// <summary>Same layout, same bytes: Extensible-wrapped float and plain IeeeFloat of
+    /// identical layout are equal, so no converter is manufactured for a straight copy.</summary>
     static bool FormatsEqual(WaveFormat a, WaveFormat b) =>
-        a.Encoding == b.Encoding && a.SampleRate == b.SampleRate &&
-        a.Channels == b.Channels && a.BitsPerSample == b.BitsPerSample;
+        IsFloat(a) == IsFloat(b) && a.SampleRate == b.SampleRate &&
+        a.Channels == b.Channels && a.BitsPerSample == b.BitsPerSample &&
+        (IsFloat(a) || a.Encoding == b.Encoding || IsPcmLike(a) && IsPcmLike(b));
 
-    /// <summary>Peak absolute sample amplitude in 0..1, for IEEE-float or 16-bit PCM buffers.</summary>
+    internal static bool IsFloat(WaveFormat f) =>
+        f.Encoding == WaveFormatEncoding.IeeeFloat
+        || f is WaveFormatExtensible e && e.SubFormat == BufferConverter.IeeeFloatSubFormatId;
+
+    internal static bool IsPcmLike(WaveFormat f) =>
+        f.Encoding == WaveFormatEncoding.Pcm
+        || f is WaveFormatExtensible e && e.SubFormat == BufferConverter.PcmSubFormatId;
+
+    /// <summary>Peak absolute sample amplitude in 0..1, for IEEE-float or 16-bit PCM buffers
+    /// (Extensible wrappers included - a peak of 0 on a live mic makes the silence check lie).</summary>
     internal static float PeakOf(byte[] buffer, int bytes, WaveFormat format)
     {
         float peak = 0;
-        if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
+        if (IsFloat(format) && format.BitsPerSample == 32)
         {
             for (var i = 0; i + 4 <= bytes; i += 4)
             {
@@ -164,7 +168,7 @@ public sealed class MicCapture : IDisposable
                 if (v > peak) peak = v;
             }
         }
-        else if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 16)
+        else if (IsPcmLike(format) && format.BitsPerSample == 16)
         {
             for (var i = 0; i + 2 <= bytes; i += 2)
             {

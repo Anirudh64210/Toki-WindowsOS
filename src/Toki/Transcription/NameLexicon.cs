@@ -3,22 +3,12 @@ using Toki.Storage;
 namespace Toki.Transcription;
 
 /// <summary>
-/// Who Toki knows about, and how sure it is.
-///
-/// Two tiers, and the difference between them is who did the typing.
-///
-///   TRUSTED  the user's own name from Settings, a calendar attendee's display name, or a term the user
-///            pinned. A human typed these, so they are simply correct, and a correction TOWARDS one of
-///            them is allowed to reach further (see <see cref="NameCorrector"/>).
-///
-///   CORPUS   how often each spelling appears across the whole library. Nobody vouched for these, so
-///            they only get a vote - but the vote is decisive where a single meeting cannot be. The
-///            case that drove this: one recording contained "Craig" (from the mic) and "Greg" (from the
-///            loopback), once each, which is unresolvable; across the library Craig appears many times
-///            and Greg once, which is not.
-///
-/// Notes and titles are counted alongside transcripts on purpose: a name the ASR mangled in one
-/// recording is often spelled correctly in another meeting's summary.
+/// Who Toki knows about, and how sure it is. Two tiers, split by who did the typing: TRUSTED
+/// (the user's own name, calendar attendees, pinned terms) - a human typed these, so a correction
+/// TOWARDS one may reach further (see <see cref="NameCorrector"/>); CORPUS - how often each
+/// spelling appears across the whole library, a vote decisive where a single meeting cannot be.
+/// Notes and titles are counted alongside transcripts: a name the ASR mangled in one recording
+/// is often spelled correctly in another meeting's summary.
 /// </summary>
 public static class NameLexicon
 {

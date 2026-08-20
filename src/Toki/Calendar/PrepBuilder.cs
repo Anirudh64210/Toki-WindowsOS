@@ -17,9 +17,8 @@ public sealed record PrepContent(
 }
 
 /// <summary>
-/// Builds a prep card's content DETERMINISTICALLY - pure store reads + string parsing, no LLM, so it's
-/// instant and costs nothing on a low-memory machine. Matches a calendar event to a prior meeting by
-/// TITLE/topic similarity (attendee emails aren't stored in notes), and is honest when there's no
+/// Builds a prep card's content deterministically (store reads + string parsing, no LLM). Matches a
+/// calendar event to a prior meeting by title/topic similarity, and is honest when there is no
 /// confident match. Provider-neutral (takes a <see cref="CalEvent"/>).
 /// </summary>
 public static class PrepBuilder
@@ -100,10 +99,8 @@ public static class PrepBuilder
     }
 
     /// <summary>
-    /// The prep card AS AN EDITABLE NOTE. Pressing Edit on the card doesn't open a blank sheet beside
-    /// it - it hands you the card's own content as text you can carry on writing in (owner, 2026-08-05),
-    /// so the still-open items arrive as real tick boxes and the agenda as real bullets.
-    /// Deterministic, same as everything else on this card: no model, no network.
+    /// The prep card as an editable note: Edit hands you the card's own content as text to carry on
+    /// writing in - still-open items as real tick boxes, the agenda as real bullets. Deterministic.
     /// </summary>
     public static string ToMarkdown(PrepContent prep)
     {

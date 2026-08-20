@@ -6,16 +6,11 @@ using Toki.Transcription;
 namespace Toki.Llm;
 
 /// <summary>
-/// Meaning-based text embeddings via a small on-device model (bge-small-en-v1.5, GGUF) run through
-/// LLamaSharp. NOTE: production retrieval does NOT use this yet - in-process loading conflicts with
-/// the sherpa-onnx native backend (see ARCHITECTURE "Why on-device embeddings are deferred"; the fix
-/// is an out-of-process CPU embedder). It ships for the --embedtest self-test and as the seam for
-/// that future work. Runs on CPU (tiny model), keeping the GPU free for Qwen.
-///
-/// Optional by design: if the model isn't downloaded, <see cref="Ready"/> is false and retrieval falls
-/// back to keyword/FTS search - the app never depends on it being present.
-///
-/// One shared instance; generations are serialized (a llama context isn't concurrent).
+/// Text embeddings via bge-small-en-v1.5 (GGUF) through LLamaSharp, CPU only. Production retrieval
+/// does NOT use this yet: in-process loading conflicts with the sherpa-onnx native backend (see
+/// ARCHITECTURE); it ships for --embedtest and as the seam for that work. Optional by design:
+/// if the model isn't installed, <see cref="Ready"/> is false and retrieval falls back to
+/// keyword/FTS. One shared instance; generations serialized (a llama context isn't concurrent).
 /// </summary>
 public sealed class EmbeddingService : IDisposable
 {
@@ -67,9 +62,8 @@ public sealed class EmbeddingService : IDisposable
             _embedder = null;
             return false;
         }
-        }   // _loadGate - the whole check-and-load is atomic so two concurrent Ready/EmbedAsync
-            // callers can never double-load the native weights (leaking one copy) or see a
-            // spurious permanent "not ready" from a half-set _tried.
+        }   // _loadGate: check-and-load is atomic so concurrent callers can't double-load the
+            // native weights or see a spurious permanent "not ready" from a half-set _tried.
     }
 
     /// <summary>Embed one text → a unit-normalized vector, or null if the embedder isn't available.</summary>

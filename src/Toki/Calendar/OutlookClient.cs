@@ -5,26 +5,12 @@ using System.Text.Json;
 namespace Toki.Calendar;
 
 /// <summary>
-/// The Microsoft Graph equivalent of <see cref="CalendarClient"/>: list, create, edit, delete on the
-/// signed-in person's own calendar. Raw HttpClient + System.Text.Json, no Graph SDK - the SDK is many
-/// megabytes of generated models for four endpoints, and this ships as a single file.
-///
-/// ── THE THREE PLACES GRAPH DIFFERS FROM GOOGLE, EACH OF WHICH BITES ──
-///
-///   1. LISTING A DATE RANGE. <c>/me/events</c> returns the SERIES master of a recurring meeting, once,
-///      with a recurrence rule Toki would have to expand itself. <c>/me/calendarView</c> takes a start
-///      and end and returns the expanded INSTANCES, which is what an agenda actually needs. Using the
-///      wrong one makes a daily standup appear once, on the day it was created.
-///
-///   2. TIME ZONES. Graph returns <c>dateTime</c> with NO offset and a separate <c>timeZone</c> field,
-///      so parsing it like an RFC3339 string silently reads it as local. The Prefer header below asks
-///      for everything in UTC, and the parser then attaches UTC explicitly rather than assuming.
-///
-///   3. ATTENDEES AND SELF. Graph never marks which attendee is you, so "is this my meeting" has to be
-///      answered by comparing against the connected account's own address, which the service passes in.
-///
-/// Everything else is deliberately the same shape as the Google client, so the two can sit behind one
-/// facade without either one leaking its vocabulary upward.
+/// Microsoft Graph equivalent of <see cref="CalendarClient"/> (raw HttpClient, no Graph SDK).
+/// Three Graph gotchas that break silently: (1) list via <c>/me/calendarView</c>, never
+/// <c>/me/events</c>, which returns a recurring series once, unexpanded; (2) Graph dateTimes carry
+/// NO offset plus a separate timeZone field - the Prefer header asks for UTC and the parser attaches
+/// it explicitly; (3) Graph never marks which attendee is you - self is resolved against the
+/// connected account's own address. Otherwise the same shape as the Google client.
 /// </summary>
 public static class OutlookClient
 {
@@ -185,10 +171,8 @@ public static class OutlookClient
     }
 
     /// <summary>
-    /// Graph sends <c>{ "dateTime": "2026-08-13T14:00:00.0000000", "timeZone": "UTC" }</c> - note the
-    /// missing offset. Parsed as-is it becomes a LOCAL time, which is how a 2pm meeting shows up at 7:30
-    /// in another zone. The Prefer header asks for UTC, so the zone is attached explicitly here; a
-    /// non-UTC reply (an older mailbox setting) is converted rather than trusted.
+    /// Graph dateTimes have NO offset (separate timeZone field); parsed as-is they become local time.
+    /// The Prefer header asks for UTC, attached explicitly here; a non-UTC reply is converted.
     /// </summary>
     static DateTimeOffset? ParseWhen(JsonElement item, string prop)
     {

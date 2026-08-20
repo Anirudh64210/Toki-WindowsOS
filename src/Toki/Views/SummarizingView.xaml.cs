@@ -8,10 +8,8 @@ using System.Windows.Threading;
 namespace Toki.Views;
 
 /// <summary>
-/// The "working on your notes" loader - deliberately small and calm. It spends most of its
-/// life tucked as a 13px sliver whose only visible element is a soft coral shimmer sweeping
-/// across the top edge (Toki's heartbeat). Hover it open and a tiny Toki bobs beside a gentle
-/// status line. No loud multi-stage scene - just quiet, sticky reassurance.
+/// The "working on your notes" loader. Mostly lives tucked as a 13px sliver with a coral
+/// shimmer along the top edge; hover opens a tiny bobbing Toki beside a status line.
 /// </summary>
 public partial class SummarizingView : UserControl
 {

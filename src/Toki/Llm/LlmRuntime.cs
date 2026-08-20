@@ -3,17 +3,10 @@ using Microsoft.Win32;
 namespace Toki.Llm;
 
 /// <summary>
-/// Decides - ONCE, before any llama.cpp call - how to run the local model on THIS
-/// machine: how many layers to put on the GPU and how big a context to allocate.
-///
-/// Why this matters: enabling the Vulkan backend but offloading 0 layers is the
-/// worst case (llama.cpp shuffles every layer CPU↔GPU - hundreds of graph splits,
-/// painfully slow). So GPU and CPU must be an all-or-partial decision made up front:
-/// the Vulkan backend is loaded ONLY when we actually intend to offload.
-///
-/// VRAM is read from the driver's registry entry (no COM interop). Offload is sized
-/// to fit with headroom so it can't hit the uncatchable native OOM crash. A small or
-/// absent GPU falls back to a clean CPU path.
+/// Decides once, before any llama.cpp call, how many layers go on the GPU and the context size.
+/// The Vulkan backend is loaded ONLY when we intend to offload (Vulkan with 0 layers shuffles
+/// every layer CPU-GPU, the worst case). Offload is sized with headroom because native OOM is an
+/// uncatchable crash; VRAM comes from the driver's registry entry, small/absent GPU = CPU path.
 /// </summary>
 public static class LlmRuntime
 {

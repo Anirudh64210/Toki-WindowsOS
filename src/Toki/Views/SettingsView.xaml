@@ -33,8 +33,17 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
             <StackPanel>
-                <TextBlock Style="{StaticResource SettingTitle}" Text="Appearance" Margin="0,8,0,2"/>
-                <Grid Margin="0,4,0,0">
+                <!-- No "Appearance" heading: there is one setting on this page and a link to the rest,
+                     so a category label above a single row is a word that earns nothing (owner,
+                     2026-08-14: "remove appearance in the notch setting, its self explanatory").
+
+                     The 12px inset is not decoration - it MATCHES RowButton's padding, which is what
+                     the button below uses. Without it this row's text started 12px to the left of the
+                     button's and the two read as belonging to different pages (owner: "the glassy
+                     notch and the all other settings button differ in their starting point ...
+                     alignment and symmetry is missing"). Same on the right, so the switch and the
+                     chevron line up too. -->
+                <Grid Margin="12,10,12,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>

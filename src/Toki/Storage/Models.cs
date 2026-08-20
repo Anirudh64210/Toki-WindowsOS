@@ -31,6 +31,10 @@ public sealed class NoteSet
     public string? Title { get; set; }
     /// <summary>The template Toki wrote this note in (e.g. "Standup", "1:1"); null for legacy/heuristic.</summary>
     public string? Template { get; set; }
+    /// <summary>True when the LLM actually produced this note; false for the heuristic floor.
+    /// NOT persisted - it exists so a caller holding a good saved note can refuse to overwrite it
+    /// with a silent heuristic fallback.</summary>
+    public bool FromModel { get; set; }
     public string Tldr { get; set; } = "";
     /// <summary>Template-driven middle sections (heading + bullets). New notes populate this.</summary>
     public List<NoteSection> Sections { get; set; } = [];

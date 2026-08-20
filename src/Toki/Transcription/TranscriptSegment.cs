@@ -1,13 +1,10 @@
 namespace Toki.Transcription;
 
 /// <summary>
-/// Which STREAM an utterance came from - the microphone or the meeting's own audio.
-///
-/// This is not "who spoke". It stays a two-value enum on purpose even now that diarisation can tell the
-/// remote people apart: it is what the <c>you:</c>/<c>them:</c> search prefixes filter on, what
-/// <c>COUNT(DISTINCT speaker)</c> counts, and it is knowable with certainty because it is a fact about
-/// where the bytes came from rather than an inference about a voice. Who actually spoke lives in
-/// <see cref="TranscriptSegment.Tag"/>, which can be absent, wrong, or renamed by the user.
+/// Which STREAM an utterance came from - the mic or the meeting's audio. NOT "who spoke": it
+/// stays a two-value enum because the <c>you:</c>/<c>them:</c> search prefixes filter on it, and
+/// it is a certain fact about where the bytes came from rather than an inference about a voice.
+/// Who actually spoke lives in <see cref="TranscriptSegment.Tag"/>.
 /// </summary>
 public enum Speaker { You, Them }
 
@@ -18,12 +15,9 @@ public sealed record TranscriptSegment(Speaker Speaker, int StartMs, int EndMs, 
     public TimeSpan Start => TimeSpan.FromMilliseconds(StartMs);
 
     /// <summary>
-    /// Who actually said this, once the speakers have been told apart: a real name when the conversation
-    /// gave one away, else "Speaker 2". Null means diarisation has not run (or found nothing), and the
-    /// transcript falls back to the stream name.
-    ///
-    /// Nothing about the VOICE is stored - only this text. Close the meeting and Toki has no way to
-    /// recognise the same person again, which is the point.
+    /// Who actually said this once speakers are told apart: a real name when the conversation gave
+    /// one away, else "Speaker 2". Null means diarisation has not run (or found nothing). Nothing
+    /// about the VOICE is stored - only this text (owner decision: no persistent voiceprints).
     /// </summary>
     public string? Tag { get; init; }
 

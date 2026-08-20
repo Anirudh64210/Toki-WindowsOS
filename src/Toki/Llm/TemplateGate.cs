@@ -4,23 +4,13 @@ using Toki.Transcription;
 namespace Toki.Llm;
 
 /// <summary>
-/// The transcript's veto over the model's template choice.
-///
-/// WHY THIS EXISTS. A specialised template is not a layout, it is a CLAIM about the meeting.
-/// "Decision log" asserts that a decision was made, and then asks the model to fill in
-/// "Options considered", "Decision" and "Rationale". Both of the first real meetings were
-/// classified "Decision log" and neither made a decision, so Rationale came out as invented
-/// justification for a decision that never happened. The note did not look wrong - it looked
-/// authoritative, which is worse.
-///
-/// The model proposes; the transcript disposes. Every non-General template must clear a
-/// deterministic evidence gate computed from the raw transcript. Failing the gate is not an
-/// error and is never surfaced: it falls back to General ("Key points"), which asserts nothing
-/// about the meeting and therefore cannot be wrong about it.
-///
-/// The gates are deliberately loose about what counts as evidence and strict about needing SOME.
-/// A missed specialisation costs a slightly plainer note. A false one puts words in people's
-/// mouths - the same asymmetry that sets <see cref="NameCorrector"/>'s thresholds.
+/// The transcript's veto over the model's template choice. A template is not a layout, it is a
+/// CLAIM about the meeting ("Decision log" asserts a decision was made), and an unconfirmed claim
+/// gets filled with invention. The model proposes; the transcript disposes: every non-General
+/// template must clear a deterministic evidence gate, and failing it silently falls back to
+/// General, which asserts nothing and so cannot be wrong. Gates are loose about what counts as
+/// evidence, strict about needing SOME: a missed specialisation costs a plainer note; a false
+/// one puts words in people's mouths.
 /// </summary>
 public static class TemplateGate
 {
@@ -45,18 +35,17 @@ public static class TemplateGate
             "sales call" => Count(text, Sales) >= 2,
             "standup" => Count(text, Standup) >= 2,
             "brainstorm" => Count(text, Brainstorm) >= 2,
-            "1:1" => Voices(transcript) == 2,
+            // Two LABELS is not two PEOPLE: pre-diarisation every remote speaker is "Them", so
+            // Voices() == 2 even on an 8-person all-hands. Until some segment carries a diarised
+            // tag, "1:1" is a claim the transcript cannot support (a post-diarisation rewrite can).
+            "1:1" => transcript.Any(s => s.Tag is not null) && Voices(transcript) == 2,
             "lecture" => Dominance(transcript) >= 0.80 && Count(text, Lecture) >= 1,
             _ => true,
         };
     }
 
-    // ── the cues ──
-    //
-    // Each is written as one alternation so a single Regex pass answers "how many DIFFERENT kinds of
-    // evidence are here". Counting distinct alternatives rather than total matches matters: someone
-    // saying "let's go with" four times about four different lunch orders is one kind of evidence, not
-    // four, and it should not on its own promote a meeting to a decision log.
+    // The cues. Each is one alternation so a single pass counts how many DIFFERENT kinds of
+    // evidence appear: "let's go with" said four times is one kind of evidence, not four.
 
     static readonly Regex DecisionStrong = Make(
         @"we(?:'ve| have)? decided|decision is|the decision|we decided|it(?:'s| is) decided|"

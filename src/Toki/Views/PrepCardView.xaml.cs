@@ -10,19 +10,14 @@ using Toki.Storage;
 namespace Toki.Views;
 
 /// <summary>
-/// Pre-meeting prep card: title + when, a one-line recap of last time, still-open action items, and the
-/// agenda - plus Join-and-record / Later. Content is assembled deterministically by <see cref="PrepBuilder"/>
-/// and handed in via <see cref="App.CurrentPrep"/>; this view only renders it (no network, no model).
-///
-/// It is also where a meeting's STICKY NOTE is written. Pressing Edit turns the card itself into the
-/// note - the recap, open items and agenda arrive as real text you carry on writing in. The note is a
-/// row in the database from that moment, saved on every pause in typing, and which note this meeting
-/// uses is always the user's explicit choice (see <see cref="ShowNotePicker"/>): Toki never matches
-/// notes to meetings by title, because titles change and two meetings are often called the same thing.
+/// Pre-meeting prep card. Content is assembled deterministically by <see cref="PrepBuilder"/> and
+/// handed in via <see cref="App.CurrentPrep"/>; this view only renders it (no network, no model).
+/// Edit turns the card into the meeting's sticky note. Which note a meeting uses is always the
+/// user's explicit choice: Toki never matches notes to meetings by title.
 /// </summary>
 public partial class PrepCardView : UserControl
 {
-    // Same re-entrancy guard as HomeView - NEVER grow the notch during construction.
+    // Same re-entrancy guard as HomeView: NEVER grow the notch during construction.
     bool _ready;
     void Grow() { if (_ready && !App.Headless) App.GrowNotch(); }
 
@@ -42,8 +37,8 @@ public partial class PrepCardView : UserControl
         _ready = true;
     }
 
-    /// <summary>Repaint from <see cref="App.CurrentPrep"/>. Called by PillWindow.OnStateChanged BEFORE the
-    /// height is measured, so the reveal is sized to real content (the clipped-notch lesson).</summary>
+    /// <summary>Repaint from <see cref="App.CurrentPrep"/>. Called by PillWindow.OnStateChanged BEFORE
+    /// the height is measured, so the reveal is sized to real content.</summary>
     public void Refresh()
     {
         var prep = App.CurrentPrep;
@@ -93,9 +88,8 @@ public partial class PrepCardView : UserControl
 
     // ── the sticky note ──
 
-    /// <summary>Open whichever note this meeting is linked to. Once you've written on a card it STAYS
-    /// written - reopening shows your version, not the generated one, because your words outrank
-    /// Toki's. A meeting with no note yet shows the generated card, and Edit starts one.</summary>
+    /// <summary>Open whichever note this meeting is linked to. Reopening shows the user's version,
+    /// never the generated one: their words outrank Toki's. No note yet shows the generated card.</summary>
     void PaintScratch(string eventId)
     {
         if (App.Headless) { ShowReadOnly(); return; }
@@ -113,8 +107,7 @@ public partial class PrepCardView : UserControl
         EditButton.Visibility = Visibility.Visible;
     }
 
-    /// <summary>Turn the card into the note. The generated content comes along as real text - open
-    /// items as tick boxes, agenda as bullets - so you carry on writing rather than starting over.</summary>
+    /// <summary>Turn the card into the note; the generated content comes along as real text.</summary>
     void EnterEdit(string markdown)
     {
         if (_scratch is null)
@@ -137,9 +130,8 @@ public partial class PrepCardView : UserControl
         catch (Exception ex) { App.Log($"sticky save failed: {ex.Message}"); }
     }
 
-    /// <summary>Start writing. If this meeting has no note yet, one is created NOW - a row on disk from
-    /// the first keystroke, so a crash mid-sentence can't cost anything - seeded with the card's own
-    /// content and linked to this event.</summary>
+    /// <summary>Start writing. A missing note is created NOW (a row on disk from the first keystroke,
+    /// so a crash mid-sentence can't cost anything), seeded with the card's content and linked to this event.</summary>
     void OnEdit(object sender, RoutedEventArgs e)
     {
         if (App.CurrentPrep is not { } prep) return;
@@ -162,11 +154,8 @@ public partial class PrepCardView : UserControl
     }
 
     /// <summary>
-    /// Choose which note this meeting uses - an earlier one, or a fresh one.
-    ///
-    /// This exists instead of guessing. Toki has no reliable way to know that today's "Weekly sync" is
-    /// the same conversation as last week's, and getting it wrong either buries your notes or shows you
-    /// someone else's; so the choice is simply yours, and it's remembered by id.
+    /// Choose which note this meeting uses - an earlier one, or a fresh one. Explicit choice instead
+    /// of guessing by title; remembered by id.
     /// </summary>
     void OnPickNote(object sender, RoutedEventArgs e)
     {
@@ -205,9 +194,9 @@ public partial class PrepCardView : UserControl
 
     // ── recording-aware chrome (N4) ──
 
-    /// <summary>Mid-recording the card is a side-trip: drop the Join/Later pair - you're already in the
-    /// meeting, so "Join and record" would be nonsense. Back is ALWAYS shown, because while a card is
-    /// armed hovering the peek opens this card, and without a way out you could never reach Home.</summary>
+    /// <summary>Mid-recording, drop the Join/Later pair (already in the meeting). Back is ALWAYS
+    /// shown: while a card is armed, hovering the peek opens this card, and without a way out
+    /// Home would be unreachable.</summary>
     void PaintChrome()
     {
         var recording = App.IsRecording;
@@ -226,16 +215,15 @@ public partial class PrepCardView : UserControl
     /// <summary>Dev/render only: show edit mode with planted text, without touching the database.</summary>
     public void DebugOpenScratch(string markdown) { EnterEdit(markdown); Grow(); }
 
-    // "9:41 – 10:11 AM  ·  in 9 min" - the time range reads soft, the countdown reads amber (the
-    // reference card's urgency accent). Runs use SetResourceReference so a live theme swap recolours.
+    // "9:41 – 10:11 AM  ·  in 9 min" - soft time range, amber countdown.
+    // Runs use SetResourceReference so a live theme swap recolours.
     void PaintWhen(CalEvent e)
     {
         WhenText.Inlines.Clear();
         var range = new Run(CalendarRows.TimeRange(e));
         range.SetResourceReference(TextElement.ForegroundProperty, "TextSoft");
         WhenText.Inlines.Add(range);
-        // Amber only when it's genuinely urgent (≤15 min / started) - a card previewed further out
-        // keeps a quiet countdown, not a false alarm.
+        // Amber only when genuinely urgent (within 15 min, or started).
         var urgent = CalendarRows.Imminent(e) || e.Until <= TimeSpan.Zero;
         var rel = new Run("  ·  " + (CalendarRows.RelativeTime(e) is { Length: > 0 } r ? r : "now"))
         { FontWeight = FontWeights.SemiBold };
@@ -243,8 +231,7 @@ public partial class PrepCardView : UserControl
         WhenText.Inlines.Add(rel);
     }
 
-    // "5 invited · 3 accepted" + overlapping initials - only from the REAL invite list; a meeting with
-    // no guests shows nothing (never fabricated).
+    // "5 invited · 3 accepted" + overlapping initials, only from the REAL invite list; never fabricated.
     void PaintPeople(CalEvent e)
     {
         AvatarHost.Children.Clear();

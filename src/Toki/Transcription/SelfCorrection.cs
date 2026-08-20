@@ -3,18 +3,10 @@ using System.Text.RegularExpressions;
 namespace Toki.Transcription;
 
 /// <summary>
-/// Drops the discarded half of a spoken self-repair.
-///
-/// People correct themselves mid-sentence and the recogniser, faithfully, keeps both attempts:
-/// "the educative, oh, executive summary". A reader has to do the repair again in their head every
-/// time they read the line, and the note writer sees a word that was never really said - in one real
-/// meeting "educative" reached the summary as if it were a topic.
-///
-/// The rule is narrow on purpose. A repair is only removed when a CUE ("sorry", "I mean", "oh") sits
-/// between two words that clearly sound like the same word - "educative ... executive", not
-/// "shipping, I mean, Tuesday". Otherwise "I mean" is just ordinary speech and cutting the word
-/// before it would delete real content. Same asymmetry as everywhere else in the transcript pipeline:
-/// a missed repair is a slightly clumsy line; a wrong one deletes what somebody said.
+/// Drops the discarded half of a spoken self-repair ("the educative, oh, executive summary").
+/// Narrow on purpose: a repair is removed only when a CUE ("sorry", "I mean", "oh") sits between
+/// two words that sound like the same word. A missed repair is a slightly clumsy line; a wrong
+/// one deletes what somebody said.
 /// </summary>
 public static class SelfCorrection
 {
@@ -25,10 +17,11 @@ public static class SelfCorrection
     const string Cues =
         @"oh(?:,?\s+sorry)?|i\s+mean(?:t)?|or\s+rather|rather|sorry|excuse\s+me|no,?\s+wait|well,?\s+no";
 
-    // wrong-word , cue , right-word. The separators allow the comma, ellipsis or dash the recogniser
-    // tends to place around a hesitation.
+    // wrong-word , cue , right-word. Separators allow the comma/ellipsis/dash placed around a
+    // hesitation but NOT a full stop: a period means a sentence END, and two sentences flanking
+    // an apology are not a self-repair - matching across it deleted real words from both.
     static readonly Regex Pattern = new(
-        @"\b(?<wrong>[A-Za-z][A-Za-z'’-]{3,})\b[\s,.…-]*\b(?<cue>" + Cues + @")\b[\s,.…-]*(?<right>[A-Za-z][A-Za-z'’-]{3,})\b",
+        @"\b(?<wrong>[A-Za-z][A-Za-z'’-]{3,})\b[\s,…-]*\b(?<cue>" + Cues + @")\b[\s,…-]*(?<right>[A-Za-z][A-Za-z'’-]{3,})\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>Clean one line. Returns the line unchanged when nothing qualifies.</summary>
@@ -73,7 +66,9 @@ public static class SelfCorrection
     static bool SoundsLikeTheSameWord(string a, string b)
     {
         if (a.Length < 4 || b.Length < 4) return false;
-        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
+        // The IDENTICAL word on both sides is a repetition, not a repair - treating it as one
+        // deletes the first word AND the cue and welds two clauses together.
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return false;
 
         var ka = NameCorrector.Phonetic(a);
         var kb = NameCorrector.Phonetic(b);

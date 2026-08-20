@@ -55,7 +55,16 @@ public partial class NotesView : UserControl
         foreach (var seg in transcript) Body.Children.Add(TranscriptRow(seg));
     }
 
-    void RenderNotes(MeetingRecord m) => NoteRenderer.Meeting(Body, m, spacious: false);
+    // ONE FlowDocument in a read-only RichTextBox so a drag-select spans the whole note;
+    // embedded so the page's ScrollViewer stays the only scroll.
+    void RenderNotes(MeetingRecord m)
+    {
+        var box = NoteRenderer.MeetingDocument(m, spacious: false,
+            resolving: m.Id > 0 && App.IsResolvingSpeakers(m.Id), scrollHost: Scroll);
+        // A scroll-disabled RichTextBox still eats the wheel; hand it to the page's scroller.
+        box.PreviewMouseWheel += (_, e) => { e.Handled = true; Toki.Controls.SmoothScroll.Nudge(Scroll, e.Delta); };
+        Body.Children.Add(box);
+    }
 
     void OnCopy(object sender, RoutedEventArgs e)
     {
@@ -64,8 +73,7 @@ public partial class NotesView : UserControl
             try
             {
                 Clipboard.SetText(NoteRenderer.TranscriptText(m));
-                // Feedback checkmark reverts after a moment - a permanent ✓ made the copy
-                // button look consumed and unpressable.
+                // Feedback checkmark reverts after a moment; a permanent one reads as consumed.
                 var prior = CopyBtn.Content;
                 CopyBtn.Content = "✓";
                 var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };

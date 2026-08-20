@@ -12,7 +12,7 @@ namespace Toki.Llm;
 /// the user can point it at ANY model they like: OpenAI, Anthropic/Claude &amp; Google/Gemini
 /// (directly via their compatible endpoints, or through a router like OpenRouter with one
 /// key), Groq, Together, a local model, and so on. The user pays their own provider; Toki
-/// never touches that cost (hard constraint #1).
+/// never touches that cost.
 ///
 /// Security posture: HTTPS over the network (the key never travels in the clear; plain http
 /// only for loopback), the key goes on each request - never on the shared client, never in a
@@ -20,13 +20,11 @@ namespace Toki.Llm;
 /// </summary>
 public sealed class ApiLlm : ILlm
 {
-    // ONE client for the process (per-call clients exhaust sockets). No default auth
-    // header - the key can change between calls, so it rides on each request instead.
-    // No client-wide timeout: HttpClient.Timeout covers the WHOLE operation including
-    // reading the body, so a 60s cap silently killed long streamed answers and long
-    // completions - precisely on the supported slow backends (LM Studio/Ollama on CPU).
-    // Deadlines are per-call instead: ListModels/Test carry 12s CTSes, and Complete/
-    // Stream get a connect deadline + an idle watchdog below.
+    // ONE client for the process (per-call clients exhaust sockets); no default auth header
+    // (the key can change between calls, so it rides on each request). No client-wide timeout:
+    // HttpClient.Timeout covers the WHOLE operation including the body, which kills long streamed
+    // answers on slow backends. Deadlines are per-call: 12s CTSes on ListModels/Test, a connect
+    // deadline + idle watchdog on Complete/Stream.
     static readonly HttpClient Http = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
 
     /// <summary>How long we wait for the provider to ACCEPT a request (connect + headers).</summary>

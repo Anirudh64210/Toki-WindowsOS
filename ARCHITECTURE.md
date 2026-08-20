@@ -1650,3 +1650,1654 @@ design agent and a shareable reference. The owner's verdict after using it: the 
 the boss - adopted screens (Ask, Settings) are implemented in WPF from the frame, never ported
 from the agent's HTML. The mirror drifts silently when Theme.xaml changes; port token changes by
 hand and re-sync.
+
+## The capsule states, and one card that had to get out of the way (2026-08-14)
+
+The owner supplied the raw Figma export of the whole board (`css code for all the design layers.txt`,
+46,687 lines, 23 screens). Building its six "Menu Bar" frames forced two structural decisions.
+
+**Decision: some states draw their own capsules; the window's card steps aside.** Every notch state
+so far has been content laid on ONE glass card that the window draws. Three of the menu-bar frames
+are not that shape: "Record This Meeting" is a 169x40 pill with a separate 40px mascot circle 12px
+to its left, and "Idle" is two 144x40 pills with a 12px gap and a close puck floating past the right
+edge. One card cannot express two capsules with air between them - laying glass pills on a glass
+card gives you glass-on-glass, and stretching one card across both loses the gap that IS the design.
+So `PillWindow.DrawsOwnCapsules` names the states whose view supplies the visible surfaces, and for
+those the card drops its fill, rim, sheen and shadow caster. Toki's bubble stays (unlike a peek):
+the frames still draw him beside the pills.
+
+**Decision: a view may own its card width.** `Sizes` gives every state one fixed width, which was
+right until the recording state became two frames - the compact bar ("Menu Bar - Transcribing", 320)
+and the transcript panel ("Live Transcription (Expanded)", 344), with a chevron moving between them
+and no state change in between. `IWidthAware` lets the cached view have the last word; `CardSize()`
+is now the single place all three sizing paths ask. `GrowToContent` had to start comparing WIDTH as
+well as height, or a change that only widened the card was swallowed by its early-out.
+
+**Decision: "Notes ready" is a tucked appearance, not a state.** The frame gives a finished note its
+own pill. Making it a PillState would mean threading it through the hover pairs, the context memory,
+the idle/auto-hide timers and the reveal path, and would risk losing the note's scroll position and
+its Keep-or-Discard choice on every tuck. Instead the state stays `Notes` and only the Host content
+swaps while tucked (`ShowNotesReady` / `RestoreTuckedView`). This also fixes a real ambiguity: a
+ready note and a working loader both used to tuck into an identical blank 13px strip.
+
+**The frames' widths are not our widths, and that is on purpose.** Three frames reserve 64px of left
+padding INSIDE the pill for a mascot that overlaps it. Toki floats BESIDE the card here - the owner
+explicitly replaced a 4px overlap with a 10px air gap the day before - so those 64px come off the
+card and the content row keeps the frame's own 242px. What sits between the rounded corners is the
+frame's row at the frame's spacing; the overlap is the one thing deliberately not ported.
+
+**Lesson: a render harness with its own width table will draw a layout the app does not have.**
+`--render` hardcoded 288px for the meeting prompt and kept drawing a card behind it, so the PNGs
+showed a wide box around a 169px pill. The shot widths now come from the same numbers the window
+uses, and `Shot(bare:)` asks `PillWindow.IsCapsuleState` whether to draw a card at all. A harness
+that renders a *model* of the product is the failure mode this project keeps paying for.
+
+**Lesson (build hygiene): `src/Toki/bin/Debug/` has two output folders.** A live
+`net8.0-windows10.0.19041.0/` and a stale `net8.0-windows/` from an older target framework, last
+written 15 July. A recursive search for `Toki.exe` returns the July one first; it hangs on startup
+after the "llm runtime" log line and reads exactly like a regression in the code you just wrote.
+Half an hour went into bisecting a hang that was a stale binary. Always run the TFM-suffixed path.
+
+## Where the notch's frames actually go, measured (2026-08-14)
+
+The owner asked why the notch struggles to render clean, smooth animation, especially the mascot.
+Three plausible answers were on the table and they need opposite fixes, so `--fpstest` was written
+to settle it instead of reasoning about it. It runs the same animated mascot in three windows and
+counts frames: transparent (the notch), opaque (the control), and transparent-while-resizing (what
+a state change actually does). On the dev PC, 120Hz, render tier 2:
+
+| case | avg fps | worst frame | frames over budget / 4s |
+|---|---|---|---|
+| transparent window, static bounds | 116 | 12-16 ms | - |
+| opaque window, same content | 118 | 11-17 ms | - |
+| transparent window, animating its own size | (meaningless) | **39-48 ms** | **56-76** |
+
+**Two theories died.** Transparency costs about 1%: `AllowsTransparency=True` was assumed to be the
+culprit, and it is not, at least on a tier-2 machine. The mascot's vector art costs about 2%: the
+gradient-filled geometry is not too heavy to animate, so BitmapCache would have bought nothing and
+would have cost quality (a cached bitmap scaled down to 44px is worse than the vector drawn at 44px).
+
+**What is left is the WINDOW MORPH.** Animating `Window.Width`/`Height` - which every state change
+does, via `AnimateSize` - drops 56 to 76 frames every four seconds, roughly fifteen visible stutters
+a second, with worst frames three to four times the 8.3ms budget. Average fps in that case is a lie:
+it reads *higher* than the refresh rate because layout churn fires extra `CompositionTarget.Rendering`
+events. The eye does not average; it sees the 48ms hitches.
+
+The cause is not throughput. Each frame the window's bounds are set, rounded to whole device pixels,
+and the window re-centred by `PlaceTopCenter` on `SizeChanged` - a Win32 window move plus a layered
+surface reallocation, per frame, on the UI thread, in the middle of a layout pass.
+
+**The fix is architectural, and it is the same one the Dynamic Island and every good Electron
+overlay uses: hold the window at a FIXED size and animate the CARD inside it.** The window is placed
+once and never moves during a transition; the card's size, clip and transform do the work on the
+composition thread. `PinContentForMorph` (added the same day, for the reflow problem) is the first
+half of this - the content is already laid out once at its final size and revealed through an
+animated rounded clip. The second half is to stop the window's own bounds moving at all.
+
+The obstacle is that everything positional keys off the WINDOW rect: `PointInWindow`,
+`CursorOverPill`, `_rectL..B`, the wheel hook, the click-outside dismissal. A fixed oversized window
+would report the pointer as "on the notch" from 200px away, and a `Background="Transparent"` window
+swallows clicks across its whole area. So the move has to come with a card rect that all of those
+consult instead. `CursorOverVisiblePeek` is the pattern: derive the visible rectangle from the pads
+rather than trusting the window.
+
+**Lesson: measure which layer is slow before optimising any of them.** The instinct was to blame the
+transparent window and cache the mascot. Both would have been wasted work, and the mascot cache
+would have made it look worse. One 4-second measurement pointed at a layer neither of us suspected.
+
+**The fix, and what it bought.** `AnimateSize` no longer animates the window. It sets the window
+ONCE to the UNION of where it is and where it is going, holds it there for the whole transition,
+and animates a rounded clip on the card instead - centred horizontally, top-anchored, with Toki's
+bubble tracking the clip's left edge on the same curve so the air gap between them stays constant.
+The content is laid out once at the union size and never re-laid-out. One further resize settles
+onto the exact target after the motion ends. Two window resizes per transition instead of ~120.
+The reveal-from-hidden path already worked this way; this brings the morph in line with it.
+
+**What the evidence does and does not support.** The synthetic rows in `--fpstest` are solid and
+reproducible: a transparent window animating its own bounds drops 56-76 frames every four seconds,
+while the identical content in a window with static bounds drops effectively none. That is the
+finding, and the rework follows from it directly - the number of window resizes per transition goes
+from about 120 to two, which is a property of the code rather than of a measurement.
+
+**The live-notch number could not be made to prove it, and an earlier claim of a "36-54%
+improvement" is WITHDRAWN.** An interleaved A/B against the real notch produced that figure across
+four runs; a later standalone measurement of the same build reported 6.3 dropped frames per
+transition where the interleaved run had reported 1.8. Two harnesses, one build, a 3x disagreement.
+Three hypotheses for the gap were tested and all three were wrong: a double resize in the in-place
+path, the window's Background brush, and an added UpdateLayout call. None moved it.
+
+The reason the live number resists is that it is dominated by the VIEW SWAP: every state change
+clears `Host` and lays out a fresh page, tens of milliseconds that have nothing to do with the
+morph. The animation's contribution is small enough to sit inside that noise. So the live row is
+kept as a REGRESSION ALARM (if it doubles, something got slower) and is explicitly not a benchmark.
+Reducing the view-swap cost - caching arranged views rather than rebuilding them - is the next real
+lever, and a bigger one than the morph was.
+
+**Lesson: a sequential A/B measures the minute, not the code.** The first version ran the old path
+for four seconds, then the new one, and reported -16%, -124% and +72% on three consecutive runs of
+identical code. Interleaving the conditions inside one run, alternating every whole cycle, made it
+look reproducible - but "reproducible" is not "correct", as the standalone disagreement then showed.
+Alternating every TRANSITION would have been worse still: it hands one condition all the shrinks and
+the other all the grows, a confound that would have looked exactly like a result.
+
+**Lesson: state what a measurement supports, not what you hoped it would.** The architectural
+argument here stands on its own. Dressing it in a percentage that later failed to replicate added
+nothing to it and cost credibility.
+
+
+## Contrast is arithmetic, not taste (2026-08-14)
+
+Owner: "fix the text colors, it kinda blends in with the background, both for white and black
+themes". Rather than nudge colours by eye, every text token was composited over every surface it can
+land on and scored with the WCAG ratio. Three separate faults came out, and only one of them was
+what the report sounded like.
+
+**1. The light theme's accents were never checked.** AccentAmber measured 2.42:1 on a light chip,
+AccentTeal 2.74:1, TextDim 2.94:1, and light `TextMid` 3.83:1 - under the 4.5 bar for body text.
+
+**2. Three accents had no light value at all.** Coral, Pink and Purple were documented in
+ThemeManager as "constant brushes that don't invert". They are pastels tuned for a near-black card;
+painted onto a near-white one, Pink measured **1.66:1**. Not dim - invisible. Any colour ever used
+as TEXT needs both ends of the palette table, and that is now written above the table.
+
+**3. The real one: the card's own opacity.** The frame specifies rgba(33,30,30,0.5), so the card is
+half whatever is behind it. Over a bright window the "warm dark glass" composites to mid-grey and
+white-90% text falls to **2.96:1** - failing even the 3:1 non-text bar. No text colour can fix a
+background that ranges from near-black to grey. This is why the report said BOTH themes: each one
+fails against the opposite wallpaper. The card is now 85% (`#D9`), which still reads as glass - the
+desktop shows through - while holding a floor of 8.7:1 for primary text over any wallpaper.
+
+Secondary text went from 50% to 65% opacity and tertiary from 25% to 45% (both `TextLow`s were at
+1.8-2.3:1, which is decoration nobody can see). Every accent was then re-derived by walking its HLS
+lightness until it cleared 4.5:1 on the glass card over black, grey AND white, with hue and
+saturation preserved so the "one meaning, one colour" mapping is untouched. `CoralText` is new:
+white on the dark theme's coral measured 2.73:1, so a filled coral button now carries a near-black
+label in dark and a white one in light.
+
+**This is now enforced, not remembered.** `ContrastTests` reads the palette straight out of
+`ThemeManager.cs` and fails the build if any text colour drops under 4.5:1 on any surface in either
+theme, or under 3:1 for decoration, including against the translucent card over three wallpapers. It
+also asserts the parse actually found the palette, because a check that silently reads nothing
+passes perfectly while measuring nothing.
+
+**Lesson: when something looks invisible, measure the contrast before debugging anything else.**
+This is the second time the project has paid for that. In August 2026 a 12% white hover wash on a
+black notch (1.15:1) was diagnosed for hours as a broken input layer. The same mistake in a new
+costume cost another session here. A ratio takes a minute to compute and settles the argument.
+
+**Lesson: a translucent surface has no fixed contrast.** It depends on the user's wallpaper, so a
+token can look correct against the opaque stand-in in every screenshot and still fail in use. Any
+see-through surface must be checked composited over both extremes, and its alpha is a contrast
+decision as much as an aesthetic one.
+
+
+## A captured brush never hears about a theme switch (2026-08-14)
+
+The contrast pass above fixed the palette, and the light theme still shipped white labels on
+"Start a meeting", "Take notes" and "Record this meeting". The palette was right; the views were not
+reading it.
+
+**The cause.** Those pills are built in CODE, and the natural thing to write is
+`Foreground = (Brush)Application.Current.Resources["TextHi"]`. That hands back the brush that exists
+at that instant. `ThemeManager.Apply` switches themes by REPLACING the resource, not by mutating the
+brush (it cannot - WPF freezes a brush once it has been rendered). So a captured brush is a snapshot:
+correct when the view is built, wrong forever after a switch. XAML's `DynamicResource` does not have
+this problem, which is why the same views look right in a screenshot taken with `--render --theme
+light`: that process STARTS in light, so the snapshot is taken from the right palette.
+
+The rule: **in code-built UI, bind themed colours with `SetResourceReference`, never by reading the
+resource.** `PillParts.Themed()` is the helper; `LiveWave`, `NotesReadyView` and the live-transcript
+rows were converted with it. Fixed brushes are still fine where the theme must NOT repaint them -
+the white square on the red stop disc, a speaker's initial on its tinted disc - and `PillParts` now
+has two `Solid` overloads to make that choice explicit rather than accidental.
+
+**The test that missed it, and what it looks like now.** `--themetest` already existed and passed
+throughout: it created one `Border`, wired it up with `SetResourceReference`, and checked it
+recoloured. That proves the MECHANISM works on an element somebody wired correctly. It says nothing
+about whether the app's own views use it - testing the model instead of the product, again.
+
+It now walks every notch view and every label in it, computes the contrast of each against whatever
+is actually painted behind it, and fails on anything under 3:1. The critical detail is the ORDER:
+the views are built ONCE, in dark, and then the theme is switched under them. Building a fresh view
+per theme passes even with the bug present, because a constructor that snapshots the palette
+snapshots the RIGHT one. The bug only exists for views that outlive a switch, which is exactly what
+the notch's cached views are. The check was written that way first and would have been useless.
+
+It was then validated by putting the bug back deliberately: the sweep named all three labels at
+1.26:1. A check that has never failed on the defect it exists for is not evidence.
+
+**Two false alarms worth remembering**, both from asking WPF what the background is:
+  · A templated `Control.Background` carries whatever the default style put there (#FFDDDDDD, the
+    classic grey button) even when the custom `ControlTemplate` never paints it. Only `Border` and
+    `Panel` fills are real.
+  · A hover overlay (#38FFFFFF) is not a background. Anything under ~75% alpha is a wash that is
+    absent most of the time; skip it and fall through to the surface underneath.
+
+
+## Making a meeting is a mode, not a banner (2026-08-14)
+
+The calendar composer was reported as "so so so bad", with four specific faults. All four had the
+same shape: a layout decision that was never checked against the panel it lives in.
+
+**Two hairlines under the header.** The header drew one, and the composer's own top border drew
+another 12px below it. Two tram-lines across the panel the instant you pressed New.
+
+**Cancel and Create fell off the bottom.** The composer was docked ABOVE the agenda, so its height
+came out of the list's - but the calendar panel is a fixed 430 tall, and a full form does not fit in
+what is left. It is a MODE now: the composer takes the whole panel, the agenda hides, the header
+reads "New meeting", the New button steps aside, the fields scroll, and the two buttons are pinned
+to the bottom where nothing can push them off.
+
+**The fields were six boxes at four different heights.** A filled 38px box, a filled 36px box, an
+OUTLINED 36px chip, another filled box, a bare switch. They are all the same kind of thing - a
+property of the meeting - and now look like it: one card of 46px rows split by hairlines, label
+left, value right, the same shape as the Library settings page. The end-time chip stopped being an
+outlined control and became a row like its neighbours.
+
+**Two competing sentences under the title.** A permanent hint ("Type a day and time, or pick them")
+and a separate green parse preview, stacked. The hint is the empty state now; once the preview
+exists it takes the line. An error outranks both, and has to re-show the hint explicitly - hiding a
+line and then reporting a failure into it is a bug waiting to be filed.
+
+**The cause of the half-width card, which took two wrong fixes to find.** The composer was a bare
+child of the root DockPanel with no `DockPanel.Dock` set, and that silently means `Dock=Left`: it
+was handed only its desired width, so the field card sized to its widest row and sat at about 56% of
+the panel with dead space beside it. `HorizontalScrollBarVisibility` was blamed first, then the
+ScrollViewer's measuring. Neither was it. The composer and the agenda are mutually exclusive, so
+they now share the one filling slot at the end of the DockPanel.
+
+**The new theme sweep earned its place within a minute.** Adding the composer to `--themetest`
+immediately failed it: `ParsePreview.Foreground = (Brush)FindResource("Green")` captures the brush at
+parse time, so a preview rendered under one theme kept that colour into the other - the light
+theme's green on the dark card, at 1.98:1. Same bug as the pill labels, in code written long before
+them, found by a test that was written an hour earlier and had never seen this view.
+
+
+## The Library window, slice one: the shell (2026-08-14)
+
+The 1440px frames in the CSS export ("Library - List + Detail") had never been built. This is the
+shell: sidebar, header, search, and the list rows.
+
+**The sidebar is a floating CARD, not a flush rail.** The frame draws it 240 wide, inset from the
+window edges, radius 18, warm glass, a 1px white-10% rim and the same shadow every surface in this
+design carries. A rail that runs edge to edge reads as window chrome; a card reads as a panel, which
+is what it is. The seam that used to divide it from the main pane is gone - with the card floating,
+a rule there draws a line down the middle of the gap.
+
+**The nav rows were Borders with `MouseLeftButtonUp` handlers.** That is the standing rule this
+project has broken three times ("a clickable thing is a Button"), and it survived because `--hittest`
+only audits `ButtonBase` - so the app's most-used control was breaking the rule in the one place the
+test could not look. They are real Buttons now, at the frame's sizes (44 tall, 24px icon, 16px label
+at weight 500/white 60% idle and 600/white 90% active), and the hittest count went up accordingly.
+
+**The list rows are filled capsules.** The frame gives EVERY row a fill (rgba(118,118,128,0.12),
+radius 16, padding 12); only the selected one had one before, so the list read as a wall of text with
+one highlighted line in it. Selection is now a brighter fill, which is a stronger signal than "has a
+fill at all". Type went to the frame's sizes: title 16 SemiBold, meta 12 Medium, snippet 12 - it was
+13/9.5/10.5, a size smaller than anything else in the app, which is why the list read as fine print.
+
+**The search field had no icon and no placeholder** - a bare rounded rectangle you had to guess at.
+It is the frame's 44-tall radius-24 glass pill now, with a magnifier and "Search these notes - you: /
+them", and the sort control beside it is a real 44x44 button rather than a floating glyph.
+
+**The header is one line.** "Library   56 | all on this PC", with the frame's 1px rule between the
+count and the scope, instead of a title with a caption stacked under it costing a second line for
+two facts that fit beside the word.
+
+Still to do on this window: the reading pane's section cards, the Ask page, and the Settings
+segmented controls.
+
+
+## The reading pane's section rails (2026-08-14)
+
+Slice two of the Library window. The frame does not draw sections as cards, which is what the
+screenshot suggests at a glance - it draws a coloured circle badge and label, then a **3px vertical
+bar in the same accent at 12%** running down the left of that section's content, with the text
+inset past it. The badge already existed (`DocHeader`); the bar did not, and the bar is the part
+that makes a section read as a group. Without it a coloured heading is the only thing tying its
+bullets together, and by the third bullet the eye has lost which heading it is under.
+
+**One Section per group, not a border per paragraph.** `Block.BorderThickness` would put a bar on
+each paragraph and leave a gap at every paragraph margin - a dotted line rather than a rail. A
+FlowDocument `Section` is a block container, so the whole group takes one continuous border.
+
+The transcript rides the same rail. Its blocks are inserted and removed as it expands, so that code
+now writes to the Section's `Blocks` rather than the document's - six call sites, all of them
+already routed through one local.
+
+**`--copytest` is what made this safe to do.** Restructuring a read-only FlowDocument risks breaking
+selection ACROSS the new containers, which is invisible in a screenshot and is exactly the kind of
+thing that would be discovered by the owner trying to copy a note. It proves select-all still
+captures summary, bullet, to-do and transcript through the Sections.
+
+
+## A button you cannot see, and a check that could not tell (2026-08-14)
+
+The owner spotted "Back to Toki" at the bottom of the sidebar. Measured, its fill sat **1.02:1**
+against the card behind it, in BOTH themes - not dim, invisible. The cause was mine: when the
+sidebar became a glass card I gave the button `GlassCapsule`, and the Glass tokens are tuned to sit
+on the NOTCH. Over the sidebar's own fill they composite to within a rounding error of it. A new
+opaque `SidebarButton` token steps clearly in both directions.
+
+**The text sweep could never have caught this.** It checks that a LABEL contrasts with what is
+behind it, and this label measured 10:1. The control was invisible; its text was perfect.
+
+**So a button-fill check was written, and then deleted.** It compared each button's fill to the
+surface behind it. On the real app it reported seventeen cases, of which one was the bug. The
+redesign has buttons defined by a 1px rim rather than a fill, and buttons sitting on gradients -
+which are not `SolidColorBrush`, so "the surface behind" resolves to whatever opaque ancestor is
+further up rather than what is actually painted. Real faults and correct controls both landed
+between 1.01 and 1.15:1; no threshold separated them. A gate that cries wolf is worse than no gate,
+and this project has already paid for that once. The reasoning is left as a comment where the check
+would go: if it comes back it must sample the ACTUAL rendered pixel behind the control, not walk the
+tree guessing.
+
+**What did survive is the Library window joining the sweep**, which is worth more than the check
+that prompted it. Two things came out of that:
+
+  · The first run reported sixteen "invisible" labels that were simply mid-fade - the page entrance
+    animation. Effective opacity is now part of the test, and anything under 95% is skipped: its
+    contrast measures the clock, not the colour.
+  · What remained was real. The list row's DATE NUMBER is the one label in the row that does not go
+    through a Style, so it captured its brush and stayed dark-theme white on a light-theme card at
+    1.02:1 until something happened to rebuild the list. Same captured-brush class as the pill
+    labels and the calendar's parse preview, third occurrence, found by the sweep the moment it was
+    pointed at a new surface.
+
+
+## Half the transcript is hallucinated silence (2026-08-14, MEASURED)
+
+Owner: "we are struggling to do transcription with good and clean accuracy" - Talat runs the same
+Parakeet and the same Qwen3-4B and gets cleaner results. So the gap is ours. It is, and this is the
+measurement that found it.
+
+**The baseline.** Today's real recording, 13:15 of a two-stream meeting, run through `--asrtest`:
+
+    you.wav   794.8s -> TEN segments, the first at 02:51
+              "Oh my god, singy cocky and the beef in the table."
+              "Vacuum kinna bital pin button up okay I will laugh okay okay"
+
+That is not transcription, it is a model hallucinating words out of noise. So the two tracks were
+measured second by second (RMS per one-second block, mono-mixed):
+
+| | you.wav (mic) | them.wav (meeting) |
+|---|---|---|
+| format | 2ch f32 48kHz | 2ch s16 44.1kHz |
+| speech-ish (rms > 0.010) | **3%** | 66% |
+| near-silent (rms < 0.002) | **73%** | 32% |
+| median rms | **0.0008** | 0.0635 |
+| p90 rms | 0.0052 | 0.1614 |
+
+**The mic track's median level is about EIGHTY TIMES quieter than the meeting track** - roughly 38dB
+apart - and three quarters of it is silence. We hand both to the same model, at the same gain, with
+no voice-activity gate. Parakeet's features are log-mel; fed a track whose median RMS is 0.0008 it
+does not return nothing, it returns confident nonsense.
+
+**Why this matters more than any other item on the accuracy list.** Lesson 1 of this project is
+"garbage in, garbage out - check what the LLM is fed before tuning prompts". Half of every
+transcript is this. It then feeds the note writer, the diarisation (which is counting speakers in
+noise), the echo de-dup, the evidence links and the Ask index. Tuning a prompt downstream of it is
+tuning against invented input.
+
+**Two fixes, in order:**
+1. A REAL voice-activity gate before decode. Not `QuietCut`, which finds the least loud frame near a
+   target and always returns one - a genuine VAD that says "there is no speech here" and declines to
+   decode it. Silence is not failure (lesson 4); it should produce nothing, not fiction.
+2. PER-STREAM GAIN NORMALISATION. The two streams arrive 38dB apart from different capture paths
+   (WASAPI mic vs per-process loopback) and there is no reason to expect them to match. Normalise
+   each to a target level before the model sees it.
+
+**THE CONTROL that proves it.** The other half of the same meeting, same model, same code, same
+settings, run the same way:
+
+| | you.wav (mic) | them.wav (meeting) |
+|---|---|---|
+| median rms | 0.0008 | 0.0635 |
+| speech-ish seconds | 3% | 66% |
+| **segments from ~13 min** | **10** | **242** |
+| sample | "Oh my god, singy cocky and the beef in the table." | "Yeah, I pinged you in the team space itself." |
+
+Nothing differs but the audio. The model is fine, the decode path is fine, and on a well-levelled
+stream this pipeline produces a genuinely good transcript. It is the MIC stream that is broken, and
+we decode its silence instead of declining to.
+
+This also answers the second half of the owner's complaint - "same with LLM responses". The note
+writer, the diarisation, the echo de-dup, the evidence links and the Ask index are all downstream of
+a transcript that is half fabricated. No prompt change can survive that input.
+
+**The fix is available without a new dependency.** The sherpa-onnx build already shipping in this
+app exports `SileroVad`, `SileroVadModelConfig`, `TenVad`, a circular buffer and speech-segment
+types - so a real VAD is one small model file (silero_vad.onnx, ~2MB via ModelManager) away, with no
+second ONNX runtime and therefore no risk of the native-backend conflict CLAUDE.md forbids.
+
+Order: gate with the VAD FIRST, then normalise per-stream gain. Not the other way round - normalising
+a track that is 73% silence just amplifies its noise floor eighty-fold and would make the
+hallucinations worse.
+
+**And a measurement obligation.** 71 real recordings sit under `%APPDATA%\Toki\Recordings` (read
+only). No change to this pipeline should land again without running the same audio before and after
+and showing the diff - the remaining levers are all plausible and none of them is proven.
+
+
+## The speech gate, and the tuning that had to be measured twice (2026-08-14)
+
+Built on the finding above: decode only where somebody is speaking. Silero VAD, through the
+sherpa-onnx runtime already shipping here (`SileroVad` is in the binding), so no second inference
+runtime and no conflict with the rule against Microsoft.ML.OnnxRuntime. `Transcription/SpeechGate.cs`;
+`Transcriber.Transcribe` decodes each region and offsets its timestamps. When the model is missing
+or the gate throws it returns null and the old path runs - silencing a whole meeting because a
+629KB download failed would be far worse than the bug being fixed.
+
+It also replaces the arbitrary windowing. The old long path cut every 3 minutes at whatever
+`QuietCut` judged the least-loud frame, which in continuous speech is still mid-word. Regions now
+come from the model's own speech boundaries.
+
+**Measured, on the same real recording.**
+
+The quiet stream (you.wav, 13 minutes, 73% silence):
+
+| | ungated | gated |
+|---|---|---|
+| decode | 159s (5.0x RT) | **30s (26.8x RT)** |
+| worst line | "Vacuum kinna bital pin button up okay I will laugh okay okay" | "Okay I will laugh." / "Okay, okay." |
+
+**The first tuning was wrong, and only an A/B caught it.** With Silero's defaults (threshold 0.5,
+min-speech 0.25s) the gate looked fine on the quiet stream and quietly damaged the good one: a
+word-level diff against the ungated decode showed **187 words of real speech thrown away**, and they
+were all short - "yep", "yes", "go ahead craig", "hey david what you got", "craig you're not
+audible". Real conversation is full of one-word turns and a 0.25s floor eats them.
+
+The insight is that the two errors are not symmetric. **A false negative is a word the user said and
+will never see; a false positive is a second of quiet handed to a recogniser that will mostly return
+nothing for it.** So the gate must not sit at the middle of the curve: threshold 0.30, min-speech
+0.10s, min-silence 0.50s, 0.35s of padding either side of every region. Retuned:
+
+| them.wav (the good stream) | ungated | gated (v1) | gated (retuned) |
+|---|---|---|---|
+| words | 1580 | 1549 (**-31**) | 1596 (**+16**) |
+| audio decoded | 100% | 70% | 72% |
+
+No net word loss on good audio, hallucinations gone from bad audio, and a quarter of the audio never
+reaches the recogniser at all.
+
+**What this does NOT prove.** There is no ground-truth transcript, so none of this is a WER claim.
+What is measured is word retention against the previous behaviour, decode time, and the
+disappearance of specific hallucinations. Honest limits.
+
+**Two smaller things found on the way.** Sherpa logged "Overflow! ... Increase capacity" twice: the
+VAD buffer was sized for one region on the assumption that is all it holds, when on a continuous
+talker the detector accumulates far more before it can emit. And `--asrtest` only printed three
+lines of head and tail, which is why the first regression was nearly missed - it now writes the full
+transcript to `--out` and names the file `.gated`/`.ungated`, so an A/B is two runs and a diff
+(`TOKI_ASR_NOGATE=1` forces the old path).
+
+**Lesson: a sorted line-diff cannot compare two transcripts.** The first comparison sorted lines and
+reported dozens of "removed" utterances, which read as a catastrophic regression. It was an
+artefact: the gate changes segment BOUNDARIES, so almost every line differs textually even when the
+words are identical. Compare word sequences, not lines.
+
+
+## Levelling, and why it has to happen BEFORE the gate (2026-08-14)
+
+Second half of the accuracy fix: lift a quiet stream to the level the recogniser was trained for.
+The two streams come from different capture paths - a WASAPI microphone and a per-process loopback
+tap - and on a real call they arrived 38dB apart.
+
+**Two things were wrong in the first version, and both were caught by measuring rather than reading.**
+
+**1. The true peak vetoed the gain.** The lift was capped so the loudest sample could not clip, which
+sounds obviously correct and is not: one transient - a cough, a desk knock - held a thirteen-minute
+recording down to **x1.7** when its speech needed roughly ten times that. A single sample must not
+decide the gain for a whole meeting. The ceiling now comes from the 99.9th percentile magnitude, and
+the same recording gets **x9.4**.
+
+**2. The gate was running on the un-levelled audio.** Gain was applied after the regions were chosen,
+so Silero - a trained model with its own expectations about input level - was being handed the very
+signal it was least able to read, on exactly the stream this whole exercise exists for. Levelling
+now happens FIRST and the gate sees the lifted stream. Speech found on the quiet mic went from
+**17% to 46%** of the recording.
+
+The level itself is the 95th percentile of 25ms frame energy, not a mean. A mean over a track that
+is three quarters silence reports a level nobody ever spoke at; the 95th percentile of a
+mostly-silent recording is speech. It also needs no voice-activity pass to compute, which is what
+makes it available before the gate.
+
+**It does what it should on both streams**, which is the test that matters:
+
+| | gain chosen | speech found | words |
+|---|---|---|---|
+| you.wav (mic, 38dB down) | **x9.4** | 17% -> 46% | 73 |
+| them.wav (already good) | **x1.0** | 72% | 1595 (was 1596) |
+
+A stream that is already at level is left alone entirely. That is the whole design: only ever lift,
+never attenuate, and never touch audio that does not need it.
+
+**What is still not fixed, and cannot be fixed here.** The mic transcript still contains
+hallucinations ("Oh my money is a bumblebee"). The source is genuinely poor - a microphone running
+38dB below the meeting audio is barely capturing the speaker - and no amount of post-processing
+invents the information that was never recorded. The real fix is at CAPTURE: the input level on
+that device. Worth telling the owner plainly rather than tuning further against a broken input.
+
+
+## The mascot morphs, and the harness that could not see it (2026-08-14)
+
+Task #11. Toki changed mood by flipping Visibility: a pen appeared, a bubble vanished, nothing moved
+between the two. That is a doll having its accessories swapped, and it is the difference the owner
+pointed at in the Grok mascot they sent, where nothing is ever attached and every state is the same
+shape becoming something else.
+
+**Two changes, and the second is the one that matters.**
+
+1. **Props morph.** Every overlay now carries its own ScaleTransform whose origin is the point on the
+   BODY it belongs to: the bubble's bottom-left at the shoulder, the pen's nib, the sparkles' crown.
+   A mood change shrinks the outgoing prop back into the body and grows the incoming one out of it.
+   260ms in, 170ms out, per the motion rules.
+
+2. **The body carries the mood too.** Before this the silhouette was identical in all four moods and
+   the prop was doing all the acting. Now Toki leans and sways slowly when thinking, dips on the
+   SAME 260ms period as its own pen stroke when writing (an identical period is what makes it one
+   motion instead of two), bounces once when pleased, and in every mood its EYES look at whatever it
+   is doing. The eyes are three lines of code and do more than everything else combined.
+
+The mood motion lives on its own transform channel (MoodBob/MoodLean), separate from the reaction
+channel (Hop/Tilt). A mood runs for minutes and a reaction for 400ms; sharing a transform would mean
+every tap jerked the body out of its mood and every mood swallowed the reaction.
+
+**A prop is hidden by a mood-keyed timer, not by an animation-completed callback.** Moods flap - a
+recording stops and restarts, a summary finishes mid-morph - and a completion handler that fires
+after its animation was already replaced hides a prop that is at that moment being shown.
+
+### The harness that could not see any of it
+
+The --render-anim flag exists to render a view twice, ~550ms apart, "so the two PNGs can be compared
+to confirm the loading animation actually moves". Its two files were **byte-identical, every run,
+since the day it was written.**
+
+WPF's timing engine is driven by the compositor, the compositor only runs for a visual tree attached
+to a presentation source, and that harness never made one. RenderTargetBitmap.Render draws whatever
+the properties hold right now, and with no clock tick that is forever the base value. So the one
+check that existed to confirm an animation moves could not have detected an animation that did not.
+CLAUDE.md lesson 12, again: a self-test that never produced its real artifact is not a test.
+
+Fixed with a real off-screen host window. The clock then ticks as it does in the app, IsVisible turns
+true so self-animating controls actually start, and the second frame is a genuine settled pose. A
+second bug surfaced immediately underneath: RenderTargetBitmap.Render honours a visual's offset
+within its parent, so the second subject in the host's stack rendered 200px below the top of a 100px
+bitmap and came out as a 614-byte PNG of nothing - the kind of artifact that gets glanced at and
+believed. Painting through a VisualBrush re-anchors it at 0,0.
+
+The pair now shows what it claims: at t0 the props are absent and the eyes are level; settled, the
+props are full size, Happy's eyes are squinted and Thinking's body is mid-sway.
+
+## The notch's glass gets its highlight, and the mascot loses its Effect (2026-08-14)
+
+Two parts of task #12.
+
+**The mascot bubble's DropShadowEffect is gone.** That Effect sat inside MascotZone, which is the
+subtree that animates - MascotPop springs it in, MascotShift glides it between states - so every
+frame of every mascot entrance re-rendered the bubble in software. It is rule 1.3 of the motion
+skill and the diagnosed cause of the mascot "rendering hard" in the first place. Replaced by a soft
+gradient contact ellipse beneath the disc: same read, no per-frame cost. A surrounding glow would
+have been clipped by the window's left edge (the zone is only 2px wider than the bubble), and there
+is unlimited room below.
+
+**The Sheen element finally does something.** The design system asks a glass panel for two things:
+a 1px rim, and a top-edge inner highlight where light catches the surface. The notch has carried a
+Sheen border for the second one since the redesign, painted Transparent - drawn but wired to
+nothing, which is the exact shape of bug this project keeps paying for. It is now a themed gradient
+(CardSheen, new in ThemeManager) fading down over a 48px band pinned to the top, not the full card
+height: spread across a tall panel, the same amount of light stops reading as an edge catching it.
+
+Gradients needed a second table in ThemeManager - the palette builds one SolidColorBrush per hex.
+Dark sits at 11% white, deliberately BELOW the rim's 15%, because a highlight brighter than the edge
+it sits inside reads as a smudge rather than as gloss. Light needs 55% to register at all against a
+near-white card. Text under the band stays above 5:1 in both themes over any wallpaper.
+
+**Still unpictured:** --render wraps each view in a stand-in pill, so the notch's real chrome - the
+glass fill, the rim, this sheen, the mascot bubble - has never appeared in any artifact, which is
+precisely the layer the owner keeps saying looks wrong. Tracked as its own task rather than papered
+over with an approximation, because a model of the chrome is what every previous failed check was.
+
+
+## The life layer: Toki watches you (2026-08-14)
+
+Owner, after the morph work landed: "toki looks much better now, but ... it only blinks, doesn't see
+to the side, it needs to ... more life to Toki".
+
+They were right, and the reason was a number rather than a design. Fidgets fired every **30-60
+seconds**, and only one of the four was a glance - so a sideways look happened roughly once every
+three minutes. For the notch mascot, which is on screen in bursts of a few seconds, that is
+statistically never. Toki was technically alive and observably a picture.
+
+What actually reads as alive, from how eyes work and from the mascots that get this right, is the
+EYES, moving often, in small fast darts. A human eye saccades several times a second. It is not a
+fidget to be spent sparingly; it is the baseline, and everything else layers on top.
+
+**Four layers now, constant to rare:**
+
+| | what | how often |
+|---|---|---|
+| **Watch** | the eyes follow the pointer while it is near | continuous, 15Hz |
+| **Saccade** | when nobody is near, the eyes dart to a new point | every 0.9-3.4s |
+| **Drift** | the whole body floats and leans, so it is never truly still | 4.3s and 5.6s cycles |
+| **Fidget** | the old vocabulary (look-around, nod, wobble, perk, double-blink) | every 9-20s |
+
+**Pointer tracking is the one that does most of the work.** A character that tracks you is paying
+attention; one that does not is a drawing. It is polled (GetCursorPos at 15Hz) rather than hooked,
+because the notch is a click-through, never-focused window whose mascot is not hit-testable, so
+there is no MouseMove to subscribe to. Deflection is normalised by the ATTENTION RADIUS, not by the
+distance - dividing by distance would peg the eyes at full travel the moment the pointer left dead
+centre. It re-aims only when the target has actually moved more than 0.12 art units, so a still
+pointer does not start two animations fifteen times a second for no visible change.
+
+**Gaze is composed, not owned.** A mood sets a BASE direction (writing = down on the page); saccades
+and the pointer are OFFSETS from it. So a writing Toki still glances up at your cursor and returns
+to the page rather than to dead centre. One shared ApplyGaze writes the transform; nothing else
+touches it.
+
+Measured cost with all of it running: **0.25 CPU-seconds over 20 idle seconds** (~1.2% of one core),
+and `--fpstest` reports 1.2 dropped frames per notch transition, unchanged.
+
+### The two moments the owner named
+
+**Sparkles (first-run setup).** They pulsed and scaled; they now also TURN, each on its own period
+and alternating direction, and there is a fourth low on the left flank so the set surrounds the
+character instead of sitting in a neat arc above it. A four-point star that only pulses is a pulsing
+star; the same star turning a few degrees while it pulses catches the eye the way a real glint does.
+The fourth is placed OUTSIDE the body silhouette on purpose - a gold star in the middle of the blue
+body reads as a blemish, not a sparkle.
+
+**Writing (while transcribing).** The scribble was a 260ms sine loop, which is a metronome, and the
+eye reads perfectly even motion as mechanical however good the curve is. It is now one 2.2-second
+PHRASE: six quick strokes of uneven size, a beat of nothing where the hand lifts between words,
+three more, then a longer rest. The body shares the same phrase (not merely the same tempo) at 16%
+of the travel, which is what keeps pen and body reading as one motion.
+
+## Two things a picture was lying about (2026-08-14)
+
+**The Ask page's ambient bloom had hard edges.** It was a full-width rectangle of teal tint pinned to
+the bottom of the pane, which gives you two straight lines: a vertical one down the gap beside the
+sidebar card, and a square corner where it meets the window's rounded one. The owner sent a
+before/after pair for it - "only have the curved corner". It now carries an opacity mask that fades
+it out over the outer 14% on each side. Atmosphere with a straight edge is not atmosphere, it is a
+panel. One static brush, no per-frame work.
+
+**Every dark-theme Library shot was unreadable.** `--libshot` renders `RootGrid`, and the page's
+surface is the WINDOW's background, which RootGrid does not have - so the shots came out as
+dark-theme text on the bitmap's white. A picture of a bug the product does not have, which is the
+same failure as the animation harness that photographed nothing: an artifact that gets glanced at
+and believed. The harness now paints the background by resource reference (harness-only, so the real
+window does not carry a background it has no use for).
+
+**And the landing mascot was a Border with a mouse handler** - the fifth time this project has
+shipped that pattern. No press feedback, no keyboard, no hover: the biggest, most obvious Toki on
+screen was the one you could poke and feel nothing from, which is exactly the "haptics" half of the
+owner's complaint. It is a Button now, so the shared style compresses the whole box on press.
+
+
+## The summon flash, and the bug class behind it (2026-08-14)
+
+Owner: "when i try to open toki by taking my cursor to the top of the screen, the toki in the bubble
+flicker appears for a second before the actual toki gets rendered, this happened before as well".
+
+**A delayed animation does not hold its own From value while it waits.** Toki's bubble springs in
+90ms behind the card so the pair reads as two objects rather than one printed graphic, and that delay
+was expressed as `BeginTime`. Until an animation's clock starts, the property shows the element's
+BASE value - and those were scale 1 and opacity 1, which is Toki's ENDING. So every summon painted a
+full-size, fully opaque Toki beside a card that had not unfurled yet, then snapped him down to 0.55
+and sprang him back in. The delay was a preview of the result.
+
+The fix is `ArmMascotReveal()`: park the properties at the animation's From, THEN build the
+character, THEN make the zone visible, THEN start the animation. Order matters and it was wrong.
+
+**The same class, swept.** Every `BeginTime` in the app was checked. Two more were wrong, both in the
+mascot: the thinking dots sat at full opacity for up to 320ms before dropping to 0.25, and the
+staggered sparkles sat at FULL size and opacity for up to 690ms before snapping to half size. Both
+now park at their From. The rest (the Library's staggered page entrance, the calendar rows, the
+status flashes, the wave bars) were already correct - they set the start value first.
+
+### --revealtest
+
+New flag, because nothing could have caught this. It is not a hit target, not a colour, not a
+measured height, and it cannot be screenshotted: the overlay is a layered window and the whole thing
+is over in a tenth of a second. So it drives the REAL PillWindow from Hidden into a panel state and
+reads the properties back at the instant of truth: the card must be clipped shut, Toki must not be at
+full size or opacity, the content must be faded out.
+
+Verified by deliberately removing the fix: it reports `opacity 1.00` and `scale 1.00` - exactly what
+the owner saw - and passes with the fix in.
+
+### A flag can be registered in one place and silently do nothing
+
+`--revealtest` printed nothing and exited 0 on its first run. Self-test flags are registered TWICE:
+in the switch in `SelfTests.Run` and in a whitelist in `App.OnStartup`. A flag in only the switch
+falls through, the app decides it is a second instance, and exits 0 with no output - which is
+indistinguishable from a test that ran and passed. Noted in a comment at the whitelist.
+
+## The UI sweep the owner asked for (2026-08-14)
+
+Beyond the reported flash, from the app's own click log and a pass over the known anti-patterns:
+
+**Three more clickable things that were not buttons.** The "Latest" jump pill in the notch's Ask
+view, its twin in the Library's Ask page, and the "Built with - open source and licences" row in
+Settings. All three were Borders with mouse handlers: pill- or row-shaped, wearing the hand cursor,
+giving nothing back when pressed. The About row had two hand-written MouseEnter/MouseLeave handlers
+re-implementing what the shared style does for free. That is the fifth, sixth and seventh instance of
+this pattern in the project.
+
+**A whole screen was outside the hit-target audit.** The live log had recorded a real hover miss on
+the calendar composer's Create button (inside its box, `IsMouseOver` false, `DirectlyOver` a Grid) -
+and `--hittest` could never have found it, because the composer is a MODE of the Calendar page rather
+than a PillState, and the audit walks states. The composer and the month day-picker are both audited
+now: 259 controls became 311, all passing.
+
+## One Toki per surface, enforced (2026-08-14)
+
+Owner, with two screenshots: the Ask page's mascot grew a grey rounded-rectangle background on hover,
+and the sidebar masthead (mascot plus wordmark) did the same.
+
+The hover box was mine, from an hour earlier: making the landing mascot a real Button - correct, it
+had no press feedback at all - brought `RowButton`'s hover fill with it. **New `BareButton` style**:
+press-compress only, no hover or press fill, transparent background retained so the whole box stays
+hit-testable. It is for the one case where the thing you click IS the artwork. Drawing a grey
+rectangle behind a soft character puts a box around a shape that is deliberately not a box; the
+affordance is the hand cursor plus Toki reacting when poked, which is a better one.
+
+**The sidebar mascot is gone entirely** - the masthead is the wordmark alone. CLAUDE.md has said "one
+Toki per surface" since the redesign, and the Library window had two: a small one in the rail and the
+real one in the middle of the Ask page. A masthead identifies the app; it is not a control.
+
+**And no icon in the title bar.** WS_EX_DLGMODALFRAME plus a frame-change, which is the documented
+way to get the icon-less dialog look, plus clearing ICON_SMALL because that is the one the title bar
+draws. ICON_BIG is deliberately left alone: that is what the taskbar and alt-tab use, and it is the
+icon generated from Toki by --makeicon. Clearing both would have quietly blanked the taskbar entry.
+
+
+## The first-summon flash: it was the LAST frame, not the first (2026-08-14)
+
+The owner tested the previous fix and it was still there, with a detail that changed everything:
+"the FIRST time i hover over the top, the notch kinda pops open for a split second and then the toki
+drops down from the top ... everytime i hover back again after the first time has no issues."
+
+The arming fix (parking the entrance at its From) was necessary but was not this bug. This one is at
+the other end of the cycle.
+
+**Closing the notch left a picture of an OPEN notch in the window's surface.** `ConcealUp` finished
+with `Root.Clip = null; Hide();` - it un-clipped the card, to its full open size, and then hid the
+window. The render pass queued by that clip change still ran, against a window that was already
+hidden, so the layered surface Windows keeps for the HWND ended up holding a fully open notch. The
+mascot made it worse: `MascotZone` is a SIBLING of the card, not a child, so the clip never masked
+it - the stale surface had Toki's bubble in it at full opacity too.
+
+On the next `Show()`, DWM presents that surface until the first new frame lands.
+
+**Which is exactly why it was the first time only.** On the first summon the view for that state is
+being constructed and laid out for the first time, so the gap between `Show()` and the first real
+frame is long enough to see. Afterwards the view is cached, the new frame lands within a vsync or
+two, and the stale frame is never on screen long enough to notice. The owner's "only the first time"
+was not a clue about startup - it was a clue about how long the gap is.
+
+The fix is `ParkAfterHide()`: hide FIRST, then put everything back to its "before it opens" state and
+leave the clip SHUT. The last thing the window ever composes is empty.
+
+**A second bug fell out of it.** The mascot's entrance only ever ran ONCE per app run. `SetSurface`
+arms and plays it only when the mascot was hidden, and nothing ever hid it - so after the first open,
+Toki simply appeared with the card, with none of the spring he was written to have. Parking on hide
+fixes that too. The owner's "everytime i hover back again after the first time has no issues" was
+half right: no flash, and also no entrance.
+
+**Proven, not asserted.** `--revealtest` grew a hide/show cycle: after a hide, Toki must not be left
+showing, the card must be left clipped shut, the content must be left faded out, and the SECOND
+summon must arm the entrance like the first. Reverting the one line reports all three failures,
+including `opacity 1.00, scale 1.00` for the second summon. The test pumps the real dispatcher for
+500ms so the retract animation genuinely runs - a test that only calls methods would be measuring a
+model of the animation.
+
+## The mascot bubble in dark theme (2026-08-14)
+
+`MascotBubble` was `#D9F4F7FB` in the DARK theme - a near-white disc - on the reasoning that a bright
+puck lifts the character off the dark glass. On a dark desktop with a dark notch it is the single
+brightest thing on screen. Owner: "the bubble doesn't turn dark enough when we switch to dark theme,
+its just white with a shade of black."
+
+Now `#E6383433`: the same warm dark glass as the card, a step lighter so the disc still reads as its
+own object beside it rather than a hole in it, with the rim dropped from white-40% to white-20% to
+suit. The character stays legible either way - he is a pale blue cloud (#3D9BEA up to #EAF6FF),
+which is a bigger step against #383433 than it ever was against near-white. Rendered in both themes
+to check rather than reasoned about.
+
+## No icon in the Library's title bar (2026-08-14)
+
+Owner: "even on the window bar with the minimise, maximise and close buttons, on the left side, it
+says mascot and Toki, remove all the mascot, only Toki."
+
+WPF has no ShowIcon property. `WS_EX_DLGMODALFRAME` plus a frame-change gives a window the dialog
+look, which has no title-bar icon. **Setting only the style was measured on the real window and was
+NOT enough** - the style bit was on and the mascot was still there - for two reasons: `StyleChrome`
+runs on `SourceInitialized` and WPF applies its own icon AFTER that, and the title bar draws whatever
+icon the window holds regardless. So the strip runs again at `Loaded` priority, and both icon slots
+are cleared. Verified by screenshotting the real title bar: "Toki", no icon.
+
+**Not verified:** the taskbar/alt-tab icon. Those read the icon from the process, and the app icon is
+compiled into the exe (the one `--makeicon` generates from Toki), so clearing the window's icons
+should not touch them - but the owner's taskbar is auto-hidden and could not be captured in this
+session, so this is reasoning rather than a measurement, and it is flagged as such.
+
+**Incidental finding worth keeping:** this machine has "Show Toki in screen recordings" ON, which
+means ghost mode is off and **the notch IS screen-capturable here**. Every note in this repo saying
+the overlay cannot be screenshotted assumed the default. Task #15 (picture the notch's real chrome)
+is therefore much cheaper than planned on this PC.
+
+
+## Two morphs, 19ms apart: the actual split-second pop (2026-08-14)
+
+The owner reported the flash a third time. Both earlier fixes were real bugs and neither was this
+one. This time I stopped reasoning and photographed it: 90 screenshots of the top-centre strip while
+the app woke up, assembled into a contact sheet. (This PC has "Show Toki in screen recordings" ON, so
+ghost mode is off and the notch is capturable - every note in this repo saying otherwise assumed the
+default.)
+
+The frames showed the card appearing at FULL SIZE and EMPTY in a single frame, then the content
+fading in, then Toki arriving. Not a stale surface, not a delayed animation: no growth at all.
+
+Then one line of instrumentation in `PinContentForMorph` said exactly why:
+
+```
+22:06:33.294  morph clip  52x42 -> 344x211   union 344x211  (150ms)
+22:06:33.295  transition Collapsed->Home path=hover-morph  card=344x211
+22:06:33.313  morph clip 344x211 -> 344x211  union 344x211  (300ms)
+```
+
+**Two morphs run for one transition, 19ms apart, and the second is a no-op that cancels the first.**
+
+- The first (150ms) is `GrowToContent`, fired by the freshly-built view as it lays out. It is the
+  real growth, 52x42 to 344x211, and it is correct.
+- The second (300ms) is the state change's own morph. Starting it supersedes the first (`_pinGen`),
+  so the genuine growth is cancelled 19ms in - and because its own from == to, it animates nothing.
+  The card is left sitting at full size.
+
+**Root cause: `_cardW/_cardH` is written at the START of a morph, not at its end.** So while one is in
+flight it already claims the destination, and any morph that begins during it reads its own target as
+its origin. That is a general fault - ANY two overlapping morphs snap - and the first summon is simply
+where two reliably overlap, because that is the one time the view is being built and grows as it
+lays out. On later opens the view is cached, there is nothing to grow into, one morph runs, and it
+looks fine. That is the whole of "only the first time".
+
+**The fix:** a starting morph reads the CURRENT size off the live clip (`RectangleGeometry.Rect`
+returns its animated value), so a superseding morph picks up where the previous one had reached and
+carries on. Second half of the fix: the hover-morph path was doing `Root.Clip = null` immediately
+before calling the morph, which destroyed that information - it no longer does, and
+`PinContentForMorph` clears the clip itself on the one path where it sets no new one.
+
+Measured after: `morph clip 52x42 -> 344x211` for both, and the contact sheet shows the card growing
+across five or six frames instead of appearing in one.
+
+**Both diagnostic lines stay in.** One per state transition (which path, is the window visible, what
+size is the card) and one per morph (from, to, union, duration). This bug took three attempts and a
+90-frame burst to find, and it would have been one line of log the first time. Same reasoning as
+`LogClicksThatMissAButton`.
+
+
+## The flicker, frame 34 (2026-08-14)
+
+The owner sent a screen recording. Extracted at 30fps, the answer is one frame:
+
+```
+frame 33  (1089ms)  the peek
+frame 34  (1122ms)  THE COMPLETE SETTINGS PANEL - full size, fully opaque, fully laid out
+frame 35  (1155ms)  blank
+frame 36+ (1188ms)  the panel fading in properly
+```
+
+One frame of the finished panel, then nothing, then the real entrance. That is the flicker, and it
+is not the same bug as either of the two fixed before it (the un-armed entrance, and the two
+colliding morphs - both real, both shipped, neither this).
+
+**The content was put into a visible window at full opacity before anything hid it.** `OnStateChanged`
+adds the new view to `Host` near the top; each of the three transition paths then sets `Host.Opacity`
+to 0 and applies a clip - but only AFTER doing the sizing work. And the sizing work ends in
+`SetWindowPos`, which is a synchronous Win32 call that can let the window paint. So there was a
+one-frame window in which the new view existed on screen at full opacity, at the new full size, with
+no clip. Exactly frame 34.
+
+**Three changes, in the order the frames demanded:**
+
+1. `Host.Opacity = 0` moved to BEFORE the view is added, not after the sizing. There is now no moment
+   at which the content is on screen without having been faded in.
+2. In `AnimateSize`, the clip goes on BEFORE the window grows. The worst thing that can be painted
+   mid-resize is now the small rectangle the card is about to grow out of, instead of the whole panel.
+3. The mascot fades out WITH the card during the retract. The clip masks only `Root`, and the mascot
+   is a sibling, so through the whole 170ms close the bubble sat at full size beside a card shrinking
+   to a stub - which is the owner's second screenshot exactly. `ParkAfterHide` did put it away, but
+   only once the retract had already finished.
+
+**Measured after**, same transition, log-synchronised burst on the real app: the panel comes up over
+frames 44-50 (~230ms) as a smooth grow-and-fade, and there is no full-size frame anywhere in the
+sequence. The morph log also shows the clean handover the previous fix bought: `52x42 -> 344x211`
+followed by `141x93 -> 344x211` - the second morph picking up the live value and carrying on.
+
+**How this was found, and the lesson.** Three attempts failed because I reasoned from the code about
+what the frames must contain. The recording settled it in one pass. ffmpeg is not installed on this
+PC but `pip install imageio-ffmpeg` ships a binary, and a contact sheet with frame numbers and
+timestamps drawn on turns "a fast flicker" into a specific frame index. When a visual bug survives a
+fix, get the frames before touching the code again.
+
+
+## Toki, from the actual vector (2026-08-14)
+
+The owner described the gap precisely: "it has one blob on top, 2 for each side, and 2 legs kinda
+shape, but ours is a blob on top of its head, and a fat mascot that just is fat at the bottom part
+... it is a semi circle shape at the bottom."
+
+That is exactly what the old art was - four overlapping ellipses (a wide base plus three head
+circles), which can only ever make a fat semicircle - and no amount of tuning ellipses would have got
+to the real shape. So the character was rebuilt from the design file instead of from a reading of it.
+
+**What came out of Figma** (Udtb5KHB2iTLIVP5FhKaSl, "Assets - Characters", 325:278), via
+`get_design_context` on the vector node, which returns a real SVG:
+
+| | before | now |
+|---|---|---|
+| body | 4 ellipses, 120x106 (ratio 1.13) | the design's single path, 57.43x43.90 (ratio 1.31) |
+| silhouette | fat semicircle | crown bump, a lobe each side, two feet with a notch between |
+| gradient | pale top -> saturated bottom | **#01A4FF flat to 35%, then -> #F0FAF9** (the design's own) |
+| eyes | 16x30, far apart | 7.05x15.26 at x 18.99 / 31.49 - the design's numbers |
+| happy | squashed pills | ^ ^ arcs |
+| thinking | r9 bubble, 4.5px dots | 28x12 at r4, three 4px dots |
+| reading | **did not exist** | the note in hand: 26x18 card, two rows of a dot and a line |
+| writing | a hand-drawn chunky barrel | the design's pen paths, navy #3E5E92-#608EC6 with a silver ferrule |
+
+The gradient being upside down is worth naming on its own: it is why the old one read as a heavy blob
+sitting on the floor rather than a light one floating.
+
+**The board is 67x52, not the body's 57.43x43.90**, because the props live outside the body exactly as
+the design frames do (the thinking and notes frames are 67 wide). The body is drawn at (0,4) and every
+prop uses the design's own coordinates plus that offset, so the numbers in the file can be checked
+against the file they came from.
+
+**Two things measured rather than eyeballed.** The crown glow was set by sampling the reference
+render: 10% down the body it reads (138,216,252), which is #C7F0FC at 69% over #01A4FF, and 25% down
+it reads (40,178,254), which is 20%. The overlay was at 56% fading out by 34% - far too weak at the
+crown, which is why ours looked harder and more saturated than the design.
+
+And the pen: its path already carries the angle it is held at, so the scribble animation had to move
+a few degrees around ZERO. It was sitting at 26 degrees of REST, which rotated the whole pen off the
+body and out of frame - visible in the render as a pen floating outside the mascot's disc entirely.
+
+**Moods are re-wired to match what they mean.** Recording (live transcription) is now READING - the
+note in hand - and Summarizing is WRITING - the pen. They were the other way round in spirit
+(recording showed a pen, summarising showed a thinking bubble), and the note-in-hand character
+existed in the design and not in the app at all.
+
+**A bug worth remembering from the rebuild:** `DotFill` was declared inside the thinking bubble and
+referenced by the note card, its SIBLING. WPF resource lookup walks UP the tree, never sideways, so
+the whole control threw a XamlParseException at construction - which surfaced as `--render-anim`
+hanging rather than as an error, because the harness had no try/catch around the view it was building.
+
+## Home says what it does (2026-08-14)
+
+Owner: "the start a meeting button is not the relevant button for what its purpose is, it opens the
+calendar page", and on the row beneath it: "the buttons, connect a calendar, library > and +google,
+are so ugly and weird, what is +google, we have outlook as well, why is that even there?"
+
+Both are fair, and the second is a correctness point rather than a taste one: naming ONE provider on
+the home screen of an app that supports two is a bug.
+
+- **"Start a meeting" is now "Calendar"**, with a calendar glyph instead of a video camera. It has
+  always opened the calendar page; the label now says so. (The owner's call, from two options.)
+- **The whole footer is gone** - the account marks, the "+ Google" pill, the "Library >" pill and the
+  "Connect a calendar" dropdown. Connecting a calendar happens once, ever, and Settings already has
+  both providers with their sign-in state and a disconnect.
+- **UPCOMING moved below the two actions** (the verbs first, then what is coming), and when nothing
+  is connected it shows one quiet row: "Connect to Google or Outlook calendar in Settings", which
+  opens Settings.
+- **The Library door became an icon** beside Settings in the header, where the redundant calendar
+  icon used to be.
+
+## The notch's Settings page (2026-08-14)
+
+- The "Appearance" heading is gone. One setting and a link to the rest; a category label above a
+  single row is a word that earns nothing.
+- **The two rows now start at the same x.** "Glassy notch" was a bare Grid at inset 0 while "All
+  other settings" is a RowButton whose style pads 12 - so the two read as belonging to different
+  pages (owner: "alignment and symmetry is missing"). The row now carries the same 12px inset on both
+  sides, so the switch and the chevron line up as well as the labels.
+
+
+## The Grok lesson, applied where it was being broken (2026-08-14)
+
+The owner looked at the new mood strip and said two things in a row. First: "the sparkly toki has
+eyes and ^ ^, it can only have ^ ^". Then, once that was patched: **"remember the dynamic lesson from
+grok bot, use that."**
+
+Both were about the same thing, and the second is the one that mattered. The happy face was a SWAP -
+collapse the two eye ellipses, reveal a separate arc Path - which is exactly the doll-with-swappable-
+accessories pattern that task #11 exists to kill. It was written into ARCHITECTURE as the principle
+and then violated in the very next feature.
+
+**The eyes are now ONE shape that morphs.** Each eye is a closed path of four cubic segments -
+thirteen points. Open, those points are an exact ellipse (kappa 0.5523, the design's 7.046 x 15.257).
+Happy, the SAME thirteen points sit in a caret: the top rises to an apex, the sides swing out into
+arms, the bottom lifts to the inner V. A `PointAnimation` per point takes one to the other, so the
+eye BENDS into the smile and unbends out of it. Nothing appears; nothing is hidden.
+
+Two implementation notes worth keeping:
+
+- **Absolute board coordinates with `Stretch="None"`, not `Canvas.Left`.** The caret reaches outside
+  the oval's bounding box, and a Path positioned by its bounds would slide sideways as those bounds
+  grew mid-morph. The blink scale is centred on explicit numbers for the same reason.
+- **The design's 1px eye shadow is gone**, along with the second copy of the eye that faked it. That
+  copy was what stayed on screen under the arcs and produced "eyes AND ^ ^" - collapsing the eye did
+  not collapse its shadow. At the size an eye actually renders, it was contributing nothing.
+
+**And the body is centred.** The board is 67 wide for the props but the body is 57.43, and all the
+spare room was on the right, so Toki sat 4.8px left of centre in his bubble. One fixed translate.
+
+## Home and Settings, refined (2026-08-14)
+
+Owner's list, each item its own defect:
+
+- **"the library should have a proper button mentioning library and the symbol, not just the symbol"**
+  and **"library button should be at the bottom right corner, like last time"**. It had been a text
+  pill in a footer, then an unlabelled header icon. Neither was a button you could read. It is now a
+  real pill, bottom right, with the shelf icon AND the word, on the same `Chip` fill every other
+  secondary action uses - so its shade and size stop being a one-off.
+
+- **"connect to google or outlook calendar button takes me to the notch settings, but the notch
+  settings doesnt even have connect google or outlook buttons"**. Correct, and worse than untidy: a
+  button that opens a page which cannot do what it promised. New `LibraryWindow.ShowLibrarySettings`
+  opens the Library's Settings and brings the calendar rows into view - the only page that has Google
+  AND Outlook with their sign-in state.
+
+- **"the button itself is so long and so much text it cannot have that"**. It read "Connect to Google
+  or Outlook calendar in Settings", which is an instruction printed on a button instead of a button.
+  Now: an icon, "Connect a calendar", a chevron.
+
+- **"the settings has an extended bottom empty area"**. The notch's Settings page was pinned at a
+  FIXED 208px while its content - one switch and one link - measures far less, so the card carried a
+  stretch of empty glass under the last row. It has joined the AutoHeight set (120 is now only a
+  floor). A fixed height is only honest while the content is fixed, and this page lost most of its
+  content when AI/calendar/name/about moved to the Library.
+
+
+## Toki on white, and four smaller fixes (2026-08-14)
+
+**The mascot is drawn for a dark notch.** The design fades his feet to #F0FAF9 and washes his crown
+with pale #C7F0FC at high alpha - beautiful on dark glass, and on the light theme's near-white bubble
+it means the top and bottom of the character simply stop existing. The owner sent a screenshot: a
+blue band floating in a white disc.
+
+Measured, our colour profile was actually FAITHFUL - sampling down the centre gave (131,214,253) at
+15% against the reference's (138,216,252) at 10%, and (25,173,254) at 37% against (23,171,254) at
+40%. The design is genuinely that pale at the ends. It survives on the Figma artboard because that
+board is pure white and the eye supplies the missing edge; it does not survive in a product where the
+same character has to sit on a #E6FFFFFF puck.
+
+So three colours now have a light-theme value, applied in code on construction and on every theme
+swap (gradient stops cannot take a DynamicResource cleanly):
+
+| | dark | light |
+|---|---|---|
+| feet | `#F0FAF9` | `#4FC0FF` |
+| crown wash | 86% / 69% / 20% | 35% / 24% / 8% |
+| sparkles | `#FDE685` - `#FCC942` | `#FFC93C` - `#F59300` |
+
+The saturated middle is untouched: the character is the same character, it just keeps its edges on a
+pale background.
+
+**The bubble was clipped during recording.** `PlaceMascot` centres the 58px bubble on the card, and a
+compact pill is 40-50 tall - so centring wanted a NEGATIVE offset, which put the top of the circle
+above the window's own top edge, where it was cut flat. Clamped to 0: a few pixels low beats a circle
+with a flat top.
+
+**The moods were the wrong way round again.** Owner: "toki writing should be when toki is recording,
+and toki notes should be when toki is transcribing." So recording shows the pen and summarising shows
+the note. My previous guess had it inverted.
+
+**"Connect a calendar" now glides.** New `SmoothScroll.GlideTo` animates a ScrollViewer so a target
+element lands near the top, on the same curve family as a wheel nudge but longer and ease-in-out -
+this is a journey across a page, not a nudge. `BringIntoView` jumps, which is right for a keyboard
+tab and wrong for "take me to that setting": arriving somewhere new should show you that you
+travelled, or the page just seems to have changed under you. It fires 260ms after the page lands, so
+the motion is not spent on a page nobody has seen yet.
+
+**The app icon is the new mascot**, regenerated at all seven sizes with `--makeicon`. It is built
+from the LIGHT-theme colours deliberately: the dark-theme feet fade to near-white, which is right on
+a dark notch and invisible on a light taskbar, and an icon has exactly one requirement. Windows
+caches shortcut and taskbar icons, so a pinned shortcut may need re-pinning to pick it up.
+
+
+## "Replay first-run setup" landed on the last page (2026-08-15)
+
+Owner: "replay toki first setup takes me to you're all set page".
+
+The notch caches one instance of every view, and OnboardingView holds its position in the flow in
+nothing but the three steps' Visibility. So the first run walked name -> privacy -> done and left the
+cached instance sitting on "You're all set" - and every later replay handed that same instance
+straight back, already finished. It would have been invisible on a fresh install and permanent
+afterwards, which is why nothing caught it.
+
+`ResetToStart()` rewinds the three visibilities and re-reads the name from settings (which may have
+changed in Settings since the last run - seeing and correcting it is the point of replaying). It is
+called from `OnStateChanged` when the view is fetched, NOT from the view's own `Loaded`: the notch
+measures the view to size the card, and that measure happens before Loaded runs, so a reset on Loaded
+would size the card for whatever step was left showing and then swap the content under it.
+
+**The general shape here is worth naming:** a cached view that holds a FLOW must be rewound on entry.
+The cache is right (rebuilding every view on every state change is task #10's whole complaint), but a
+view with a position in it is state, and state that outlives its visit is a bug waiting for someone
+to come back.
+
+### The reveal test stopped racing the clock
+
+Adding the onboarding check to `--revealtest` made three of its existing checks fail - on a build that
+was correct. They sampled the entrance LIVE (`is Toki still faint?`) a few instructions after the
+state change, and the extra work in the test was enough that, on a loaded machine, the 90ms delay had
+elapsed and the spring was 90% done. A test that fails because the machine is busy is worse than no
+test.
+
+`PillWindow` now snapshots the four entrance values at the instant of `Show()` - clip height, mascot
+opacity, mascot scale, content opacity - and the test asserts on that snapshot. It is the number that
+actually matters (what the entrance starts FROM) and it never moves. The thresholds went back to
+"essentially zero" instead of the loose 0.35 the sampling had forced.
+
+Verified the same way as the others: with the fix reverted, the check reports `showing step 2`.
+
+
+## Toki sitting on the pills (2026-08-15)
+
+Three screenshots, one root cause. During a morph the window is held at the UNION of the old and new
+sizes and the card is CENTRED in it, so the mascot is shifted right by half the slack to stay beside
+the card's moving left edge. That shift was never cleared. The moment the morph finished and the
+window settled onto the target, the card filled its area again - and the bubble stayed parked at the
+inset, on top of the pill.
+
+It only showed on a SHRINK, which is why it looked like three unrelated bugs: a panel folding to the
+"Notes ready" pill, to the recording bar, or to the loader's sliver each left Toki further right than
+the last. The timer read "0:17" with the bubble over the "0". Cleared in the clip animation's
+Completed, at the same instant the clip is dropped and the card starts filling its area again.
+
+**And a second, older one underneath it:** the window is only as tall as the card plus its shadow pad,
+but the mascot zone is a fixed 58px pinned to the window's top - so any state whose card is shorter
+than about 40px cut the bottom off the circle. The loader's sliver made it unmissable: a 13px card
+gives a 37px window and two thirds of Toki's head. `WinH` now floors at the mascot's height. The extra
+is transparent pad below the card, exactly like CardPadB, so nothing else moves.
+
+Photographed on the real notch afterwards, state by state (ghost mode is off on this PC, so the
+overlay is capturable): Summarizing and Notes both show a full circle with Toki beside the pill.
+
+### The frame budget, and an instrument I cannot currently trust
+
+`--fpstest` after all of this reported 16.8 dropped frames per notch transition against a 1.2 baseline
+from before the mascot rebuild - which would be a serious regression and exactly the "hard rendering"
+this project has fought before.
+
+So I cached the two things that deserve it. The body is THREE complex bezier paths, each
+gradient-filled, and the whole mascot is permanently under transform animation (breathing, the idle
+float, the mood lean), so every frame re-rasterised all three; the pen is five more paths under a
+scribble that runs for as long as a recording. Both are static geometry that only ever moves under a
+transform, which is the textbook BitmapCache case, and there is no text in either so the skill's
+ClearType warning does not apply. RenderAtScale 4; verified crisp at notch size and in the harness.
+
+**Then the measurement fell apart.** Three consecutive runs of the SAME binary gave 10.5, 18.4 and
+15.4, with the CONTENT cost line swinging between 5% and 33%. The spread between runs is larger than
+the difference being chased, so the instrument currently cannot answer the question. This PC is
+syncing this repository to OneDrive and has been building continuously for hours.
+
+I am recording that rather than picking whichever number flatters the change. Tracked as its own task,
+with the next suspects named (the eyes, which replaced two Ellipses with two PathGeometry paths and
+cannot be cached because they blink and morph; the idle float and lean, which are two NEW permanent
+animations; the 15Hz pointer watch) and a note that the test should report a median of several runs
+instead of a single one.
+
+## The four ways the notes lied, and the shape of each fix (2026-08-18)
+
+The owner asked what was wrong with the two newest recordings. All four defects shared one root:
+a layer that was allowed to be confidently wrong where it should have stayed silent. The fixes are
+all narrowing moves, and each encodes a rule worth keeping.
+
+**Distance budgets must scale with length.** The name corrector allowed a trusted name to claim any
+word within 5 edits and 2 phonetic-key edits. On a 3-letter word that is a licence to rewrite
+anything: "day" became "Toki", "get" became "Craig", the real person David became "Toki", and the
+damage compounded because notes are written FROM the transcript ("a two-Toki wait period is
+suggested"). `SoundAlike` is now three explicit branches - homophone (key distance 0, raw <= 3),
+near-spelling (key distance 1, floor of 4 letters, raw <= 2 or 3 by length), and the trusted reach
+(key distance <= 2, raw <= 5, ONLY at 6+ letters with the first two key characters matching). Each
+branch's comment carries the real example that justifies it and the real failure it must not
+readmit. This matches what the contextual-biasing literature warns about: a correction layer must
+be measured against DISTRACTORS, not just against the names it should catch.
+
+**Detection conditions are replacement conditions.** The old rewrite replaced every case variant of
+a mapped word anywhere in the text, while detection required a capitalised mid-sentence token. Any
+gap between what qualifies a word and what gets rewritten is a bug factory: one stray capitalised
+"Day" poisoned every lowercase "day" in the meeting. The rewrite now applies the same tests
+detection does (capitalised; sentence-initial only with mid-sentence evidence or a trusted target).
+
+**A fix that is not on the executed path does not exist.** The Silero speech gate (2026-08-14) ran
+only in the stop-time whole-file decode - and every real meeting takes the LIVE path, which fed raw
+15-second windows to Parakeet ungated. Lesson 12 already said a self-test that never produced its
+artifact is not a test; the corollary is that a fix verified on a path meetings never take is not a
+fix. The gate now lives in `TranscribeSlice` (persistent Silero session, levelled before gating,
+same order and reasons as the whole-file path), and the whole-file path no longer falls through to
+an ungated decode when the gate finds zero speech.
+
+**Cross-references resolve against final identity, at bounded range.** "Still open from last time"
+matched previous meetings while this meeting still had its placeholder title (the transcript's
+first words), by SUBSTRING ("just" matched "AdJUSTing", "even" matched "EVENt Coverage"), with no
+age limit (a seed record with 2023 due dates was handing out homework). It now runs after the LLM
+title exists, matches whole words only, and looks back at most 45 days. Wrong evidence links are
+worse than none - the same rule the evidence player follows.
+
+**A prompt is a request; a validator is the enforcement.** The model echoed the prompt's own
+"drop the due field when no time was stated" into an actual due slot, and ParseActions stored it.
+Owner and due are claims now checked in code: due must look like a time, owner must be "You" or
+appear word-for-word in the transcript (the faithfulness literature's point that a mis-attributed
+task is the compounding error - the wrong name in the note becomes the wrong name in the follow-up).
+This is the same lesson as sampler-params-over-prompts (lesson 8), applied to output instead of
+decoding.
+
+Checked and rejected: the loopback "clipping" theory. them.wav's 99% peak scanned clean - zero
+saturated samples, max 0.985. Loud is not clipped, and turning it down would have cost quiet
+speakers for nothing.
+
+## The five-critic audit, and what it says about guessing layers (2026-08-18)
+
+The owner asked for the processing system to be adversarially reviewed end to end. Five independent
+critic agents each audited one layer and reported only provable failure scenarios; every claim was
+re-verified against the code before a fix. Twenty-four confirmed defects were fixed in one pass.
+The patterns matter more than the list (the list is in the build log):
+
+**State machines must not own session facts.** The recording clock lived in AppState and reset on
+any re-entry into a recording state - but the SESSION keeps recording while the pill detours
+through Ask. A fact about the session (when recording started) now has session lifetime: set once
+while null, cleared explicitly at stop. Any fact stored one level above the thing it describes
+will eventually disagree with it.
+
+**Deletion needs a tombstone, recovery needs a claim.** DiscardMeeting deleted the DB row first
+and the folder second; a locked WAV left a folder that looked exactly like a crash orphan, and the
+recovery sweep faithfully resurrected the meeting the user had deleted. Now the folder is marked
+`.discarded` BEFORE the row goes; the sweep deletes marked folders and claims unmarked ones by
+rename (the repo's own claim-by-rename rule, which the sweep itself had never applied). The sweep
+also re-checks the DB at claim time - its `known` snapshot goes stale over a minutes-long backlog.
+
+**Validation against model output is not validation.** The owner gate checked names against the
+map-reduce DIGESTS - text the model wrote - so an invented name validated itself. Ground truth
+for a claim must be text the model cannot have produced: the transcript. Same shape as the
+template gate's "1:1" check, which counted stream labels (always two before diarisation) and so
+cleared every meeting there is: a gate whose condition is always true is not a gate, and both were
+invisible because every test fed them exactly the shape that made them pass.
+
+**Failure and absence are different answers.** Three separate layers folded "I could not do it"
+into "there was nothing to do": a map-chunk timeout became "nothing substantive was discussed", a
+thrown live decode became "nobody spoke in this window", and a parse miss on headerless output
+became a low-substance note. Each now propagates failure distinctly (heuristic fallback, counted
+lost seconds with a whole-file fallback past 8s, null-means-parse-failure) - because the cost of
+conflating them is an invented VERDICT, which is worse than an honest degradation.
+
+**Priors may extend evidence, never override it.** The attendee-count prior stopped diarisation's
+merging the moment the cluster count matched the invite, force-splitting one voice into four
+"speakers" on a partially-attended meeting. The rule now: distances below threshold always merge;
+the prior only lets merging continue past the threshold. A prior that can create structure the
+data does not support is a fabricator, not a prior.
+
+**Symmetric-looking operations need their direction checked.** The echo de-dup's containment score
+divided by the shorter line, which deletes the LONGER line - backwards for an echo, which is a
+degraded COPY. The trusted-name reach, the corpus vote, the union-find transitivity (A~B and
+B~winner never tested A~winner) - all had the same shape: a relation applied without asking which
+way it points.
+
+Deferred (documented in docs/backlog.md with reasons): VAD-boundary live windowing, device-gap
+silence injection, handover-vs-backchannel attribution, evidence clip cap anchoring, live Library
+refresh on title upgrade.
+
+## An accuracy instrument, and cosmetics as a separate last pass (2026-08-18)
+
+**`--wertest` exists because every accuracy claim before it was inference.** The project rule says
+a self-test that never produced its real artifact is not a test; by that standard the whole
+transcription stack was unmeasured. The harness scores the PIPELINE (gate + levelling +
+readability), not the bare model, because the pipeline is what the user reads - and it skips name
+correction deliberately, because that layer depends on the user's real library and settings,
+which a test must never touch. Both sides of the comparison go through one normalizer (lowercase,
+punctuation out, fillers out) so formatting can never masquerade as recognition error. Names get
+a separate recall table: a 6% WER with the attendees' names all wrong is a worse product than 9%
+with them right, and a single average hides exactly that.
+
+The instrument paid for itself on its first run: synthesized eval audio came back with "Abhishek"
+as "Ubishek", and tracing why pinning would NOT have fixed it exposed that SoundAlike's
+first-sound gate required identical opening phonemes. Recognisers swap the opening vowel of
+unfamiliar names constantly (a distinctly Indian-name-shaped failure, and these are the owner's
+meetings). Opening vowels are now one sound class at that gate; consonant openings stay strict.
+An instrument that finds a real defect in the thing it measures, on day one, is the argument for
+building instruments first.
+
+**Readability is its own pass, last in the chain, and rule-based on purpose.** Converting
+"august twenty first" to "August 21st" or dropping "uh" could have been prompt lines in the note
+writer or extra cases inside SelfCorrection. Both would have been wrong: a model rewrite can
+invent, and mixing cosmetics into a repair pass couples "how it reads" to "what was said". The
+pass runs after names and self-corrections so cosmetics never feed evidence into riskier layers;
+its conversions are recorded as "tidy" fixes (the transcript shows its working, like name fixes);
+its deletions are not recorded (nothing to hover); and every rule keeps the conservative default:
+counts stay words, small ordinals stay words, "may" needs its capital before it can be a month,
+and a line that was pure hesitation survives as itself rather than being emptied - the record
+that somebody made a sound is still a record.
+
+## One waveform, driven by real audio (2026-08-18)
+
+**Decision: there is exactly ONE waveform control, `Controls/VoiceWave`, and its only per-site knobs
+are `BarCount` and `Height`.** Two unrelated decorative waves had grown up independently (a
+travelling-sine `LiveWave` on the recording bar, a row of pink bars built inline in `AskView`), and
+the owner's read was that they did not match and neither was good. Anything richer than a count and a
+height as a per-site knob is how two waveforms happen again, so the knobs stop there. `LiveWave` is
+deleted; the pink bars are deleted with their captured-brush theme bug.
+
+**Decision: the wave is driven by measured audio, and silence is drawn as silence.** Both old waves
+animated at a fixed amplitude regardless of what the microphone was doing. That is a small lie, but
+it is the same *kind* of lie the entire product is built to avoid, and it is the one the user can
+check against the room in real time. `Audio/LevelMeter` is the source: capture buffers report RMS
+(sum of squares over the buffer already in hand, no allocation, safe on the audio thread), and the
+value self-decays through a sliding two-bucket max, so a stopped capture parks the row at its resting
+dots on its own rather than through teardown wiring somebody can forget to call.
+
+Two static meters, not one. `LevelMeter.Recording` is fed by BOTH the mic and the per-process
+loopback, so the bar shows max(you, them) - a wave that only answers to your own voice is dead for
+most of a meeting you are listening to. `LevelMeter.Voice` is fed only by push-to-talk, because
+asking Toki a question mid-meeting must not make the Ask wave dance to the call.
+
+**Decision: both ends of the level mapping track the recent history.** `LevelScale` maps
+`sqrt(clamp((rms - noise) / (ref - noise), 0, 1))`, with `noise` following the 10th percentile of ~3s
+of history and `ref` the 95th, separated by a minimum span. A fixed floor cannot serve both mics that
+exist here: the owner's mic records around 38dB below the meeting stream, so a floor tuned for a
+normal mic renders that one permanently flat, and a floor tuned for that one makes room tone dance on
+a normal mic. A tracked floor answers both, and it is what makes steady room tone read as 0 rather
+than as a quiet conversation. The history starts FULL of silence rather than empty: an empty ring
+normalises the very first loud buffer against itself and calls it noise, which left the row flat for
+the first second of every push-to-talk - the exact second somebody is looking at it.
+
+**Decision: the recording bar's disclosure is one chevron in a glass puck, overruling the frame.**
+The Figma frame draws lucide chevrons-up-down on a transparent disc. The owner rejected it directly
+("sooooo ugly"), and the owner outranks the frame. It is now a 26px `RoundPuck` carrying `GlassFill`
++ `GlassRim` with a single chevron-down that rotates 180 degrees on expand (200ms on the new
+`Motion.Move` in-place curve, applied to the GLYPH so the button keeps the shared style's
+press-compress transform). The timer moved to amber, which is what time is everywhere else in Toki.
+
+**What the arithmetic tests could not have caught.** The level mapping and the envelope are pure
+functions and are unit-tested with mutation probes. The *feel* is not: the new `--wavetest` flag runs
+the real control on the real dispatcher with a synthetic level and prints the bar heights at each
+phase, and it immediately failed two things reasoning had passed. The first decay constant (0.10/tick)
+left the row visibly above its resting dots a second and a half after the room went quiet, and the
+per-bar jitter multiplied by the wobble peaked bars at 1.21x the control's own height, growing them
+silently over whatever sat underneath. The envelope is now normalised to a tallest bar of exactly 1
+with explicit headroom for the wobble, and the decay is 0.14/tick. Neither defect was visible to a
+green test suite or to a static PNG.
+
+## The Apple-glass material (2026-08-18)
+
+**Decision: the glass is faked, and that is final for this window architecture.** The supported
+Windows 11 backdrop (`DWMWA_SYSTEMBACKDROP_TYPE` Acrylic/Mica) requires normal DWM frame
+composition and cannot combine with a per-pixel-alpha `WS_EX_LAYERED` window, which
+`AllowsTransparency=True` makes us. The undocumented `SetWindowCompositionAttribute` acrylic path
+blurs the window's FULL rectangle, and the notch window is deliberately bigger than the card
+(mascot gutter left, shadow pads right/bottom), so the blur would frost empty desktop. This is the
+same conclusion the earlier glass work reached (`ApplyBlur` exists and is called with `false` on
+every path); the research pass confirmed it with three independent blockers and closed the
+question. Apple's own material runs its tint plate at 82-95% opacity, so beyond the blur the look
+is layering, and layering is buildable: plate gradient, grain, lit rim, inner edge light, stacked
+shadows. `ApplyBlur`/`ApplyRoundRegion` stay as legacy machinery, still permanently off.
+
+**Decision: one material, defined once, worn everywhere.** `Theme/CardMaterial.cs` is the layer
+stack (radial top sheen, fixed-seed 64x64 grain at 2.5% dark / 2.0% light, 2px inner top highlight
+and bottom shade drawn as rings so they follow the corner arcs), and the `Gradients` table in
+`ThemeManager` builds and freezes every gradient (plate, rim, sheen, mascot) per theme swap, so
+code-built consumers stay theme-correct despite frozen brushes. The rim is a vertical gradient,
+brightest at the crown: the cheap 2D form of Liquid Glass's specular edge. Light mode rims end on a
+dark bottom hairline because a white card on a white app otherwise has no edge at all. The Library
+and all popups consume the same stack through `Theme/GlassSurface.cs` (`GlassCard`), not copies.
+The Glassy notch setting now selects only plate opacity (~95% vs 100%); both modes get the full
+stack, so the toggle can no longer strand the notch on a flat un-layered look.
+
+**Decision: hover brightens a sibling overlay; it never dims content.** The old grammar (an opacity
+dim on the whole button, or a white wash painted OVER a translucent fill) greys glass instead of
+lighting it, and it fades labels with the box. Every shared interactive style now carries a fading
+highlight layer (130ms in, 90ms out) that is a SIBLING of the padded content. The highlight brush
+follows the family: free-floating glass mini-cards (GlassPill, RoundPuck) use the glass tokens; 
+controls resting on the card keep the 22% HoverOverlay the owner signed off after the invisible-
+hover day, because measured on the plate the glass token is 1.49:1 and 22% is 2.0:1. The rule is
+recorded next to the tokens so a future pass does not harmonise it back below visibility.
+
+**Decision: squircle corners at rest only, and honesty about what they bought.** `Theme/Squircle.cs`
+implements the figma-squircle parameterisation (cubic, arc, mirror cubic per corner; smoothing 0 is
+exactly a rounded rect, so one code path serves both). The card's clip and rim swap to the squircle
+only when the notch is settled; every morph and reveal runs the exact pre-existing animated
+rounded-rect machinery, and one method owns all four corner properties so a double rim or a rimless
+frame is impossible by construction. Measured result: at radius 24 the squircle departs from a
+circular arc by at most ~0.35px and is not visible at 1:1 (pixel-diffed renders, ~420 differing
+pixels of 450,000, corners only). The visible smoothness wins came from elsewhere in the same pass:
+every hairline on a rounded edge now lands on whole DEVICE pixels from the live DPI (a 1 logical px
+stroke at 125% is a blurry 1.25px; the fix is 0.8 DIP = 1 device px), and the settle paths that
+nulled the clip a frame early no longer flash a hard rectangle. The smoothing constant stays one
+number (`Squircle.DefaultSmoothing`) should a larger radius ever make it worth seeing.
+
+## The details pass (2026-08-19)
+
+**Decision: the stop red is Apple system red, and it lives in the theme, nowhere else.** The stop
+disc painted a frozen `#FF114D` copied from the Figma frame, while the theme token `StopRed
+#FF2D55` (which is Apple systemPink, not red) had zero consumers - two reds, both wrong, one dead.
+`StopRed` is now `#FF453A` dark / `#FF3B30` light (Apple system red), the disc consumes it via
+`SetResourceReference` through `PillParts.RoundButton`, which now takes a resource KEY, not a
+Brush - a captured brush in a code-built control is the theme-bug class that has now bitten four
+times, so the helper's signature forbids it. The owner asked for Apple's clean red by name; the
+CLAUDE.md colour line and the design-web mirror were updated in the same pass.
+
+**Decision: small glyphs are authored Path geometry, never font characters.** The off-centre play
+triangle the owner photographed was `Text="▶"` with a hand-tuned margin: font glyphs carry
+baseline and side-bearing offsets that shift with font fallback and DPI, so they can never be
+reliably centred in a 20px chip. Every glyph-in-a-disc is now drawn geometry at its final pixel
+size (`PillParts.PlayTriangle`, `StopSquare`, `Cross`), optically centred (a right-pointing
+triangle sits a hair right of box centre because its visual centroid is left of it), and opted out
+of layout rounding (`PillParts.SubPixel`) so fractional-DPI margins centre sub-pixel instead of
+snapping to one side. Corollary discovered on the way: nudging a glyph inside a centre-aligned
+ContentPresenter by Margin is a measured no-op (layout re-centres the widened box); positional
+nudges use a RenderTransform.
+
+**Decision: a control must FIT its layout slot; the hit-test gate now proves it.** The clipped
+chevron puck was a 26px control in a 24px row - WPF silently layout-clips and the bottom of the
+circle ships flat. `--hittest` now fails any clickable control whose `GetLayoutClip` is non-null,
+so an oversized control in an undersized bar is a broken build, not a screenshot from the owner.
+
+**Decision: Library accent bars mean something or they are uniform - never random.** The per-card
+bar was coloured by `id % 6` across six accents, which reads as meaning and carries none. It is now
+coded by `MeetingKind`: blue for recorded meetings, purple for manual notes, written so collapsing
+to one uniform colour is a one-line change. One meaning, one colour extends to the list.
+
+**Decision: the transcribing loader is a status strip, so it behaves like one.** `Summarizing`
+joins the recording states at TopGap 2 (flush with the screen top) instead of hovering 12px into
+the screen, and its auto-tuck idle timer both re-arms when the cursor is over the pill (it used to
+fire once and die silently, leaving the loader open forever) and runs on the 2s result beat rather
+than the 9s page beat - a loading pill has nothing to interact with. The idle decision is a pure
+function (`IdleDecision`) so the timer's behaviour is unit-testable without a window.
+
+**Decision: the mascot's appearances are paid for up front.** Two first-show glitches shared a root
+shape: work done on the animation's first frames. Collapsing to a peek deferred the surface swap
+240ms while the peek's own Toki faded in - two Tokis, then a one-frame disappearance; the bubble
+disc now fades out over 180ms and the deferred swap re-arms the reveal. And the first expand built
+its views and rasterised the mascot's `RenderAtScale=4` bitmap cache synchronously mid-animation,
+eating the opening 50-150ms; `WarmFirstOpen` now builds the first-open views and renders the
+mascot once off-screen at `ApplicationIdle` during launch, mirroring the model-warm philosophy: a
+meeting never waits on a download, and an animation never waits on a rasteriser.
+
+**Decision: the peek flip is character motion, sized to be seen.** The peeking Toki shrank to 27px
+and sits 5px lower so its eyes clear the card's clip with air above (the old geometry put the top
+3px of eye above the clip - measured from the eye path's coordinates, not eyeballed). The flip
+dropped its two-bounce `BounceEase` (jitter at 30px) for one 520ms turn on `Motion.Move` with a
+single soft `BackEase` overshoot on the fall, ~540ms total: slow enough to read as fun, inside the
+workflow bound, and exempt from the 350ms cap because character motion is the one named exception.
+
+## The film round (2026-08-19, late night)
+
+**Decision: the peek blooms into everything; in-place snaps are for refreshes only.** The white
+flicker the owner filmed was the meeting prompt's own white pill rendering alone over the desktop:
+`Collapsed -> MeetingPrompt` was missing from the hover-pair list, so it took the in-place path
+(instant full-size snap, content fading in, plate and mascot late). `IsHoverPair` now treats the
+collapsed peek (and the loader sliver) as blooming into EVERY target. Second cause, same frame: a
+refresh-triggered `GrowToContent` raced the transition because AppState notifies App's
+view-refresh handlers before the window; the grow morphed the box while surface and content were
+still the old state's, so the real transition arrived with nothing left to animate. Grows are now
+gated on a `_shownState` stamp: a grow may only run for the state the window is actually showing.
+
+**Decision: the resting squircle clip trusts the CARD, not the arranged box.** The settle rebuilt
+the resting clip from Root's arranged size, and a tucked 13px sliver arranges at the window's
+~50px bubble floor - so the settle silently un-clipped every tucked sliver back to a full card.
+The clamp: if the card's asked size differs from the arranged box by more than 1px, the card is
+deliberately smaller and the card's size wins. Corollary in the same fix: the mascot bubble and
+his say-bubble are siblings OUTSIDE the card clip, so a tucked state must hide the mascot zone
+explicitly (opacity, restored by SetSurface's existing path) - clipping the card never touched him.
+
+**Decision: transient surfaces open on dwell and close on leave, not on timers.** The loader
+ping-ponged (graze opens instantly, a 2s idle beat tucks, repeat). The grammar now: a 360ms dwell
+(`SliverDwellMs`) means "the user came here on purpose"; a 540ms grace after the cursor leaves
+(`LoaderTuckGraceMs`) means "they left"; the idle timer stays only as a backstop. The notes-ready
+announce follows the same grammar: `Summarizing -> Notes` enters as a "Notes ready" pill + Toki
+for `NotesReadyPeekMs = 2000`, click (or the same dwell) opens the note, ignored folds to the
+ambient peek with `_context` still on Notes so the note stays one summon away.
+
+**Decision: nothing inside a disc trusts inherited text metrics.** `Paragraph.LineHeight` is an
+inherited dependency property: the transcript's 19.5px line height reached the TextBlock inside a
+16px avatar and inflated its line box, pinning the capital's ink to the disc top (a standalone
+probe reproduced the owner's screenshot to the half-pixel). `PillParts.DiscLabel` is now the one
+way to put a letter in a disc: LineHeight pinned to the font size, BlockLineHeight, a -0.5px
+optical lift, and the SubPixel opt-out - and `Outline()` glyphs got the same opt-out (an 11px
+chevron in a 26px puck at 125% is 9.375 device px a side; layout rounding split it 9/10, which
+was the visible leftward lean).
+
+## The ghost frame round (2026-08-19 afternoon)
+
+**Decision: a layered window may only Hide() after its final frame has COMPOSED.** The persistent
+corner flicker was the OS, not our painting: `Hide()` on the animation clock's Completed fires a
+frame before the fully-shut clip is composed, and a WS_EX_LAYERED window RETAINS its last composed
+frame - so the next `Show()` presents the stale ~13px card stub until the reveal's first real
+frame. Theme-independent by mechanism (the surface replays whatever it held). The rule: pin every
+leaving element at its parked value, wait two `CompositionTarget.Rendering` frames, then Hide and
+park, generation-guarded on both sides. A Dispatcher priority hop is NOT a substitute - priorities
+order UI-thread work, and presentation happens on the render thread; only Rendering callbacks
+prove frames actually composed (the priority-hop attempt was filmed still flashing).
+`--revealtest` now reads a hide-audit seam and fails if the hide composed a non-empty frame.
+
+**Decision: transitions measure BEFORE they mutate.** The expand painted the new surface, then
+stalled ~100ms in `ContentHeight` measuring the incoming view - a bare card with neither state's
+content, moving as layout churned. Transitions now do ALL measuring first; the old state owns
+every pixel through any stall, and the visual mutations are packed to compose in one frame.
+
+**Decision: the notes announce exits as character motion, and the landing is silent.** Unclicked
+after `NotesReadyPeekMs`, Toki hops out of his dissolving bubble (the disc is HELD Hidden after
+its fade - an opacity alone was resurrectable), somersaults once (-360, a dedicated `MascotFlip`
+transform), shrinks 44 to 28px, and flies 560ms to the collapsed peek's exact resting spot while
+the pill conceals beneath him. `Notes -> Collapsed` is a hover pair with a dedicated silent
+branch: the card bare-ifies in place (including `Material.Visibility` - the grain layer was
+filmed as a rimmed card-ghost when skipped), the window sizes silently, and the peek's own Toki
+cross-fades in under the flyer's fade-out. The flyer's X compensates the window recentre by the
+computed card-width delta, because `Left` updates asynchronously and reading it back was a filmed
+~30px landing offset. Click on the landed peek opens the notes via the existing context path.
+
+## The unparseable note (2026-08-19 night)
+
+Meeting 101's note shipped as the heuristic floor because the final LLM pass answered in a shape
+the parser refused: every line a bullet, headers included ("- SUMMARY: ..."). Decisions:
+
+- **A parse failure earns a retry, not a fallback.** The passes were "validated, retried once"
+  only against DEGENERATE output (CJK, repeat runs); a fluent answer in the wrong shape went
+  straight to the floor. At sampling temperature (0.7) a second ask is a genuinely different
+  sample, so `FinalNote` now retries once on a parse miss, with an explicit header reminder
+  appended. Only after two unparseable answers does the heuristic floor ship.
+- **Strictness keeps its reason, loses its monopoly.** The rule "a bullet is never a header"
+  exists so a KEY POINTS bullet reading "Next steps: ..." cannot hijack the actions parser. It
+  stays. But when the strict parse matches NOTHING, there is no parsed content left to protect,
+  so a rescue pass (`PromoteBulletHeaders`) un-bullets exactly the lines that match a known
+  header and runs the same strict parser again. Header recognition itself was deduplicated into
+  `HeadOf`/`MatchHeader` so the strict parser and the rescue can never disagree.
+- **Log what the model wrote, not just that it failed.** The original failure line carried only
+  a character count; the actual 1230 chars were gone forever, and the diagnosis above is partly
+  inference. Parse failures now log a bounded excerpt of the raw output.
+- Guarded by two MUTATION PROBES in `LlmNotesTests` (bulleted-headers rescue, retry-once), both
+  verified failing against the unfixed code.
+
+## The production pass (2026-08-19 late night)
+
+Four decisions from the pre-field-test quality round:
+
+- **The LLM never owns every core.** llama.cpp defaults to all logical cores, and a generation
+  visibly hitched the loader animation - the render thread starved. `LlamaLlm` now sets
+  `Threads`/`BatchThreads` to `ProcessorCount - 2`. UI smoothness is a budget the model must
+  live inside, not compete with; a note that lands two seconds later is invisible, a stuttering
+  loader is not.
+- **Transient surfaces open on click, never hover.** The tucked loader sliver and the "Notes
+  ready" pill live in the top-centre band every cursor crosses; any hover trigger there, however
+  dwelled, interrupts work. The recording peek set the precedent (owner rule); the loader and
+  the ready-pill now follow it. A window-level MouseLeftButtonUp expands a tucked
+  Summarizing/Notes state; the hover poll no longer can.
+- **One note surface, one document.** The notch's Notes page now embeds the same FlowDocument
+  the Library renders (`MeetingDocument` grew a `scrollHost` embedded mode: no title block, no
+  own scrollbar, evidence links scroll the host page). The parallel panel-of-TextBoxes renderer
+  is deleted - it capped drag-select at one line and was a second implementation of the same
+  note that could drift. One renderer, two hosts.
+- **The heuristic floor is capped.** Uncapped, the floor is a transcript sieve (92 questions on
+  a 17-minute meeting). It now keeps at most 10 questions / 10 decisions / 12 actions, drops
+  sub-4-word lines, and prefers owner/due-carrying actions. The full transcript remains one
+  section away.
+
+Also in this round: "Built with" + THIRD-PARTY-NOTICES now credit Silero VAD v5 (MIT), pyannote
+segmentation-3.0 (MIT) and 3D-Speaker CAM++ (Apache-2.0) - all three ship and were uncredited,
+which is a licence gap, not cosmetics. Credit rows became real Buttons (RowButton).
+
+**The comment cleanup.** Six parallel agents removed ~2,300 lines of session-diary comments
+across src/Toki (dated stories compressed to their invariants; code lines byte-identical;
+doubled/orphaned `<summary>` blocks repaired). Dead-code candidates surfaced by the pass, kept
+pending an owner decision: `MeetingStore.Reorder` + the `sort_order` column (drag-reorder was
+removed), `MicrosoftAuth.RevokeAsync`, `CalendarProviders.MeetingLinkName`,
+`CalendarRows.GlanceSubtitle`/`RightAffordance`, `NotesView.Ago`, `LibraryWindow.CopyTranscript`
+and the superseded `CopyButton`/`SeamButton`/`Flash` path, `PillWindow.LoaderBubble`,
+`StreamCtl.Append`, the dormant `GlassTopBleed` machinery, unused region P/Invokes,
+`HitTargets.OffCentre`, and the single-segment `EvidenceAudio` overloads (test-only).
+
+## Low frequency, not high: the grain comes out (2026-08-20)
+
+**Why the plate is not the frame's 0.5 alpha, recorded once so it stops being re-asked.** Figma node
+293:1875 builds the card from three things: a `rgba(33,30,30,0.50)` fill, a `#333` layer in
+color-dodge, and the frame's background blur. The 50% is only legible BECAUSE of the blur - it is a
+recipe, not a target value. We cannot run the recipe (see "The Apple-glass material", 2026-08-18:
+three independent blockers, question closed) and Windows has no color-dodge compositing here, so
+`CardPlate` bakes the recipe's RESULT at ~95%. The frame's inner capsules are a different case: they
+sit on our own card, not the wallpaper, so those DO render at the frame's translucency and match it
+directly. The token table's `--tk-glass: rgba(33,30,30,0.50)` is therefore the SOURCE value, not
+what the notch paints.
+
+**Decision: the card carries NO fill of its own. Plate, sheen, edge rings, nothing else.**
+Supersedes the "fixed-seed 64x64 grain at 2.5% dark / 2.0% light" layer in the 2026-08-18 material
+stack, and supersedes the light field that briefly replaced it the same day.
+
+Two rounds, and the second is the interesting one. The grain went first: a 64px tile repeats about
+five times across a 344px card, and the owner read the result as texture, which is the opposite of
+glass. The reasoning for its replacement was sound as far as it went - a blur destroys HIGH spatial
+frequencies and keeps low ones, so grain is the one thing a blurred backdrop cannot leave behind,
+and a soft diagonal sweep is what it DOES leave. That shipped as `CardGlow`.
+
+The owner then reported "strands of lines that go sideways on it very faintly". That is BANDING. A
+gradient spanning ~344px at under 6% alpha has only a handful of 8-bit quantisation steps across
+its whole run, so the steps land as wide diagonal stripes. **The grain had been dithering them away
+all along**, which is the classic reason noise sits in a material in the first place. Removing the
+dither did not just remove texture; it exposed what the dither was hiding. The earlier render check
+missed it because banding of a few code values does not survive image scaling in a screenshot the
+way it survives on a real display.
+
+Rather than reintroduce noise at a lower amplitude (which re-opens the texture complaint the owner
+raised in the first place), the card is now plain. Depth comes from the parts that cannot band:
+the 1-device-pixel gradient rim, the fixed 48px radial top sheen, the 2px inner edge rings, and the
+two stacked shadow casters.
+
+**The generalisable rule: a broad, very-low-alpha gradient needs dithering, and a material that
+wants no visible texture therefore cannot have one.** Pick a shape whose value range is either wide
+enough to step smoothly or small enough in area to hide the steps.
+
+`CardMaterial` loses the noise builder, its `ImageBrush` cache, the `ThemeChanged` subscription
+that existed only to rescale grain opacity, and now the glow layer too, so the control is three
+static layers with no lifetime. `Grad.Sweep` and the `CardGlow` token are removed rather than left
+unused. `GlassCard`'s `grain:` parameter is renamed `material:`.

@@ -1,12 +1,8 @@
 namespace Toki.Calendar;
 
 /// <summary>
-/// Which account an event came from, and which account a change should be sent to.
-///
-/// Toki can hold BOTH connections at once and shows one merged agenda, so this is not a global mode -
-/// it travels on each event. Without it, editing an Outlook meeting would send a Google API call for an
-/// id Google has never heard of, and the failure would look like a bug in the edit rather than in the
-/// routing.
+/// Which account an event came from, and which account a change should be sent to. Both connections
+/// can be held at once with one merged agenda, so this travels on each event, not as a global mode.
 /// </summary>
 public enum CalendarProvider
 {

@@ -113,7 +113,13 @@ public class TemplateGateTests
     [Fact]
     public void A_one_to_one_needs_exactly_two_voices()
     {
-        Assert.True(TemplateGate.HasEvidence("1:1", T("Line one.", "Line two.")));
+        // An UNTAGGED transcript cannot support the claim: before diarisation every remote person
+        // is one "Them" label, so two labels is what an 8-person all-hands looks like too. The
+        // gate used to accept that (it cleared every meeting there is); now the claim needs the
+        // speakers actually told apart.
+        Assert.False(TemplateGate.HasEvidence("1:1", T("Line one.", "Line two.")));
+        Assert.True(TemplateGate.HasEvidence("1:1", Tagged(
+            ("Ana", "Line one."), ("Ben", "Line two."))));
         Assert.False(TemplateGate.HasEvidence("1:1", Tagged(
             ("Ana", "Line one."), ("Ben", "Line two."), ("Cal", "Line three."))));
     }

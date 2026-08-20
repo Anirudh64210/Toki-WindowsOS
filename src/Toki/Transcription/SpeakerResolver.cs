@@ -4,26 +4,12 @@ using System.IO;
 namespace Toki.Transcription;
 
 /// <summary>
-/// Turns "Them" into people, for one meeting, and then forgets them.
-///
-/// This is the whole T8 feature end to end: split the remote audio into voices, ask
-/// <see cref="SpeakerNamer"/> who those voices are, and write the answer onto the saved transcript.
-/// It is deliberately TRANSIENT - nothing about anybody's voice survives the call. The clusters exist
-/// for the length of this method; what persists is text, which the user can edit or delete like any
-/// other text. Reopen the same meeting tomorrow and Toki has no idea whose voice it heard.
-///
-/// Three design points worth keeping:
-///
-///   • <b>Only them.wav.</b> The microphone is its own stream, so the user is already separated more
-///     reliably than any model could manage, and half the audio never needs looking at.
-///   • <b>Sub-segment before embedding.</b> A merged turn can run to 700 characters, and embedding one
-///     of those whole would blend two voices into a fingerprint that matches neither. Each turn is cut
-///     into <see cref="WindowSec"/> windows, every window is embedded, and the turn takes the majority
-///     verdict of its own windows.
-///   • <b>Under-split beats over-split.</b> Merging two quiet people into one label is today's behaviour
-///     and reads as slightly coarse. Splitting one person into two invents a colleague who was never in
-///     the room. When the attendee count is known it is used as the answer; when it isn't, the threshold
-///     leans conservative and the user can set the count by hand.
+/// Turns "Them" into people for one meeting, then forgets them - deliberately TRANSIENT: nothing
+/// about anybody's voice survives the call, only text persists. Only them.wav is diarised (the
+/// mic already separates the user). Turns are sub-segmented into <see cref="WindowSec"/> windows
+/// before embedding (a whole 700-char turn would blend two voices) and each turn takes its
+/// windows' majority verdict. Under-split beats over-split: splitting one person in two invents
+/// a colleague who was never in the room.
 /// </summary>
 public static class SpeakerResolver
 {
@@ -121,10 +107,8 @@ public static class SpeakerResolver
                 ? b.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).First().Key
                 : -1;
 
-        // A turn nobody could fingerprint (too short to embed honestly) inherits from its neighbour.
-        // Short lines are usually the same person carrying on, so this is far more often right than
-        // wrong, and it beats leaving holes: a transcript where every third line says "Them" while the
-        // rest say "Priya" reads as broken rather than as careful.
+        // A turn too short to fingerprint honestly inherits from its neighbour: short lines are
+        // usually the same person carrying on, and holes read as broken rather than careful.
         var last = -1;
         for (var t = 0; t < perTurn.Length; t++)
         {

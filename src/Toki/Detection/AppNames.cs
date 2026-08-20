@@ -3,12 +3,9 @@ using System.Text.RegularExpressions;
 namespace Toki.Detection;
 
 /// <summary>
-/// Turns a raw detected app identity ("Com.tinyspeck.slackdesktop", "ms-teams", "chrome.exe",
-/// "ZoomIt64_...") into the human name a prompt can say ("Slack is in a call. Record it?").
-/// The raw identifier leaking into the meeting prompt was a real live bug: the reverse-DNS name
-/// wrapped to two lines and overflowed the prompt's height, so the notch rendered cut off - and it
-/// read like debug output. Known apps map exactly; unknown ones are cleaned (reverse-DNS/".exe"/
-/// "desktop" stripped) and title-cased instead of shown raw.
+/// Turns a raw detected app identity ("Com.tinyspeck.slackdesktop", "chrome.exe") into a human
+/// name for prompts. Known apps map exactly; unknown ones are cleaned and title-cased - a raw
+/// identifier must never reach the UI (it overflows the prompt and reads like debug output).
 /// </summary>
 public static class AppNames
 {
@@ -55,9 +52,8 @@ public static class AppNames
         if (underscore > 0) stem = stem[..underscore];
         var tokens = stem.Split(new[] { '.', '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
-        // Exact/contained known-app match wins ("slackdesktop" contains "slack"). Containment needs a
-        // 5+ char key so a short key can't fire inside an unrelated word ("meetify" must NOT be
-        // "Google Meet"); short keys ("zoom", "arc", "meet") match exact tokens only.
+        // Containment matching needs a 5+ char key so short keys ("zoom", "arc", "meet") can't
+        // fire inside unrelated words; short keys match exact tokens only.
         foreach (var t in tokens)
         {
             var lt = t.ToLowerInvariant();
@@ -69,17 +65,15 @@ public static class AppNames
         foreach (var (key, name) in Known)
             if (key.Length >= 5 && whole.Contains(key)) return name;
 
-        // Unknown app: strip reverse-DNS chrome ("com"/"org"/"net"/"io", a likely vendor segment) and
-        // the "desktop"/"app"/"client" suffix, then title-case what's left - a readable name, never
-        // the raw identifier.
+        // Unknown app: strip reverse-DNS chrome and "desktop"/"app"/"client" suffixes, then
+        // title-case what's left.
         var meaningful = tokens
             .Where(t => !Regex.IsMatch(t, @"^(com|org|net|io|co|www|app|apps|desktop|client|electron|x64|x86|win32|win64)$", RegexOptions.IgnoreCase))
             .Select(t => Regex.Replace(t, @"(desktop|client)$", "", RegexOptions.IgnoreCase))
             .Where(t => t.Length > 0)
             .ToList();
         if (meaningful.Count == 0) return TitleCase(tokens.LastOrDefault() ?? r);
-        // Reverse-DNS puts the vendor before the product ("com.tinyspeck.slackdesktop") - the LAST
-        // meaningful token is usually the product; keep up to the last two for compound names.
+        // Reverse-DNS puts the vendor before the product: keep the last two meaningful tokens.
         var take = meaningful.Count > 2 ? meaningful.Skip(meaningful.Count - 2).ToList() : meaningful;
         return string.Join(" ", take.Select(TitleCase));
     }

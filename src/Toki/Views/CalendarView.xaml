@@ -15,7 +15,7 @@
             </Grid.ColumnDefinitions>
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="Calendar" Style="{StaticResource Title}"/>
+                <TextBlock x:Name="HeaderTitle" Text="Calendar" Style="{StaticResource Title}"/>
                 <TextBlock x:Name="Subtitle" Style="{StaticResource Caption}" Text="This week"/>
             </StackPanel>
             <Button x:Name="TodayButton" Grid.Column="2" Style="{StaticResource PillButton}" Background="Transparent"
@@ -24,120 +24,185 @@
             <Button x:Name="NewButton" Grid.Column="3" Style="{StaticResource PillButton}" FontSize="11.5"
                     Padding="12,7" Content="＋ New" Click="OnNew"/>
         </Grid>
+
+        <!-- ONE hairline under the header. There used to be two: this one, and a second on the
+             composer's own top border 12px below it, which drew a pair of tram-lines across the
+             panel the moment you pressed New (owner, 2026-08-14). -->
         <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource Hairline}" Margin="0,10,0,0"/>
 
-        <!-- Quick-create composer (natural language). A flat SECTION under the header (a top hairline,
-             no enclosing card), so it reads like Fantastical/Cron's NL bar, not a nested widget. -->
-        <Border x:Name="Composer" DockPanel.Dock="Top" Visibility="Collapsed" Margin="0,12,0,0"
-                BorderBrush="{DynamicResource Hairline}" BorderThickness="0,1,0,0" Padding="0,12,0,2">
-            <StackPanel>
-                <!-- Shaped like the composer in Google Calendar or Outlook, for the reasons in
-                     CalendarView.xaml.cs "the composer":
-                       · the title is the first thing and needs no label - a placeholder says what it is
-                       · Day and Time still accept typing ("tomorrow", "2pm"), but each now carries a
-                         picker, so nobody has to GUESS what this box will accept
-                       · both are prefilled with a sensible answer, so the form is never blank
-                       · guests are a labelled field that is always there, not a surprise behind a toggle
-                       · the Meet link is a labelled switch, because a bare chip cannot say whether it
-                         is describing a state or offering an action -->
-                <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
+        <!-- ═══ CREATE / EDIT, as a MODE ═══
+             This used to be a strip docked ABOVE the agenda, so its height came out of the list's -
+             and the calendar panel is a fixed 430 tall, so Cancel and Create fell off the bottom
+             edge (owner, 2026-08-14: "the bottom 2 buttons are cut off"). Making an event is a
+             mode, not a banner. The composer now takes the whole panel, its fields scroll, and the
+             two buttons are PINNED to the bottom where nothing can push them off.
+
+             The fields are ONE CARD OF ROWS split by hairlines - the same shape as the Library
+             settings page - instead of six free-floating boxes at four different heights. Every row
+             is 46 tall with its label left and its value right, and the only chrome is the divider
+             between them. The old layout set a filled box beside an outlined chip beside a
+             differently-sized box and asked the eye to read them as one kind of thing. -->
+        <!-- The composer and the agenda are mutually exclusive, so they SHARE the one filling slot at
+             the end of the DockPanel. The composer used to be a bare child of the root DockPanel with
+             no Dock set, which silently means Dock=Left - so it was given only its desired width and
+             the field card sat at about half the panel with dead space beside it. -->
+        <Grid>
+        <DockPanel x:Name="Composer" Visibility="Collapsed" Margin="0,14,0,0">
+
+            <!-- Pinned. Never scrolls, never gets clipped. -->
+            <Grid DockPanel.Dock="Bottom" Margin="0,14,0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"
+                        Foreground="{DynamicResource TextMid}" FontSize="12" Padding="14,8"
+                        HorizontalAlignment="Left" Content="Cancel" Click="OnComposerCancel"/>
+                <Button x:Name="ComposerCreate" Grid.Column="1" Style="{StaticResource WhiteButton}" FontSize="12"
+                        Padding="26,8" Content="Create" Click="OnComposerCreate"/>
+            </Grid>
+
+            <!-- HorizontalScrollBarVisibility=Disabled is load-bearing, not tidiness: without it the
+                 ScrollViewer measures its content with infinite width, so the field card sizes to
+                 its own content and sits at about half the panel's width with dead space beside it. -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          controls:SmoothScroll.Enabled="True">
+                <StackPanel Margin="0,0,2,0">
+
+                    <!-- The title is the first thing and needs no label: a 17px line you type straight
+                         into, the way every calendar app opens. It also carries the natural-language
+                         parse ("Design sync tomorrow 2pm with ana@work.com"). -->
                     <Grid>
                         <TextBlock x:Name="TitlePlaceholder" Text="Add a title" IsHitTestVisible="False"
-                                   Foreground="{DynamicResource TextDim}" Opacity="0.6" VerticalAlignment="Center"
-                                   FontSize="13.5" FontFamily="{StaticResource UiFont}" Margin="1,0,0,0"/>
-                        <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="38"
-                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                 FontSize="13.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                   Foreground="{DynamicResource TextLow}" VerticalAlignment="Center"
+                                   FontSize="17" FontFamily="{StaticResource UiFont}" Margin="2,0,0,0"/>
+                        <TextBox x:Name="TitleBox" Background="Transparent" BorderThickness="0" Height="40"
+                                 Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
+                                 FontSize="17" FontWeight="SemiBold" Padding="2,0,0,0"
+                                 FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                                  TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
                     </Grid>
-                </Border>
 
-                <!-- WHEN, on two lines - the day, then start–end. Three fields on one 360px line
-                     clipped the word "tomorrow" mid-word; Outlook's compact pane stacks them for the
-                     same reason. The dash between start and end says they are two ends of one thing. -->
-                <TextBlock Text="When" Style="{StaticResource Caption}" Margin="2,12,0,4"/>
-                <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0,4,0">
-                    <DockPanel>
-                        <Button x:Name="DatePick" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
-                                Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10" Width="28" Height="30"
-                                ToolTip="Pick a day" Click="OnPickDay"/>
-                        <TextBox x:Name="DateBox" Background="Transparent" BorderThickness="0" Height="36"
-                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                 FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                                 TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
-                    </DockPanel>
-                </Border>
+                    <!-- What the parse understood, in one line. This replaces a permanent hint AND a
+                         separate green preview which between them took two lines to say one thing. -->
+                    <TextBlock x:Name="ParsePreview" FontFamily="{StaticResource UiFont}" FontSize="11.5"
+                               FontWeight="SemiBold" Foreground="{DynamicResource Green}"
+                               Margin="2,2,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ComposerHint" FontFamily="{StaticResource UiFont}" FontSize="11.5"
+                               Foreground="{DynamicResource TextMid}" Margin="2,2,0,0" TextWrapping="Wrap"
+                               Text="Type a day and time, or pick them"/>
 
-                <Grid Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
+                    <Border Background="{DynamicResource GlassCapsuleOpaque}" CornerRadius="14" Margin="0,12,0,0">
+                        <StackPanel>
+                            <!-- Day. Still typeable ("tomorrow"), with a picker so nobody has to guess
+                                 what the box accepts. -->
+                            <Grid Height="46">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Day" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0" Width="62"/>
+                                <TextBox x:Name="DateBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
+                                         Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
+                                         FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                         FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                         TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                                <Button x:Name="DatePick" Grid.Column="2" Style="{StaticResource IconButton}"
+                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10"
+                                        Width="30" Height="30" Margin="2,0,8,0"
+                                        Foreground="{DynamicResource TextMid}"
+                                        ToolTip="Pick a day" Click="OnPickDay"/>
+                            </Grid>
+                            <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0,0,0"/>
 
-                    <Border Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0,4,0">
-                        <DockPanel>
-                            <Button x:Name="TimePick" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
-                                    Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10" Width="28" Height="30"
-                                    ToolTip="Pick a start time" Click="OnPickTime"/>
-                            <TextBox x:Name="TimeBox" Background="Transparent" BorderThickness="0" Height="36"
-                                     Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                     FontSize="12.5" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                                     TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
-                        </DockPanel>
+                            <!-- Starts -->
+                            <Grid Height="46">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Starts" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0" Width="62"/>
+                                <TextBox x:Name="TimeBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
+                                         Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
+                                         FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                         FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                         TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
+                                <Button x:Name="TimePick" Grid.Column="2" Style="{StaticResource IconButton}"
+                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10"
+                                        Width="30" Height="30" Margin="2,0,8,0"
+                                        Foreground="{DynamicResource TextMid}"
+                                        ToolTip="Pick a start time" Click="OnPickTime"/>
+                            </Grid>
+                            <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0,0,0"/>
+
+                            <!-- Ends. A row like the others, not an outlined chip: it is the same kind
+                                 of choice as the two above it and should look like one. -->
+                            <Grid Height="46">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Ends" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0" Width="62"/>
+                                <Button x:Name="DurationChip" Grid.Column="1" Style="{StaticResource PillButton}"
+                                        Background="Transparent" Foreground="{DynamicResource TextHi}"
+                                        FontSize="12.5" FontWeight="SemiBold" Padding="10,6" Margin="0,0,6,0"
+                                        HorizontalAlignment="Right" HorizontalContentAlignment="Right"
+                                        Click="OnPickDuration" ToolTip="When the meeting ends"/>
+                            </Grid>
+                            <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0,0,0"/>
+
+                            <!-- Guests. A field, always present - never a surprise behind a toggle. -->
+                            <Grid x:Name="PeopleRow" Height="46">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Guests" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                           Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0" Width="62"/>
+                                <Grid Grid.Column="1" Margin="0,0,16,0">
+                                    <TextBlock x:Name="PeoplePlaceholder" Text="Add email addresses"
+                                               IsHitTestVisible="False" Foreground="{DynamicResource TextLow}"
+                                               VerticalAlignment="Center" TextAlignment="Right"
+                                               FontSize="12.5" FontFamily="{StaticResource UiFont}"/>
+                                    <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0"
+                                             Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
+                                             FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                             FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
+                                             TextChanged="OnPeopleChanged"/>
+                                </Grid>
+                            </Grid>
+                            <Border Height="1" Background="{DynamicResource Hairline}" Margin="16,0,0,0"/>
+
+                            <!-- The Meet link is a labelled switch: a bare chip cannot say whether it is
+                                 describing a state or offering an action. -->
+                            <Grid Height="46">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Google Meet link" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                           Foreground="{DynamicResource TextHi}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0"/>
+                                <CheckBox x:Name="MeetToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
+                                          VerticalAlignment="Center" Margin="0,0,16,0" Click="OnToggleMeet"/>
+                            </Grid>
+                        </StackPanel>
                     </Border>
-
-                    <TextBlock Grid.Column="1" Text="–" Style="{StaticResource Dim}" FontSize="13"
-                               VerticalAlignment="Center" Margin="8,0"/>
-
-                    <Button x:Name="DurationChip" Grid.Column="2" Style="{StaticResource ChipButton}"
-                            Content="30 min  &#x25BE;" Click="OnPickDuration" Height="36"
-                            HorizontalContentAlignment="Center"
-                            ToolTip="When the meeting ends"/>
-                </Grid>
-
-                <TextBlock x:Name="ComposerHint" Style="{StaticResource Caption}" Margin="2,7,0,0"
-                           Text="Type a day and time, or pick them"/>
-                <TextBlock x:Name="ParsePreview" Style="{StaticResource Secondary}" FontWeight="SemiBold"
-                           Foreground="{DynamicResource Green}" Margin="2,6,0,0" Visibility="Collapsed"/>
-
-                <TextBlock Text="Guests" Style="{StaticResource Caption}" Margin="2,12,0,4"/>
-                <Border x:Name="PeopleRow" Background="{DynamicResource Chip}" CornerRadius="10" Padding="12,0">
-                    <Grid>
-                        <TextBlock x:Name="PeoplePlaceholder" Text="name@company.com, someone@else.com"
-                                   IsHitTestVisible="False" Foreground="{DynamicResource TextDim}" Opacity="0.55"
-                                   VerticalAlignment="Center" FontSize="12" FontFamily="{StaticResource UiFont}"
-                                   Margin="1,0,0,0"/>
-                        <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0" Height="36"
-                                 Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                 FontSize="12" FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
-                                 TextChanged="OnPeopleChanged"/>
-                    </Grid>
-                </Border>
-
-                <Grid Margin="0,14,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Add a Google Meet link" Style="{StaticResource Body}" FontSize="12.5"
-                               VerticalAlignment="Center"/>
-                    <CheckBox x:Name="MeetToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
-                              VerticalAlignment="Center" Click="OnToggleMeet"/>
-                </Grid>
-
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                    <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"
-                            Foreground="{DynamicResource TextDim}" FontSize="11.5" Padding="12,6" Content="Cancel"
-                            Click="OnComposerCancel"/>
-                    <Button x:Name="ComposerCreate" Style="{StaticResource WhiteButton}" FontSize="11.5" Padding="18,6"
-                            Margin="8,0,0,0" Content="Create" Click="OnComposerCreate"/>
                 </StackPanel>
-            </StackPanel>
-        </Border>
+            </ScrollViewer>
+        </DockPanel>
 
         <!-- Content area: the day list, plus overlay state panels + the undo/confirm bar -->
-        <Grid>
+        <Grid x:Name="AgendaHost">
             <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto"
                           controls:SmoothScroll.Enabled="True" Margin="0,8,0,0" ScrollChanged="OnScroll">
                 <StackPanel x:Name="Days"/>
@@ -150,7 +215,7 @@
             <!-- Undo / confirm bar, pinned to the bottom -->
             <Border x:Name="ActionBar" VerticalAlignment="Bottom" Visibility="Collapsed"
                     Background="{DynamicResource SurfaceHi}" BorderBrush="{DynamicResource Hairline}"
-                    BorderThickness="1" CornerRadius="11" Padding="12,8" Margin="0,0,0,2">
+                    BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,2">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -165,6 +230,7 @@
                             FontSize="11" Padding="10,4" Margin="8,0,0,0"/>
                 </Grid>
             </Border>
+        </Grid>
         </Grid>
     </DockPanel>
 </UserControl>
