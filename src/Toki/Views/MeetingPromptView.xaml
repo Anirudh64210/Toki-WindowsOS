@@ -1,18 +1,22 @@
 <UserControl x:Class="Toki.Views.MeetingPromptView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel Margin="14,9" VerticalAlignment="Center">
-        <TextBlock x:Name="Prompt" Text="Record this meeting?" Style="{StaticResource Body}"
-                   FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"
-                   TextWrapping="Wrap" TextAlignment="Center"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,7,0,0">
-            <!-- Calendar match only: open the Meet link (and record). Hidden for an ad-hoc call. -->
-            <Button x:Name="JoinBtn" Style="{StaticResource CoralButton}" Content="Join call" Padding="15,5"
-                    Margin="0,0,8,0" Visibility="Collapsed" Click="OnJoin"/>
-            <Button x:Name="RecordBtn" Style="{StaticResource CoralButton}" Content="Record" Padding="18,5"
-                    Margin="0,0,8,0" Click="OnRecord"/>
-            <Button Style="{StaticResource PillButton}" Content="Not now" Padding="14,5"
-                    Foreground="{DynamicResource TextDim}" Click="OnDismiss"/>
-        </StackPanel>
-    </StackPanel>
+    <!-- "Menu Bar - Record This Meeting": ONE 169x40 glass pill, camera + 13 SemiBold label, and
+         nothing else. The old three-button prompt ("Record this meeting?" over Record / Not now)
+         asked a question the pill already answers by existing.
+
+         Declining is the frame's own affordance from "Menu Bar - Idle (Close on Hover)": a 20px
+         glass puck with a cross, sitting 10px past the right edge, revealed on hover. It is a real
+         Button, so the whole puck is the hit target. -->
+    <Grid Background="Transparent">
+        <StackPanel x:Name="Pills" Orientation="Horizontal" HorizontalAlignment="Left"
+                    VerticalAlignment="Center"/>
+        <!-- The frame floats the puck clear of the pills, 8px past the right one, and reveals it on
+             hover. It is ALWAYS visible here: hover-to-reveal made the only way to say no invisible
+             until you found it, so the prompt read as having one button (owner: "the x button doesnt
+             work, i cannot select it"). A prompt you cannot decline is not a prompt. It sits at 55%
+             so it stays the quiet half of the pair without ever being hidden. -->
+        <ContentControl x:Name="CloseHost" HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Opacity="0.55"/>
+    </Grid>
 </UserControl>

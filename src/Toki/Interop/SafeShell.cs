@@ -4,11 +4,9 @@ using System.IO;
 namespace Toki.Interop;
 
 /// <summary>
-/// The ONE place Toki hands a string to the Windows shell. <see cref="UseShellExecute"/> will happily
-/// launch <c>file://</c>, <c>\\attacker\share\x.exe</c> (UNC → SMB creds/exec), <c>ms-msdt:</c>,
-/// <c>javascript:</c> and other dangerous handlers. Calendar data (a meeting's join link) is
-/// attacker-influenceable, so every external open goes through here and only <c>http/https</c> web
-/// URLs (and, for the file-reveal case, a validated in-app path) are allowed.
+/// The ONE place Toki hands a string to the Windows shell. Calendar data is attacker-influenceable
+/// and ShellExecute launches any handler (file://, UNC, ms-msdt:, javascript:), so every external
+/// open goes through here: only http/https URLs, or a validated in-app path for file reveal.
 /// </summary>
 public static class SafeShell
 {
@@ -40,7 +38,7 @@ public static class SafeShell
         return true;
     }
 
-    /// <summary>Reveal a file in Explorer — only when it resolves INSIDE one of the app's own data
+    /// <summary>Reveal a file in Explorer - only when it resolves INSIDE one of the app's own data
     /// directories (never an arbitrary path), so a poisoned DB row can't point Explorer elsewhere.</summary>
     public static bool RevealInExplorer(string? path, params string[] allowedRoots)
     {

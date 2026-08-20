@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Toki.Tests;
 
-/// <summary>The deterministic "understand the query first" layer — the three P2.1 bug fixes live here.</summary>
+/// <summary>The deterministic "understand the query first" layer - the three P2.1 bug fixes live here.</summary>
 public sealed class QueryUnderstandingTests
 {
     // Fixed reference date so date parsing is stable in CI.

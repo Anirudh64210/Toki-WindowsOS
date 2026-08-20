@@ -6,7 +6,7 @@ namespace Toki.Tests.Brain;
 /// <summary>
 /// Wake-name ASR robustness (taxonomy §15): push-to-talk renders "Toki" as Doki/Toky/Docie/Toku/…, and
 /// a mis-heard address must never turn a command or a greeting into a notes search. The fuzzy WakeName
-/// address is the pipeline's real ASR-tolerance feature — this exercises it across the canned routes.
+/// address is the pipeline's real ASR-tolerance feature - this exercises it across the canned routes.
 /// </summary>
 [Collection("BrainSeams")]
 public sealed class WakeNameGoldenTests : IClassFixture<BrainFixture>

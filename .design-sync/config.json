@@ -1,0 +1,17 @@
+{
+  "projectId": "2ab6c6ca-0156-4057-afd1-5c238ec31eb7",
+  "shape": "package",
+  "pkg": "toki-design",
+  "globalName": "TokiDesign",
+  "buildCmd": "npm run build",
+  "srcDir": "src",
+  "cssEntry": "dist/toki.css",
+  "tokensGlob": "src/styles/tokens.css",
+  "guidelinesGlob": ["docs/guides/**/*.md"],
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "GlanceRow": { "cardMode": "column" },
+    "GlassPanel": { "cardMode": "column" },
+    "NotchShell": { "cardMode": "column" }
+  }
+}

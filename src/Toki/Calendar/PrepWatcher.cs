@@ -24,9 +24,10 @@ public sealed class PrepWatcher
     readonly HashSet<string> _shown = new();   // event-instance ids already surfaced or snoozed
     bool _wired;
 
-    /// <summary>Guard: only raise a card while the notch is idle. Overridable for tests.</summary>
-    public Func<bool> CanPrompt { get; set; } =
-        () => App.State.Current is PillState.Hidden or PillState.Collapsed;
+    /// <summary>Is a prep card currently available to open? The notch asks this to decide whether
+    /// hovering the peek should show the card, and the recording page asks it to decide whether to
+    /// offer its "Prep card" button.</summary>
+    public static bool Armed => App.CurrentPrep is not null;
 
     public void Start()
     {
@@ -35,7 +36,7 @@ public sealed class PrepWatcher
         {
             _wired = true;
             _timer.Tick += (_, _) => Tick();
-            // A fresh fetch completing mid-window: react promptly (marshal — the event fires off-thread).
+            // A fresh fetch completing mid-window: react promptly (marshal - the event fires off-thread).
             UpcomingCache.Instance.Changed += () =>
                 Application.Current?.Dispatcher.BeginInvoke(new Action(TryRaise));
         }
@@ -52,17 +53,18 @@ public sealed class PrepWatcher
         if (!CalendarService.Instance.IsConnected) return;
         WarmCache();                     // keep UpcomingCache fresh (coalesced by its 60s TTL)
 
-        // Auto-retire a card the user walked away from — a prompt must not squat through the meeting.
-        if (App.State.Current == PillState.PrepCard && App.CurrentPrep is { } cp
-            && cp.Event.StartUtc < DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2))
-            App.State.TryGo(PillState.Hidden);
+        // Disarm a card whose meeting is behind us, but never while recording: the card must stay
+        // reachable from the recording page for the whole meeting. Typed scratch text is untouched -
+        // it outlives the card.
+        if (!App.IsRecording && App.State.Current != PillState.PrepCard
+            && App.CurrentPrep is { } cp && cp.Event.EndUtc < DateTimeOffset.UtcNow)
+            App.CurrentPrep = null;
 
         TryRaise();
     }
 
     void TryRaise()
     {
-        if (!CanPrompt() || Suppressed()) return;
         var events = UpcomingCache.Instance.Snapshot;
         if (events is null) return;
 
@@ -74,29 +76,37 @@ public sealed class PrepWatcher
             .FirstOrDefault();
         if (cand is null) return;
 
+        // ARM: the card becomes available, so hovering the peek opens it and the recording page can
+        // offer its "Prep card" button.
         App.CurrentPrep = PrepBuilder.Build(cand, App.Store);
-        if (App.State.TryGo(PillState.PrepCard))
+        _shown.Add(cand.Id);
+        var mins = (int)(cand.StartUtc - now).TotalMinutes;
+
+        // ...and surface it once, quietly, ONLY when opening it costs nothing: notch idle, never over
+        // a fullscreen app. If the moment isn't right the card stays armed, one hover away.
+        if (Surfaceable())
         {
-            _shown.Add(cand.Id);
-            App.Log($"prep: surfaced card for '{cand.Summary}' ({(int)(cand.StartUtc - now).TotalMinutes} min out)");
+            App.State.TryGo(PillState.PrepCard);
+            App.Log($"prep: surfaced card for '{cand.Summary}' ({mins} min out)");
         }
+        else App.Log($"prep: armed card for '{cand.Summary}' ({mins} min out) - notch busy, hover to open");
+
         // Prune ids no longer upcoming so the set can't grow forever.
         _shown.RemoveWhere(id => events.All(e => e.Id != id));
     }
+
+    /// <summary>Is now a moment when taking the notch would be welcome rather than rude?</summary>
+    static bool Surfaceable() =>
+        !App.IsRecording
+        && App.State.Current is PillState.Hidden or PillState.Collapsed
+        && !PillWindow.QuietFullscreen();
 
     // A real meeting worth prepping: not all-day, and either a video link or at least one other guest.
     static bool Worthy(CalEvent e) => !e.IsAllDay && (e.HasMeetLink || e.Attendees.Any(a => !a.IsSelf));
 
     async void WarmCache()
     {
-        try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline — the next tick retries */ }
+        try { await UpcomingCache.Instance.GetAsync(); } catch { /* offline - the next tick retries */ }
     }
 
-    // Don't interrupt a fullscreen app / game / presentation — the one shared quiet check
-    // (edge-summon, meeting prompt, and this watcher all consult PillWindow.QuietFullscreen).
-    static bool Suppressed()
-    {
-        try { return PillWindow.QuietFullscreen(); }
-        catch { return false; }
-    }
 }

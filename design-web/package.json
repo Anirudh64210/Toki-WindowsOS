@@ -1,0 +1,22 @@
+{
+  "name": "toki-design",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web mirror of the Toki for Windows design system (the Figma 'Redesign by SKz', file Udtb5KHB2iTLIVP5FhKaSl node 288:4). The WPF app's Theme.xaml is the source of truth; this package exists so claude.ai/design can build Toki screens with on-brand parts.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-css.mjs"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.5.4"
+  }
+}

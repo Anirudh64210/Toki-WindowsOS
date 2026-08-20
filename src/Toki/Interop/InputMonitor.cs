@@ -4,14 +4,9 @@ using System.Windows;
 namespace Toki.Interop;
 
 /// <summary>
-/// A global low-level MOUSE hook (click-outside-to-dismiss) running on its OWN
-/// dedicated thread with its own message loop. Low-level hooks are serviced on
-/// the thread that installed them; if that were the UI thread, any render/GC
-/// stall there would lag ALL mouse input system-wide. A dedicated thread keeps
-/// the pointer buttery no matter what the UI is doing.
-///
-/// The callback does only pure arithmetic against a cached rect + thread-safe
-/// reads, then marshals the actual dismissal to the UI thread.
+/// Global low-level MOUSE hook (click-outside-to-dismiss) on its own thread with its own
+/// message loop: low-level hooks are serviced on the installing thread, so a UI stall would
+/// lag ALL mouse input system-wide. The callback stays pure; dismissal marshals to the UI thread.
 /// </summary>
 public sealed class InputMonitor : IDisposable
 {
@@ -71,10 +66,8 @@ public sealed class InputMonitor : IDisposable
                 }
                 else if (w == WmMouseWheel && _onWheel is not null)
                 {
-                    // The wheel goes to the FOCUSED window by default (or the hovered one only if the OS
-                    // "scroll inactive windows" setting is on) — so scrolling the notch fell through to the
-                    // app behind it. We catch every wheel here: if it's over the notch's scrollable content,
-                    // scroll the notch AND return non-zero to CONSUME it, so the window behind never moves.
+                    // The never-focused notch can't receive wheel input normally: if the wheel is over
+                    // its scrollable content, scroll it AND consume the event so the window behind never moves.
                     var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
                     var delta = (short)(data.mouseData >> 16);
                     if (_onWheel(data.pt.x, data.pt.y, delta)) return (IntPtr)1;

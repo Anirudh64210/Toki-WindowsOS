@@ -7,7 +7,7 @@ namespace Toki.Calendar;
 /// <summary>
 /// The tiny slice of the Google Calendar REST API Toki actually uses: list upcoming events,
 /// create an event, delete an event. Raw HttpClient + System.Text.Json in the <see cref="Toki.Llm.ApiLlm"/>
-/// house style — no Google SDK (it would drag several MB of assemblies into the single-file publish for
+/// house style - no Google SDK (it would drag several MB of assemblies into the single-file publish for
 /// three endpoints). The access token rides on each request; it is never logged.
 /// </summary>
 public static class CalendarClient
@@ -15,11 +15,8 @@ public static class CalendarClient
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
     const string Base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-    /// <summary>The ONE send/read/error-map path for every Calendar call. The four public methods
-    /// used to carry their own copies, which had already diverged (Delete lost the error body,
-    /// Insert lost sendUpdates) — and the HttpClient 30s timeout leaked out as a raw
-    /// TaskCanceledException past callers that (per the documented contract) catch only
-    /// GoogleAuthException. All of that is mapped here, once.</summary>
+    /// <summary>The ONE send/read/error-map path for every Calendar call. Maps HttpClient's own
+    /// timeout and network errors to GoogleAuthException so callers' documented catch contract holds.</summary>
     static async Task<(System.Net.HttpStatusCode Status, string Body)> SendAsync(
         HttpMethod method, string url, string accessToken, object? jsonBody, CancellationToken ct)
     {
@@ -33,26 +30,25 @@ public static class CalendarClient
             return (resp.StatusCode, body);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (OperationCanceledException) { throw new GoogleAuthException("Google Calendar timed out — try again.", needsReconnect: false); }
+        catch (OperationCanceledException) { throw new GoogleAuthException("Google Calendar timed out - try again.", needsReconnect: false); }
         catch (HttpRequestException) { throw new GoogleAuthException("Couldn't reach Google Calendar (network error).", needsReconnect: false); }
     }
 
-    /// <summary>Upcoming events on the primary calendar for the next <paramref name="days"/> days,
-    /// soonest first, recurring events expanded into instances. Cancelled instances are dropped.
-    /// Follows nextPageToken to completion: a single daily standup expands to ~30 instances over
-    /// the 31-day horizon, and rendering only the first page made weeks 2–4 silently look empty.</summary>
+    /// <summary>Upcoming events on the primary calendar, soonest first, recurring events expanded,
+    /// cancelled instances dropped. Follows nextPageToken to completion: a daily recurring event
+    /// fills a page, and stopping at page one makes later weeks silently look empty.</summary>
     public static async Task<IReadOnlyList<CalEvent>> ListUpcomingAsync(string accessToken, int days, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
-        // URL-encode the timestamps: RFC3339 ends in "+00:00", and a raw '+' in a query string means a
-        // space — Google then sees a malformed date and returns HTTP 400. EscapeDataString → %2B.
+        // URL-encode the timestamps: RFC3339 ends in "+00:00", and a raw '+' in a query string
+        // means a space, so Google sees a malformed date and returns HTTP 400.
         var timeMin = Uri.EscapeDataString(Rfc3339(now));
         var timeMax = Uri.EscapeDataString(Rfc3339(now.AddDays(Math.Max(1, days))));
         var baseUrl = $"{Base}?timeMin={timeMin}&timeMax={timeMax}" +
                       "&singleEvents=true&orderBy=startTime&maxResults=250";
         var all = new List<CalEvent>();
         string? pageToken = null;
-        for (var page = 0; page < 8; page++)   // hard cap — 2000 events in a month is beyond real use
+        for (var page = 0; page < 8; page++)   // hard cap - 2000 events in a month is beyond real use
         {
             var url = pageToken is null ? baseUrl : $"{baseUrl}&pageToken={Uri.EscapeDataString(pageToken)}";
             var (status, raw) = await SendAsync(HttpMethod.Get, url, accessToken, null, ct).ConfigureAwait(false);
@@ -80,9 +76,8 @@ public static class CalendarClient
         if (ev.AttendeeEmails is { Count: > 0 })
         {
             body["attendees"] = ev.AttendeeEmails.Select(e => new { email = e }).ToArray();
-            // Same as Patch: guests supplied at CREATE time must get their invitation email —
-            // Google's insert default is sendUpdates=none, so without this the event just
-            // silently appeared on their calendars.
+            // Google's insert default is sendUpdates=none: without this, invited guests get no
+            // invitation email and the event just silently appears on their calendars.
             query.Add("sendUpdates=all");
         }
         if (ev.AddMeet)
@@ -105,7 +100,7 @@ public static class CalendarClient
         return ParseEvent(doc.RootElement) ?? throw new GoogleAuthException("Google created the event but sent an odd reply.", needsReconnect: false);
     }
 
-    /// <summary>Edit an existing event (PATCH — only the fields we send change). <c>sendUpdates=all</c>
+    /// <summary>Edit an existing event (PATCH - only the fields we send change). <c>sendUpdates=all</c>
     /// so guests are notified of a time change. Adds a Meet link only if the event doesn't already have one.</summary>
     public static async Task<CalEvent> PatchAsync(string accessToken, string eventId, NewEvent ev, bool hasMeetAlready, CancellationToken ct = default)
     {
@@ -146,11 +141,11 @@ public static class CalendarClient
     // ── parsing (defensive: skip odd items rather than throwing on the whole list) ──
 
     /// <summary>Parse a Google <c>events.list</c> body into <see cref="CalEvent"/>s. Never throws on
-    /// odd shapes — a malformed item is skipped. Exposed for unit tests against canned fixtures.</summary>
+    /// odd shapes - a malformed item is skipped. Exposed for unit tests against canned fixtures.</summary>
     public static IReadOnlyList<CalEvent> ParseEvents(string json) => ParseEventsPage(json).Events;
 
     /// <summary>Like <see cref="ParseEvents"/>, plus the page's <c>nextPageToken</c> (null when this
-    /// is the last page) — for the pagination loop in <see cref="ListUpcomingAsync"/>.</summary>
+    /// is the last page) - for the pagination loop in <see cref="ListUpcomingAsync"/>.</summary>
     public static (IReadOnlyList<CalEvent> Events, string? NextPageToken) ParseEventsPage(string json)
     {
         var list = new List<CalEvent>();
@@ -247,10 +242,10 @@ public static class CalendarClient
     {
         var reason = (int)status switch
         {
-            401 => "Your Google sign-in has expired — please connect again.",
+            401 => "Your Google sign-in has expired - please connect again.",
             403 => "Google denied the request (permissions or quota).",
             404 => "That calendar item wasn't found.",
-            429 => "Google is rate-limiting Calendar requests — try again shortly.",
+            429 => "Google is rate-limiting Calendar requests - try again shortly.",
             >= 500 => "Google Calendar had a server error.",
             _ => $"Google Calendar refused the request (HTTP {(int)status}).",
         };

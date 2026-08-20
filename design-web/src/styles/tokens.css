@@ -1,0 +1,59 @@
+/* Toki design tokens - mirrored from src/Toki/Theme/ThemeManager.cs + Theme.xaml (dark palette,
+   the app's default and the Figma redesign's world). Every component color routes through these.
+   Toki's surfaces are DELIBERATELY dark-first: the notch is warm dark glass over the desktop in
+   both app themes, so this mirror commits to the dark look and paints every ground explicitly. */
+:root {
+  /* ── material ── */
+  --tk-ink: #161618;                       /* Library reading pane ground */
+  --tk-surface: #0E0E10;                   /* main panel background */
+  --tk-surface-hi: #1C1C1E;                /* raised surface / input field */
+  --tk-chip: #2C2C2E;                      /* chips, secondary buttons */
+  --tk-glass: rgba(33, 30, 30, 0.50);      /* SOURCE value (Figma) - needs the blur we cannot run */
+  --tk-glass-opaque: #2B2828;              /* what the app actually paints: the baked result */
+  /* The card carries NO fill beyond the plate: a tiled grain read as texture, and the broad
+     low-alpha gradient that replaced it banded. Depth comes from the rim, sheen and shadows. */
+  --tk-glass-capsule: rgba(33, 30, 30, 0.40); /* inner rows / capsules on glass */
+  --tk-glass-border: rgba(255, 255, 255, 0.10); /* the 1px light rim */
+  --tk-hairline: rgba(255, 255, 255, 0.094);
+  --tk-hover: rgba(255, 255, 255, 0.22);
+  --tk-press: rgba(255, 255, 255, 0.34);
+  --tk-check-border: rgba(255, 255, 255, 0.33);
+
+  /* ── text: WHITE OPACITIES, never grey hexes (the redesign's rule) ── */
+  --tk-text-hi: rgba(255, 255, 255, 0.90);
+  --tk-text-mid: rgba(255, 255, 255, 0.50);
+  --tk-text-low: rgba(255, 255, 255, 0.25);
+  --tk-text: #F5F5F7;                      /* legacy solid text (Library) */
+  --tk-text-dim: #98989D;
+
+  /* ── accents (one meaning, one colour) ── */
+  --tk-amber: #F5A05C;                     /* time / transcript / "N open" */
+  --tk-teal: #32C7D3;                      /* action items */
+  --tk-blue: #5AA9F9;                      /* people / owners */
+  --tk-green: #3DD68C;                     /* decisions / success */
+  --tk-pink: #F09CC7;                      /* open questions / selection */
+  --tk-purple: #C08AF0;
+  --tk-coral: #FF6F61;                     /* record CTA */
+  --tk-stop-red: #FF453A;                  /* Stop & summarize (Apple system red; light #FF3B30) */
+  --tk-danger: #E5484D;                    /* destructive text */
+  --tk-join-pill: rgba(255, 255, 255, 0.90);
+  --tk-join-pill-text: rgba(0, 0, 0, 0.90);
+
+  /* ── radii: the concentric ramp (inner = outer - padding, floor 4) ── */
+  --tk-r-card: 24px;
+  --tk-r-inner: 16px;
+  --tk-r-capsule: 12px;
+  --tk-r-pill: 999px;
+
+  /* ── type ── */
+  --tk-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  /* ── motion (the motion-and-feel skill's named curves) ── */
+  --tk-ease-arrive: cubic-bezier(0.23, 1, 0.32, 1);
+  --tk-ease-depart: cubic-bezier(0.30, 0, 0.80, 0.15);
+  --tk-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ── elevation (layered, vertical offset 2x horizontal) ── */
+  --tk-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.30), 0 2px 4px rgba(0, 0, 0, 0.22);
+  --tk-shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.35), 0 3px 8px rgba(0, 0, 0, 0.25);
+}

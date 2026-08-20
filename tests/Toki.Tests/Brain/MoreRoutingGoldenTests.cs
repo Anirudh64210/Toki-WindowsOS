@@ -52,7 +52,7 @@ public sealed class MoreRoutingGoldenTests : IClassFixture<BrainFixture>
     [InlineData("how many syncs this week")]
     public void Counting_RoutesToCount(string q) => Assert.Equal(Route.Count, R(q));
 
-    // Counting TASKS is answered by the task route (the list carries the count) — either is acceptable.
+    // Counting TASKS is answered by the task route (the list carries the count) - either is acceptable.
     [Theory]
     [InlineData("how many open tasks do I have")]
     [InlineData("how many things are on my plate")]
@@ -98,14 +98,23 @@ public sealed class MoreRoutingGoldenTests : IClassFixture<BrainFixture>
     public void PromptInjection_NeverBecomesACommand(string q)
         => Assert.NotEqual(Route.Command, R(q));
 
-    // ── §14.4 future prediction → not a deterministic misroute; stays a normal QA turn that will
-    //    decline downstream. We assert routing is stable (no crash, a real route). ──
+    // ── §14.4 future prediction → stays a normal QA turn that declines downstream. The old assert
+    //    (Enum.IsDefined on a switch result) could never fail; found by the 2026-08-18 test audit.
+    //    The property that actually matters: a future-tense question must never become a COMMAND or
+    //    a canned reply - it has to reach the QA layer, where the honest "I only know what was
+    //    recorded" answer lives. ──
     [Theory]
     [InlineData("what will Ana say tomorrow")]
     [InlineData("summarize next week's meetings")]
     [InlineData("what's in my 3pm meeting")]
-    public void FuturePrediction_RoutesSomewhere(string q)
-        => Assert.True(Enum.IsDefined(R(q)));
+    public void FuturePrediction_StaysAQaTurn(string q)
+    {
+        var r = R(q);
+        Assert.NotEqual(Route.Command, r);
+        Assert.NotEqual(Route.SmallTalk, r);
+        Assert.NotEqual(Route.Persona, r);
+        Assert.NotEqual(Route.MishearClarify, r);
+    }
 
     // ── §13 ambiguous underspecified → a QA turn (grounded/general), never a wrong command ──
     [Theory]

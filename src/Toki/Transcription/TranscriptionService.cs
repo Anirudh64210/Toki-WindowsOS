@@ -6,7 +6,7 @@ namespace Toki.Transcription;
 /// App-level transcription: turns a finished recording folder (you.wav / them.wav)
 /// into one merged, echo-de-duped transcript. Owns the heavy Parakeet recognizer
 /// and creates it once, lazily. Degrades gracefully (returns null) if the model
-/// isn't installed yet — a recording is never lost, it just isn't transcribed
+/// isn't installed yet - a recording is never lost, it just isn't transcribed
 /// until the model is present (lesson 2).
 /// </summary>
 public sealed class TranscriptionService
@@ -22,13 +22,13 @@ public sealed class TranscriptionService
     TranscriptionService() { }
 
     /// <summary>
-    /// Transcribe both streams of a recording folder (sequentially — a sherpa-onnx
-    /// offline recognizer is NOT safe to run concurrently, even as two instances:
-    /// concurrent decode produced non-deterministic, corrupt transcripts in testing,
-    /// so correctness wins over the ~15% wall-clock a parallel run would save) and
-    /// merge them. Returns null if the model isn't available. Background-thread safe.
+    /// Transcribe both streams of a recording folder and merge them. Sequential on purpose:
+    /// a sherpa-onnx offline recognizer is NOT safe to run concurrently, even as two instances
+    /// (concurrent decode corrupts output). Returns null if the model isn't available.
     /// </summary>
-    public IReadOnlyList<TranscriptSegment>? Process(string sessionFolder)
+    /// <param name="attendees">Display names from the calendar event; typed by a human,
+    /// so they outrank anything counted from past transcripts.</param>
+    public IReadOnlyList<TranscriptSegment>? Process(string sessionFolder, IEnumerable<string>? attendees = null)
     {
         if (!ModelReady)
         {
@@ -37,7 +37,7 @@ public sealed class TranscriptionService
         }
 
         // On a small-RAM PC the 2.5GB notes LLM cannot be resident while the recognizer
-        // decodes a long meeting — that's the native OOM crash. Free it first so the
+        // decodes a long meeting - that's the native OOM crash. Free it first so the
         // recognizer has room; the LLM reloads on demand after transcription.
         if (App.LowMemoryMode) Toki.Llm.LlmService.Instance.Release();
 
@@ -49,19 +49,88 @@ public sealed class TranscriptionService
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var you = TranscribeStream(Path.Combine(sessionFolder, "you.wav"), Speaker.You);
             var them = TranscribeStream(Path.Combine(sessionFolder, "them.wav"), Speaker.Them);
+
+            // Merge joins each person's consecutive lines into turns and lifts short backchannels
+            // out of the middle of someone else's sentence.
             var merged = TranscriptMerger.Merge(you, them);
+
+            // Text repairs run LAST so they see whole turns, not fragments - a name split across
+            // two fragments is one word by the time it is judged.
+            merged = Polish(merged, attendees);
+
             App.Log($"transcribed in {sw.ElapsedMilliseconds} ms: you={you.Count} them={them.Count} -> merged {merged.Count} segments");
             return merged;
         }
     }
 
     /// <summary>
-    /// Decode one LIVE window [start,end) of a stream's 16k-mono buffer at a meeting-time offset,
-    /// using the SHARED recognizer under the SAME gate as the stop-time decode — so live windows
-    /// and any stop-time pass never run concurrently (concurrent decode corrupts sherpa-onnx output).
-    /// Returns [] if the model isn't ready or the decode throws (never crashes the recording).
+    /// Every edit the last <see cref="Process"/> or <see cref="PolishNames"/> made. Read straight
+    /// after the call on the same thread, so the caller can store the edits WITH the meeting.
     /// </summary>
-    public IReadOnlyList<TranscriptSegment> DecodeLive(float[] samples, int start, int end, double offsetSec, Speaker speaker)
+    public IReadOnlyList<Toki.Storage.TextFix> LastCorrections { get; private set; } = [];
+
+    /// <summary>
+    /// Repair an ALREADY-merged transcript - the live path never goes through
+    /// <see cref="Process"/>, and it is the path most meetings actually take.
+    /// </summary>
+    public IReadOnlyList<TranscriptSegment> PolishNames(
+        IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees = null) =>
+        Polish(segments, attendees);
+
+    /// <summary>
+    /// The two text repairs, in the order that makes each one see its best input: names first (whole
+    /// turns, so a name split across fragments is one word by the time it is judged), then spoken
+    /// self-corrections. Never fatal - a transcript with a mis-heard name beats no transcript.
+    /// </summary>
+    IReadOnlyList<TranscriptSegment> Polish(
+        IReadOnlyList<TranscriptSegment> segments, IEnumerable<string>? attendees)
+    {
+        var record = new List<Toki.Storage.TextFix>();
+        try
+        {
+            var trusted = NameLexicon.Trusted(attendees);
+            var corpus = NameLexicon.Corpus(App.Store);
+            var (named, fixes) = NameCorrector.Correct(segments, trusted, corpus);
+            if (fixes.Count > 0)
+                App.Log("names corrected: " + string.Join(", ", fixes.Select(f => $"{f.From}->{f.To}")));
+            record.AddRange(fixes.Select(f => new Toki.Storage.TextFix(f.From, f.To, "name")));
+            segments = named;
+        }
+        catch (Exception ex) { App.Log($"name correction skipped (non-fatal): {ex.Message}"); }
+
+        try
+        {
+            var (repaired, repairs) = SelfCorrection.Clean(segments);
+            if (repairs.Count > 0)
+                App.Log("self-corrections dropped: " + string.Join(", ", repairs.Select(r => $"{r.From}->{r.To}")));
+            record.AddRange(repairs.Select(r => new Toki.Storage.TextFix(r.From, r.To, "repair")));
+            segments = repaired;
+        }
+        catch (Exception ex) { App.Log($"self-correction skipped (non-fatal): {ex.Message}"); }
+
+        try
+        {
+            // Readability LAST: cosmetic by design, so it must never feed the earlier passes; a
+            // name inside "august twenty first" has already been judged as spoken.
+            var (tidied, tidies) = Readability.Clean(segments);
+            record.AddRange(tidies.Select(td => new Toki.Storage.TextFix(td.From, td.To, "tidy")));
+            segments = tidied;
+        }
+        catch (Exception ex) { App.Log($"readability skipped (non-fatal): {ex.Message}"); }
+
+        LastCorrections = record
+            .GroupBy(f => (f.From.ToLowerInvariant(), f.To.ToLowerInvariant()))
+            .Select(g => g.First())
+            .ToList();
+        return segments;
+    }
+
+    /// <summary>
+    /// Decode one LIVE window [start,end) using the SHARED recognizer under the SAME gate as the
+    /// stop-time decode (concurrent decode corrupts sherpa-onnx output). Null means the decode
+    /// FAILED - count the window as lost; an empty list means it genuinely contained no speech.
+    /// </summary>
+    public IReadOnlyList<TranscriptSegment>? DecodeLive(float[] samples, int start, int end, double offsetSec, Speaker speaker)
     {
         if (!ModelReady || end <= start) return [];
         lock (_gate)
@@ -71,7 +140,7 @@ public sealed class TranscriptionService
                 _transcriber ??= new Transcriber();
                 return _transcriber.TranscribeSlice(samples, start, end, offsetSec, speaker);
             }
-            catch (Exception ex) { App.Log($"live decode {speaker} @ {offsetSec:F0}s failed: {ex.Message}"); return []; }
+            catch (Exception ex) { App.Log($"live decode {speaker} @ {offsetSec:F0}s failed: {ex.Message}"); return null; }
         }
     }
 
@@ -105,10 +174,8 @@ public sealed class TranscriptionService
         try
         {
             var samples = AudioLoader.To16kMono(wavPath);
-            // Skip a near-silent stream (e.g. the user's mic muted the whole call).
-            // Decoding it costs the full ~4x-real-time grind yet yields nothing — on
-            // a muted-mic meeting that was ~half the total processing time (real logs).
-            // Silence is not failure (lesson 4): a muted stream just isn't transcribed.
+            // Skip a near-silent stream (e.g. mic muted the whole call). Silence is not
+            // failure: a muted stream just isn't transcribed.
             if (IsSilent(samples))
             {
                 App.Log($"{speaker} stream near-silent, skipping ASR ({samples.Length / (double)AudioLoader.TargetRate:F0}s)");
@@ -118,17 +185,15 @@ public sealed class TranscriptionService
         }
         catch (Exception ex)
         {
-            // Parakeet errored (not silence) — this is where the whisper.cpp
-            // fallback will run (lesson 4). For now, log and skip this stream.
+            // Parakeet errored (not silence) - this is where the whisper.cpp fallback
+            // will run; Whisper only on actual error, never on silence.
             App.Log($"Parakeet error on {speaker} stream: {ex.Message} (whisper fallback: TODO)");
             return [];
         }
     }
 
-    // A stream is "silent" if no sample ever crosses a low amplitude floor (~-46 dBFS).
-    // Real speech peaks near 0.1–1.0, so this only ever trips on genuine digital silence
-    // (muted mic / no loopback), never on quiet speech. Early-exits on the first loud
-    // sample, so it's a cheap linear scan.
+    // "Silent" = no sample crosses ~-46 dBFS: trips only on genuine digital silence
+    // (muted mic / no loopback), never on quiet speech. Early-exits on the first loud sample.
     const float SilenceFloor = 0.005f;
     static bool IsSilent(float[] samples)
     {

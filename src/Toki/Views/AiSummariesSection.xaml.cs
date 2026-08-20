@@ -13,10 +13,9 @@ using Toki.Transcription;
 namespace Toki.Views;
 
 /// <summary>
-/// The AI-summaries settings block — mode (On-device / Heuristic / My API key) plus the whole
-/// BYO-API-key flow (provider wheel, key, model wheel, Test connection). Moved WHOLE from the notch
-/// SettingsView (2026-08-04 consolidation) so it lives in exactly one place: the Library's Settings
-/// page. All logic is the original SettingsView logic — same one-path persistence via AppSettings.
+/// The AI-summaries settings block: mode (On-device / Heuristic / My API key) plus the BYO-API-key
+/// flow (provider, key, model, Test connection). Lives only on the Library's Settings page;
+/// persistence goes through AppSettings.
 /// </summary>
 public partial class AiSummariesSection : UserControl
 {
@@ -42,18 +41,20 @@ public partial class AiSummariesSection : UserControl
     public AiSummariesSection()
     {
         InitializeComponent();
+        // Rounded 1px rims, snapped to whole device pixels (see GlassSurface.Hairline).
+        Theme.GlassSurface.CrispRim(ApiBaseUrlRim);
+        Theme.GlassSurface.CrispRim(ApiKeyRim);
         ProviderHost.Content = _providerDrop;
         ModelHost.Content = _modelDrop;
         _providerDrop.Changed += (_, _) => OnProviderChanged();
         _modelDrop.Changed += (_, _) => OnModelChanged();
-        // No model fetch at construction — the LibraryWindow is pre-warmed off-screen at startup, and
-        // a hidden settings page must not fire network calls. The page's open (LoadLibrarySettings)
-        // does the full Refresh.
+        // No model fetch at construction: the LibraryWindow is pre-warmed off-screen at startup, and a
+        // hidden settings page must not fire network calls. Opening the page does the full Refresh.
         Refresh(refreshModels: false);
     }
 
     /// <summary>Re-read settings into the controls. <paramref name="refreshModels"/> false = a
-    /// recolour-only pass (theme swap) — never fire a network fetch for that.</summary>
+    /// recolour-only pass (theme swap) - never fire a network fetch for that.</summary>
     public void Refresh(bool refreshModels = true)
     {
         _loading = true;
@@ -80,7 +81,7 @@ public partial class AiSummariesSection : UserControl
             var seed = _models.Count > 0 ? _models
                      : string.IsNullOrWhiteSpace(s.ApiModel) ? new List<string>()
                      : new List<string> { s.ApiModel };
-            _modelDrop.SetItems(seed, s.ApiModel, placeholder: "—");
+            _modelDrop.SetItems(seed, s.ApiModel, placeholder: "-");
             ApiTestStatus.Visibility = Visibility.Collapsed;   // stale test result shouldn't linger across opens
             UpdateStateText();
         }
@@ -130,13 +131,13 @@ public partial class AiSummariesSection : UserControl
             if (b is not null) { s.ApiBaseUrl = b; ApiBaseUrlBox.Text = b; }
         }
 
-        // A new provider means the old model no longer applies — clear it and reload the list from
+        // A new provider means the old model no longer applies - clear it and reload the list from
         // the new provider. No provider is favoured.
         s.ApiModel = "";
         s.ApiVerified = false;
         s.Save();
         _models = new();
-        _modelDrop.SetItems(Array.Empty<string>(), null, placeholder: "—");
+        _modelDrop.SetItems(Array.Empty<string>(), null, placeholder: "-");
         UpdateStateText();
         RefreshModels();
     }
@@ -154,7 +155,7 @@ public partial class AiSummariesSection : UserControl
     }
 
     /// <summary>Fetch the provider's live model list and fill the wheel. Cheap, cancellable,
-    /// never blocks. Doubles as a key check — if it loads, the key + address reach the provider.</summary>
+    /// never blocks. Doubles as a key check - if it loads, the key + address reach the provider.</summary>
     async void RefreshModels()
     {
         if (_loading || App.Headless) return;   // never fetch or save from the offscreen render harness
@@ -179,14 +180,14 @@ public partial class AiSummariesSection : UserControl
             var current = s.ApiModel;
             if (!_models.Any(m => string.Equals(m, current, StringComparison.OrdinalIgnoreCase)))
             {
-                // Saved model belongs to a different provider (or none) — pick a sensible default.
+                // Saved model belongs to a different provider (or none) - pick a sensible default.
                 current = PickDefault(_models);
                 s.ApiModel = current;
                 s.ApiVerified = false;
                 s.Save();
             }
             _modelDrop.SetItems(_models, current);
-            SetModelHint($"{_models.Count} model{(_models.Count == 1 ? "" : "s")} — flick to choose.");
+            SetModelHint($"{_models.Count} model{(_models.Count == 1 ? "" : "s")} - flick to choose.");
         }
         else
         {
@@ -194,7 +195,7 @@ public partial class AiSummariesSection : UserControl
         }
     }
 
-    /// <summary>Pick a reasonable default from a fetched list — a provider-neutral lean toward the
+    /// <summary>Pick a reasonable default from a fetched list - a provider-neutral lean toward the
     /// cheaper/smaller tier, else the first. No provider favoured.</summary>
     static string PickDefault(IReadOnlyList<string> models)
     {
@@ -213,9 +214,8 @@ public partial class AiSummariesSection : UserControl
 
     // ── segmented mode control ──
 
-    /// <summary>One segment of the mode selector. Sized for a window, not the notch: a real tap target
-    /// with side margins so the three never sit shoulder-to-shoulder, a hover fill on the inactive ones,
-    /// and the selected chip fading in (Motion.Micro) rather than snapping when the mode changes.</summary>
+    /// <summary>One segment of the mode selector: a real tap target with side margins, a hover fill
+    /// on inactive segments, and the selected chip fading in rather than snapping.</summary>
     Border SegButton(string label, NotesMode mode, NotesMode current)
     {
         var on = mode == current;
@@ -231,8 +231,9 @@ public partial class AiSummariesSection : UserControl
         var b = new Border
         {
             Background = on ? (Brush)FindResource("Chip") : Brushes.Transparent,
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(14, 11, 14, 11),   // was 0,7 — no side padding at all
+            // Concentric with the track it sits in: its r14 minus the 5px padding.
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(14, 11, 14, 11),
             Margin = new Thickness(2, 0, 2, 0),        // the gap that stops them touching
             Cursor = System.Windows.Input.Cursors.Hand, Child = text,
         };
@@ -245,8 +246,7 @@ public partial class AiSummariesSection : UserControl
         }
         else if (!App.Headless)
         {
-            // The control is rebuilt on every mode change, so "fade the selected chip in" is just an
-            // opacity ramp on the new one — reads as the selection moving, not the panel redrawing.
+            // The control is rebuilt on every mode change; the opacity ramp reads as the selection moving.
             b.Opacity = 0;
             b.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Micro))
             {
@@ -318,7 +318,7 @@ public partial class AiSummariesSection : UserControl
 
         TestApiButton.IsEnabled = false;
         ShowApiStatus("Testing…", ok: null);
-        // Off the UI thread (never block it — the async stack can deadlock if we do).
+        // Off the UI thread (never block it - the async stack can deadlock if we do).
         var (ok, message) = await Task.Run(() => llm.TestAsync());
         if (ok)
         {
@@ -334,7 +334,7 @@ public partial class AiSummariesSection : UserControl
         TestApiButton.IsEnabled = true;
     }
 
-    // Briefly turn the Test button into a green "Connected", then restore it — immediate,
+    // Briefly turn the Test button into a green "Connected", then restore it - immediate,
     // unmissable feedback at the point of the click.
     void FlashTestButton()
     {
@@ -370,8 +370,8 @@ public partial class AiSummariesSection : UserControl
         var s = AppSettings.Current;
         var hasKey = !string.IsNullOrWhiteSpace(s.ApiKey);
         var connected = hasKey && s.ApiVerified;
-        if (connected) ShowApiStatus("Connected — notes now come from the cloud.", ok: true, connected: true);
-        else if (hasKey) ShowApiStatus("Key saved — tap Test connection to confirm.", ok: null);
+        if (connected) ShowApiStatus("Connected - notes now come from the cloud.", ok: true, connected: true);
+        else if (hasKey) ShowApiStatus("Key saved - tap Test connection to confirm.", ok: null);
         else { ApiTestStatus.Text = ""; ApiTestStatus.Visibility = Visibility.Collapsed; }
     }
 

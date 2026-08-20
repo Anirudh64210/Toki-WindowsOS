@@ -32,7 +32,7 @@ public class CalendarTests
         Assert.All(states, s => Assert.Matches("^[A-Za-z0-9._~-]+$", s));
     }
 
-    // The canonical RFC 7636 Appendix B S256 vector — proves our challenge derivation is exactly right.
+    // The canonical RFC 7636 Appendix B S256 vector - proves our challenge derivation is exactly right.
     [Fact]
     public void CodeChallenge_MatchesRfc7636Vector()
         => Assert.Equal("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",

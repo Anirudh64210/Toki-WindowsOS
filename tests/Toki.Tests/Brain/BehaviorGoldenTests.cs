@@ -8,7 +8,7 @@ namespace Toki.Tests.Brain;
 
 /// <summary>
 /// End-to-end behavior golden set (taxonomy §4, §6, §14) through the real Ask pipeline with a seeded
-/// store + a fake model — the HONESTY rails, person/self filters, and no-fabrication traps. A fake LLM
+/// store + a fake model - the HONESTY rails, person/self filters, and no-fabrication traps. A fake LLM
 /// records whether it was even invoked, so "an honest miss never reaches the model" is checkable.
 /// </summary>
 [Collection("NotesQaSeams")]
@@ -82,10 +82,13 @@ public sealed class BehaviorGoldenTests : IDisposable
     [Fact]
     public async Task RealPerson_AbsentTopic_DoesNotFabricate()
     {
+        // (The first assert here used to be a tautology - its haystack was always "x" or "" - so
+        // for months this test survived on the Sources check alone. Found by the 2026-08-18 test
+        // audit. Now it asserts the actual honesty property: no invented Ana-said-X content.)
         var ans = await Ask("what did Ana say about the merger");
-        Assert.DoesNotContain("merger", ans.Text.Replace("merger", "", StringComparison.OrdinalIgnoreCase) == ans.Text ? "x" : "", StringComparison.OrdinalIgnoreCase);
-        // The real assertion: a miss carries no citations and doesn't invent Ana content.
-        Assert.Empty(ans.Sources);
+        Assert.Empty(ans.Sources);                                        // a miss cites nothing
+        Assert.DoesNotContain("Ana said", ans.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("$20", ans.Text);                           // no unrelated fact leaks in
     }
 
     // ── §6.2 existence yes/no honesty: present topic answers, absent topic honestly denies ──

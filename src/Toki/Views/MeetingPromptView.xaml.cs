@@ -1,26 +1,50 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace Toki.Views;
 
-public partial class MeetingPromptView : UserControl
+public partial class MeetingPromptView : UserControl, IWidthAware
 {
+    // One "Record this meeting" pill, plus a "Join call" pill when a scheduled meeting is on now;
+    // each layout also reserves the gap and close puck to the right of the right-hand pill.
+    const double PillW = 169, JoinW = 112, Gap = 10, PuckW = 24;
+    const double RecordOnlyWidth = PillW + Gap + PuckW;
+    const double WithJoinWidth = JoinW + Gap + PillW + Gap + PuckW;
+
+    bool _hasJoin;
+
     public MeetingPromptView()
     {
         InitializeComponent();
+
+        // 24px, not 20: this is the only way to decline, so it must not be the smallest target in the app.
+        var close = PillParts.RoundButton(
+            PillParts.Outline(PillParts.Cross(), "TextHi"),
+            "Glass", "Not now - don't record this meeting", 24);
+        close.Click += OnDismiss;
+        CloseHost.Content = close;
+
+        // Hovering anywhere on the strip brings it to full strength; it never drops below 55%.
+        MouseEnter += (_, _) => FadeClose(1);
+        MouseLeave += (_, _) => FadeClose(0.55);
+
         Refresh();
-        // Belt and braces: if the detected app changed while the cached view was off-screen, re-fit
-        // the notch to the (possibly re-wrapped) text once shown. The AUTHORITATIVE text update runs
-        // in Refresh() BEFORE PillWindow measures the content height — Loaded fires after layout, so
-        // updating only here was the real clip bug (height measured on stale one-line text, longer
-        // text then wrapped past the reveal clip and the prompt rendered cut off).
+        // If the detected app changed while the cached view was off-screen, re-fit once shown.
+        // The authoritative update runs in Refresh() BEFORE PillWindow measures this view.
         Loaded += (_, _) => { Refresh(); App.GrowNotch(); };
     }
 
-    /// <summary>Set the prompt from live state. Called by PillWindow right before it measures this view's
-    /// height, so the measured height always reflects the REAL (possibly wrapped) text. "Both smart": if a
-    /// scheduled meeting with a Meet link is happening now, offer to Join the call + Record; otherwise
-    /// it's an ad-hoc detected call → Join &amp; take notes (record).</summary>
+    /// <summary>One pill, or two when there is a call to join.</summary>
+    public double CardWidth => _hasJoin ? WithJoinWidth : RecordOnlyWidth;
+
+    void FadeClose(double to) =>
+        CloseHost.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(to, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
+
+    /// <summary>Set the prompt from live state. Called by PillWindow right before it measures this view,
+    /// so what is measured is what will show. A scheduled meeting with a Meet link adds a Join pill.</summary>
     public void Refresh()
     {
         var cal = App.LiveCalendarMeeting();
@@ -32,26 +56,33 @@ public partial class MeetingPromptView : UserControl
 
     void Configure(bool calendarMatch, string? title, string? rawAppName)
     {
+        _hasJoin = calendarMatch;
+        Pills.Children.Clear();
+
         if (calendarMatch)
         {
-            // A scheduled call is on right now — "Join call" opens the Meet link; "Record" is secondary.
-            Prompt.Text = string.IsNullOrWhiteSpace(title) ? "A meeting is on now — join?" : $"“{title}” is on now — join?";
-            JoinBtn.Visibility = Visibility.Visible;
-            RecordBtn.Content = "Record";
-            RecordBtn.Style = (Style)FindResource("WhiteButton");
+            // "Join call" opens the Meet link and records.
+            var join = PillParts.ActionPill(PillParts.Videocam(), "Join call", JoinW);
+            join.Margin = new Thickness(0, 0, Gap, 0);
+            join.ToolTip = string.IsNullOrWhiteSpace(title)
+                ? "Open the meeting link and start taking notes"
+                : $"Open “{title}” and start taking notes";
+            join.Click += OnJoin;
+            Pills.Children.Add(join);
         }
-        else
-        {
-            // Ad-hoc detected call — the FRIENDLY app name, never the raw process id (a past live bug).
-            var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
-            Prompt.Text = string.IsNullOrWhiteSpace(name) ? "A meeting's in progress." : $"{name} is in a call.";
-            JoinBtn.Visibility = Visibility.Collapsed;
-            RecordBtn.Content = "Join & take notes";   // Toki "joins" by taking notes on the call
-            RecordBtn.Style = (Style)FindResource("CoralButton");
-        }
+
+        var record = PillParts.ActionPill(PillParts.Videocam(), "Record this meeting", PillW);
+        // The detected app's identity lives in the tooltip: knowing WHICH app Toki noticed
+        // is what makes the prompt trustworthy.
+        var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
+        record.ToolTip = string.IsNullOrWhiteSpace(name)
+            ? "Transcribe this call and write the notes, all on this PC"
+            : $"{name} is in a call - transcribe it and write the notes, all on this PC";
+        record.Click += OnRecord;
+        Pills.Children.Add(record);
     }
 
-    /// <summary>Dev/measuretest seam: force the calendar-match (3-button) layout to verify it fits.</summary>
+    /// <summary>Dev/measuretest seam: force the calendar-match (two-pill) layout to verify it fits.</summary>
     public void DebugCalendarMatch(string title) => Configure(calendarMatch: true, title, null);
 
     void OnJoin(object sender, RoutedEventArgs e) => App.JoinFromPrompt();

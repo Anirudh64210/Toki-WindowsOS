@@ -8,10 +8,10 @@ static class PrepSamples
 {
     public static PrepContent Matched()
     {
-        var e = CalendarSamples.Events().First(x => x.Id == "s1");   // Design review — PixelFlow (+ agenda)
+        var e = CalendarSamples.Events().First(x => x.Id == "s1");   // Design review - PixelFlow (+ agenda)
         var m = new MeetingRecord
         {
-            Title = "Design review — PixelFlow", Kind = MeetingKind.Meeting,
+            Title = "Design review - PixelFlow", Kind = MeetingKind.Meeting,
             StartedAt = DateTimeOffset.Now.AddDays(-2),
             Notes = new NoteSet
             {
@@ -29,7 +29,7 @@ static class PrepSamples
 
     public static PrepContent FirstTime()
     {
-        var e = CalendarSamples.Events().First(x => x.Id == "s3");   // Pricing sync — Maydit (no prior notes)
+        var e = CalendarSamples.Events().First(x => x.Id == "s3");   // Pricing sync - Maydit (no prior notes)
         return new PrepContent(e, null, Array.Empty<ActionItem>(), new[] { "Q3 tier proposal", "Renewal terms" });
     }
 }

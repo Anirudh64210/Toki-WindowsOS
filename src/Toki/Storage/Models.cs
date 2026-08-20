@@ -13,7 +13,7 @@ public sealed class ActionItem
     public bool Done { get; set; }
 }
 
-/// <summary>One template section of a note — a heading and its bullets (e.g. "Blockers", "Ideas",
+/// <summary>One template section of a note - a heading and its bullets (e.g. "Blockers", "Ideas",
 /// "Key concepts"). Which sections appear depends on the meeting's template (see NoteTemplates).</summary>
 public sealed class NoteSection
 {
@@ -24,13 +24,17 @@ public sealed class NoteSection
 /// <summary>The structured notes for a meeting. Summary + Action items are always the same shape;
 /// the middle <see cref="Sections"/> are TEMPLATE-driven (standup → Updates/Blockers, interview →
 /// Strengths/Concerns, …). Older/heuristic notes leave Sections empty and use the legacy
-/// <see cref="Decisions"/>/<see cref="Questions"/> lists — <see cref="EffectiveSections"/> unifies both.</summary>
+/// <see cref="Decisions"/>/<see cref="Questions"/> lists - <see cref="EffectiveSections"/> unifies both.</summary>
 public sealed class NoteSet
 {
     /// <summary>A concise, context-aware meeting title (LLM-written when available).</summary>
     public string? Title { get; set; }
     /// <summary>The template Toki wrote this note in (e.g. "Standup", "1:1"); null for legacy/heuristic.</summary>
     public string? Template { get; set; }
+    /// <summary>True when the LLM actually produced this note; false for the heuristic floor.
+    /// NOT persisted - it exists so a caller holding a good saved note can refuse to overwrite it
+    /// with a silent heuristic fallback.</summary>
+    public bool FromModel { get; set; }
     public string Tldr { get; set; } = "";
     /// <summary>Template-driven middle sections (heading + bullets). New notes populate this.</summary>
     public List<NoteSection> Sections { get; set; } = [];
@@ -66,14 +70,28 @@ public sealed class MeetingRecord
     public string? Body { get; set; }            // freeform markdown for manual notes
     public NoteSet Notes { get; set; } = new();
     public List<TranscriptSegment> Transcript { get; set; } = [];
+
+    /// <summary>
+    /// What Toki quietly rewrote in this transcript: mis-heard names it unified, and self-repairs it
+    /// dropped. Kept so the transcript can SHOW the change (underlined, original on hover) rather than
+    /// silently presenting an edited record of what somebody said. The owner's rule: mark it in the
+    /// transcript only - the notes stay clean.
+    /// </summary>
+    public List<TextFix> Corrections { get; set; } = [];
 }
+
+/// <summary>One word Toki changed, and what it changed it from.</summary>
+/// <param name="From">What the recogniser produced.</param>
+/// <param name="To">What the transcript now says.</param>
+/// <param name="Reason">"name" (unified against the library) or "repair" (a spoken self-correction).</param>
+public sealed record TextFix(string From, string To, string Reason);
 
 /// <summary>Lightweight row for the Library list.</summary>
 public sealed record MeetingSummary(
     long Id, MeetingKind Kind, string Title, string? App,
     DateTimeOffset StartedAt, int DurationMs, string Tldr, int OpenActions, int PeopleCount);
 
-/// <summary>An open action item with the source meeting's id, title and date — for due-date-aware
+/// <summary>An open action item with the source meeting's id, title and date - for due-date-aware
 /// task scoping (the meeting date is the reference for resolving a free-text due like "Friday").</summary>
 public sealed record OpenAction(
     long MeetingId, string MeetingTitle, DateTimeOffset MeetingAt, string Text, string? Owner, string? Due);

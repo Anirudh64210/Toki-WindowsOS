@@ -6,9 +6,8 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// A small, on-brand confirmation dialog — replaces the dated Win32 <see cref="MessageBox"/>. It's a
-/// borderless rounded window that follows the current theme (light or dark), with a title, a message,
-/// and Cancel / confirm buttons. Returns true only if the user confirms. Esc = cancel, Enter = confirm.
+/// Themed borderless confirmation dialog with Cancel / confirm buttons.
+/// Returns true only if the user confirms. Esc = cancel, Enter = confirm.
 /// </summary>
 public static class ConfirmDialog
 {
@@ -65,8 +64,7 @@ public static class ConfirmDialog
         {
             Content = confirmLabel, Style = (Style)Application.Current.FindResource("PillButton"),
             Padding = new Thickness(14, 7, 14, 7), Margin = new Thickness(8, 0, 0, 0),
-            // Destructive action carries the brand coral (as the existing Delete buttons do); a plain
-            // action stays monotone.
+            // Destructive actions carry the brand coral; plain actions stay monotone.
             Foreground = danger ? B("Coral") : B("Text"),
         };
         confirm.Click += (_, _) => Close(true);
@@ -74,11 +72,11 @@ public static class ConfirmDialog
         buttons.Children.Add(confirm);
         stack.Children.Add(buttons);
 
-        win.Content = new Border
+        // The window is transparent, so the card's shadow gutter is simply room inside it;
+        // a centred dialog has no anchor to compensate for.
+        win.Content = new Theme.GlassCard(16)
         {
-            Background = B("Surface"), CornerRadius = new CornerRadius(16),
-            BorderBrush = B("Hairline"), BorderThickness = new Thickness(1),
-            Padding = new Thickness(20, 18, 20, 18), Child = stack,
+            CardPadding = new Thickness(20, 18, 20, 18), Content = stack,
         };
 
         win.KeyDown += (_, e) =>

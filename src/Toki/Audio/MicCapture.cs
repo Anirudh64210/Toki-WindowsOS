@@ -6,17 +6,9 @@ using NAudio.Wave;
 namespace Toki.Audio;
 
 /// <summary>
-/// Captures the default microphone (WASAPI shared mode) to a WAV file — the
-/// "you" stream. Reports the peak level so a self-test can prove real audio
-/// (not silence) was recorded.
-///
-/// Mid-recording resilience: if the default communications mic CHANGES (headset
-/// plugged in / unplugged, Bluetooth drop) the capture rebuilds itself on the new
-/// default device and keeps writing to the SAME WAV — buffers are converted to the
-/// original writer format when the new device's format differs. Without this, a
-/// device switch silently killed the "you" stream for the rest of the meeting.
-/// The WAV header is also re-finalized every few seconds so a crash or power loss
-/// mid-meeting leaves a playable file instead of a zero-length RIFF header.
+/// Captures the default microphone (WASAPI shared mode) to a WAV - the "you" stream.
+/// If the default communications mic changes mid-recording, capture rebuilds on the new
+/// device and keeps writing the SAME WAV (format-converted when the device format differs).
 /// </summary>
 public sealed class MicCapture : IDisposable
 {
@@ -37,12 +29,12 @@ public sealed class MicCapture : IDisposable
     public float PeakLevel => _peak;
 
     /// <summary>Optional passive tap: capture bytes in the WRITER's format as they arrive, for live
-    /// transcription. Purely an observer of the buffer already being written to WAV — must never
+    /// transcription. Purely an observer of the buffer already being written to WAV - must never
     /// affect capture. Wire it between <see cref="Prepare"/> and <see cref="Begin"/> so the very
     /// first buffers are tapped too.</summary>
     public Action<byte[], int>? OnBuffer;
 
-    /// <summary>Open the default device and the WAV writer WITHOUT starting capture — so the
+    /// <summary>Open the default device and the WAV writer WITHOUT starting capture - so the
     /// caller can wire <see cref="OnBuffer"/>/live-transcription against <see cref="Format"/>
     /// before the first buffer arrives. Follow with <see cref="Begin"/>.</summary>
     public void Prepare(string wavPath)
@@ -86,7 +78,7 @@ public sealed class MicCapture : IDisposable
     {
         lock (_gate)
         {
-            if (_writer is null) return;   // stopped (or mid-rebuild) — drop the straggler buffer
+            if (_writer is null) return;   // stopped (or mid-rebuild) - drop the straggler buffer
             var buf = e.Buffer;
             var bytes = e.BytesRecorded;
             if (_converter is not null) (buf, bytes) = _converter.Convert(buf, bytes);
@@ -107,12 +99,12 @@ public sealed class MicCapture : IDisposable
         }
     }
 
-    /// <summary>The capture stopped on its own (device unplugged/disabled mid-recording) —
+    /// <summary>The capture stopped on its own (device unplugged/disabled mid-recording) -
     /// try to carry on with whatever the new default mic is.</summary>
     void OnStopped(object? sender, StoppedEventArgs e)
     {
         if (e.Exception is null) return;               // deliberate Stop()
-        App.Log($"mic capture stopped unexpectedly ({e.Exception.Message}) — rebuilding");
+        App.Log($"mic capture stopped unexpectedly ({e.Exception.Message}) - rebuilding");
         System.Threading.Tasks.Task.Run(RebuildOnDefaultDevice);
     }
 
@@ -142,21 +134,33 @@ public sealed class MicCapture : IDisposable
             }
             catch (Exception ex)
             {
-                // No usable mic right now — a later device arrival triggers another attempt.
+                // No usable mic right now - a later device arrival triggers another attempt.
                 App.Log($"mic rebuild failed (will retry on next device change): {ex.Message}");
             }
         }
     }
 
+    /// <summary>Same layout, same bytes: Extensible-wrapped float and plain IeeeFloat of
+    /// identical layout are equal, so no converter is manufactured for a straight copy.</summary>
     static bool FormatsEqual(WaveFormat a, WaveFormat b) =>
-        a.Encoding == b.Encoding && a.SampleRate == b.SampleRate &&
-        a.Channels == b.Channels && a.BitsPerSample == b.BitsPerSample;
+        IsFloat(a) == IsFloat(b) && a.SampleRate == b.SampleRate &&
+        a.Channels == b.Channels && a.BitsPerSample == b.BitsPerSample &&
+        (IsFloat(a) || a.Encoding == b.Encoding || IsPcmLike(a) && IsPcmLike(b));
 
-    /// <summary>Peak absolute sample amplitude in 0..1, for IEEE-float or 16-bit PCM buffers.</summary>
+    internal static bool IsFloat(WaveFormat f) =>
+        f.Encoding == WaveFormatEncoding.IeeeFloat
+        || f is WaveFormatExtensible e && e.SubFormat == BufferConverter.IeeeFloatSubFormatId;
+
+    internal static bool IsPcmLike(WaveFormat f) =>
+        f.Encoding == WaveFormatEncoding.Pcm
+        || f is WaveFormatExtensible e && e.SubFormat == BufferConverter.PcmSubFormatId;
+
+    /// <summary>Peak absolute sample amplitude in 0..1, for IEEE-float or 16-bit PCM buffers
+    /// (Extensible wrappers included - a peak of 0 on a live mic makes the silence check lie).</summary>
     internal static float PeakOf(byte[] buffer, int bytes, WaveFormat format)
     {
         float peak = 0;
-        if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
+        if (IsFloat(format) && format.BitsPerSample == 32)
         {
             for (var i = 0; i + 4 <= bytes; i += 4)
             {
@@ -164,7 +168,7 @@ public sealed class MicCapture : IDisposable
                 if (v > peak) peak = v;
             }
         }
-        else if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 16)
+        else if (IsPcmLike(format) && format.BitsPerSample == 16)
         {
             for (var i = 0; i + 2 <= bytes; i += 2)
             {
@@ -205,7 +209,7 @@ public sealed class MicCapture : IDisposable
 
     /// <summary>Default-device-change watcher. Windows fires these on a COM callback thread;
     /// the rebuild takes the capture lock, so it is safe from any thread. Only the
-    /// communications-capture role matters — that's the device this capture opened.</summary>
+    /// communications-capture role matters - that's the device this capture opened.</summary>
     sealed class DeviceWatcher(MicCapture owner) : IMMNotificationClient
     {
         public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)

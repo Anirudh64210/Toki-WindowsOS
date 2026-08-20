@@ -7,14 +7,14 @@ using Xunit;
 namespace Toki.Tests;
 
 /// <summary>
-/// P10 — the dialogue brain. End-to-end tests of the turn-type router around the meeting-QA
+/// P10 - the dialogue brain. End-to-end tests of the turn-type router around the meeting-QA
 /// pipeline: user facts + identity ("call me Anirudh" → "what's my name"), general conversation
 /// turns that must NOT hit retrieval, misheard-command resilience, the anti-fabrication relevance
 /// floor, and no-citations-on-a-miss. All against a temp-file store (StoreOverride), an in-memory
-/// profile (UserProfile.SettingsOverride) and a fake model (LlmOverride) — the real settings.json,
+/// profile (UserProfile.SettingsOverride) and a fake model (LlmOverride) - the real settings.json,
 /// toki.db and model are never touched.
 /// </summary>
-[Collection("NotesQaSeams")]   // shares NotesQa's static seams with NotesQaTests — same collection, never parallel
+[Collection("NotesQaSeams")]   // shares NotesQa's static seams with NotesQaTests - same collection, never parallel
 public sealed class DialogueBrainTests : IDisposable
 {
     readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"toki-brain-{Guid.NewGuid():N}.db");
@@ -40,7 +40,7 @@ public sealed class DialogueBrainTests : IDisposable
     {
         public string? System, User;
         public int MaxTokens;
-        public string Reply = "Sure — here's a thought.";
+        public string Reply = "Sure - here's a thought.";
         public bool ReadyValue = true;
         public bool Ready => ReadyValue;
         public Task<string> CompleteAsync(string system, string user, int maxTokens, CancellationToken ct = default)
@@ -118,8 +118,8 @@ public sealed class DialogueBrainTests : IDisposable
     }
 
     [Theory]
-    [InlineData("call me later")]        // manner/time — not a name
-    [InlineData("i'm tired")]            // a state — not a name
+    [InlineData("call me later")]        // manner/time - not a name
+    [InlineData("i'm tired")]            // a state - not a name
     [InlineData("i am done")]
     public async Task NotANameStatement_NeverSetsTheName(string q)
     {
@@ -138,7 +138,7 @@ public sealed class DialogueBrainTests : IDisposable
         Assert.Contains(UserProfile.Facts, f => f.Contains("Contoso"));
     }
 
-    // ═══ GENERAL turns: converse from the model's own knowledge — no retrieval, no citations ═══
+    // ═══ GENERAL turns: converse from the model's own knowledge - no retrieval, no citations ═══
 
     [Fact]
     public async Task GeneralKnowledgeQuestion_UsesTheGeneralPath_NotRetrieval()
@@ -177,7 +177,7 @@ public sealed class DialogueBrainTests : IDisposable
     public async Task MeetingCue_KeepsTheTurnGrounded()
     {
         _store.Save(Meeting("Pricing sync", "We settled on the one-time $20 price."));
-        var fake = new FakeLlm { Reply = "You settled on $20 — that was the pricing sync." };
+        var fake = new FakeLlm { Reply = "You settled on $20 - that was the pricing sync." };
         NotesQa.LlmOverride = fake;
 
         var ans = await Ask("what did we decide about pricing");
@@ -233,7 +233,7 @@ public sealed class DialogueBrainTests : IDisposable
 
     // ═══ Anti-fabrication: the relevance floor + no citations on a miss ═══
 
-    // An anchored analytical question whose anchor matches NOTHING must miss honestly — never
+    // An anchored analytical question whose anchor matches NOTHING must miss honestly - never
     // "analyse 5 random recent meetings" (the fallback that fabricated the theme-command answer).
     [Fact]
     public async Task AnchoredAnalyze_WithNoMatch_IsAnHonestMiss_NotRecentMeetingSoup()
@@ -251,7 +251,7 @@ public sealed class DialogueBrainTests : IDisposable
     }
 
     // A model answer that declares a miss must ship with NO citations (the "I don't have your name
-    // in the meeting notes — From <3 meetings>" screenshot shape).
+    // in the meeting notes - From <3 meetings>" screenshot shape).
     [Fact]
     public async Task ModelDeclaredMiss_DropsItsCitations()
     {
@@ -269,7 +269,7 @@ public sealed class DialogueBrainTests : IDisposable
     public async Task RealAnswer_KeepsItsCitations()
     {
         _store.Save(Meeting("Budget planning", "We set the Q3 budget for the launch."));
-        var fake = new FakeLlm { Reply = "You set the Q3 budget — that was Budget planning." };
+        var fake = new FakeLlm { Reply = "You set the Q3 budget - that was Budget planning." };
         NotesQa.LlmOverride = fake;
 
         var ans = await Ask("what did we decide about the launch");
@@ -327,7 +327,7 @@ public sealed class DialogueBrainTests : IDisposable
     public void RealRecordingCommands_MatchBeforeNearMiss(string q)
         => Assert.Equal(AppCommand.StartRecording, CommandRouter.TryMatch(q));
 
-    // A greeting with a fuzzy ASR wake-name ("Hey Toky", "hey doki") must be small-talk — NEVER fall
+    // A greeting with a fuzzy ASR wake-name ("Hey Toky", "hey doki") must be small-talk - NEVER fall
     // through to notes retrieval and return an unrelated meeting (the notch "leak" the owner hit).
     [Theory]
     [InlineData("Hey Toky.")]
@@ -361,7 +361,7 @@ public sealed class DialogueBrainTests : IDisposable
     public void RealQuestions_AreNotSwallowedByAck(string q)
         => Assert.Null(SmallTalk.TryReply(q));
 
-    // The exact artifact the owner saw ("Toki: Hey Anirudh! … 🚀") — a leading label + emoji — must be
+    // The exact artifact the owner saw ("Toki: Hey Anirudh! … 🚀") - a leading label + emoji - must be
     // stripped: the notch/answer voice is plain text, enforced in code, not just asked in the prompt.
     [Theory]
     [InlineData("Toki: Hey Anirudh! The day's off to a sharp start. 🚀", "Hey Anirudh! The day's off to a sharp start.")]

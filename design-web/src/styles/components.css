@@ -1,0 +1,238 @@
+/* Toki component styles - every class routes through the tokens in tokens.css.
+   The press-compress on every button is the design system's "haptic feel" rule:
+   whole box to scale(0.97) in 90ms, spring back ~200ms (motion-and-feel skill). */
+
+.tk {
+  font-family: var(--tk-font);
+  color: var(--tk-text-hi);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── GlassPanel: the hovering card ── */
+.tk-glass-panel {
+  background: var(--tk-glass-opaque);
+  border: 1px solid var(--tk-glass-border);
+  border-radius: var(--tk-r-card);
+  box-shadow: var(--tk-shadow-card);
+  color: var(--tk-text-hi);
+  font-family: var(--tk-font);
+  position: relative;
+}
+.tk-glass-panel--translucent { background: var(--tk-glass); backdrop-filter: blur(24px); }
+/* the top-edge inner highlight: light catching the rim */
+.tk-glass-panel::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 1px;
+  border-radius: var(--tk-r-card) var(--tk-r-card) 0 0;
+  background: linear-gradient(90deg, transparent 8%, rgba(255, 255, 255, 0.16) 50%, transparent 92%);
+  pointer-events: none;
+}
+
+/* ── buttons ── */
+.tk-btn {
+  font-family: var(--tk-font);
+  font-size: 12px; font-weight: 600;
+  color: var(--tk-text);
+  background: var(--tk-chip);
+  border: none; border-radius: 13px;
+  min-height: 32px; min-width: 34px;
+  padding: 8px 15px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  transition: transform 200ms var(--tk-ease-arrive), background 130ms ease, opacity 130ms ease;
+}
+.tk-btn:hover { background: color-mix(in srgb, var(--tk-chip) 78%, white 12%); }
+.tk-btn:active { transform: scale(0.97); transition-duration: 90ms; }
+.tk-btn:focus-visible { outline: 2px solid var(--tk-blue); outline-offset: 2px; }
+
+.tk-btn--white { background: var(--tk-join-pill); color: var(--tk-join-pill-text); }
+.tk-btn--white:hover { background: rgba(255, 255, 255, 0.98); }
+.tk-btn--coral { background: var(--tk-coral); color: #FFFFFF; }
+.tk-btn--coral:hover { background: color-mix(in srgb, var(--tk-coral) 88%, white 12%); }
+.tk-btn--stop { background: var(--tk-stop-red); color: #FFFFFF; border-radius: var(--tk-r-pill); }
+.tk-btn--stop:hover { background: color-mix(in srgb, var(--tk-stop-red) 88%, white 12%); }
+.tk-btn--ghost { background: transparent; }
+.tk-btn--ghost:hover { background: var(--tk-hover); }
+.tk-btn--glass { background: var(--tk-glass-capsule); border: 1px solid var(--tk-glass-border); }
+.tk-btn--glass:hover { background: color-mix(in srgb, var(--tk-glass-capsule) 70%, white 10%); }
+.tk-btn--danger-text { color: var(--tk-danger); }
+
+/* icon button: bare glyph that lights on a rounded highlight */
+.tk-iconbtn {
+  width: 34px; height: 34px; padding: 0;
+  background: transparent; border: none; border-radius: 10px;
+  color: var(--tk-text-dim); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 200ms var(--tk-ease-arrive), background 130ms ease, color 130ms ease;
+}
+.tk-iconbtn:hover { background: var(--tk-hover); color: var(--tk-text); }
+.tk-iconbtn:active { transform: scale(0.94); transition-duration: 90ms; }
+.tk-iconbtn:focus-visible { outline: 2px solid var(--tk-blue); outline-offset: 2px; }
+.tk-iconbtn--danger { color: var(--tk-danger); }
+.tk-iconbtn--danger:hover { color: var(--tk-danger); }
+
+/* ── Capsule: outlined status chip ("2 open", "Priya", "Tomorrow") ── */
+.tk-capsule {
+  display: inline-flex; align-items: center;
+  font-family: var(--tk-font); font-size: 9.5px; font-weight: 600;
+  padding: 2.5px 8px; border-radius: 8px;
+  border: 1px solid; white-space: nowrap;
+}
+
+/* ── RowButton: a settings line that IS a button ── */
+.tk-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  font-family: var(--tk-font); text-align: left;
+  background: transparent; border: none; border-radius: var(--tk-r-capsule);
+  padding: 10px 12px; cursor: pointer; color: var(--tk-text);
+  transition: transform 200ms var(--tk-ease-arrive), background 130ms ease;
+}
+.tk-row:hover { background: var(--tk-hover); }
+.tk-row:active { transform: scale(0.985); transition-duration: 90ms; }
+.tk-row:focus-visible { outline: 2px solid var(--tk-blue); outline-offset: 2px; }
+.tk-row__title { font-size: 12.5px; font-weight: 600; color: var(--tk-text-hi); }
+.tk-row__sub { font-size: 11px; color: var(--tk-text-mid); margin-top: 2px; }
+.tk-row__chevron { margin-left: auto; color: var(--tk-text-low); flex: none; }
+
+/* ── CircleCheck: the redesign's action tick ── */
+.tk-circlecheck {
+  width: 18px; height: 18px; flex: none;
+  border-radius: 50%; border: 1.5px solid var(--tk-check-border);
+  background: transparent; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 150ms ease, border-color 150ms ease, transform 180ms var(--tk-ease-arrive);
+  color: transparent;
+}
+.tk-circlecheck:hover { border-color: rgba(255, 255, 255, 0.55); background: var(--tk-hover); }
+.tk-circlecheck[aria-checked="true"] {
+  background: var(--tk-teal); border-color: var(--tk-teal); color: #FFFFFF;
+}
+.tk-circlecheck:active { transform: scale(0.88); }
+.tk-circlecheck:focus-visible { outline: 2px solid var(--tk-blue); outline-offset: 2px; }
+
+/* ── ToggleSwitch ── */
+.tk-switch {
+  width: 40px; height: 22px; flex: none; position: relative;
+  border-radius: var(--tk-r-pill); border: none; cursor: pointer; padding: 0;
+  background: var(--tk-chip);
+  transition: background 180ms ease;
+}
+.tk-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #FFFFFF;
+  transition: transform 220ms var(--tk-ease-drawer);
+}
+.tk-switch[aria-checked="true"] { background: var(--tk-green); }
+.tk-switch[aria-checked="true"]::after { transform: translateX(18px); }
+.tk-switch:focus-visible { outline: 2px solid var(--tk-blue); outline-offset: 2px; }
+
+/* ── SectionHeader ── */
+.tk-section {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--tk-font); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.tk-section__chip {
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ── ActionItem ── */
+.tk-action { display: flex; gap: 9px; align-items: flex-start; font-family: var(--tk-font); }
+.tk-action__text { font-size: 13px; color: var(--tk-text-hi); line-height: 1.5; }
+.tk-action__text--done { color: var(--tk-text-mid); text-decoration: line-through; }
+.tk-action__chips { display: flex; gap: 6px; margin-top: 5px; }
+
+/* ── TranscriptLine ── */
+.tk-transcript { display: flex; gap: 8px; align-items: baseline; font-family: var(--tk-font); }
+.tk-transcript__avatar {
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8.5px; font-weight: 700; align-self: flex-start; margin-top: 2px;
+}
+.tk-transcript__name { font-weight: 600; white-space: nowrap; }
+.tk-transcript__text { font-size: 12.5px; line-height: 1.55; }
+
+/* ── GlanceRow (COMING UP) ── */
+.tk-glance { display: flex; gap: 10px; align-items: stretch; font-family: var(--tk-font); }
+.tk-glance__date { width: 34px; flex: none; text-align: center; padding-top: 8px; }
+.tk-glance__daynum { font-size: 16px; font-weight: 900; color: var(--tk-text-hi); line-height: 1; }
+.tk-glance__mon { font-size: 8px; font-weight: 700; color: var(--tk-text-mid); letter-spacing: 0.08em; }
+.tk-glance__card {
+  flex: 1; display: flex; align-items: center; gap: 10px;
+  background: var(--tk-glass-capsule); border: 1px solid var(--tk-glass-border);
+  border-radius: var(--tk-r-capsule); padding: 9px 12px 9px 0; overflow: hidden;
+}
+.tk-glance__accent { width: 3px; align-self: stretch; border-radius: 2px; margin-left: 9px; flex: none; }
+.tk-glance__title { font-size: 12.5px; font-weight: 600; color: var(--tk-text-hi); }
+.tk-glance__meta { font-size: 10.5px; color: var(--tk-text-mid); margin-top: 1px; }
+.tk-glance__count { font-size: 10.5px; font-weight: 600; color: var(--tk-amber); margin-left: auto; white-space: nowrap; }
+.tk-glance__join {
+  margin-left: 8px; flex: none;
+  background: var(--tk-join-pill); color: var(--tk-join-pill-text);
+  border: none; border-radius: var(--tk-r-pill);
+  font-family: var(--tk-font); font-size: 11px; font-weight: 600;
+  padding: 5px 13px; cursor: pointer;
+  transition: transform 200ms var(--tk-ease-arrive);
+}
+.tk-glance__join:active { transform: scale(0.95); }
+
+/* ── MeetingCard (Library list row) ── */
+.tk-mcard { display: flex; gap: 6px; font-family: var(--tk-font); }
+.tk-mcard__date { width: 34px; flex: none; text-align: center; padding-top: 12px; }
+.tk-mcard__daynum { font-size: 16px; font-weight: 900; color: var(--tk-text-hi); line-height: 1; }
+.tk-mcard__mon { font-size: 8px; font-weight: 700; color: var(--tk-text-mid); letter-spacing: 0.08em; }
+.tk-mcard__card {
+  flex: 1; display: flex; gap: 10px; cursor: pointer;
+  background: transparent; border-radius: var(--tk-r-inner);
+  padding: 11px 12px 11px 0; transition: background 140ms ease;
+  overflow: hidden;
+}
+.tk-mcard__card:hover { background: var(--tk-surface-hi); }
+.tk-mcard--selected .tk-mcard__card { background: var(--tk-surface-hi); }
+.tk-mcard__accent { width: 3px; align-self: stretch; border-radius: 2px; margin-left: 10px; flex: none; }
+.tk-mcard__title { font-size: 13px; font-weight: 600; color: var(--tk-text-hi); }
+.tk-mcard__meta { font-size: 10.5px; color: var(--tk-text-mid); margin-top: 1px; }
+.tk-mcard__snippet {
+  font-size: 11px; color: var(--tk-text-mid); margin-top: 6px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tk-mcard__chips { display: flex; gap: 6px; margin-top: 8px; }
+
+/* ── TokiMascot ── */
+.tk-mascot { position: relative; display: inline-block; }
+.tk-mascot__bubble {
+  border-radius: 50%;
+  background: rgba(244, 247, 251, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.40);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  display: flex; align-items: center; justify-content: center;
+}
+.tk-mascot__art { animation: tk-breathe 3.5s ease-in-out infinite; transform-origin: 50% 95%; }
+@keyframes tk-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.014, 0.982); }
+}
+.tk-mascot__eye { animation: tk-blink 4.6s infinite; transform-origin: center; }
+@keyframes tk-blink {
+  0%, 91.5%, 100% { transform: scaleY(1); }
+  92.8% { transform: scaleY(0.06); }
+  97% { transform: scaleY(1); }
+}
+.tk-mascot__dot { animation: tk-dotpulse 840ms ease-in-out infinite alternate; }
+.tk-mascot__dot:nth-child(2) { animation-delay: 160ms; }
+.tk-mascot__dot:nth-child(3) { animation-delay: 320ms; }
+@keyframes tk-dotpulse { from { opacity: 0.25; } to { opacity: 1; } }
+.tk-mascot__pen { animation: tk-scribble 480ms ease-in-out infinite alternate; transform-origin: 80% 90%; }
+@keyframes tk-scribble { from { transform: rotate(98deg); } to { transform: rotate(112deg); } }
+.tk-mascot__sparkle { animation: tk-sparkle 1.4s ease-in-out infinite alternate; }
+@keyframes tk-sparkle { from { opacity: 0.45; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .tk-mascot__art, .tk-mascot__eye, .tk-mascot__dot, .tk-mascot__pen, .tk-mascot__sparkle { animation: none; }
+}
+
+/* ── NotchShell: the hovering-window architecture ── */
+.tk-notch { position: relative; display: inline-flex; align-items: flex-start; font-family: var(--tk-font); }
+.tk-notch__mascot { position: absolute; left: 0; z-index: 2; transition: top 300ms var(--tk-ease-drawer); }
+.tk-notch__card { margin-left: 56px; }

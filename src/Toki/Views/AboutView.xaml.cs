@@ -8,15 +8,13 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The "Built with" screen — open-source attribution. This is a LICENCE OBLIGATION, not decoration:
-/// Parakeet is CC-BY-4.0 (name + source + licence link + a note that we modified it), Qwen3 is
-/// Apache-2.0, everything else MIT. Each row opens its upstream source. Fixed height + internal scroll.
-/// The full licence texts ship alongside the app in THIRD-PARTY-NOTICES.md.
+/// The "Built with" screen - open-source attribution. This is a LICENCE OBLIGATION, not decoration:
+/// Parakeet is CC-BY-4.0, Qwen3 is Apache-2.0, everything else MIT. Full licence texts ship
+/// alongside the app in THIRD-PARTY-NOTICES.md.
 /// </summary>
 public partial class AboutView : UserControl
 {
-    // (Name, what it does for us, who made it, licence, source URL). Grouped by section.
-    // Only what Toki actually ships is credited — Whisper is a stubbed fallback and is intentionally absent.
+    // Only what Toki actually ships is credited; Whisper is a stubbed fallback and intentionally absent.
     record Credit(string Name, string Role, string Author, string Licence, string Url);
 
     static readonly (string Section, Credit[] Items)[] Sections =
@@ -29,6 +27,12 @@ public partial class AboutView : UserControl
                        "Apache-2.0", "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507"),
             new Credit("bge-small-en-v1.5", "Meaning search", "BAAI",
                        "MIT", "https://huggingface.co/BAAI/bge-small-en-v1.5"),
+            new Credit("Silero VAD v5", "Tells speech from silence", "Silero Team",
+                       "MIT", "https://github.com/snakers4/silero-vad"),
+            new Credit("pyannote segmentation-3.0", "Who talks when", "pyannote · CNRS",
+                       "MIT", "https://huggingface.co/pyannote/segmentation-3.0"),
+            new Credit("3D-Speaker CAM++", "Voice fingerprints for telling speakers apart", "Alibaba 3D-Speaker",
+                       "Apache-2.0", "https://github.com/modelscope/3D-Speaker"),
         }),
         ("ENGINES & LIBRARIES", new[]
         {
@@ -66,7 +70,6 @@ public partial class AboutView : UserControl
 
     void Build()
     {
-        // Intro — the honest, human framing (Toki is on-device; thank the people who made that possible).
         Body.Children.Add(new TextBlock
         {
             Style = (Style)FindResource("Secondary"),
@@ -83,7 +86,6 @@ public partial class AboutView : UserControl
             foreach (var c in items) Body.Children.Add(Row(c));
         }
 
-        // Footer: where the full texts live + a small credit line.
         Body.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("Hairline"), Margin = new Thickness(0, 14, 0, 0) });
         Body.Children.Add(new TextBlock
         {
@@ -94,8 +96,7 @@ public partial class AboutView : UserControl
         });
     }
 
-    // One tappable credit row: name + role on the left, a licence chip on the right; the whole row
-    // opens the upstream source. Hover lifts the background and reveals an ↗ open-external glyph.
+    // One tappable credit row; the whole row opens the upstream source.
     FrameworkElement Row(Credit c)
     {
         var name = new TextBlock { Style = (Style)FindResource("BodyStrong"), Text = c.Name, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -106,7 +107,7 @@ public partial class AboutView : UserControl
         left.Children.Add(sub);
         Grid.SetColumn(left, 0);
 
-        // CC-BY / Apache carry real obligations — tint their chips amber so they read as "attribution", not filler.
+        // CC-BY / Apache carry real obligations; their chips are tinted amber.
         var strong = c.Licence.StartsWith("CC-BY") || c.Licence.StartsWith("Apache");
         var chip = new Border
         {
@@ -138,15 +139,16 @@ public partial class AboutView : UserControl
         grid.Children.Add(chip);
         grid.Children.Add(arrow);
 
-        var row = new Border
+        // A real Button, never a Border with a mouse handler.
+        var row = new Button
         {
-            Child = grid, Padding = new Thickness(8, 9, 8, 9), Margin = new Thickness(-6, 2, -6, 0),
-            CornerRadius = new CornerRadius(10), Background = Brushes.Transparent,
-            Cursor = Cursors.Hand, ToolTip = c.Url,
+            Style = (Style)FindResource("RowButton"),
+            Content = grid, Padding = new Thickness(8, 9, 8, 9), Margin = new Thickness(0, 2, 0, 0),
+            ToolTip = c.Url,
         };
-        row.MouseEnter += (_, _) => { row.Background = (Brush)FindResource("Chip"); arrow.Opacity = 1; };
-        row.MouseLeave += (_, _) => { row.Background = Brushes.Transparent; arrow.Opacity = 0; };
-        row.MouseLeftButtonUp += (_, _) => Open(c.Url);
+        row.MouseEnter += (_, _) => arrow.Opacity = 1;
+        row.MouseLeave += (_, _) => arrow.Opacity = 0;
+        row.Click += (_, _) => Open(c.Url);
         return row;
     }
 

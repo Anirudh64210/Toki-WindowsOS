@@ -1,9 +1,10 @@
 <Window x:Class="Toki.PillWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:theme="clr-namespace:Toki.Theme"
         Title="Toki"
         WindowStyle="None" AllowsTransparency="True" ResizeMode="NoResize"
-        Background="Transparent"
+        Background="{x:Null}"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="{StaticResource UiFont}"
@@ -11,26 +12,146 @@
     <!-- Transparent window (like Cluely / Cheating Daddy): the Border IS the pill, with
          a translucent frosted surface so the desktop shows through. Ghost mode
          (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
-         capture even though it's transparent — the two are NOT mutually exclusive.
+         capture even though it's transparent - the two are NOT mutually exclusive.
          A real acrylic blur-behind is applied in code (SetWindowCompositionAttribute). -->
-    <!-- Rounded only on the BOTTOM — the top is flush with the screen edge, so it reads as
+    <!-- Rounded only on the BOTTOM - the top is flush with the screen edge, so it reads as
          a notch carved into the top, not a floating pill. -->
-    <!-- A VIRTUAL NOTCH, not a glass pill: PITCH BLACK and fully opaque, so it reads as a hole
-         carved out of the top edge (like the macOS notch / Dynamic Island). No white sheen, no
-         translucency — a clean black slab. Even a 13px tucked sliver is an unmistakable dark tab. -->
-    <Border x:Name="Root" CornerRadius="0,0,8,8" BorderThickness="1,0,1,1"
-            Background="{DynamicResource Notch}" BorderBrush="{DynamicResource NotchBorder}">
-        <Grid>
-            <!-- Kept only so code can reference it; no white glare on a pitch-black notch. -->
-            <Border x:Name="Sheen" CornerRadius="0,0,8,8" IsHitTestVisible="False"
-                    Background="Transparent"/>
-            <!-- Grid stretches its child view to fill the window exactly, so content
-                 wraps/scrolls within bounds instead of overflowing and clipping. -->
-            <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
-                <Grid.RenderTransform>
-                    <ScaleTransform x:Name="HostScale"/>
-                </Grid.RenderTransform>
-            </Grid>
+    <!-- THE 2026-08 REDESIGN (figma 288:4): the panel HOVERS. It is no longer a slab fused to the
+         screen edge - it is a floating sheet of warm dark glass a little below the top, rounded on
+         ALL FOUR corners (r24), with a soft shadow underneath and Toki floating BESIDE it as his own
+         element (the frames put him at the card's top-left, outside it). The window is therefore
+         BIGGER than the card: a left zone for the mascot, right/bottom room for the shadow - the
+         pads live in code (CardPadL/R/B) so every size path adds them once, centrally. -->
+    <!-- ═══ THE MORPH (2026-08-14) ═══
+         The window's bounds are set ONCE per transition, not animated. Everything that used to be
+         done by animating Window.Width/Height is done by an animated clip on the card instead.
+
+         Why: measured with the fpstest flag, animating the window's own bounds dropped 56 to 76
+         frames every four seconds (worst frames 39-48ms against an 8.3ms budget), because each is a Win32
+         window move plus a layered-surface reallocation on the UI thread, mid-layout. Transparency
+         cost 1% and the mascot art cost 2%, so neither was ever the problem. The reveal-from-hidden
+         path already worked this way (it was fixed for "the ugly open"); AnimateSize now does too.
+
+         Background stays Transparent (a brush that paints alpha 0), NOT {x:Null}. Null would make
+         the pads around the card click-through, which sounds like an improvement and was tried -
+         but it is an unrequested behaviour change to the input surface of a window whose input
+         handling has been subtle enough to cost this project real time before, and it was made in
+         the same session as a reported glitch. Change one thing at a time. -->
+    <Grid x:Name="Stage">
+        <!-- The shadow is cast by a SEPARATE nearly-invisible border, not an Effect on Root itself:
+             a DropShadowEffect on the card would force its whole subtree (all the text) through an
+             intermediate surface and cost ClearType. This caster has the card's shape and position;
+             its fill is 1/255 alpha - invisible itself, but enough silhouette to cast.
+             Size and vertical offset are set in code (LayoutCard) to match Root exactly. -->
+        <!-- TWO casters, because one shadow is a sticker and two are an object sitting above a
+             surface: a wide soft KEY shadow for the lift, and a tight AMBIENT one for the contact.
+             They share one wrapper so every path that hides the shadow for a morph and fades it back
+             on settle (AnimateSize, RevealDown, ConcealUp, ParkAfterHide) keeps addressing exactly one
+             element. Their opacities are set per theme in code (ApplyShadowDepth) - a shadow on a
+             bright surface is weaker than the same shadow on a dark one.
+             The key shadow's blur+depth are sized to stay inside CardPadB (24) so the window's own
+             bottom edge never crops it. -->
+        <Grid x:Name="ShadowCaster" Margin="68,0,20,24" IsHitTestVisible="False">
+            <Border x:Name="KeyShadow" CornerRadius="24" Background="#01000000">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28" ShadowDepth="8" Direction="270" Opacity="0.22" Color="#000000"/>
+                </Border.Effect>
+            </Border>
+            <Border x:Name="AmbientShadow" CornerRadius="24" Background="#01000000">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="8" ShadowDepth="2" Direction="270" Opacity="0.12" Color="#000000"/>
+                </Border.Effect>
+            </Border>
         </Grid>
-    </Border>
+
+        <!-- The card. Its Background is the PLATE gradient (lighter at the top, because light comes
+             from above) and its rim is a gradient too - brightest along the top edge, which is the
+             cheap specular cue a flat 10% white rim can never give. The rest of the material (sheen,
+             light field, inner edges) is the CardMaterial stack below. Rim thickness is set in code to a
+             whole number of DEVICE pixels so the stroke lands crisp at 125%/150%. -->
+        <Border x:Name="Root" Margin="68,0,20,24" CornerRadius="24" BorderThickness="1"
+                Background="{DynamicResource CardPlateOpaque}" BorderBrush="{DynamicResource CardRim}">
+            <Grid>
+                <theme:CardMaterial x:Name="Material"/>
+                <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="HostScale"/>
+                    </Grid.RenderTransform>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- THE RIM AT REST. A Border's CornerRadius stroke is a circular arc and can never be a
+             squircle, so the resting card's outline is drawn here instead: the same CardRim gradient,
+             the same device-pixel thickness, on the same box, but following the smoothed corner
+             (Theme/Squircle.cs). ApplyCornerGeometry owns the handover - Root's own BorderBrush goes
+             transparent exactly when this appears, so there is never two rims and never none.
+             It is a SIBLING of Root, not a child, so the rim's outer edge is not shaved by Root's own
+             squircle clip; during a morph it hides and Root's arc rim takes over, because the morph's
+             animated clip is a rounded RECTANGLE and a squircle rim would be cut at the corners. -->
+        <Path x:Name="RimPath" Margin="68,0,20,24" Visibility="Collapsed" IsHitTestVisible="False"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+              Stroke="{DynamicResource CardRim}" StrokeThickness="1"/>
+
+        <!-- Toki, floating beside the card - INSIDE A CIRCLE, as every frame draws him: a round
+             translucent bubble (soft white glass, gentle shadow) with the blue cloud in it. Hidden
+             during the peek states - the CollapsedView carries its own Toki there. -->
+        <!-- Sized to be NOTICED (owner: "weirdly unassumingly small") - a 56px bubble whose centre
+             sits level with the card's header row, snug against the card's left edge as the frames
+             draw him. Homely means present, not peripheral. -->
+        <!-- A clean 10px AIR GAP to the card (owner: the old 4px overlap read messy): the 58px
+             bubble ends at 58, the card starts at the 68px pad. -->
+        <Grid x:Name="MascotZone" Width="58" Height="58" HorizontalAlignment="Left" VerticalAlignment="Top"
+              Margin="0,0,0,0" Visibility="Collapsed" IsHitTestVisible="False">
+            <!-- Vertical position is ANIMATED per state (PlaceMascot): centered on a compact pill,
+                 bottom-left on the expanded recording panel, level with the header on tall panels -
+                 exactly where each Figma frame draws him. A translate (composition), never Margin
+                 (layout), so the glide is smooth.
+                 The SCALE is his own arrival: Toki springs in a beat AFTER the card, so he reads as
+                 a character who came to sit beside it rather than a decal printed on its edge
+                 (owner, 2026-08-14: "the toki bubble should feel like it is not attached to the
+                 notch bar, now it renders at the same time"). -->
+            <Grid.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="MascotPop" CenterX="29" CenterY="29"/>
+                    <!-- The somersault for the notes-ready hand-off flight (StartNotesHandoffFlight):
+                         Toki jumps out of the bubble, flips once and flies to the peek's spot. Angle
+                         stays 0 outside that beat, so this transform costs nothing at rest. -->
+                    <RotateTransform x:Name="MascotFlip" CenterX="29" CenterY="29"/>
+                    <TranslateTransform x:Name="MascotShift"/>
+                </TransformGroup>
+            </Grid.RenderTransform>
+            <!-- The bubble's lift, as a soft gradient ellipse rather than a DropShadowEffect.
+                 It HAS to be: this whole zone is animated (MascotPop springs it in, MascotShift glides
+                 it between states), and an Effect renders its entire subtree in software and re-renders
+                 it on every frame of that animation - rule 1.3 of the motion skill, and the exact cause
+                 of the "hard rendering" the mascot was diagnosed with before. The same shape, none of
+                 the per-frame cost. -->
+            <!-- A CONTACT shadow under the disc rather than a halo around it: the zone is only 2px
+                 bigger than the bubble, so a surrounding glow would be clipped by the window's left
+                 edge, and there is unlimited room below. Same idiom as the mascot's own ground shadow
+                 inside TokiBlob. -->
+            <Ellipse x:Name="MascotLift" Width="50" Height="18" IsHitTestVisible="False"
+                     HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,-5">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#47000000" Offset="0.0"/>
+                        <GradientStop Color="#00000000" Offset="1.0"/>
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- Themed, not hardcoded: a fixed pale disc disappeared into a light-theme notch. The
+                 disc gets the CARD's material at disc scale (2026-08-18) - a plate that is lighter at
+                 the top and a rim that is brightest at its crown - so Toki's bubble reads as the same
+                 physical stuff as the panel beside it instead of as a flat puck. -->
+            <!-- A circle is already curvature-continuous everywhere, so the disc is NOT squircled.
+                 Its rim gets the same device-pixel rounding the card's does (ApplyCornerGeometry) -
+                 a 1 DIP stroke is 1.25 physical px at 125%, drawn as two half-lit rows, which is what
+                 a "soft" edge actually is. -->
+            <Border x:Name="MascotDisc" Width="56" Height="56" CornerRadius="28"
+                    Background="{DynamicResource MascotPlate}"
+                    BorderBrush="{DynamicResource MascotRim}" BorderThickness="1"/>
+            <ContentControl x:Name="MascotHost" Width="44" Height="40" Margin="0,1,0,0"/>
+        </Grid>
+    </Grid>
 </Window>

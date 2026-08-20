@@ -12,24 +12,24 @@ namespace Toki.Tests.Brain;
 /// </summary>
 public enum Route
 {
-    Command,            // CommandRouter.TryMatch (navigation/action) — runs upstream, wins first
+    Command,            // CommandRouter.TryMatch (navigation/action) - runs upstream, wins first
     SmallTalk,          // greetings/thanks/affection
     Persona,            // questions about Toki itself / meta / privacy
-    UserFact,           // "call me X" — a fact to store
-    Identity,           // "what's my name" — a profile read
+    UserFact,           // "call me X" - a fact to store
+    Identity,           // "what's my name" - a profile read
     VoiceCreate,        // "schedule a call with Ana tomorrow at 3"
     MishearClarify,     // command-shaped but matched nothing
     Count,              // deterministic count
     ListMeetings,       // deterministic meeting list
     ListTasks,          // deterministic task list
-    IdentifyMeeting,    // "which/oldest/most-recent meeting" — DB fact
+    IdentifyMeeting,    // "which/oldest/most-recent meeting" - DB fact
     General,            // RAG-vs-parametric: not about the meetings → model's own knowledge
     Grounded,           // LookupFact / SummarizeOne / Analyze grounded in retrieved notes
 }
 
 /// <summary>
 /// A seeded, deterministic meeting corpus + a frozen reference clock, plus the <see cref="RouteOf"/>
-/// classifier — the substrate for the 1000+ prompt golden set. All data is synthetic and local.
+/// classifier - the substrate for the 1000+ prompt golden set. All data is synthetic and local.
 /// </summary>
 public sealed class BrainFixture : IDisposable
 {
@@ -116,7 +116,7 @@ public sealed class BrainFixture : IDisposable
     public Route RouteOf(string q, ConversationContext? ctx = null, string? screenTitle = null, long? screenId = null)
     {
         // 0) Command (runs upstream in App.HandleNotchText). ShowTasks is forwarded into Ask, so it is
-        //    NOT a terminal command route — everything else is.
+        //    NOT a terminal command route - everything else is.
         if (CommandRouter.TryMatch(q) is { } cmd && cmd != AppCommand.ShowTasks) return Route.Command;
         // 0.5–0.8 canned turn types, in order.
         if (SmallTalk.TryReply(q) is not null) return Route.SmallTalk;
@@ -133,7 +133,7 @@ public sealed class BrainFixture : IDisposable
         if (screenId is long && qaIntent && !parsed.HasDateRange && parsed.Rank is null)
         {
             // Proximal-deixis / underspecified-with-open-note pinning is a scope refinement, not a
-            // route change — the intent below still decides the route.
+            // route change - the intent below still decides the route.
         }
         plan = (ctx is not null ? QueryUnderstanding.ResolveFollowUp(q, ctx, Now) : null) ?? parsed;
 
@@ -145,7 +145,7 @@ public sealed class BrainFixture : IDisposable
             case QueryIntent.ListTasks: return Route.ListTasks;
         }
         // A recency-rank question ("oldest/most-recent meeting") is resolved deterministically to a
-        // specific meeting (the real IdentifyMeetingAnswer either names it or summarizes it) — label it
+        // specific meeting (the real IdentifyMeetingAnswer either names it or summarizes it) - label it
         // IdentifyMeeting. The exact identify-vs-summarize split is an internal refinement not modelled here.
         if (plan.Rank is not null) return Route.IdentifyMeeting;
 

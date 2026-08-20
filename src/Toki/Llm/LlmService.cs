@@ -6,7 +6,7 @@ namespace Toki.Llm;
 /// <summary>
 /// App-level LLM notes: picks the local Qwen model (or a BYO API key, per
 /// settings) and produces an upgraded <see cref="NoteSet"/> from a transcript.
-/// Owns the heavy local model — loaded once, lazily, warmed at launch. Degrades
+/// Owns the heavy local model - loaded once, lazily, warmed at launch. Degrades
 /// to null (caller keeps the heuristic notes) whenever no model is available.
 /// </summary>
 public sealed class LlmService
@@ -29,10 +29,8 @@ public sealed class LlmService
         var s = AppSettings.Current;
         if (s.NotesMode == NotesMode.ApiKey)
         {
-            // Only hand back the API client when it can actually work; otherwise say why
-            // (never the key itself) and degrade one rung, not two: API → LOCAL model when
-            // it's installed (the user chose AI notes; a missing key shouldn't silently
-            // drop them all the way to heuristic) → heuristic only when there's no model.
+            // Only hand back the API client when it can actually work; otherwise log why (never
+            // the key itself) and degrade one rung, not two: API → local model → heuristic.
             var api = new ApiLlm(s.ApiKey, s.ApiModel, s.ApiBaseUrl);
             if (api.Ready) return api;
             var why = string.IsNullOrWhiteSpace(s.ApiKey) ? "no API key set"
@@ -40,10 +38,10 @@ public sealed class LlmService
                 : "no model name set";
             if (ModelManager.QwenInstalled)
             {
-                App.Log($"API notes unavailable: {why} — falling back to the on-device model");
+                App.Log($"API notes unavailable: {why} - falling back to the on-device model");
                 return EnsureLocal();
             }
-            App.Log($"API notes unavailable: {why} — keeping heuristic notes");
+            App.Log($"API notes unavailable: {why} - keeping heuristic notes");
             return null;
         }
         if (s.NotesMode == NotesMode.HeuristicOnly) return null;
@@ -54,7 +52,7 @@ public sealed class LlmService
     {
         if (_local is not null) return _local;
         if (_localFailed || !ModelManager.QwenInstalled) return null;
-        // On a small-RAM PC, free the ~630MB recognizer before loading the 2.5GB LLM —
+        // On a small-RAM PC, free the ~630MB recognizer before loading the 2.5GB LLM -
         // both resident is what crashes/pages the machine. The recognizer reloads for
         // the next meeting.
         if (App.LowMemoryMode) TranscriptionService.Instance.Release();
@@ -72,7 +70,7 @@ public sealed class LlmService
         }
     }
 
-    /// <summary>Load the local model ahead of the first meeting (lesson 2), off the UI thread.</summary>
+    /// <summary>Load the local model ahead of the first meeting, off the UI thread.</summary>
     public void Warm()
     {
         if (AppSettings.Current.NotesMode == NotesMode.Local && ModelManager.QwenInstalled)
@@ -80,7 +78,7 @@ public sealed class LlmService
     }
 
     /// <summary>
-    /// Warm synchronously on the caller's thread — used by the gentle low-priority
+    /// Warm synchronously on the caller's thread - used by the gentle low-priority
     /// startup warmer so the model load inherits that below-normal priority instead
     /// of running on a normal-priority thread-pool thread.
     /// </summary>
@@ -116,7 +114,9 @@ public sealed class LlmService
     }
 
     /// <summary>Write notes with the active model, or null to keep the heuristic notes. Pass
-    /// <paramref name="force"/> to write in a specific template (the manual pick-menu override).</summary>
+    /// <paramref name="force"/> to write in a specific template (the manual override).
+    /// The summary is written from the TRANSCRIPT alone; the user's sticky note is deliberately
+    /// not an input - the note must say what was actually said.</summary>
     public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
         CancellationToken ct = default, NoteTemplate? force = null)
     {
@@ -134,7 +134,7 @@ public sealed class LlmService
             : NoteTemplates.All.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>True when a model is available to (re)write notes — WITHOUT loading it. (Calling
+    /// <summary>True when a model is available to (re)write notes - WITHOUT loading it. (Calling
     /// <see cref="Active"/> would synchronously load the 2.5 GB local model, freezing the caller;
     /// this only checks that a model COULD be used, and the load happens later, off-thread.)</summary>
     public bool CanWrite()

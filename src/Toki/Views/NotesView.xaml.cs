@@ -15,6 +15,14 @@ public partial class NotesView : UserControl
         Loaded += (_, _) => Populate();
         // Note content is built in code (NoteRenderer/FindResource) → re-render on a theme swap.
         Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { if (IsLoaded) Populate(); });
+        // The speakers land a few seconds after the note does. Re-read the meeting so the loaders are
+        // replaced by real names in place, rather than the note quietly differing next time it is opened.
+        App.SpeakersResolved += id => Dispatcher.BeginInvoke(() =>
+        {
+            if (!IsLoaded || App.CurrentMeeting?.Id != id) return;
+            if (App.Store.Get(id) is { } fresh) App.CurrentMeeting = fresh;
+            Populate();
+        });
     }
 
     void Populate()
@@ -47,7 +55,16 @@ public partial class NotesView : UserControl
         foreach (var seg in transcript) Body.Children.Add(TranscriptRow(seg));
     }
 
-    void RenderNotes(MeetingRecord m) => NoteRenderer.Meeting(Body, m, spacious: false);
+    // ONE FlowDocument in a read-only RichTextBox so a drag-select spans the whole note;
+    // embedded so the page's ScrollViewer stays the only scroll.
+    void RenderNotes(MeetingRecord m)
+    {
+        var box = NoteRenderer.MeetingDocument(m, spacious: false,
+            resolving: m.Id > 0 && App.IsResolvingSpeakers(m.Id), scrollHost: Scroll);
+        // A scroll-disabled RichTextBox still eats the wheel; hand it to the page's scroller.
+        box.PreviewMouseWheel += (_, e) => { e.Handled = true; Toki.Controls.SmoothScroll.Nudge(Scroll, e.Delta); };
+        Body.Children.Add(box);
+    }
 
     void OnCopy(object sender, RoutedEventArgs e)
     {
@@ -56,8 +73,7 @@ public partial class NotesView : UserControl
             try
             {
                 Clipboard.SetText(NoteRenderer.TranscriptText(m));
-                // Feedback checkmark reverts after a moment — a permanent ✓ made the copy
-                // button look consumed and unpressable.
+                // Feedback checkmark reverts after a moment; a permanent one reads as consumed.
                 var prior = CopyBtn.Content;
                 CopyBtn.Content = "✓";
                 var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
@@ -102,7 +118,7 @@ public partial class NotesView : UserControl
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 7, 0),
             Child = new TextBlock
             {
-                Text = you ? "YOU" : "THEM", FontSize = 8.5, FontWeight = FontWeights.Bold,
+                Text = seg.Label.ToUpperInvariant(), FontSize = 8.5, FontWeight = FontWeights.Bold,
                 Foreground = (Brush)FindResource(you ? "Blue" : "TextDim"), FontFamily = (FontFamily)FindResource("UiFont"),
             },
         };
@@ -121,7 +137,7 @@ public partial class NotesView : UserControl
     // The meeting is auto-saved when it's transcribed, so "Save to Library" just keeps it and closes.
     void OnSaveToLibrary(object sender, RoutedEventArgs e) => App.State.TryGo(PillState.Hidden);
 
-    // "Delete" discards it entirely (DB + notes file + audio) — the user decided not to keep it.
+    // "Delete" discards it entirely (DB + notes file + audio) - the user decided not to keep it.
     void OnDelete(object sender, RoutedEventArgs e)
     {
         App.DiscardMeeting(App.CurrentMeeting);

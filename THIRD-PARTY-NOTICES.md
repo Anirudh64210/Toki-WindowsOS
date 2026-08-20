@@ -1,4 +1,4 @@
-# Third-party notices — Toki for Windows
+# Third-party notices - Toki for Windows
 
 Toki runs entirely on your device using the open-source models and libraries below.
 This file, and the in-app **Settings → Built with** screen, satisfy the attribution
@@ -12,7 +12,7 @@ Toki itself is not open source; the components below are, under their own licenc
 
 ## Models
 
-### Parakeet TDT 0.6b v2 — speech-to-text
+### Parakeet TDT 0.6b v2 - speech-to-text
 - **Author:** NVIDIA
 - **Licence:** Creative Commons Attribution 4.0 International (CC-BY-4.0)
 - **Source:** https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
@@ -24,17 +24,36 @@ Toki itself is not open source; the components below are, under their own licenc
 > that the material was modified. All three are provided here and on the in-app
 > "Built with" screen.
 
-### Qwen3-4B-Instruct-2507 — on-device notes & chat
+### Qwen3-4B-Instruct-2507 - on-device notes & chat
 - **Author:** Alibaba Cloud (Qwen team)
 - **Licence:** Apache License 2.0
 - **Source:** https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507
 - **Redistribution:** Q4_K_M GGUF quantisation (community build).
 
-### bge-small-en-v1.5 — meaning search
+### bge-small-en-v1.5 - meaning search
 - **Author:** Beijing Academy of Artificial Intelligence (BAAI)
 - **Licence:** MIT
 - **Source:** https://huggingface.co/BAAI/bge-small-en-v1.5
 - **Redistribution:** Q8_0 GGUF quantisation (community build).
+
+### Silero VAD v5 - voice activity detection
+- **Author:** Silero Team
+- **Licence:** MIT
+- **Source:** https://github.com/snakers4/silero-vad
+- **Redistribution:** ONNX export, as packaged by the sherpa-onnx project.
+
+### pyannote segmentation-3.0 - speaker segmentation
+- **Author:** pyannote (Hervé Bredin), (c) 2022 CNRS
+- **Licence:** MIT
+- **Source:** https://huggingface.co/pyannote/segmentation-3.0
+- **Redistribution:** ONNX export, as packaged by the sherpa-onnx project.
+
+### 3D-Speaker CAM++ - speaker embedding
+- **Author:** Alibaba (3D-Speaker / ModelScope team)
+- **Licence:** Apache License 2.0 (code and weights)
+- **Source:** https://github.com/modelscope/3D-Speaker
+- **Redistribution:** `3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx`, as packaged
+  by the sherpa-onnx project.
 
 ---
 

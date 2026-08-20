@@ -16,7 +16,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
 
     Route R(string q) => _fx.RouteOf(q);
 
-    // ── §5.1/5.2/5.7 small-talk: greetings, thanks, affection, goodbyes — never retrieval ──
+    // ── §5.1/5.2/5.7 small-talk: greetings, thanks, affection, goodbyes - never retrieval ──
     [Theory]
     [InlineData("hi")]
     [InlineData("hey")]
@@ -55,7 +55,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
     [InlineData("can you hear me")]
     public void SmallTalk_Routes(string q) => Assert.Equal(Route.SmallTalk, R(q));
 
-    // ── §5.4 identity: who/what are you — SmallTalk or Persona both give a correct, non-retrieval answer ──
+    // ── §5.4 identity: who/what are you - SmallTalk or Persona both give a correct, non-retrieval answer ──
     [Theory]
     [InlineData("who are you")]
     [InlineData("what are you")]
@@ -65,7 +65,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
     public void Identity_IsHandledNotRetrieved(string q)
         => Assert.True(R(q) is Route.SmallTalk or Route.Persona or Route.Identity, $"'{q}' routed to {R(q)}");
 
-    // ── §5.4 "are you an AI/robot/chatgpt" — Persona (in-character, honest) ──
+    // ── §5.4 "are you an AI/robot/chatgpt" - Persona (in-character, honest) ──
     [Theory]
     [InlineData("are you an ai")]
     [InlineData("are you chatgpt")]
@@ -74,7 +74,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
     [InlineData("why are you so rude")]
     public void PersonaMeta_Routes(string q) => Assert.Equal(Route.Persona, R(q));
 
-    // ── §5.5 PRIVACY — must be caught and answered accurately, NEVER sent to retrieval ──
+    // ── §5.5 PRIVACY - must be caught and answered accurately, NEVER sent to retrieval ──
     [Theory]
     [InlineData("are you sending my data to the cloud")]
     [InlineData("is this private")]
@@ -138,7 +138,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
     [InlineData("schedule lunch with Sam Monday at noon")]
     public void CalendarCreate_Routes(string q) => Assert.Equal(Route.VoiceCreate, R(q));
 
-    // ── §12 general knowledge / parametric — NO retrieval, NO citations ──
+    // ── §12 general knowledge / parametric - NO retrieval, NO citations ──
     [Theory]
     [InlineData("what does OKR mean")]
     [InlineData("what does MRR stand for")]
@@ -162,7 +162,7 @@ public sealed class TurnTypeGoldenTests : IClassFixture<BrainFixture>
 
     // ── the boundary: an absent topic phrased WITHOUT a meeting cue is a general turn (no fabricated
     //    grounding). (With a "we decided about X" cue it stays a grounded meeting-QA that honestly
-    //    misses at answer time — asserted in the behavior suite.) ──
+    //    misses at answer time - asserted in the behavior suite.) ──
     [Theory]
     [InlineData("tell me about the berlin office")]
     [InlineData("tell me about kangaroos")]

@@ -23,10 +23,8 @@ public static class AudioLoader
             ? mono
             : new WdlResamplingSampleProvider(mono, TargetRate); // managed resampler, no MediaFoundation
 
-        // Preallocate the exact array and fill it in place. The old List<float> +
-        // ToArray path transiently held 3-4x the final size (doubling growth + a full
-        // copy), which OOM'd on a 35-min recording once the LLM was warmed. This holds
-        // just the one array.
+        // Preallocate the exact array and fill in place: a List<float> + ToArray path transiently
+        // holds 3-4x the final size, which can OOM on a long recording with the LLM resident.
         var estimate = (int)(reader.TotalTime.TotalSeconds * TargetRate) + TargetRate;
         var samples = new float[estimate];
         var count = 0;

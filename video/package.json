@@ -1,0 +1,23 @@
+{
+  "name": "toki-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The Toki demo film. Kept OUT of src/Toki on purpose: a Node toolchain inside the WPF project would drag into every build and publish.",
+  "scripts": {
+    "dev": "remotion studio src/index.ts",
+    "build": "remotion render src/index.ts Toki out/toki.mp4 --concurrency=2"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.410",
+    "remotion": "4.0.410",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.0",
+    "typescript": "5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.25.0": true
+  }
+}

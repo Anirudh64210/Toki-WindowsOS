@@ -5,7 +5,7 @@ namespace Toki.Detection;
 /// <summary>
 /// Watches the mic-in-use set and decides when a meeting is worth prompting for.
 /// Denylist (not allowlist): any app can host a call, so treat every mic user as
-/// a candidate and exclude the known non-meetings. Conservative on purpose — a
+/// a candidate and exclude the known non-meetings. Conservative on purpose - a
 /// spurious prompt is dismissible; a missed meeting is lost forever.
 ///
 /// Debounce 2 polls (~5s) before prompting; a dismissed app is suppressed 10 min;
@@ -66,10 +66,8 @@ public sealed class MeetingDetector
 
     public void EndRecording() => _recordingTarget = null;
 
-    /// <summary>Suppress an app for the cooldown window (user dismissed its prompt). Also clears the
-    /// "already offered" mark so that — if the call is STILL going when the cooldown expires — the
-    /// ongoing-meeting prompt re-surfaces once more (the owner's "even while the meeting is happening"),
-    /// rather than the app being silenced for the whole session after one dismiss.</summary>
+    /// <summary>Suppress an app for the cooldown window (user dismissed its prompt). Also clears
+    /// the "already offered" mark so an ongoing call re-prompts once when the cooldown expires.</summary>
     public void Snooze(DetectedApp app)
     {
         _cooldownUntil[app.Id] = _now() + Cooldown;
@@ -78,10 +76,8 @@ public sealed class MeetingDetector
 
     public static bool IsDenylisted(DetectedApp app)
     {
-        // Match the app's own NAME only (exe filename, or packaged-app id) — never the full
-        // install path. Matching the path made the user's folders part of the decision: a
-        // Windows username like "Jacobs" (contains "obs") or a "C:\Code\" install dir would
-        // denylist every per-user app and silently kill meeting detection.
+        // Match the app's own NAME only (exe filename, or packaged-app id), never the install
+        // path - path matching lets the user's folder names silently denylist apps.
         var name = app.DisplayName;
         var packagedId = app.Packaged ? app.Id : "";
         return Denylist.Any(d => name.Contains(d, StringComparison.OrdinalIgnoreCase)
@@ -96,7 +92,7 @@ public sealed class MeetingDetector
         PollOnce(active);
     }
 
-    /// <summary>The decision logic for one poll — separated so it's unit-testable.</summary>
+    /// <summary>The decision logic for one poll - separated so it's unit-testable.</summary>
     public void PollOnce(IReadOnlyList<DetectedApp> active)
     {
         var candidates = active.Where(a => !IsDenylisted(a)).ToList();
@@ -107,7 +103,7 @@ public sealed class MeetingDetector
             _consecutive[c.Id] = _consecutive.GetValueOrDefault(c.Id) + 1;
         foreach (var id in _consecutive.Keys.Where(k => !liveIds.Contains(k)).ToList())
             _consecutive.Remove(id);
-        // Once an app leaves the mic, forget we prompted it — a fresh call later re-prompts.
+        // Once an app leaves the mic, forget we prompted it - a fresh call later re-prompts.
         _prompted.RemoveWhere(id => !liveIds.Contains(id));
 
         // Auto-stop: is the recording target still on the mic?
@@ -119,7 +115,7 @@ public sealed class MeetingDetector
             {
                 var t = _recordingTarget;
                 _recordingTarget = null;
-                App.Log($"detect: target '{t?.DisplayName}' released mic — auto-stop");
+                App.Log($"detect: target '{t?.DisplayName}' released mic - auto-stop");
                 MeetingEnded?.Invoke();
             }
             return; // never prompt while recording

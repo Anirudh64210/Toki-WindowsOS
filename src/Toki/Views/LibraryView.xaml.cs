@@ -18,8 +18,7 @@ public partial class LibraryView : UserControl
         Loaded += (_, _) => { SearchBox.Text = ""; Reload(); };
         // Cards are built in code (FindResource brushes) → rebuild them on a theme swap so they recolour.
         Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() => { if (IsLoaded) Reload(); });
-        // Debounce search: a synchronous DB query + full card rebuild per KEYSTROKE stuttered
-        // typing on a large library; 200ms after the last key is imperceptible and calm.
+        // Debounce search: a synchronous DB query + full card rebuild per keystroke stutters typing.
         _searchDebounce.Tick += (_, _) => { _searchDebounce.Stop(); Reload(); };
     }
 
@@ -113,7 +112,7 @@ public partial class LibraryView : UserControl
     {
         if (!ConfirmDialog.Show(null, "Delete this?",
                 $"“{m.Title}” and its audio will be removed for good. This can't be undone.")) return;
-        // DiscardMeeting is the one true delete (DB + Markdown mirror + recording folder) —
+        // DiscardMeeting is the one true delete (DB + Markdown mirror + recording folder) -
         // the promise in the dialog includes the audio.
         try { App.DiscardMeeting(App.Store.Get(m.Id)); } catch (Exception ex) { App.Log($"delete failed: {ex.Message}"); }
         Reload();

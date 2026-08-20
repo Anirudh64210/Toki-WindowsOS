@@ -10,11 +10,9 @@ using Toki.State;
 namespace Toki.Views;
 
 /// <summary>
-/// The push-to-talk voice notch — a minimal, chrome-light conversation. No title bar (the mascot is the
-/// identity); assistant answers are PLAIN TEXT on the surface, not chat bubbles; only the user's line is
-/// differentiated (dim, with a small pink tick). Grows to content and scrolls past a cap — never opens big.
-/// A scrollable THREAD keeps the whole session until the notch closes. Driven by <see cref="App"/> via
-/// <see cref="Instance"/>.
+/// The push-to-talk voice notch. Assistant answers are plain text (no chat bubbles); only the user's
+/// line is differentiated. Grows to content and scrolls past a cap; a scrollable thread keeps the
+/// session until the notch closes. Driven by <see cref="App"/> via <see cref="Instance"/>.
 /// </summary>
 public partial class AskView : UserControl
 {
@@ -22,7 +20,6 @@ public partial class AskView : UserControl
 
     static FontFamily Ui => (FontFamily)Application.Current.FindResource("UiFont");
 
-    readonly List<ScaleTransform> _bars = new();
     readonly List<Border> _thinkDots = new();   // the 3 "thinking" dots
     DispatcherTimer? _autoHide;
     TextBox? _curAnswer;
@@ -30,29 +27,26 @@ public partial class AskView : UserControl
     StackPanel? _curMoreHost;
     string? _moreQuestion;
 
-    // Stick-to-bottom: the thread auto-follows the newest text ONLY while you're already parked at the
-    // bottom. The moment you scroll UP to read earlier turns, following stops — so a streaming answer (or
-    // a new token) can never yank you back down (the "scroll fights me" glitch). A new turn you initiate
-    // (asking a question, a command reply) re-pins to the bottom, because you want to see the new thing.
+    // Stick-to-bottom: auto-follow the newest text ONLY while parked at the bottom, so a streaming
+    // answer never yanks the reader back down. A user-initiated turn re-pins to the bottom.
     bool _stick = true;
 
     public AskView()
     {
         InitializeComponent();
         Instance = this;
-        BuildWave();
+        // Push-to-talk's own mic, never the meeting's: asking a question mid-recording must not make
+        // this wave dance to the call.
+        Wave.Meter = Audio.LevelMeter.Voice;
         BuildLoader();
         ThreadScroll.ScrollChanged += OnThreadScroll;
     }
 
-    // Re-evaluate "am I pinned to the bottom?" ONLY on a user-driven scroll. Content growth (streaming
-    // tokens, an inserted scope line) changes ExtentHeight — we must ignore those, or every token would
-    // reset the flag and defeat the point. A user wheel/drag has ExtentHeightChange == 0.
+    // Re-evaluate "pinned to bottom" ONLY on a user-driven scroll: content growth changes ExtentHeight
+    // and must NOT flip the flag (a user wheel/drag has ExtentHeightChange == 0). The ~120px threshold
+    // is generous on purpose - a tight one un-anchors the reader on sub-pixel extent wobble.
     void OnThreadScroll(object sender, ScrollChangedEventArgs e)
     {
-        // Re-evaluate "pinned to bottom" only on a USER scroll (content growth changes ExtentHeight, which
-        // must NOT flip the flag). ~120px threshold (research §3a: 8px was hair-trigger — any sub-pixel
-        // extent wobble un-anchored the reader).
         if (e.ExtentHeightChange == 0 && (e.VerticalChange != 0 || e.ViewportHeightChange != 0))
             _stick = ThreadScroll.VerticalOffset >= ThreadScroll.ScrollableHeight - 120;
         // The "↓ Latest" pill shows whenever you've drifted up from the bottom and there's more below.
@@ -71,16 +65,15 @@ public partial class AskView : UserControl
         JumpPill.BeginAnimation(OpacityProperty, anim);
     }
 
-    void OnJumpToLatest(object sender, MouseButtonEventArgs e)
+    void OnJumpToLatest(object sender, RoutedEventArgs e)
     {
         _stick = true;
         ThreadScroll.ScrollToEnd();
         ShowJumpPill(false);
     }
 
-    // Follow the newest content only if the user is parked at the bottom (see _stick). Deferred to
-    // Background priority so it runs AFTER the just-appended text has been measured into the extent —
-    // otherwise ScrollToEnd targets the pre-append (too-short) extent and lands a line high.
+    // Follow the newest content only if parked at the bottom. Deferred to Background priority so it
+    // runs AFTER the appended text is measured into the extent; otherwise ScrollToEnd lands a line high.
     void Follow()
     {
         if (!_stick) return;
@@ -107,7 +100,7 @@ public partial class AskView : UserControl
         HintText.Text = "Hold Ctrl + Alt + Space and speak";
         HintText.Visibility = Visibility.Visible;
         StatusStrip.Visibility = Visibility.Visible;
-        WaveHost.Visibility = Visibility.Visible; StartWave();
+        Wave.Visibility = Visibility.Visible; Wave.IsLive = true;
         LoaderHost.Visibility = Visibility.Collapsed; StopLoader();
         if (Toki.IsVisible) Toki.DropIn();
         App.GrowNotch();
@@ -118,7 +111,7 @@ public partial class AskView : UserControl
         StatusText.Text = "Thinking…";
         HintText.Visibility = Visibility.Collapsed;
         StatusStrip.Visibility = Visibility.Visible;
-        WaveHost.Visibility = Visibility.Collapsed; StopWave();
+        Wave.IsLive = false; Wave.Visibility = Visibility.Collapsed;
         LoaderHost.Visibility = Visibility.Visible; StartLoader();
         App.GrowNotch();
     }
@@ -135,9 +128,8 @@ public partial class AskView : UserControl
         App.GrowNotch();
     }
 
-    /// <summary>Show which note this answer is grounded on ("About: MR Rate Target…") — screen-aware
-    /// answers must SHOW their scope, or a wrong grounding is invisible and trust dies. One line,
-    /// dim, above the streaming answer; once per turn.</summary>
+    /// <summary>Show which note this answer is grounded on. Screen-aware answers must SHOW their
+    /// scope, or a wrong grounding is invisible. One dim line above the answer, once per turn.</summary>
     public void Scope(string title)
     {
         if (_curStack is null || string.IsNullOrWhiteSpace(title)) return;
@@ -188,7 +180,7 @@ public partial class AskView : UserControl
     }
 
     public void Help()
-        => TokiSay("Ask about your meetings — decisions, tasks, who said what. Or say “schedule a call with Ana "
+        => TokiSay("Ask about your meetings - decisions, tasks, who said what. Or say “schedule a call with Ana "
             + "tomorrow at 3”, “take me to the library”, “open settings”, “new note”, or “go home”.");
 
     // A standalone Toki line (no preceding user turn): commands, errors, help.
@@ -206,14 +198,14 @@ public partial class AskView : UserControl
     void HideStrip()
     {
         StatusStrip.Visibility = Visibility.Collapsed;
-        WaveHost.Visibility = Visibility.Collapsed; StopWave();
+        Wave.IsLive = false; Wave.Visibility = Visibility.Collapsed;
         LoaderHost.Visibility = Visibility.Collapsed; StopLoader();
     }
 
     // ── plain-text turns (no bubbles) ──
 
-    // The one standard "arrive" motion for new content: fade up a few px, ease-out (Motion tokens). Only
-    // NEW rows animate — existing history never moves. Render transform only, so layout is untouched.
+    // The one standard "arrive" motion. Only NEW rows animate - existing history never moves.
+    // Render transform only, so layout is untouched.
     static void Arrive(FrameworkElement el)
     {
         if (App.Headless) return;
@@ -254,7 +246,7 @@ public partial class AskView : UserControl
             Text = text, IsReadOnly = true, IsReadOnlyCaretVisible = false, BorderThickness = new Thickness(0),
             Background = Brushes.Transparent, FontFamily = Ui, FontSize = fs, TextWrapping = TextWrapping.Wrap,
             Padding = new Thickness(0), Cursor = Cursors.IBeam, IsTabStop = false,
-            FocusVisualStyle = null,   // no focus outline — it reads as plain text, not a form field
+            FocusVisualStyle = null,   // no focus outline - it reads as plain text, not a form field
             SelectionOpacity = 0.35,
         };
         tb.SetResourceReference(Control.ForegroundProperty, fgKey);
@@ -262,7 +254,7 @@ public partial class AskView : UserControl
         return tb;
     }
 
-    // Progressive disclosure as an inline LINK (not a pill button) — "See full answer in Library →".
+    // Progressive disclosure as an inline link: "See full answer in Library →".
     FrameworkElement MoreLink()
     {
         var link = new TextBlock { Text = "See full answer in Library  →", FontSize = 12, FontFamily = Ui, Cursor = Cursors.Hand, Margin = new Thickness(0, 7, 0, 1) };
@@ -296,38 +288,9 @@ public partial class AskView : UserControl
         if (App.State.Current == PillState.Ask) App.CloseOverlay();
     }
 
-    // ── listening waveform ──
-
-    void BuildWave()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        for (var i = 0; i < 7; i++)
-        {
-            var st = new ScaleTransform(1, 0.3) { CenterX = 2, CenterY = 22 };
-            var bar = new Border { Width = 4, Height = 22, CornerRadius = new CornerRadius(2), Background = (Brush)FindResource("Pink"), Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center, RenderTransform = st };
-            _bars.Add(st);
-            row.Children.Add(bar);
-        }
-        WaveHost.Child = row;
-    }
-
-    void StartWave()
-    {
-        if (App.Headless) return;
-        for (var i = 0; i < _bars.Count; i++)
-            _bars[i].BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.28, 1.0, TimeSpan.FromMilliseconds(360 + i * 40))
-            {
-                AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever,
-                BeginTime = TimeSpan.FromMilliseconds(i * 70), EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-            });
-    }
-
-    void StopWave() { foreach (var st in _bars) { st.BeginAnimation(ScaleTransform.ScaleYProperty, null); st.ScaleY = 0.3; } }
-
     // ── thinking loader ──
 
-    // Three pulsing dots — the calm "thinking" indicator (Glass/ChatGPT pattern), staggered so the pulse
-    // travels across them. Replaces the old sliding bar.
+    // Three pulsing dots, staggered so the pulse travels across them.
     void BuildLoader()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(1, 8, 0, 3) };

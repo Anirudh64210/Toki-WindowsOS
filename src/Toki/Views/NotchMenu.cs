@@ -6,7 +6,7 @@ using System.Windows.Media;
 namespace Toki.Views;
 
 /// <summary>
-/// A tiny dropdown menu that belongs to the notch — a rounded dark card of buttons anchored under an
+/// A tiny dropdown menu that belongs to the notch - a rounded dark card of buttons anchored under an
 /// element. Registers with <see cref="NotchPopups"/> so the notch doesn't tuck/dismiss while it's open
 /// (the same treatment the model/provider dropdowns get). Reuses Theme.xaml tokens.
 /// </summary>
@@ -14,11 +14,15 @@ static class NotchMenu
 {
     public static void Show(FrameworkElement anchor, IReadOnlyList<(string Label, bool Danger, Action Action)> items)
     {
-        var panel = new StackPanel { Margin = new Thickness(5) };
+        // Card is r14, rows r8: inner radius = outer minus the padding between them.
+        var panel = new StackPanel { Margin = new Thickness(6) };
         var popup = new Popup
         {
             PlacementTarget = anchor, Placement = PlacementMode.Bottom, StaysOpen = false,
-            AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade, HorizontalOffset = -110,
+            AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade,
+            // The card sits inset inside its own shadow gutter; both offsets must compensate for it.
+            HorizontalOffset = -110 - Theme.GlassCard.ShadowGutter,
+            VerticalOffset = -Theme.GlassCard.ShadowGutter,
         };
 
         foreach (var (label, danger, action) in items)
@@ -29,21 +33,17 @@ static class NotchMenu
                 HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 6, 14, 6),
                 FontFamily = (FontFamily)Application.Current.Resources["UiFont"], FontSize = 11.5,
                 Background = Brushes.Transparent,
-                Foreground = (Brush)Application.Current.Resources[danger ? "Danger" : "Text"],
                 Template = ItemTemplate(),
             };
+            // Resource REFERENCE, not a captured brush: a menu left open across a theme swap must repaint.
+            btn.SetResourceReference(Control.ForegroundProperty, danger ? "Danger" : "Text");
             btn.Click += (_, _) => { popup.IsOpen = false; action(); };
             panel.Children.Add(btn);
         }
 
-        var card = new Border
-        {
-            Background = (Brush)Application.Current.Resources["SurfaceHi"],
-            BorderBrush = (Brush)Application.Current.Resources["Hairline"], BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(11), Child = panel, MinWidth = 168,
-            Effect = new System.Windows.Media.Effects.DropShadowEffect
-            { BlurRadius = 22, ShadowDepth = 3, Opacity = 0.45, Color = Colors.Black },
-        };
+        // GlassCard, never a DropShadowEffect: an Effect here puts every label behind an
+        // intermediate render surface and gets cropped by the popup's edge.
+        var card = new Theme.GlassCard(14) { CardMinWidth = 168, Content = panel };
         popup.Child = card;
 
         NotchPopups.Register(popup);
@@ -51,13 +51,13 @@ static class NotchMenu
         popup.IsOpen = true;
     }
 
-    // A flat button that lights up on hover — same idiom as IconButton, left-aligned text.
+    // A flat button that lights up on hover - same idiom as IconButton, left-aligned text.
     static ControlTemplate ItemTemplate()
     {
         var t = new ControlTemplate(typeof(Button));
         var bd = new FrameworkElementFactory(typeof(Border));
         bd.Name = "Bd";
-        bd.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
+        bd.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));   // concentric: card 14 - panel margin 6
         bd.SetValue(Border.BackgroundProperty, Brushes.Transparent);
         bd.SetValue(Border.PaddingProperty, new Thickness(0));
         var cp = new FrameworkElementFactory(typeof(ContentPresenter));
@@ -66,8 +66,9 @@ static class NotchMenu
         bd.AppendChild(cp);
         t.VisualTree = bd;
         var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        // DynamicResource, not a brush captured at build time: the hover wash must follow theme swaps.
         hover.Setters.Add(new Setter(Border.BackgroundProperty,
-            (Brush)Application.Current.Resources["HoverOverlay"], "Bd"));
+            new DynamicResourceExtension("HoverOverlay"), "Bd"));
         t.Triggers.Add(hover);
         return t;
     }

@@ -7,12 +7,12 @@ namespace Toki.Llm;
 
 /// <summary>
 /// On-device notes LLM: Qwen3-4B-Instruct via LLamaSharp (llama.cpp). Weights are
-/// heavy (~2.5GB) — loaded once and reused. Tries GPU offload (Vulkan backend,
+/// heavy (~2.5GB) - loaded once and reused. Tries GPU offload (Vulkan backend,
 /// configured in App) and falls back to CPU if the GPU can't allocate. Generations
 /// are serialized (a llama context isn't concurrent).
 ///
-/// Sampler params are Qwen3's official values; NEVER greedy (lesson 8: greedy
-/// makes 4-bit Qwen loop/degenerate).
+/// Sampler params are Qwen3's official model-card values; NEVER greedy (greedy makes
+/// 4-bit Qwen loop/degenerate).
 /// </summary>
 public sealed class LlamaLlm : ILlm, IDisposable
 {
@@ -29,7 +29,14 @@ public sealed class LlamaLlm : ILlm, IDisposable
         // offload sized to the detected VRAM, or a clean CPU path. Offload is capped
         // to fit with headroom so it can't hit the uncatchable native OOM crash.
         var gpuLayers = Math.Max(0, LlmRuntime.GpuLayers);
-        var p = new ModelParams(modelPath) { ContextSize = LlmRuntime.ContextSize, GpuLayerCount = gpuLayers };
+        // Leave two cores free: llama.cpp's default takes every core, which starves the WPF
+        // render thread and visibly hitches the notch's loader while a generation runs.
+        var threads = Math.Max(1, Environment.ProcessorCount - 2);
+        var p = new ModelParams(modelPath)
+        {
+            ContextSize = LlmRuntime.ContextSize, GpuLayerCount = gpuLayers,
+            Threads = threads, BatchThreads = threads,
+        };
         _model = LLamaWeights.LoadFromFile(p);
         OnGpu = gpuLayers > 0;
         _executor = new StatelessExecutor(_model, p);
@@ -47,7 +54,7 @@ public sealed class LlamaLlm : ILlm, IDisposable
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
         IReadOnlyList<string>? stop = null)
     {
-        // Serialize generations (a llama context isn't concurrent) — hold the gate across the whole stream.
+        // Serialize generations (a llama context isn't concurrent) - hold the gate across the whole stream.
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -58,7 +65,7 @@ public sealed class LlamaLlm : ILlm, IDisposable
             var prompt = Encoding.UTF8.GetString(template.Apply());
 
             // Caller-supplied stop sequences ride as extra anti-prompts (llama.cpp stops when the
-            // accumulated output ends with one) — a clean stop beats generating long then trimming.
+            // accumulated output ends with one) - a clean stop beats generating long then trimming.
             var anti = new List<string> { "<|im_end|>", "<|im_start|>" };
             if (stop is not null) anti.AddRange(stop);
 
@@ -66,9 +73,8 @@ public sealed class LlamaLlm : ILlm, IDisposable
             {
                 MaxTokens = maxTokens,
                 AntiPrompts = anti,
-                // Qwen3-4B-Instruct-2507 model-card "Best Practices" values: T=0.7, TopP=0.8, TopK=20,
-                // MinP=0 (explicit — the LLamaSharp default is 0.1), presence penalty in [0,2] against
-                // repetition (0.5 keeps it mild; high values cause language mixing). NEVER greedy (lesson 8).
+                // Qwen3-4B-Instruct-2507 model-card values. MinP=0 explicit (LLamaSharp defaults to
+                // 0.1); presence 0.5 keeps repetition mild (high values cause language mixing). NEVER greedy.
                 SamplingPipeline = new DefaultSamplingPipeline
                 {
                     Temperature = 0.7f,
@@ -90,7 +96,7 @@ public sealed class LlamaLlm : ILlm, IDisposable
     }
 
     /// <summary>Tear down only once no generation is running. Freeing the native weights under
-    /// an active InferAsync is a llama.cpp use-after-free — an uncatchable AccessViolation that
+    /// an active InferAsync is a llama.cpp use-after-free - an uncatchable AccessViolation that
     /// takes the whole app down. Acquire the generation gate first (bounded); on timeout keep
     /// the model alive (a leak beats a crash), and dispose the semaphore LAST so a streamer's
     /// finally-release can never hit a disposed gate.</summary>
@@ -98,7 +104,7 @@ public sealed class LlamaLlm : ILlm, IDisposable
     {
         if (!_gate.Wait(TimeSpan.FromSeconds(30)))
         {
-            App.Log("LLM release skipped — a generation is still running");
+            App.Log("LLM release skipped - a generation is still running");
             return;
         }
         try { _model.Dispose(); }

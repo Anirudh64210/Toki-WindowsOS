@@ -6,7 +6,7 @@ using Toki.Storage;
 namespace Toki.Calendar;
 
 /// <summary>The assembled content for a pre-meeting prep card. <see cref="LastTime"/> is null for a
-/// first-time meeting (an honest empty state — we never invent a "last time").</summary>
+/// first-time meeting (an honest empty state - we never invent a "last time").</summary>
 public sealed record PrepContent(
     CalEvent Event,
     MeetingRecord? LastTime,
@@ -17,9 +17,8 @@ public sealed record PrepContent(
 }
 
 /// <summary>
-/// Builds a prep card's content DETERMINISTICALLY — pure store reads + string parsing, no LLM, so it's
-/// instant and costs nothing on a low-memory machine. Matches a calendar event to a prior meeting by
-/// TITLE/topic similarity (attendee emails aren't stored in notes), and is honest when there's no
+/// Builds a prep card's content deterministically (store reads + string parsing, no LLM). Matches a
+/// calendar event to a prior meeting by title/topic similarity, and is honest when there is no
 /// confident match. Provider-neutral (takes a <see cref="CalEvent"/>).
 /// </summary>
 public static class PrepBuilder
@@ -42,7 +41,7 @@ public static class PrepBuilder
         }
         catch
         {
-            // A store hiccup must never break the card — degrade to the first-time layout.
+            // A store hiccup must never break the card - degrade to the first-time layout.
             return new PrepContent(e, null, Array.Empty<ActionItem>(), ParseAgenda(e.Description));
         }
     }
@@ -84,7 +83,7 @@ public static class PrepBuilder
         return "";
     }
 
-    /// <summary>"TODAY" / "YESTERDAY" / "N DAYS AGO" / "N WEEKS AGO" — for the LAST TIME header.</summary>
+    /// <summary>"TODAY" / "YESTERDAY" / "N DAYS AGO" / "N WEEKS AGO" - for the LAST TIME header.</summary>
     public static string AgoLabel(DateTimeOffset when)
     {
         var days = (int)(DateTimeOffset.Now.Date - when.Date).TotalDays;
@@ -97,6 +96,41 @@ public static class PrepBuilder
             < 60 => $"{days / 7} WEEKS AGO",
             _ => $"{when:MMM d}".ToUpperInvariant(),
         };
+    }
+
+    /// <summary>
+    /// The prep card as an editable note: Edit hands you the card's own content as text to carry on
+    /// writing in - still-open items as real tick boxes, the agenda as real bullets. Deterministic.
+    /// </summary>
+    public static string ToMarkdown(PrepContent prep)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        if (prep.LastTime is { } m && Recap(m) is { Length: > 0 } recap)
+            sb.Append("## Last time\n").Append(recap).Append("\n\n");
+
+        if (prep.StillOpen.Count > 0)
+        {
+            sb.Append("## Still open\n");
+            foreach (var a in prep.StillOpen)
+            {
+                var owner = string.IsNullOrWhiteSpace(a.Owner) ? "" : a.Owner + " - ";
+                sb.Append(a.Done ? "- [x] " : "- [ ] ").Append(owner).Append(a.Text).Append('\n');
+            }
+            sb.Append('\n');
+        }
+
+        if (prep.Agenda.Count > 0)
+        {
+            sb.Append("## Agenda\n");
+            foreach (var line in prep.Agenda) sb.Append("- ").Append(line).Append('\n');
+            sb.Append('\n');
+        }
+
+        // Always end with somewhere to type - an editor that opens with the caret in a heading you
+        // didn't write is an editor you have to tidy before you can use it.
+        sb.Append("## My notes\n");
+        return sb.ToString();
     }
 
     /// <summary>Turn a calendar event's description into up to 4 agenda bullets. Strips HTML, decodes

@@ -10,19 +10,21 @@ using Toki.Views;
 namespace Toki.Dev;
 
 /// <summary>
-/// Renders each view to a PNG via RenderTargetBitmap — captures the visual tree
+/// Renders each view to a PNG via RenderTargetBitmap - captures the visual tree
 /// directly, so it works even though the live overlay is a transparent (layered)
 /// window that plain screen-capture can't see. Run: <c>Toki.exe --render &lt;dir&gt;</c>.
 /// </summary>
 static class RenderHarness
 {
     // (state, width, capHeight). Height is MEASURED from the view's content (matching the runtime's
-    // content-tight auto-height) and capped — so these PNGs reflect what you actually see.
+    // content-tight auto-height) and capped - so these PNGs reflect what you actually see.
     static readonly (PillState State, double W, double Cap)[] Shots =
     [
-        (PillState.MeetingPrompt, 288, 300),
-        (PillState.RecordingOpen, 288, 300),
-        (PillState.Summarizing,   232, 300),
+        // The compact states carry the redesign's own capsule widths - the shots must picture the
+        // layout the app actually has.
+        (PillState.MeetingPrompt, 197, 300),   // 169 pill + 8 gap + 20 close puck
+        (PillState.RecordingOpen, 272, 300),   // the compact bar; the chevron widens it to 344
+        (PillState.Summarizing,   220, 300),
         (PillState.Notes,         360, 320),
         (PillState.NoSpeech,      300, 300),
         (PillState.Home,          344, 400),
@@ -42,19 +44,46 @@ static class RenderHarness
             var latest = new Storage.MeetingStore().List().FirstOrDefault(x => x.Kind == Storage.MeetingKind.Meeting);
             if (latest is not null) App.CurrentMeeting = new Storage.MeetingStore().Get(latest.Id);
         }
-        catch { /* no store yet — Notes renders its fallback */ }
+        catch { /* no store yet - Notes renders its fallback */ }
         foreach (var (state, w, cap) in Shots)
-            Shot(dir, $"{state}", Build(state), w, cap);
+            Shot(dir, $"{state}", Build(state), w, cap, PillWindow.IsCapsuleState(state));
 
-        // The meeting prompt with REAL raw app identities — proves the friendly-name mapping
-        // ("Com.tinyspeck.slackdesktop" → "Slack") and that a long/wrapping prompt is fully visible
-        // at its measured height (the regression shots for the cut-off-notch bug).
+        // The meeting prompt with REAL raw app identities - proves the friendly-name mapping and
+        // that a long/wrapping prompt is fully visible at its measured height.
         var slack = new MeetingPromptView(); slack.Refresh("Com.tinyspeck.slackdesktop");
-        Shot(dir, "MeetingPrompt-slack", slack, 288, 300);
+        Shot(dir, "MeetingPrompt-slack", slack, 197, 300, bare: true);
 
-        // The Calendar create composer, opened with sample text — proves the parse-preview line renders.
+        // The recording bar with its transcript OPEN: the chevron form at the frame's 344 width,
+        // with the speaker marks and the top fade.
+        var live = new RecordingOpenView();
+        live.DebugExpand(
+        [
+            new Transcription.TranscriptSegment(Transcription.Speaker.Them, 0, 4000,
+                "So where are we on the onboarding diagnostic, shippable this week?"),
+            new Transcription.TranscriptSegment(Transcription.Speaker.You, 4000, 9000,
+                "Tool's done. Twenty checks, results render instantly, no gate.") { Tag = "Priya" },
+            new Transcription.TranscriptSegment(Transcription.Speaker.Them, 9000, 11000,
+                "Love it. What's left?") { Tag = "Sid" },
+            new Transcription.TranscriptSegment(Transcription.Speaker.You, 11000, 15000,
+                "Brand tokens and the Make webhook. Both land Thursday."),
+        ]);
+        Shot(dir, "RecordingOpen-expanded", live, 344, 300);
+
+        // Toki's moods, at the size he is actually shown (a 56px bubble), one shot per mood.
+        Shot(dir, "Toki-moods", new MoodStrip(), 360, 120, bare: true);
+
+        // "Menu Bar - Notes Ready": not a PillState, so the state loop above cannot reach it.
+        Shot(dir, "NotesReady", new NotesReadyView { Height = NotesReadyView.CardHeight },
+             NotesReadyView.CardWidth, NotesReadyView.CardHeight);
+
+        // The Calendar create composer, opened with sample text - proves the parse-preview line renders.
         var composer = new CalendarView(); composer.DebugOpenComposer("Design sync tomorrow 2pm with ana@work.com");
         Shot(dir, "Calendar-composer", composer, 360, 520);
+
+        // The month calendar the Day field opens. Popups are invisible to a headless render, so
+        // its content is drawn directly.
+        var dayPicker = new Views.DayPickerShot();
+        Shot(dir, "Calendar-daypicker", dayPicker, 280, 320);
 
         // Agenda rows in their hover-EXPANDED state (inline Edit/Open/Delete strip).
         CalendarRows.DebugExpand = true;
@@ -66,12 +95,41 @@ static class RenderHarness
         Shot(dir, "PrepCard", new PrepCardView(), 356, 360);
         App.CurrentPrep = PrepSamples.FirstTime();
         Shot(dir, "PrepCard-firsttime", new PrepCardView(), 356, 360);
+
+        // The prep card WITH the scratchpad open (N3) - the "your notes" half of the card, which is
+        // otherwise a one-line prompt until you click it.
+        App.CurrentPrep = PrepSamples.Matched();
+        var scratched = new PrepCardView();
+        scratched.DebugOpenScratch(Toki.Calendar.PrepBuilder.ToMarkdown(App.CurrentPrep!)
+                                   + "ask about the pilot timeline\n- [ ] send pricing before Friday");
+        Shot(dir, "PrepCard-scratch", scratched, 356, 620);
         App.CurrentPrep = null;
         var longName = new MeetingPromptView(); longName.Refresh("com.megacorp.videoconferencing.collaboration.desktop");
-        Shot(dir, "MeetingPrompt-longname", longName, 288, 300);
+        Shot(dir, "MeetingPrompt-longname", longName, 197, 300, bare: true);
+
+        // The hand-written note editor (N1) showing its whole vocabulary at once - both text sizes,
+        // a ticked and an unticked to-do, a bulleted list and a numbered one. Built standalone with
+        // sample text on purpose: this must never touch the real note store to render.
+        var editor = new NoteEditor { MinHeight = 380 };
+        editor.Markdown =
+            "# Pricing sync\n" +
+            "\n" +
+            "## Summary\n" +
+            "Held the price; revisit after the pilot.\n" +
+            "\n" +
+            "## Action items\n" +
+            "- [x] send the deck\n" +
+            "- [ ] confirm with Ana\n" +
+            "\n" +
+            "## Notes\n" +
+            "- pilot runs four weeks\n" +
+            "- two more logos before we raise\n" +
+            "1. draft the pricing page\n" +
+            "2. review with the team";
+        Shot(dir, "NoteEditor", editor, 520, 560);
 
         // First-run onboarding, all three steps. These are the only screens a user sees exactly once,
-        // so they're the hardest to capture by hand — and the first thing a design review wants.
+        // so they're the hardest to capture by hand - and the first thing a design review wants.
         string[] steps = ["1-name", "2-privacy", "3-allset"];
         for (var i = 0; i < steps.Length; i++)
         {
@@ -83,29 +141,59 @@ static class RenderHarness
 
     /// <summary>Render one view into a pill PNG at its MEASURED content height (mirrors the runtime's
     /// content-tight auto-height, capped).</summary>
-    static void Shot(string dir, string name, UserControl view, double w, double cap)
+    static void Shot(string dir, string name, UserControl view, double w, double cap, bool bare = false)
     {
-        // Measure the view's real content height at this width, cap it — mirrors the runtime.
+        // Measure the view's real content height at this width, cap it - mirrors the runtime.
         view.Measure(new Size(w - 2, double.PositiveInfinity));
         var h = Math.Min(cap, Math.Ceiling(view.DesiredSize.Height) + 1);
-        var pill = new Border
+        // A CAPSULE state has no card behind it (PillWindow makes its card transparent there), so
+        // "bare" draws none - these PNGs must never picture a box that is not on screen. The card,
+        // material, shadow casters and resting squircle corner below are the REAL ones PillWindow
+        // draws, so the shots show the actual material.
+        var pill = new Border { Width = w, Height = h };
+        if (bare) { pill.Background = Brushes.Transparent; pill.Child = view; }
+        else
         {
-            Background = (Brush)Application.Current.Resources["Surface"],
-            CornerRadius = new CornerRadius(26),
-            Width = w,
-            Height = h,
-            Child = view,
-        };
-        // Neutral backdrop so the pill's rounded edges are visible in the PNG.
+            pill.SetResourceReference(Border.BackgroundProperty, "CardPlate");
+            pill.BorderThickness = new Thickness(1);
+            pill.BorderBrush = Brushes.Transparent;   // spacer only; the rim below is the visible one
+            pill.Clip = Theme.Squircle.Build(new Rect(0, 0, w, h), 24);
+            var layered = new Grid();
+            layered.Children.Add(new Theme.CardMaterial());
+            layered.Children.Add(view);
+            pill.Child = layered;
+        }
+
+        // The lift: the key + ambient casters, exactly as PillWindow stacks them.
+        var lifted = new Grid { Width = w, Height = h };
+        if (!bare)
+        {
+            lifted.Children.Add(Caster(28, 8, 0.22));
+            lifted.Children.Add(Caster(8, 2, 0.12));
+        }
+        lifted.Children.Add(pill);
+        if (!bare)
+        {
+            var rim = new System.Windows.Shapes.Path
+            {
+                Data = Theme.Squircle.Outline(new Rect(0, 0, w, h), 24, 1),
+                StrokeThickness = 1,
+                IsHitTestVisible = false,
+            };
+            rim.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "CardRim");
+            lifted.Children.Add(rim);
+        }
+
+        // Neutral backdrop so the pill's rounded edges and its shadow are visible in the PNG.
         var canvas = new Border
         {
             Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
-            Padding = new Thickness(20),
-            Child = pill,
+            Padding = new Thickness(28),
+            Child = lifted,
         };
 
-        var totalW = w + 40;
-        var totalH = h + 40;
+        var totalW = w + 56;
+        var totalH = h + 56;
         canvas.Measure(new Size(totalW, totalH));
         canvas.Arrange(new Rect(0, 0, totalW, totalH));
         canvas.UpdateLayout();
@@ -113,43 +201,96 @@ static class RenderHarness
         Save(canvas, totalW, totalH, Path.Combine(dir, $"{name}.png"));
     }
 
+    /// <summary>One of the card's two shadow casters: a card-shaped border filled at 1/255 alpha
+    /// (invisible itself, enough silhouette to cast) carrying the blur. Theme-matched to
+    /// PillWindow.ApplyShadowDepth - light theme runs both at 70%.</summary>
+    static Border Caster(double blur, double depth, double opacity) => new()
+    {
+        CornerRadius = new CornerRadius(24),
+        Background = new SolidColorBrush(Color.FromArgb(0x01, 0, 0, 0)),
+        IsHitTestVisible = false,
+        Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = blur, ShadowDepth = depth, Direction = 270, Color = Colors.Black,
+            Opacity = opacity * (Toki.Theme.ThemeManager.Current == Toki.Theme.AppTheme.Light ? 0.70 : 1.0),
+        },
+    };
+
     /// <summary>
-    /// Renders the Summarizing view twice, ~550ms apart, so the two PNGs can be
-    /// compared to confirm the loading animation actually moves (constructor-based
-    /// animations advance with the real clock even offscreen).
+    /// The MOVING shots: each subject rendered at t0 and again once its motion has settled, so the
+    /// pair proves the motion ran. A real off-screen host window is REQUIRED: WPF's animation clock
+    /// only ticks for a visual tree attached to a presentation source, so a free-standing render
+    /// produces byte-identical frames and proves nothing.
     /// </summary>
     public static void RenderAnim(string dir)
     {
         Directory.CreateDirectory(dir);
+
         const double w = 340, h = 164;
-        var view = new SummarizingView();
         var pill = new Border
         {
             Background = (Brush)Application.Current.Resources["Surface"],
             CornerRadius = new CornerRadius(26),
-            Width = w, Height = h, Child = view,
+            Width = w, Height = h, Child = new SummarizingView(),
         };
-        var canvas = new Border
+        var canvas = Framed(pill);
+        var moodCanvas = Framed(new MoodStrip { Width = MoodStrip.ShotW, Height = MoodStrip.ShotH });
+
+        var stack = new StackPanel();
+        stack.Children.Add(canvas);
+        stack.Children.Add(moodCanvas);
+
+        // Far off-screen rather than hidden: a collapsed or zero-opacity window is skipped by the
+        // compositor, which would put us straight back to a dead clock.
+        var host = new Window
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
-            Padding = new Thickness(20), Child = pill,
+            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false, ShowActivated = false, Topmost = false,
+            Left = -4000, Top = -4000, Width = w + 60, Height = h + 260,
+            Background = Brushes.Black, Content = stack,
         };
-        canvas.Measure(new Size(w + 40, h + 40));
-        canvas.Arrange(new Rect(0, 0, w + 40, h + 40));
-        canvas.UpdateLayout();
+        host.Show();
+        host.UpdateLayout();
 
-        Save(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_t0.png"));
+        SaveDetached(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_t0.png"));
+        SaveDetached(moodCanvas, MoodStrip.ShotW + 40, MoodStrip.ShotH + 40, Path.Combine(dir, "Toki-moods_t0.png"));
 
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(550) };
+        // 900ms is past every one-shot involved, so the second frame is the settled pose. Looping
+        // parts are caught mid-cycle on purpose - a loop at exactly zero looks like a dead one.
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
         timer.Tick += (_, _) =>
         {
             timer.Stop();
-            canvas.UpdateLayout();
-            Save(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_t550.png"));
+            host.UpdateLayout();
+            SaveDetached(canvas, w + 40, h + 40, Path.Combine(dir, "Summarizing_settled.png"));
+            SaveDetached(moodCanvas, MoodStrip.ShotW + 40, MoodStrip.ShotH + 40, Path.Combine(dir, "Toki-moods_settled.png"));
+            host.Close();
             Application.Current.Shutdown();
         };
         timer.Start();
     }
+
+    /// <summary>
+    /// Render one element of a laid-out tree, ignoring where layout put it: RenderTargetBitmap
+    /// honours the visual's offset within its parent (an offset child renders blank), so paint
+    /// through a VisualBrush to re-anchor at 0,0. The brush is live - animated values come through.
+    /// </summary>
+    static void SaveDetached(Visual visual, double w, double h, string path)
+    {
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+            dc.DrawRectangle(
+                new VisualBrush(visual) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
+                null, new Rect(0, 0, w, h));
+        Save(dv, w, h, path);
+    }
+
+    static Border Framed(UIElement child) => new()
+    {
+        Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+        Padding = new Thickness(20), Child = child,
+        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+    };
 
     /// <summary>Render a laid-out element (e.g. the Library window's RootGrid) to a PNG at its actual size.</summary>
     internal static void SaveVisual(FrameworkElement fe, string path)
@@ -189,3 +330,45 @@ static class RenderHarness
         _ => throw new ArgumentOutOfRangeException(nameof(s)),
     };
 }
+
+/// <summary>Toki in all four moods at once, each in the 56px bubble the notch actually draws him in,
+/// so the overlays can be judged at the size a user sees rather than at art-board scale.</summary>
+sealed class MoodStrip : UserControl
+{
+    // The strip's own size, so the two callers (--render's flat shot and --render-anim's settled
+    // pair) cannot drift apart and crop it differently.
+    public const double ShotW = 340;   // 5 discs of 56 with 6px either side
+    public const double ShotH = 60;
+
+    public MoodStrip()
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        foreach (var mood in new[]
+                 {
+                     Controls.TokiBlob.TokiMood.Idle, Controls.TokiBlob.TokiMood.Thinking,
+                     Controls.TokiBlob.TokiMood.Reading, Controls.TokiBlob.TokiMood.Writing,
+                     Controls.TokiBlob.TokiMood.Happy,
+                 })
+        {
+            var blob = new Controls.TokiBlob { Width = 44, Height = 40 };
+            blob.SetMood(mood);
+            row.Children.Add(new Border
+            {
+                Width = 56, Height = 56, CornerRadius = new CornerRadius(28), Margin = new Thickness(6, 0, 6, 0),
+                // The themed disc, not a literal - so --render --theme light shows what light actually
+                // looks like. The gradient plate + gradient rim are what PillWindow draws.
+                Background = (Brush)Application.Current.Resources["MascotPlate"],
+                BorderBrush = (Brush)Application.Current.Resources["MascotRim"],
+                BorderThickness = new Thickness(1),
+                Child = blob,
+            });
+        }
+        Content = row;
+    }
+}
+

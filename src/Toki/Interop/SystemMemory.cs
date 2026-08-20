@@ -3,11 +3,8 @@ using System.Runtime.InteropServices;
 namespace Toki.Interop;
 
 /// <summary>
-/// Physical-RAM probe. Toki has two heavy models — the ~2.5GB notes LLM and the
-/// ~630MB speech recognizer. On a machine with plenty of RAM they can both stay
-/// resident; on a small machine (the dev PC is 6GB) keeping both loaded starves
-/// transcription (native out-of-memory crash) and makes the whole PC clunky from
-/// paging. This tells the app which world it's in.
+/// Physical-RAM probe. On low-RAM machines the ~2.5GB notes LLM and ~630MB recognizer cannot
+/// both stay resident (native OOM in transcription); this tells the app which world it's in.
 /// </summary>
 public static class SystemMemory
 {

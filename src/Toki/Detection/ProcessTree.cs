@@ -25,7 +25,7 @@ public static class ProcessTree
     }
 
     /// <summary>
-    /// Given several PIDs belonging to one app, return the tree root — the PID
+    /// Given several PIDs belonging to one app, return the tree root - the PID
     /// whose parent isn't itself one of the app's PIDs. Tapping the root with
     /// INCLUDE_TARGET_PROCESS_TREE captures children (e.g. a browser's audio renderer).
     /// </summary>

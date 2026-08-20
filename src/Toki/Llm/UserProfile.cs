@@ -1,16 +1,11 @@
 namespace Toki.Llm;
 
 /// <summary>
-/// The one place the dialogue brain reads and writes WHO IT'S TALKING TO. Toki always knew the
-/// user's name for the greeting (<see cref="AppSettings.UserName"/> → Windows account fallback),
-/// but the Ask pipeline never looked — which is how "what is my name" became a meeting-notes
-/// search (real screenshot). This wraps the SAME persisted settings field (no second store, no
-/// second source of truth: correcting your name in chat also fixes the greeting) plus a small
-/// list of user-stated facts ("I work at …") — the "saved memories" shape of modern assistants
-/// (ChatGPT memory / MemGPT: a page of durable user facts kept outside the conversation window).
-///
+/// The one place the dialogue brain reads and writes who it's talking to. Wraps the SAME
+/// persisted settings field as the greeting (no second store: correcting your name in chat also
+/// fixes the greeting) plus a small capped list of user-stated facts.
 /// Test seam: <see cref="SettingsOverride"/> points everything at an in-memory AppSettings, so
-/// tests never read or write the real %APPDATA%\Toki\settings.json.
+/// tests never touch the real %APPDATA%\Toki\settings.json.
 /// </summary>
 public static class UserProfile
 {
@@ -22,14 +17,14 @@ public static class UserProfile
     const int MaxFacts = 10;
 
     /// <summary>The name Toki should call the user, or "" when nothing is known at all.
-    /// (Explicitly set name first, else the cleaned Windows account name — same as the greeting.)</summary>
+    /// (Explicitly set name first, else the cleaned Windows account name - same as the greeting.)</summary>
     public static string DisplayName => S.DisplayName;
 
-    /// <summary>True when the user explicitly told Toki their name (vs. the Windows-account guess) —
+    /// <summary>True when the user explicitly told Toki their name (vs. the Windows-account guess) -
     /// lets "what is my name" answer confidently vs. honestly hedged.</summary>
     public static bool NameWasSetByUser => !string.IsNullOrWhiteSpace(S.UserName);
 
-    /// <summary>Set the user's name ("call me Anirudh") — persisted through the normal settings path,
+    /// <summary>Set the user's name ("call me Anirudh") - persisted through the normal settings path,
     /// so the greeting uses it too.</summary>
     public static void SetName(string name)
     {

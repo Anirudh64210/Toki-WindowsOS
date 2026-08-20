@@ -7,13 +7,10 @@ using Toki.Storage;
 namespace Toki.Llm;
 
 /// <summary>
-/// Due-date-aware scoping for task questions. "What tasks do I have this week / what's due Friday /
-/// what's overdue" are DEADLINE questions, not "tasks from meetings held this week" — the mistake that
-/// made a temporal task query dump every open task on a recent library. This resolves each task's
-/// free-text due ("Friday", "next week", "by EOD") against ITS meeting's date (a due said in a meeting
-/// means the date after that meeting), then buckets open tasks into Overdue / Due-in-window /
-/// undated-from-window — the market-validated shape (task-managers scope by due date; meeting tools
-/// disclose the undated fallback).
+/// Due-date-aware scoping for task questions. "What's due Friday / what's overdue" are DEADLINE
+/// questions, not "tasks from meetings held then". Resolves each task's free-text due against ITS
+/// meeting's date (a due said in a meeting means the date after that meeting), then buckets open
+/// tasks into Overdue / Due-in-window / undated-from-window.
 /// </summary>
 public static class TaskScheduling
 {
@@ -84,12 +81,12 @@ public static class TaskScheduling
     public static readonly Regex OverdueRx = new(
         @"\b(over\s?due|past\s+due|late|behind\s+on|missed\s+deadline)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    /// <summary>A DEADLINE cue ("due", "deadline") — makes a dated task query scope by due date rather
+    /// <summary>A DEADLINE cue ("due", "deadline") - makes a dated task query scope by due date rather
     /// than by which meetings happened in the window.</summary>
     public static readonly Regex DueCueRx = new(
         @"\bdue\b|\bdeadline\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Past-tense task recall ("what tasks DID I HAVE", "what WAS assigned", "what DID I commit to") —
+    // Past-tense task recall ("what tasks DID I HAVE", "what WAS assigned", "what DID I commit to") -
     // signals PROVENANCE (tasks from that time's meetings), not a live deadline view.
     static readonly Regex PastTenseTaskRx = new(
         @"\b(did\s+i\s+have|did\s+we\s+have|were\s+there|was\s+there|did\s+i\s+get|did\s+i\s+commit|"
@@ -97,8 +94,7 @@ public static class TaskScheduling
         + @"did\s+i\s+take\s+on|had\s+to\s+do)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    /// <summary>How a task query with a time reference should be scoped. The subtle distinction the
-    /// taxonomy calls Rule T / the "August 2nd" fix.</summary>
+    /// <summary>How a task query with a time reference should be scoped.</summary>
     public enum TimeMode { None, DueDate, Provenance }
 
     /// <summary>
@@ -113,7 +109,7 @@ public static class TaskScheduling
         var deadlineCue = overdue || DueCueRx.IsMatch(original ?? "");
         var hasRange = start.HasValue && end.HasValue;
         // A deadline cue with no parsed window ("what's due", "what's due by end of week") is still a
-        // deadline VIEW — DueWindowTaskAnswer shows overdue + upcoming.
+        // deadline VIEW - DueWindowTaskAnswer shows overdue + upcoming.
         if (!hasRange) return deadlineCue ? TimeMode.DueDate : TimeMode.None;
         var pastRecall = PastTenseTaskRx.IsMatch(original ?? "");
         var windowPast = end!.Value <= now;
@@ -139,7 +135,7 @@ public static class TaskScheduling
         var other = 0;
 
         // Include the overdue bucket when the window reaches back to today or has no lower bound
-        // ("this week"/"today"/"overdue") — but NOT for a purely-future window ("next week").
+        // ("this week"/"today"/"overdue") - but NOT for a purely-future window ("next week").
         var wantOverdue = start is null || start.Value.Date <= today;
         // Include the undated-from-window bucket only when the window includes today (present tasks
         // the user is asking about now).

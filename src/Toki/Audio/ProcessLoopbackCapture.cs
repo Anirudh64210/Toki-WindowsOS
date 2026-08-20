@@ -6,12 +6,9 @@ using NAudio.Wave;
 namespace Toki.Audio;
 
 /// <summary>
-/// Captures the audio rendered by a target process AND its child processes
-/// (WASAPI Application Loopback) to a WAV — the "them" stream. This is what taps
-/// a browser meeting: Meet's audio lives in a renderer child process, and
-/// INCLUDE_TARGET_PROCESS_TREE captures the whole tree. No permission prompt.
-///
-/// Windows 10 build 19041+. Interop mirrors Microsoft's ApplicationLoopback sample.
+/// Captures audio rendered by a target process tree (WASAPI Application Loopback) to a
+/// WAV - the "them" stream. INCLUDE_TARGET_PROCESS_TREE is required: browser meeting audio
+/// lives in a renderer child process. Windows 10 19041+; interop mirrors Microsoft's sample.
 /// </summary>
 public sealed class ProcessLoopbackCapture
 {
@@ -28,11 +25,11 @@ public sealed class ProcessLoopbackCapture
     public float PeakLevel { get; private set; }
     public long BytesWritten { get; private set; }
 
-    /// <summary>The fixed capture format (44.1 kHz 16-bit stereo) — for wiring the live-transcription tap.</summary>
+    /// <summary>The fixed capture format (44.1 kHz 16-bit stereo) - for wiring the live-transcription tap.</summary>
     public static WaveFormat CaptureFormat => new(SampleRate, BitsPerSample, Channels);
 
     /// <summary>Optional passive tap: raw capture bytes as they arrive, for live transcription.
-    /// Observes the buffer already being written to WAV — must never affect capture.</summary>
+    /// Observes the buffer already being written to WAV - must never affect capture.</summary>
     public Action<byte[], int>? OnBuffer;
 
     readonly ManualResetEventSlim _stopRequested = new(false);
@@ -66,13 +63,11 @@ public sealed class ProcessLoopbackCapture
     public void Stop()
     {
         _stopRequested.Set();
-        // The loop re-checks the stop flag at least every 200ms, so a healthy thread exits
-        // almost instantly — a long timeout only matters when a COM call wedged. If it DOES
-        // wedge, say so loudly: them.wav is still open and its header unfinalized, and the
-        // caller is about to transcribe it.
+        // A healthy thread exits within ~200ms; the long timeout only matters when a COM call
+        // wedged, which leaves them.wav open with an unfinalized header - log loudly.
         var t = _thread;
         if (t is not null && !t.Join(TimeSpan.FromSeconds(10)))
-            App.Log("loopback stop: capture thread did not exit in 10s — them.wav may be incomplete");
+            App.Log("loopback stop: capture thread did not exit in 10s - them.wav may be incomplete");
         _thread = null;
         if (_threadError != null) { var e = _threadError; _threadError = null; throw e; }
     }

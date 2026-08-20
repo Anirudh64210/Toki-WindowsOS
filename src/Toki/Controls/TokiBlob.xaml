@@ -1,86 +1,324 @@
 <UserControl x:Class="Toki.Controls.TokiBlob"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Scales to whatever Width/Height the host sets, keeping proportions. -->
+    <!--
+        ═══════════════════════ TOKI, FROM THE FIGMA VECTOR ═══════════════════════
+        Everything here comes from the design file (Udtb5KHB2iTLIVP5FhKaSl, "Assets - Characters",
+        node 325:278), not from an interpretation of it. The owner's verdict on the previous version
+        was blunt and correct (2026-08-14): "it has one blob on top, 2 for each side, and 2 legs kinda
+        shape, but ours is a blob on top of its head, and a fat mascot that just is fat at the bottom
+        part ... it is a semi circle shape at the bottom."
+
+        That is exactly what the old art was: four overlapping ellipses (one wide base plus three head
+        circles), which can only ever make a fat semicircle. The real Toki is ONE path with a crown
+        bump, a lobe on each side, and two feet with a notch between them - and it is WIDER than it is
+        tall (57.43 x 43.90, ratio 1.31; the old board was 1.13).
+
+        The board is 67 x 52 rather than the body's own 57.43 x 43.90 because the props live OUTSIDE
+        the body, exactly as the design frames do (the thinking/notes frames are 67 wide). The body is
+        drawn at (0,4); every prop below uses the design's own coordinates plus that offset, so the
+        numbers in this file can be checked against the file they came from.
+    -->
     <Viewbox Stretch="Uniform">
-        <!-- A little padding around the 120x106 art so the soft drop shadow isn't clipped. -->
-        <Grid Width="132" Height="120">
-            <Grid x:Name="Root" Width="120" Height="106" HorizontalAlignment="Center" VerticalAlignment="Center"
-                  RenderTransformOrigin="0.5,0.9">
+        <Grid Width="67" Height="52">
+            <Grid x:Name="Root" Width="67" Height="52" RenderTransformOrigin="0.43,0.85">
                 <Grid.RenderTransform>
-                    <!-- Breathe = squash/stretch · Hop = vertical bounce · Tilt = wobble/spin. Each animation
-                         targets its own transform so they compose without fighting. -->
+                    <!-- Breathe = squash/stretch · Hop = vertical bounce · Tilt = wobble/spin. Each
+                         animation targets its own transform so they compose without fighting.
+                         MoodBob and MoodLean are the BODY's share of a mood, on their own channel: a
+                         mood runs for minutes and a reaction for 400ms, and sharing a transform would
+                         mean every tap jerked the body out of its mood. -->
                     <TransformGroup>
-                        <ScaleTransform x:Name="Breathe" CenterX="60" CenterY="106"/>
+                        <!-- The board is 67 wide but the BODY is 57.43, and the extra room is all on
+                             the right for the props - so the body sat 4.8px left of centre and Toki
+                             looked off-centre in his bubble (owner, 2026-08-14: "toki in its bubble is
+                             like close to the left of the bubble, its not symmetric"). One fixed
+                             translate centres the body without touching a single prop coordinate. -->
+                        <TranslateTransform X="4.78"/>
+                        <ScaleTransform x:Name="Breathe" CenterX="28.7" CenterY="48"/>
                         <TranslateTransform x:Name="Hop"/>
-                        <RotateTransform x:Name="Tilt" CenterX="60" CenterY="74"/>
+                        <TranslateTransform x:Name="MoodBob"/>
+                        <RotateTransform x:Name="MoodLean" CenterX="28.7" CenterY="46"/>
+                        <RotateTransform x:Name="Tilt" CenterX="28.7" CenterY="34"/>
                     </TransformGroup>
                 </Grid.RenderTransform>
 
-                <!-- Body: the soft pink CLOUD. A vertical gradient (light, glossy top → deep pink base) gives
-                     it a puffy, dimensional look instead of the old flat fill; a soft blurred shadow lifts it
-                     off the surface. Same cloud silhouette as the Toki-ProductDesign logo. -->
-                <Path>
-                    <Path.Effect>
-                        <DropShadowEffect Color="#E0559A" BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.30"/>
-                    </Path.Effect>
-                    <Path.Fill>
-                        <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.42,1">
-                            <GradientStop Color="#FFDCEC" Offset="0.0"/>
-                            <GradientStop Color="#FF9FCB" Offset="0.40"/>
-                            <GradientStop Color="#FB74AE" Offset="0.72"/>
-                            <GradientStop Color="#EE4F9B" Offset="1.0"/>
+                <!-- CACHED. The body is THREE complex bezier paths, each gradient-filled, and the
+                     whole mascot is permanently under transform animation (breathing, the idle float,
+                     the mood lean) - so every frame re-rasterised all three. Measured with the fpstest flag
+                     after the rebuild: dropped frames per notch transition went from 1.2 to 16.8, and
+                     the CONTENT cost line from 3 percent to 12-38 percent.
+                     The body never changes SHAPE, only transform, which is exactly the case a bitmap
+                     cache exists for. RenderAtScale 4 keeps it crisp everywhere it is drawn, from the
+                     44px notch bubble up to the 256px app icon. The motion skill's warning about
+                     BitmapCache killing ClearType does not apply: there is no text in here. -->
+                <Canvas Width="67" Height="52">
+                    <Canvas.CacheMode>
+                        <BitmapCache RenderAtScale="4" EnableClearType="False" SnapsToDevicePixels="False"/>
+                    </Canvas.CacheMode>
+                    <!-- ── THE BODY ──
+                         The path is the design's Vector node (325:288) verbatim. Do not "tidy" it:
+                         the asymmetry is deliberate (the right foot hangs lower than the left) and it
+                         is most of what makes the character read as drawn rather than constructed.
+
+                         Fill: the design's own gradient - #01A4FF held flat down to 35% of the height,
+                         then fading to #F0FAF9 at the bottom. The OLD art had this upside down (pale
+                         at the top, saturated at the bottom), which is why it read as a heavy blob
+                         sitting on the floor instead of a light one floating. -->
+                    <Path Canvas.Left="0" Canvas.Top="4"
+                          Data="M27.4168 0.0439105C27.7899 0.0125787 28.3679 0 28.7515 0C32.9906 0.0038307 37.0098 1.64726 39.729 4.48815C41.0304 5.84354 41.3616 6.74919 43.3084 7.73882C44.755 8.47438 45.3972 8.46849 46.959 8.8559C49.3313 9.4639 51.4908 10.5823 53.2392 12.1085C55.9217 14.4471 57.4299 17.621 57.4319 20.9312C57.4208 24.6086 55.6357 28.0527 52.4072 30.4546C50.8977 31.5775 49.6979 31.9525 48.5994 33.6049C47.8552 34.6249 47.664 35.7215 47.2942 36.8678C46.5434 39.1941 44.9545 41.292 42.8656 42.886C38.3887 46.3021 34.3829 40.0285 28.7515 40.0182C22.6942 40.021 17.7107 46.0289 13.3369 41.8383C12.0847 40.6385 11.091 39.2388 10.4618 37.7249C9.7477 36.0068 9.75444 34.6283 8.45776 33.1075C7.47901 31.9594 6.60185 31.5174 5.34464 30.6747C2.54343 28.7976 0.532911 25.6181 0.116654 22.5663C-0.690722 17.0413 2.7529 11.7093 8.58423 9.45527C10.6896 8.64178 12.4614 8.64504 14.3439 7.63665C15.9027 6.80167 16.4434 5.85612 17.5137 4.69924C20.0818 1.9233 23.402 0.444534 27.4168 0.0439105Z">
+                        <Path.Fill>
+                            <LinearGradientBrush StartPoint="0.5,0.3503" EndPoint="0.5,1">
+                                <GradientStop x:Name="BodyTop" Color="#01A4FF" Offset="0.0"/>
+                                <GradientStop x:Name="BodyFoot" Color="#F0FAF9" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Path.Fill>
+                    </Path>
+
+                    <!-- The design gives the body three INNER SHADOWS in pale cyan (#C7F0FC), which is
+                         what makes it glow rather than sit flat. WPF has no inner shadow, and an
+                         Effect is banned in an animated subtree anyway (it re-renders the whole thing
+                         in software every frame). These two overlays are the same read for the cost of
+                         two brushes: a pale rim hugging the edge, and a soft light from above. -->
+                    <Path Canvas.Left="0" Canvas.Top="4" IsHitTestVisible="False"
+                          Data="M27.4168 0.0439105C27.7899 0.0125787 28.3679 0 28.7515 0C32.9906 0.0038307 37.0098 1.64726 39.729 4.48815C41.0304 5.84354 41.3616 6.74919 43.3084 7.73882C44.755 8.47438 45.3972 8.46849 46.959 8.8559C49.3313 9.4639 51.4908 10.5823 53.2392 12.1085C55.9217 14.4471 57.4299 17.621 57.4319 20.9312C57.4208 24.6086 55.6357 28.0527 52.4072 30.4546C50.8977 31.5775 49.6979 31.9525 48.5994 33.6049C47.8552 34.6249 47.664 35.7215 47.2942 36.8678C46.5434 39.1941 44.9545 41.292 42.8656 42.886C38.3887 46.3021 34.3829 40.0285 28.7515 40.0182C22.6942 40.021 17.7107 46.0289 13.3369 41.8383C12.0847 40.6385 11.091 39.2388 10.4618 37.7249C9.7477 36.0068 9.75444 34.6283 8.45776 33.1075C7.47901 31.9594 6.60185 31.5174 5.34464 30.6747C2.54343 28.7976 0.532911 25.6181 0.116654 22.5663C-0.690722 17.0413 2.7529 11.7093 8.58423 9.45527C10.6896 8.64178 12.4614 8.64504 14.3439 7.63665C15.9027 6.80167 16.4434 5.85612 17.5137 4.69924C20.0818 1.9233 23.402 0.444534 27.4168 0.0439105Z">
+                        <Path.Fill>
+                            <RadialGradientBrush GradientOrigin="0.5,0.46" Center="0.5,0.46" RadiusX="0.56" RadiusY="0.60">
+                                <GradientStop Color="#00C7F0FC" Offset="0.58"/>
+                                <GradientStop Color="#4DC7F0FC" Offset="0.86"/>
+                                <GradientStop Color="#B8C7F0FC" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Path.Fill>
+                    </Path>
+                    <Path Canvas.Left="0" Canvas.Top="4" IsHitTestVisible="False"
+                          Data="M27.4168 0.0439105C27.7899 0.0125787 28.3679 0 28.7515 0C32.9906 0.0038307 37.0098 1.64726 39.729 4.48815C41.0304 5.84354 41.3616 6.74919 43.3084 7.73882C44.755 8.47438 45.3972 8.46849 46.959 8.8559C49.3313 9.4639 51.4908 10.5823 53.2392 12.1085C55.9217 14.4471 57.4299 17.621 57.4319 20.9312C57.4208 24.6086 55.6357 28.0527 52.4072 30.4546C50.8977 31.5775 49.6979 31.9525 48.5994 33.6049C47.8552 34.6249 47.664 35.7215 47.2942 36.8678C46.5434 39.1941 44.9545 41.292 42.8656 42.886C38.3887 46.3021 34.3829 40.0285 28.7515 40.0182C22.6942 40.021 17.7107 46.0289 13.3369 41.8383C12.0847 40.6385 11.091 39.2388 10.4618 37.7249C9.7477 36.0068 9.75444 34.6283 8.45776 33.1075C7.47901 31.9594 6.60185 31.5174 5.34464 30.6747C2.54343 28.7976 0.532911 25.6181 0.116654 22.5663C-0.690722 17.0413 2.7529 11.7093 8.58423 9.45527C10.6896 8.64178 12.4614 8.64504 14.3439 7.63665C15.9027 6.80167 16.4434 5.85612 17.5137 4.69924C20.0818 1.9233 23.402 0.444534 27.4168 0.0439105Z">
+                        <Path.Fill>
+                            <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                <GradientStop x:Name="Crown0" Color="#DBC7F0FC" Offset="0.00"/>
+                                <GradientStop x:Name="Crown1" Color="#B0C7F0FC" Offset="0.10"/>
+                                <GradientStop x:Name="Crown2" Color="#33C7F0FC" Offset="0.25"/>
+                                <GradientStop Color="#00C7F0FC" Offset="0.42"/>
+                            </LinearGradientBrush>
+                        </Path.Fill>
+                    </Path>
+                </Canvas>
+
+                <!-- ── EYES ──
+                     7.046 x 15.257 at x 18.988 and 31.490, y 10.255 (+4 for the board offset) - the
+                     design's own numbers. Tall, narrow and close together, which is most of the
+                     character's expression; the old pair was shorter, wider and further apart.
+                     Each has its own scale transform so it blinks, and the pair carries a Gaze
+                     translate so Toki can look around. -->
+                <Canvas Width="67" Height="52" IsHitTestVisible="False">
+                    <Canvas.RenderTransform><TranslateTransform x:Name="Gaze"/></Canvas.RenderTransform>
+                    <Canvas.Resources>
+                        <LinearGradientBrush x:Key="EyeFill" StartPoint="0.5,0" EndPoint="0.5,1.6358">
+                            <GradientStop Color="#F5F5F0" Offset="0.0"/>
+                            <GradientStop Color="#91E4F9" Offset="1.0"/>
                         </LinearGradientBrush>
-                    </Path.Fill>
-                    <Path.Data>
-                        <GeometryGroup FillRule="Nonzero">
-                            <EllipseGeometry Center="60,67" RadiusX="58" RadiusY="37"/>
-                            <EllipseGeometry Center="30,52" RadiusX="25" RadiusY="25"/>
-                            <EllipseGeometry Center="61,37" RadiusX="33" RadiusY="33"/>
-                            <EllipseGeometry Center="91,52" RadiusX="25" RadiusY="25"/>
-                        </GeometryGroup>
-                    </Path.Data>
-                </Path>
+                    </Canvas.Resources>
 
-                <!-- Glossy top highlight: a soft white sheen near the crown, so light reads as coming from
-                     above. Purely decorative (never hit-tested). -->
-                <Ellipse Width="52" Height="30" IsHitTestVisible="False"
-                         HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10,6,0">
-                    <Ellipse.Fill>
-                        <RadialGradientBrush GradientOrigin="0.4,0.3" Center="0.4,0.3" RadiusX="0.7" RadiusY="0.7">
-                            <GradientStop Color="#73FFFFFF" Offset="0.0"/>
-                            <GradientStop Color="#00FFFFFF" Offset="1.0"/>
-                        </RadialGradientBrush>
-                    </Ellipse.Fill>
-                </Ellipse>
+                    <!-- The blink transform sits on the GRID so the seat closes with the eye. The seat
+                         is the design's 0 1px 2px rgba(0,33,51,0.2) drop shadow, drawn as a static
+                         offset copy: the same read as an Effect, none of its per-frame cost. -->
+                    <!-- ══ ONE SHAPE THAT MORPHS ══
+                         The happy face used to be a SWAP: hide the two eye ellipses, reveal a
+                         separate arc Path. That is precisely the doll-with-accessories pattern the
+                         Grok-bot lesson exists to kill, and the owner caught it immediately - "the
+                         sparkly toki has eyes AND ^ ^, it can only have ^ ^", then, when I fixed the
+                         symptom: "remember the dynamic lesson from grok bot, use that".
 
-                <!-- Cheek blush -->
-                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
-                         HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,28,0,0"/>
-                <Ellipse Width="17" Height="11" Fill="#E86A9B" Opacity="0.45" IsHitTestVisible="False"
-                         HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,28,14,0"/>
+                         So each eye is now ONE closed path of four cubic segments, and the smile is
+                         the SAME thirteen points moved: the oval's top rises to an apex, its sides
+                         swing out into arms, its bottom lifts to the inner V. Nothing appears and
+                         nothing is hidden - the eye bends into the smile and back.
 
-                <!-- Eyes: clean white rounded pills, each with a scale transform so they blink (and can widen
-                     for a "surprised" reaction). A tiny highlight dot keeps them glossy, not flat. -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                            VerticalAlignment="Center" Margin="0,-4,0,0">
-                    <Grid Margin="0,0,13,0">
-                        <Border x:Name="LeftEye" Width="16" Height="30" Background="#1E1C22"
-                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform><ScaleTransform x:Name="LeftBlink"/></Border.RenderTransform>
-                        </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
-                    </Grid>
-                    <Grid>
-                        <Border x:Name="RightEye" Width="16" Height="30" Background="#1E1C22"
-                                CornerRadius="7.5" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform><ScaleTransform x:Name="RightBlink"/></Border.RenderTransform>
-                        </Border>
-                        <Ellipse Width="4.5" Height="4.5" Fill="#F2FFFFFF" IsHitTestVisible="False"
-                                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,6,0,0"/>
-                    </Grid>
-                </StackPanel>
+                         Coordinates are ABSOLUTE board coordinates with Stretch="None", not
+                         Canvas.Left offsets, because the caret reaches outside the oval's box: a
+                         Path positioned by its bounding box would slide sideways as the bounds grew
+                         mid-morph. The blink scale is centred on explicit numbers for the same
+                         reason. The design's 1px eye shadow is gone with the second copy it needed -
+                         at the size an eye actually renders it was contributing nothing, and it was
+                         the thing left showing under the arcs. -->
+                    <Path x:Name="LeftEye" Stretch="None" Fill="{StaticResource EyeFill}">
+                        <Path.RenderTransform><ScaleTransform x:Name="LeftBlink" CenterX="22.511" CenterY="21.884"/></Path.RenderTransform>
+                        <Path.Data>
+                            <PathGeometry>
+                                <PathFigure x:Name="LEyeFig" IsClosed="True" StartPoint="22.511,14.255">
+                                    <BezierSegment x:Name="LEyeS1" Point1="24.457,14.255" Point2="26.034,17.670" Point3="26.034,21.884"/>
+                                    <BezierSegment x:Name="LEyeS2" Point1="26.034,26.097" Point2="24.457,29.512" Point3="22.511,29.512"/>
+                                    <BezierSegment x:Name="LEyeS3" Point1="20.565,29.512" Point2="18.988,26.097" Point3="18.988,21.884"/>
+                                    <BezierSegment x:Name="LEyeS4" Point1="18.988,17.670" Point2="20.565,14.255" Point3="22.511,14.255"/>
+                                </PathFigure>
+                            </PathGeometry>
+                        </Path.Data>
+                    </Path>
+                    <Path x:Name="RightEye" Stretch="None" Fill="{StaticResource EyeFill}">
+                        <Path.RenderTransform><ScaleTransform x:Name="RightBlink" CenterX="35.013" CenterY="21.884"/></Path.RenderTransform>
+                        <Path.Data>
+                            <PathGeometry>
+                                <PathFigure x:Name="REyeFig" IsClosed="True" StartPoint="35.013,14.255">
+                                    <BezierSegment x:Name="REyeS1" Point1="36.959,14.255" Point2="38.536,17.670" Point3="38.536,21.884"/>
+                                    <BezierSegment x:Name="REyeS2" Point1="38.536,26.097" Point2="36.959,29.512" Point3="35.013,29.512"/>
+                                    <BezierSegment x:Name="REyeS3" Point1="33.067,29.512" Point2="31.490,26.097" Point3="31.490,21.884"/>
+                                    <BezierSegment x:Name="REyeS4" Point1="31.490,17.670" Point2="33.067,14.255" Point3="35.013,14.255"/>
+                                </PathFigure>
+                            </PathGeometry>
+                        </Path.Data>
+                    </Path>
+                </Canvas>
+
+                <!-- ══════════ MOOD PROPS ══════════
+                     Every overlay carries its own ScaleTransform whose origin is the point on the BODY
+                     it belongs to, so a mood change morphs: the outgoing prop shrinks back into the
+                     body and the incoming one grows out of it. -->
+
+                <!-- THINKING: the design's 28x12 bubble at (38.537, 25.512), radius 4, with three 4px
+                     dots at x 6/12/18. It was a 9-radius bubble with 4.5px dots. -->
+                <Canvas Width="67" Height="52" IsHitTestVisible="False">
+                    <!-- Shared by the thinking bubble AND the note card. It lived inside the bubble,
+                         where the note card - its SIBLING - could not see it: WPF resource lookup walks
+                         up the tree, never sideways. -->
+                    <Canvas.Resources>
+                        <LinearGradientBrush x:Key="DotFill" StartPoint="0.5,-0.3026" EndPoint="0.5,3.5033">
+                            <GradientStop Color="#01A4FF" Offset="0.0"/>
+                            <GradientStop Color="#F0FAF9" Offset="1.0"/>
+                        </LinearGradientBrush>
+                    </Canvas.Resources>
+                    <Border x:Name="ThinkBubble" Visibility="Collapsed"
+                            Canvas.Left="38.537" Canvas.Top="29.512" Width="28" Height="12"
+                            CornerRadius="4" RenderTransformOrigin="0.05,0.5">
+                        <Border.RenderTransform><ScaleTransform x:Name="ThinkPop"/></Border.RenderTransform>
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                <GradientStop Color="#FDFDFD" Offset="0.0"/>
+                                <GradientStop Color="#EDECEA" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Canvas>
+                            <Ellipse x:Name="Dot1" Canvas.Left="6" Canvas.Top="4" Width="4" Height="4" Fill="{StaticResource DotFill}"/>
+                            <Ellipse x:Name="Dot2" Canvas.Left="12" Canvas.Top="4" Width="4" Height="4" Fill="{StaticResource DotFill}"/>
+                            <Ellipse x:Name="Dot3" Canvas.Left="18" Canvas.Top="4" Width="4" Height="4" Fill="{StaticResource DotFill}"/>
+                        </Canvas>
+                    </Border>
+
+                    <!-- READING (live transcription): the NOTE IN HAND. 26x18 at (38.414, 21), two rows
+                         of a 4px blue dot and a 12.14 x 2.44 grey line - the design's own note card.
+                         The owner asked for this by name: "transcribing/reading toki is not there yet,
+                         the note in hand doesnt show". It genuinely did not exist. -->
+                    <Border x:Name="NoteCard" Visibility="Collapsed"
+                            Canvas.Left="38.414" Canvas.Top="25" Width="26" Height="18"
+                            CornerRadius="4" RenderTransformOrigin="0.05,0.5">
+                        <Border.RenderTransform><ScaleTransform x:Name="NotePop"/></Border.RenderTransform>
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                <GradientStop Color="#FDFDFD" Offset="0.0"/>
+                                <GradientStop Color="#EDECEA" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Canvas>
+                            <Ellipse x:Name="NoteDot1" Canvas.Left="4" Canvas.Top="4" Width="4" Height="4" Fill="{StaticResource DotFill}"/>
+                            <Rectangle x:Name="NoteLine1" Canvas.Left="10" Canvas.Top="4.78" Width="12.139" Height="2.44"
+                                       RadiusX="1.22" RadiusY="1.22" Fill="#D8D8D9"/>
+                            <Ellipse x:Name="NoteDot2" Canvas.Left="4" Canvas.Top="10" Width="4" Height="4" Fill="{StaticResource DotFill}"/>
+                            <Rectangle x:Name="NoteLine2" Canvas.Left="10" Canvas.Top="10.78" Width="12.139" Height="2.44"
+                                       RadiusX="1.22" RadiusY="1.22" Fill="#D8D8D9"/>
+                        </Canvas>
+                    </Border>
+                </Canvas>
+
+                <!-- WRITING: the design's PEN, path for path (node 325:295). Slim, navy (#3E5E92 to
+                     #608EC6) with a silver ferrule - a fountain pen held at the body's right edge.
+                     What was here before was a chunky drawn barrel roughly twice this width, which the
+                     owner called out twice: first as invisible, then as unprofessional.
+                     The design's writing pose shifts the BODY 6.73 left to make room; we keep the body
+                     put and shift the PEN right by the same amount, so one body serves every mood. -->
+                <Canvas x:Name="Pen" Visibility="Collapsed" Width="67" Height="52" IsHitTestVisible="False"
+                        RenderTransformOrigin="0.60,0.85">
+                    <Canvas.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="PenPop"/>
+                            <RotateTransform x:Name="PenTilt" CenterX="42.8" CenterY="44.2"/>
+                        </TransformGroup>
+                    </Canvas.RenderTransform>
+                    <!-- Cached for the same reason as the body: five static paths that only ever move
+                         under a transform, and the writing scribble runs them at 30fps for as long as
+                         a recording lasts. -->
+                    <Canvas.CacheMode>
+                        <BitmapCache RenderAtScale="4" EnableClearType="False" SnapsToDevicePixels="False"/>
+                    </Canvas.CacheMode>
+                    <Canvas.Resources>
+                        <LinearGradientBrush x:Key="PenNavy" StartPoint="1,0.7" EndPoint="0,0.05">
+                            <GradientStop Color="#3E5E92" Offset="0.0"/>
+                            <GradientStop Color="#608EC6" Offset="1.0"/>
+                        </LinearGradientBrush>
+                        <LinearGradientBrush x:Key="PenSilver" StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#D9D5D5" Offset="0.0"/>
+                            <GradientStop Color="#9A9FB5" Offset="1.0"/>
+                        </LinearGradientBrush>
+                    </Canvas.Resources>
+                    <!-- +6.73 in x (the design's writing-pose body offset), +4 in y (the board offset). -->
+                    <Canvas Canvas.Left="6.73" Canvas.Top="4">
+                        <!-- the cap button at the top of the barrel -->
+                        <Path Data="M49.8636 18.3181C50.0857 18.0017 50.5223 17.9253 50.8387 18.1474L51.8092 18.8287C52.1256 19.0508 52.202 19.4874 51.9799 19.8038L51.0299 21.157L48.9136 19.6714L49.8636 18.3181Z"
+                              Fill="{StaticResource PenNavy}"/>
+                        <!-- the barrel -->
+                        <Path Data="M47.2886 19.8286C47.6836 19.3655 48.3633 19.2843 48.8615 19.634L51.0872 21.1965C51.5854 21.5462 51.74 22.213 51.4386 22.7419C50.5197 24.3547 48.567 27.7129 46.9859 29.9652C44.8395 33.0227 41.0088 37.417 41.0088 37.417L37.0302 34.624C37.0302 34.624 39.8615 29.5281 42.0079 26.4706C43.589 24.2184 46.084 21.2408 47.2886 19.8286Z"
+                              Fill="{StaticResource PenNavy}"/>
+                        <!-- the silver ferrule -->
+                        <Path Data="M37.0302 34.624L41.0088 37.417L39.179 38.4839L36.6846 36.7327L37.0302 34.624Z"
+                              Fill="{StaticResource PenSilver}"/>
+                        <Path Data="M41.0331 37.4341L37.042 34.6323L36.6846 36.7327L39.179 38.4839L41.0331 37.4341Z"
+                              Fill="{StaticResource PenNavy}" Opacity="0.55"/>
+                        <!-- the nib -->
+                        <Path Data="M36.0879 40.2333L37.324 39.5335L36.3262 38.833L36.0879 40.2333Z"
+                              Fill="{StaticResource PenNavy}"/>
+                    </Canvas>
+                </Canvas>
+
+                <!-- HAPPY: gold four-point sparkles around the crown. The owner's verdict on these was
+                     "the sparkling toki is good", so the shapes and motion are left alone - only the
+                     positions move, because the body underneath is a different silhouette now. -->
+                <Canvas x:Name="Sparkles" Visibility="Collapsed" IsHitTestVisible="False"
+                        Width="67" Height="52" RenderTransformOrigin="0.5,0.45">
+                    <Canvas.RenderTransform><ScaleTransform x:Name="SparkPop"/></Canvas.RenderTransform>
+                    <Canvas.Resources>
+                        <!-- Named so the theme can deepen them: the pale gold that glitters on a dark
+                             notch is nearly invisible on a white one (owner: "the sparkles are not
+                             visible"). -->
+                        <LinearGradientBrush x:Key="Gold" StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#FDE685" Offset="0.0"/>
+                            <GradientStop Color="#FCC942" Offset="1.0"/>
+                        </LinearGradientBrush>
+                        <!-- A four-point star with concave sides: reads as "sparkle" at any size,
+                             where a plain diamond reads as "diamond". -->
+                        <PathGeometry x:Key="Star" Figures="M12,0 C12,7 17,12 24,12 C17,12 12,17 12,24 C12,17 7,12 0,12 C7,12 12,7 12,0 Z"/>
+                    </Canvas.Resources>
+                    <Path x:Name="Spark1" Canvas.Left="48" Canvas.Top="1" Width="11" Height="11" Stretch="Uniform"
+                          Data="{StaticResource Star}" Fill="{StaticResource Gold}" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform>
+                            <TransformGroup><ScaleTransform x:Name="Spark1Pop"/><RotateTransform x:Name="Spark1Spin"/></TransformGroup>
+                        </Path.RenderTransform>
+                    </Path>
+                    <Path x:Name="Spark2" Canvas.Left="56" Canvas.Top="12" Width="7" Height="7" Stretch="Uniform"
+                          Data="{StaticResource Star}" Fill="{StaticResource Gold}" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform>
+                            <TransformGroup><ScaleTransform x:Name="Spark2Pop"/><RotateTransform x:Name="Spark2Spin"/></TransformGroup>
+                        </Path.RenderTransform>
+                    </Path>
+                    <Path x:Name="Spark3" Canvas.Left="0.5" Canvas.Top="36" Width="8" Height="8" Stretch="Uniform"
+                          Data="{StaticResource Star}" Fill="{StaticResource Gold}" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform>
+                            <TransformGroup><ScaleTransform x:Name="Spark3Pop"/><RotateTransform x:Name="Spark3Spin"/></TransformGroup>
+                        </Path.RenderTransform>
+                    </Path>
+                    <Path x:Name="Spark4" Canvas.Left="47" Canvas.Top="43" Width="6" Height="6" Stretch="Uniform"
+                          Data="{StaticResource Star}" Fill="{StaticResource Gold}" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform>
+                            <TransformGroup><ScaleTransform x:Name="Spark4Pop"/><RotateTransform x:Name="Spark4Spin"/></TransformGroup>
+                        </Path.RenderTransform>
+                    </Path>
+                </Canvas>
             </Grid>
         </Grid>
     </Viewbox>

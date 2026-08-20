@@ -12,7 +12,7 @@ namespace Toki.Tests;
 /// paths never touch the LLM or the user's real database/settings. Each screenshot bug from the
 /// owner's live session is a regression test here.
 /// </summary>
-[Collection("NotesQaSeams")]   // NotesQa.StoreOverride/LlmOverride are static — never run the two fixtures that set them in parallel
+[Collection("NotesQaSeams")]   // NotesQa.StoreOverride/LlmOverride are static - never run the two fixtures that set them in parallel
 public sealed class NotesQaTests : IDisposable
 {
     readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"toki-qa-{Guid.NewGuid():N}.db");
@@ -35,7 +35,7 @@ public sealed class NotesQaTests : IDisposable
     }
 
     /// <summary>Fake model: records what the pipeline asked of it (prompts, budget, stops) and streams
-    /// a canned answer — so the ANALYZE route (breadth, prompt shape, budget) is testable end-to-end
+    /// a canned answer - so the ANALYZE route (breadth, prompt shape, budget) is testable end-to-end
     /// without loading the real model or touching the user's settings.</summary>
     sealed class FakeLlm : ILlm
     {
@@ -336,7 +336,7 @@ public sealed class NotesQaTests : IDisposable
         Assert.Empty(NotesQa.MatchPeople(new[] { "Mac" }, "what did zorblax say"));
     }
 
-    // ═══ P9.1 — the live-run failure cluster ═══
+    // ═══ P9.1 - the live-run failure cluster ═══
 
     static MeetingRecord MeetingOn(DateTimeOffset at, string title, string summary, params ActionItem[] actions)
     {
@@ -396,7 +396,7 @@ public sealed class NotesQaTests : IDisposable
         Assert.Contains("dashboard", ans.Text);   // in a meeting you recorded, all open items are your business
     }
 
-    // ── C: oldest/first recency identification is a DB fact — deterministic, never an LLM shrug ──
+    // ── C: oldest/first recency identification is a DB fact - deterministic, never an LLM shrug ──
     [Fact]
     public async Task OldestMeeting_WithTitleAsk_IsDeterministic()
     {
@@ -464,7 +464,7 @@ public sealed class NotesQaTests : IDisposable
         Assert.Contains("Prioritize keyboard shortcuts", ans.Text);
         Assert.Contains("Fix authentication", ans.Text);
         Assert.Contains("Sprint retro", ans.Text);
-        Assert.Null(fake.User);   // multiplicity is a DB fact — no model, no silent pick
+        Assert.Null(fake.User);   // multiplicity is a DB fact - no model, no silent pick
     }
 
     // ── D: a topic that matches a meeting TITLE must find that meeting (the "Amazon" recall miss) ──
@@ -482,7 +482,7 @@ public sealed class NotesQaTests : IDisposable
         var ans = await Ask("What was the meeting I had regarding Amazon?");
 
         Assert.Contains("Amazon's Resilience and Innovation", ans.Text);
-        Assert.Null(fake.User);   // a title hit is an identification fact — answered from the DB
+        Assert.Null(fake.User);   // a title hit is an identification fact - answered from the DB
     }
 
     [Fact]
@@ -502,7 +502,7 @@ public sealed class NotesQaTests : IDisposable
         Assert.Contains("Amazon's Resilience and Innovation", fake.User);
     }
 
-    // Precision guard (P8 regression): generic/unknown topics still miss honestly — the title
+    // Precision guard (P8 regression): generic/unknown topics still miss honestly - the title
     // backstop must not resurrect the "generic words match everything" bug.
     [Fact]
     public async Task UnknownTopic_StillAnHonestMiss_WithTitleBackstop()

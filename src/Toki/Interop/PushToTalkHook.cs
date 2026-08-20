@@ -3,12 +3,9 @@ using System.Runtime.InteropServices;
 namespace Toki.Interop;
 
 /// <summary>
-/// Push-to-talk detector for Ctrl+Alt+Space: fires <c>onStart</c> when the chord goes DOWN and
-/// <c>onStop</c> when it's released. RegisterHotKey only reports the press, never the release, so
-/// hold-to-talk needs a low-level keyboard hook (WH_KEYBOARD_LL) — run on its OWN thread with a
-/// message loop so a UI stall can never lag global keystrokes. The callback does pure key logic,
-/// then marshals to the UI thread. It does NOT swallow the keys (Ctrl+Alt+Space isn't a common
-/// combo), and it de-dupes auto-repeat via the <c>_active</c> latch.
+/// Push-to-talk detector for Ctrl+Alt+Space. RegisterHotKey never reports the release, so
+/// hold-to-talk needs a low-level keyboard hook, run on its own thread so a UI stall can't lag
+/// global keystrokes. Keys are not swallowed; auto-repeat is de-duped via the <c>_active</c> latch.
 /// </summary>
 public sealed class PushToTalkHook : IDisposable
 {
@@ -63,10 +60,8 @@ public sealed class PushToTalkHook : IDisposable
                 }
                 else if (up && _active && vk == VkSpace)
                 {
-                    // End the utterance only when the TALK key (Space) is released. Once the chord has
-                    // engaged, SPACE is what you hold to talk — you can relax Ctrl/Alt without cutting the
-                    // mic. (The old "any chord key ends it" cut recording the instant a finger drifted off
-                    // Ctrl or Alt mid-sentence — the "waveform disappears while I'm still listening" bug.)
+                    // End the utterance only when Space is released: once the chord has engaged,
+                    // the user may relax Ctrl/Alt mid-sentence without cutting the mic.
                     _active = false;
                     _onStop();
                 }

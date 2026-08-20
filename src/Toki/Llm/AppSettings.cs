@@ -10,13 +10,13 @@ public enum NotesMode { Local, HeuristicOnly, ApiKey }
 
 /// <summary>
 /// User settings persisted to %APPDATA%\Toki\settings.json. The BYO API key is
-/// DPAPI-encrypted (per-user) so it's never stored in plaintext (brief §4).
+/// DPAPI-encrypted (per-user) so it's never stored in plaintext.
 /// </summary>
 public sealed class AppSettings
 {
     public NotesMode NotesMode { get; set; } = NotesMode.Local;
 
-    // Model + base URL are trimmed on set — pasted values arrive with stray whitespace,
+    // Model + base URL are trimmed on set - pasted values arrive with stray whitespace,
     // and a trailing space in a URL or model name fails in confusing ways downstream.
     string _apiModel = "gpt-4o-mini";
     public string ApiModel { get => _apiModel; set => _apiModel = (value ?? "").Trim(); }
@@ -28,8 +28,28 @@ public sealed class AppSettings
     /// falls back to the Windows account name when empty.</summary>
     public string? UserName { get; set; }
 
+    /// <summary>
+    /// Names and terms the user has told Toki to get right, one per line (or comma-separated).
+    /// The escape hatch for names frequency cannot settle: a name typed here is ground truth
+    /// and is allowed a wider match, because the user has asserted it.
+    /// </summary>
+    public string? PinnedNames { get; set; }
+
+    /// <summary>
+    /// How big note text is drawn, 1 to 12; a per-person setting, not per-note. 0 or out of range
+    /// means "never chosen" and falls back to the editor's default.
+    /// </summary>
+    public int NoteTextSize { get; set; }
+
+    /// <summary>
+    /// True once the user has been told, once, that saving an evidence clip puts other people's voices
+    /// in a file Toki can no longer reach. Playing a clip never asks - that is between the user and
+    /// their own disk. See <see cref="Toki.Storage.EvidenceAudio"/>.
+    /// </summary>
+    public bool AudioSharingAcknowledged { get; set; }
+
     /// <summary>True once the user has been through the first-run onboarding (name + privacy + done).
-    /// Defaults false so EVERY existing install sees it once — which is also how a stale/wrong stored
+    /// Defaults false so EVERY existing install sees it once - which is also how a stale/wrong stored
     /// name gets corrected. Set true only when the user finishes (or skips) onboarding.</summary>
     public bool OnboardingComplete { get; set; }
 
@@ -42,20 +62,20 @@ public sealed class AppSettings
     {
         var raw = !string.IsNullOrWhiteSpace(configured) ? configured! : Environment.UserName;
         if (string.IsNullOrWhiteSpace(raw)) return "";
-        // Windows account names come as "First Last" or "first.last" — take the first
+        // Windows account names come as "First Last" or "first.last" - take the first
         // token and title-case it so "sid.desai" → "Sid".
         var first = raw.Replace('.', ' ').Replace('_', ' ').Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } parts ? parts[0] : "";
         if (first.Length == 0) return "";
         return char.ToUpperInvariant(first[0]) + (first.Length > 1 ? first[1..].ToLowerInvariant() : "");
     }
 
-    /// <summary>Durable user-stated facts from the Ask chat ("Works at Contoso") — the lightweight
+    /// <summary>Durable user-stated facts from the Ask chat ("Works at Contoso") - the lightweight
     /// user profile the dialogue brain reads (see <see cref="UserProfile"/>). Null until the first
     /// fact is stored, so existing settings files are untouched. Capped small by the writer.</summary>
     public List<string>? UserFacts { get; set; }
 
     /// <summary>Local-model GPU offload policy. 0 = auto (detect VRAM and offload a
-    /// safe number of layers — the default); -1 = force CPU only; &gt;0 = force that
+    /// safe number of layers - the default); -1 = force CPU only; &gt;0 = force that
     /// many layers. Resolved once at launch by <see cref="LlmRuntime"/>.</summary>
     public int GpuLayers { get; set; } = 0;
 
@@ -84,7 +104,7 @@ public sealed class AppSettings
     /// <summary>The Library list sort mode (a <see cref="Toki.LibrarySort"/> name). "Newest" default.</summary>
     public string LibrarySort { get; set; } = "Newest";
 
-    /// <summary>True only after a successful "Test connection" — i.e. the key/model/endpoint
+    /// <summary>True only after a successful "Test connection" - i.e. the key/model/endpoint
     /// were actually confirmed to reach the provider and get a reply. Reset to false whenever
     /// any of the three fields change (a fresh edit is unverified until re-tested). Drives the
     /// positive/working state in Settings, so we never claim a key is working on faith.</summary>
@@ -99,7 +119,7 @@ public sealed class AppSettings
 
     // ---- Google Calendar (M7) ----
 
-    /// <summary>DPAPI-encrypted Google OAuth refresh token (base64) — the ONLY long-lived Google
+    /// <summary>DPAPI-encrypted Google OAuth refresh token (base64) - the ONLY long-lived Google
     /// credential kept at rest. Access tokens are never persisted; they live in CalendarService memory
     /// and refresh lazily. Use <see cref="GoogleRefreshToken"/> to read/write in the clear.</summary>
     public string? GoogleRefreshTokenProtected { get; set; }
@@ -111,9 +131,33 @@ public sealed class AppSettings
         set => GoogleRefreshTokenProtected = Protect(value?.Trim());
     }
 
-    /// <summary>The connected Google account's email (from the id_token) — display only
+    /// <summary>The connected Google account's email (from the id_token) - display only
     /// ("Connected as sid@…"). Null when not connected.</summary>
     public string? GoogleAccountEmail { get; set; }
+
+    // ---- Outlook / Microsoft 365 ----
+    // A SECOND, INDEPENDENT connection, not a replacement: both can be connected at once and the
+    // agenda is merged. Same storage shape as the Google grant: refresh token DPAPI-encrypted at
+    // rest, access token never persisted.
+
+    /// <summary>DPAPI-encrypted Microsoft OAuth refresh token (base64). Use
+    /// <see cref="OutlookRefreshToken"/> to read/write in the clear.</summary>
+    public string? OutlookRefreshTokenProtected { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? OutlookRefreshToken
+    {
+        get => Unprotect(OutlookRefreshTokenProtected);
+        set => OutlookRefreshTokenProtected = Protect(value?.Trim());
+    }
+
+    /// <summary>The connected Outlook account's address - display only, and the only way to know which
+    /// attendee on a Graph event is the user (Microsoft does not flag it).</summary>
+    public string? OutlookAccountEmail { get; set; }
+
+    /// <summary>True when an Outlook refresh token is stored.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool OutlookConnected => !string.IsNullOrEmpty(OutlookRefreshTokenProtected);
 
     /// <summary>True when a Google refresh token is stored (the calendar is connected).</summary>
     [JsonIgnore]
@@ -137,8 +181,8 @@ public sealed class AppSettings
         catch (Exception ex)
         {
             // Loud, not silent: a parse failure here means the API key, Google connection, and
-            // profile just reset to defaults — that must at least be diagnosable from the log.
-            App.Log($"SETTINGS UNREADABLE — starting with defaults (key/calendar/profile reset): {ex.Message}");
+            // profile just reset to defaults - that must at least be diagnosable from the log.
+            App.Log($"SETTINGS UNREADABLE - starting with defaults (key/calendar/profile reset): {ex.Message}");
         }
         return new AppSettings();
     }
@@ -154,9 +198,8 @@ public sealed class AppSettings
             try
             {
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-                // Atomic: write to a temp file, then swap it in. A crash or power loss mid-write
-                // on the direct overwrite left a truncated settings.json — silently wiping the
-                // DPAPI-encrypted API key and Google refresh token, both unrecoverable.
+                // Atomic write-then-swap: a crash mid-overwrite truncates settings.json and
+                // silently wipes the DPAPI-encrypted key and refresh tokens, both unrecoverable.
                 var tmp = Path + ".tmp";
                 File.WriteAllText(tmp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
                 File.Move(tmp, Path, overwrite: true);

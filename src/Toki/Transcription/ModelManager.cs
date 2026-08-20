@@ -20,6 +20,31 @@ public sealed class ModelManager
         Folder: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
         RequiredFiles: ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]);
 
+    /// <summary>
+    /// Speaker segmentation (pyannote 3.0, MIT, (c) 2022 CNRS): WHO is talking WHEN. The exact
+    /// filename is pinned here and nowhere else: the same GitHub release also carries
+    /// sherpa-onnx-reverb-diarization-v1/v2 under Rev's NON-PRODUCTION licence - cannot ship.
+    /// </summary>
+    public static readonly ModelSpec Segmentation = new(
+        Id: "pyannote-segmentation-3-0",
+        Url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        Folder: "sherpa-onnx-pyannote-segmentation-3-0",
+        RequiredFiles: ["model.onnx"]);
+
+    /// <summary>Speaker embedding (3D-Speaker CAM++, Apache-2.0 on both code and weights - the cleanest
+    /// licence position available). Turns a slice of speech into a voice fingerprint, which is what makes
+    /// "the same person again" answerable.</summary>
+    public const string SpeakerEmbedUrl =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx";
+    public static string SpeakerEmbedPath =>
+        Path.Combine(ModelsRoot, "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx");
+    public static bool SpeakerEmbedInstalled => File.Exists(SpeakerEmbedPath);
+    public static Task EnsureSpeakerEmbedAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(SpeakerEmbedUrl, SpeakerEmbedPath, progress, ct);
+
+    /// <summary>Both pieces present, so speakers can actually be told apart.</summary>
+    public static bool DiarisationInstalled => IsInstalled(Segmentation) && SpeakerEmbedInstalled;
+
     public static string ModelsRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Toki", "Models");
 
@@ -32,7 +57,7 @@ public sealed class ModelManager
         EnsureFileAsync(QwenUrl, QwenPath, progress, ct);
 
     // Meaning-search embedder: bge-small-en-v1.5 (MIT), Q8_0 GGUF (~34MB, single file). Runs on CPU via
-    // LLamaSharp — no second inference runtime — so the GPU stays free for Qwen. Optional: when absent,
+    // LLamaSharp - no second inference runtime - so the GPU stays free for Qwen. Optional: when absent,
     // retrieval falls back to keyword/FTS only.
     public const string EmbedUrl =
         "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf";
@@ -40,6 +65,18 @@ public sealed class ModelManager
     public static bool EmbedInstalled => File.Exists(EmbedPath);
     public static Task EnsureEmbedAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
         EnsureFileAsync(EmbedUrl, EmbedPath, progress, ct);
+
+    /// <summary>
+    /// Voice activity detection: Silero VAD v5 (MIT), ~2MB. Gates ASR so Parakeet is never fed
+    /// near-silence (it returns confident nonsense, not nothing). Runs through the sherpa-onnx
+    /// runtime already shipping here - no second ONNX runtime (Microsoft.ML.OnnxRuntime conflicts).
+    /// </summary>
+    public const string VadUrl =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx";
+    public static string VadPath => Path.Combine(ModelsRoot, "silero_vad.onnx");
+    public static bool VadInstalled => File.Exists(VadPath);
+    public static Task EnsureVadAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureFileAsync(VadUrl, VadPath, progress, ct);
 
     /// <summary>Absolute path to a file inside an installed model (e.g. the encoder).</summary>
     public static string PathTo(ModelSpec spec, string file) =>

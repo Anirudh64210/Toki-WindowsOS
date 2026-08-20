@@ -128,4 +128,39 @@ public class AppStateTests
         Assert.True(s.CanGo(PillState.Hidden));
         Assert.True(s.CanGo(PillState.Home));
     }
+
+    // ── the recording clock (2026-08-18) ──
+    //
+    // Written AFTER a mutation probe proved nothing protected this: removing the null-guard on
+    // RecordingStartedAt left all 1,991 tests green - and that guard is what stops a mid-meeting
+    // detour (push-to-talk Ask, the prep card) restarting the clock, which made a 40-minute
+    // meeting measure 3 seconds and get deleted as an accidental tap.
+
+    [Fact]
+    public void The_recording_clock_survives_a_mid_meeting_detour()
+    {
+        var s = new AppState();
+        s.ForceForDemo(PillState.RecordingBar);
+        var started = s.RecordingStartedAt;
+        Assert.NotNull(started);
+
+        s.ForceForDemo(PillState.Ask);              // push-to-talk mid-meeting
+        s.ForceForDemo(PillState.RecordingBar);     // back to the recording
+        Assert.Equal(started, s.RecordingStartedAt);   // the SAME instant - never restarted
+    }
+
+    [Fact]
+    public void The_next_recording_gets_a_fresh_clock_only_after_the_last_one_ended()
+    {
+        var s = new AppState();
+        s.ForceForDemo(PillState.RecordingBar);
+        var first = s.RecordingStartedAt;
+        s.RecordingEnded();                          // the stop flow read its wall-clock
+        Assert.Null(s.RecordingStartedAt);
+
+        s.ForceForDemo(PillState.Hidden);
+        s.ForceForDemo(PillState.RecordingBar);
+        Assert.NotNull(s.RecordingStartedAt);   // a new meeting sets a fresh clock
+        GC.KeepAlive(first);                    // (instants can collide at clock resolution - identity is not the property)
+    }
 }

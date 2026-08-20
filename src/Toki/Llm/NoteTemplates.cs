@@ -2,13 +2,12 @@ namespace Toki.Llm;
 
 /// <summary>One note template: a name, a one-line "when it applies" (for auto-detection), and the
 /// middle section headings it produces. SUMMARY (always) and ACTION ITEMS (when tasks exist) are
-/// implicit and added by the writer — a template only defines the sections in between.</summary>
+/// implicit and added by the writer - a template only defines the sections in between.</summary>
 public sealed record NoteTemplate(string Name, string When, string[] Sections);
 
 /// <summary>
-/// The fixed set of note shapes Toki auto-detects between (owner-chosen full set). The writer picks
-/// the best fit for each meeting, writes it in that shape, and the user can override it. General is
-/// the safe default when nothing else clearly fits.
+/// The fixed set of note shapes Toki auto-detects between. The writer picks the best fit,
+/// the user can override it. General is the safe default when nothing else clearly fits.
 /// </summary>
 public static class NoteTemplates
 {
@@ -39,6 +38,6 @@ public static class NoteTemplates
         All.FirstOrDefault(t => string.Equals(t.Name, name?.Trim(), System.StringComparison.OrdinalIgnoreCase))
         ?? General;
 
-    /// <summary>The classification menu shown to the model: "Name — when it applies".</summary>
+    /// <summary>The classification menu shown to the model: "Name - when it applies".</summary>
     public static string Menu() => string.Join("\n", All.Select(t => $"- {t.Name}: {t.When}"));
 }

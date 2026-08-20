@@ -25,7 +25,7 @@ public sealed class SecurityTests
     public void ToFtsQuery_ProducesOnlyAlnumPrefixOrTerms(string raw)
     {
         var q = MeetingStore.ToFtsQuery(raw);
-        // Every emitted token is `alnum*`, joined only by " OR " — no FTS operators, quotes, or colons survive.
+        // Every emitted token is `alnum*`, joined only by " OR " - no FTS operators, quotes, or colons survive.
         foreach (var tok in q.Split(" OR ", StringSplitOptions.RemoveEmptyEntries))
         {
             Assert.EndsWith("*", tok);
@@ -99,8 +99,8 @@ public sealed class SecurityTests
     [InlineData("https://api.openai.com/v1", true)]
     [InlineData("http://127.0.0.1:11434", true)]      // local Ollama
     [InlineData("http://localhost:1234/v1", true)]    // local LM Studio
-    [InlineData("http://api.openai.com/v1", false)]   // cleartext to a remote host — rejected
-    [InlineData("http://192.168.1.5:11434", false)]   // non-loopback http — rejected
+    [InlineData("http://api.openai.com/v1", false)]   // cleartext to a remote host - rejected
+    [InlineData("http://192.168.1.5:11434", false)]   // non-loopback http - rejected
     [InlineData("ftp://x", false)]
     [InlineData("", false)]
     public void ApiLlm_Endpoint_RequiresHttpsOrLoopbackHttp(string baseUrl, bool ok)

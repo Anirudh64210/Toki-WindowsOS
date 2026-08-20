@@ -5,10 +5,8 @@ using Toki.Transcription;
 namespace Toki.Storage;
 
 /// <summary>
-/// Writes each meeting to a plain Markdown file under %APPDATA%\Toki\Notes\ — a
-/// user-inspectable, sync-friendly copy of the notes (the research's "every
-/// meeting is a local file you own" principle). The DB is the source of truth;
-/// this is a mirror + export format.
+/// Writes each meeting to a plain Markdown file under %APPDATA%\Toki\Notes\.
+/// The DB is the source of truth; this is a mirror + export format.
 /// </summary>
 public static class MarkdownMirror
 {
@@ -19,16 +17,14 @@ public static class MarkdownMirror
     {
         Directory.CreateDirectory(NotesDir);
         var path = Path.Combine(NotesDir, $"{Safe(m.Title)}-{m.Id}.md");
-        // Containment guard: Safe() already strips path separators and traversal, but a title is
-        // LLM/transcript-derived (attacker-influenceable), so assert the final path really is inside
-        // NotesDir before writing — a regression in Safe() becomes a caught error, not an arbitrary write.
+        // Titles are LLM/transcript-derived, so assert the final path stays inside NotesDir:
+        // a regression in Safe() becomes a caught error, not an arbitrary write.
         var full = Path.GetFullPath(path);
         var root = Path.GetFullPath(NotesDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"note path escaped the Notes directory: {full}");
-        // The filename embeds the TITLE, and the LLM retitles the meeting after the first
-        // mirror write — drop any older mirror of this id first, or every retitle leaves a
-        // stale duplicate .md (same id, old name) on disk forever.
+        // The filename embeds the title and the LLM retitles after the first mirror write;
+        // drop older mirrors of this id or every retitle leaves a stale duplicate .md.
         try
         {
             foreach (var old in Directory.GetFiles(NotesDir, $"*-{m.Id}.md"))
@@ -80,7 +76,7 @@ public static class MarkdownMirror
         {
             sb.AppendLine("## Transcript");
             foreach (var s in m.Transcript)
-                sb.AppendLine($"**{(s.Speaker == Speaker.You ? "You" : "Them")}:** {s.Text}").AppendLine();
+                sb.AppendLine($"**{s.Label}:** {s.Text}").AppendLine();
         }
         return sb.ToString();
     }

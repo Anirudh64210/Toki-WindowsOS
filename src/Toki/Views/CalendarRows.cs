@@ -9,11 +9,8 @@ namespace Toki.Views;
 
 /// <summary>
 /// Shared, code-built pieces for the calendar surfaces (Home "COMING UP" glance + the Calendar page),
-/// so both read identically. Premium agenda language (owner's reference designs): a coloured accent
-/// bar per event, title + "time · place", overlapping attendee initials, an amber relative-time hint
-/// when imminent, and an obvious Join. Everything pulls colours/fonts from Theme.xaml by key, so a
-/// live theme swap recolours it (rows are rebuilt on ThemeChanged). No provider-specific types here —
-/// only <see cref="CalEvent"/>.
+/// so both read identically. Colours/fonts come from Theme.xaml by key (rows are rebuilt on
+/// ThemeChanged). No provider-specific types here, only <see cref="CalEvent"/>.
 /// </summary>
 static class CalendarRows
 {
@@ -22,9 +19,9 @@ static class CalendarRows
     static FontFamily Icons => (FontFamily)Application.Current.Resources["IconFont"];
 
     // ── per-event accent bar + per-person avatar colours ──
-    // Deterministic (string.GetHashCode is randomised per process — never use it for a stable colour).
-    // Coral is deliberately absent: it means record/destructive only. Amber on events would collide
-    // with the imminent treatment, so it's only in the person palette.
+    // Deterministic: string.GetHashCode is randomised per process, never use it for a stable colour.
+    // Coral is absent (record/destructive only); amber on events would collide with the imminent
+    // treatment, so it's only in the person palette.
 
     static readonly string[] EventPalette = { "Pink", "Blue", "Green", "Purple" };
     static readonly string[] PersonPalette = { "Pink", "Blue", "Green", "Purple", "Amber" };
@@ -43,7 +40,7 @@ static class CalendarRows
         Width = 3, CornerRadius = new CornerRadius(1.5), Background = EventAccent(e), Margin = margin,
     };
 
-    // ── attendee avatars: overlapping initial circles (no photos on-device — initials are honest) ──
+    // ── attendee avatars: overlapping initial circles (derived, never fetched) ──
 
     /// <summary>Up to <paramref name="max"/> overlapping initial circles + a "+N" bubble for the rest.</summary>
     public static FrameworkElement AvatarStack(IEnumerable<CalAttendee> people, double size = 16, int max = 3)
@@ -84,36 +81,136 @@ static class CalendarRows
 
     // ── Home "COMING UP" glance row: accent bar · title / avatars + "day · time · place" · Join ──
 
+    /// <summary>
+    /// A COMING UP row: a bare date column, then a glass capsule holding the accent line, title,
+    /// time, and either the countdown + Join pill or a quiet relative time. The date lives OUTSIDE
+    /// the capsule so a column of rows reads as a calendar down its left edge.
+    /// </summary>
     public static FrameworkElement GlanceRow(CalEvent e, Action onOpen)
     {
-        var grid = new Grid { MinHeight = 40 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var row = new Grid { Height = 40, Margin = new Thickness(0, 0, 0, 8) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var bar = AccentBar(e, new Thickness(1, 4, 0, 4));
-        Grid.SetColumn(bar, 0);
-        grid.Children.Add(bar);
+        // The date column.
+        var date = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        date.Children.Add(new TextBlock
+        {
+            Text = e.StartLocal.Day.ToString(CultureInfo.InvariantCulture),
+            FontFamily = Ui, FontSize = 16, FontWeight = FontWeights.Black,
+            Foreground = Br("TextHi"), HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        date.Children.Add(new TextBlock
+        {
+            Text = e.StartLocal.ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant(),
+            FontFamily = Ui, FontSize = 8, FontWeight = FontWeights.Bold,
+            Foreground = Br("TextMid"), HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 1, 0, 0),
+        });
+        row.Children.Add(date);
 
-        var mid = new StackPanel { Margin = new Thickness(9, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        // The capsule.
+        var inner = new Grid();
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var accent = new Border
+        {
+            Width = 3, CornerRadius = new CornerRadius(1.5),
+            Background = AccentBrush(e), Margin = new Thickness(0, 4, 8, 4),
+        };
+        inner.Children.Add(accent);
+
+        var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
             Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
-            Foreground = Br("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = Br("TextHi"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        mid.Children.Add(SubRow(e, GlanceSubtitle(e)));
+        mid.Children.Add(new TextBlock
+        {
+            Text = TimeRange(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Medium,
+            Foreground = Br("TextLow"), Margin = new Thickness(0, 2, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
         Grid.SetColumn(mid, 1);
-        grid.Children.Add(mid);
+        inner.Children.Add(mid);
 
-        var right = RightAffordance(e);
+        var right = GlanceRight(e);
         Grid.SetColumn(right, 2);
-        grid.Children.Add(right);
+        inner.Children.Add(right);
 
-        return Clickable(grid, onOpen);
+        var capsule = new Border
+        {
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(8, 5, 12, 5),
+            Child = inner, Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        capsule.SetResourceReference(Border.BackgroundProperty, "GlassCapsule");
+        Grid.SetColumn(capsule, 2);
+        row.Children.Add(capsule);
+
+        return Clickable(row, onOpen);
     }
 
-    // The subtitle line: meta text + the attendee stack beside it (reference: avatars under the title,
-    // so the right edge stays reserved for the Join affordance).
+    /// <summary>The row's right edge: an imminent meeting gets the countdown + Join pill;
+    /// a distant one gets a quiet relative time.</summary>
+    static FrameworkElement GlanceRight(CalEvent e)
+    {
+        var until = e.Until;
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+        };
+
+        var soon = until.TotalMinutes <= 30 && until.TotalMinutes > -5;
+        var label = new TextBlock
+        {
+            Text = Countdown(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Bold,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        label.SetResourceReference(TextBlock.ForegroundProperty, soon ? "TextHi" : "TextMid");
+        stack.Children.Add(label);
+
+        if (soon && e.HasMeetLink)
+        {
+            var joinText = new TextBlock
+            {
+                Text = "Join", FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            joinText.SetResourceReference(TextBlock.ForegroundProperty, "JoinPillText");
+            var join = new Border
+            {
+                CornerRadius = new CornerRadius(999), Padding = new Thickness(11, 4, 11, 4),
+                Child = joinText, Margin = new Thickness(6, 0, 0, 0), Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = "Open the meeting link",
+            };
+            join.SetResourceReference(Border.BackgroundProperty, "JoinPill");
+            // A real click, not just decoration - and it must not ALSO open the row.
+            join.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; Interop.SafeShell.OpenUrl(e.MeetLink); };
+            stack.Children.Add(join);
+        }
+        return stack;
+    }
+
+    static string Countdown(CalEvent e)
+    {
+        var until = e.Until;
+        if (until.TotalMinutes <= 0) return "now";
+        if (until.TotalMinutes < 60) return $"in {(int)Math.Ceiling(until.TotalMinutes)} min";
+        if (until.TotalHours < 24) return $"in {(int)Math.Round(until.TotalHours)} h";
+        return $"in {(int)Math.Round(until.TotalDays)} day{((int)Math.Round(until.TotalDays) == 1 ? "" : "s")}";
+    }
+
+    /// <summary>The capsule's accent line colour, stable per event. StableHash, never GetHashCode:
+    /// an event that changed colour every launch would read as a different meeting.</summary>
+    static readonly string[] RedesignAccents = { "AccentAmber", "AccentTeal", "Blue", "Green", "Purple" };
+    static Brush AccentBrush(CalEvent e) => Br(RedesignAccents[StableHash(e.Id) % RedesignAccents.Length]);
+
+    // The subtitle line: meta text + the attendee stack beside it.
     static FrameworkElement SubRow(CalEvent e, string text)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
@@ -182,8 +279,7 @@ static class CalendarRows
         Grid.SetColumn(mid, 2);
         grid.Children.Add(mid);
 
-        // Join is always visible (joining must never require discovery); the copy glyph beside it makes
-        // SHARING the Meet link just as discoverable; the amber countdown gives it urgency when imminent.
+        // Join is always visible - joining must never require discovery.
         var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (e.HasMeetLink)
         {
@@ -195,16 +291,19 @@ static class CalendarRows
         Grid.SetColumn(right, 3);
         grid.Children.Add(right);
 
-        // Hover reveals an inline action strip (Vercel/Wispr style) below the row. Indent 52 (the time
-        // gutter), NOT the title x — the full set of links must fit the page width.
+        // Hover reveals an inline action strip below the row. Indent = the time gutter, NOT the
+        // title x: the full set of links must fit the page width.
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(52, 5, 0, 3) };
         if (canEdit) strip.Children.Add(ActionLink("Edit", false, onEdit));
-        // Share: copy the JOINABLE Google Meet link — the only link worth sharing. (The calendar-page
-        // link is pointless to send someone; "Open in Google" below already covers viewing the event.)
+        // Share copies the JOINABLE Meet link - the only link worth sending someone.
         if (e.HasMeetLink && e.MeetLink is { Length: > 0 } meetUrl)
             strip.Children.Add(CopyLink(meetUrl));
         strip.Children.Add(ActionLink("Open in Google", false, () => OpenUrl(e.HtmlLink)));
         strip.Children.Add(ActionLink("Delete", true, onDelete));
+        // Drop the last link's trailing margin, or the row clips its right edge and part of the
+        // link looks pressable but is not.
+        if (strip.Children[^1] is FrameworkElement last)
+            last.Margin = new Thickness(0);
 
         return HoverRevealRow(grid, strip);
     }
@@ -266,36 +365,39 @@ static class CalendarRows
             { EasingFunction = growing ? Motion.EaseOut : Motion.EaseIn });
     }
 
-    // A text-link action (brightens on hover) — the strip's buttons.
+    // A text-link action (brightens on hover). The label lives inside a HitTarget box:
+    // the box is the button, never the glyphs alone.
     static FrameworkElement ActionLink(string label, bool danger, Action action)
     {
         var restKey = danger ? "Danger" : "TextDim";
         var tb = new TextBlock
         {
             Text = label, FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
-            Foreground = Br(restKey), Cursor = System.Windows.Input.Cursors.Hand,
-            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Br(restKey),
         };
-        tb.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
-        tb.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
-        tb.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
-        return tb;
+        var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
+        box.Margin = new Thickness(0, 0, 6, 0);
+        box.MouseLeftButtonUp += (_, ev) => { ev.Handled = true; action(); };
+        box.MouseEnter += (_, _) => tb.Foreground = Br(danger ? "Danger" : "Text");
+        box.MouseLeave += (_, _) => tb.Foreground = Br(restKey);
+        return box;
     }
 
-    // "Copy link" → puts the meeting URL on the clipboard, then flips to "Copied ✓" (green) for a beat so
-    // the action is confirmed. Never throws (the clipboard can be momentarily locked by another app).
+    // "Copy link" puts the meeting URL on the clipboard, then flips to "Copied ✓" for a beat.
+    // Never throws: the clipboard can be momentarily locked by another app.
     static FrameworkElement CopyLink(string url)
     {
         var tb = new TextBlock
         {
-            Text = "Copy Meet link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
-            Foreground = Br("TextDim"), Cursor = System.Windows.Input.Cursors.Hand,
-            Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center,
+            Text = "Copy link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Foreground = Br("TextDim"),
         };
+        var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
+        box.Margin = new Thickness(0, 0, 6, 0);
         var copied = false;
-        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
-        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
-        tb.MouseLeftButtonUp += (_, ev) =>
+        box.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        box.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        box.MouseLeftButtonUp += (_, ev) =>
         {
             ev.Handled = true;
             var ok = false;
@@ -304,41 +406,41 @@ static class CalendarRows
             copied = true;
             tb.Text = "Copied ✓"; tb.Foreground = Br("Green");
             var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
-            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = "Copy Meet link"; tb.Foreground = Br("TextDim"); };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = "Copy link"; tb.Foreground = Br("TextDim"); };
             t.Start();
         };
-        return tb;
+        return box;
     }
 
-    // The ALWAYS-VISIBLE share affordance: a small copy glyph beside Join on rows that have a Meet
-    // link. Click → link on the clipboard, glyph flips to a green ✓ for a beat. Quiet (TextDim at
-    // rest) so it doesn't compete with Join; the hover strip's "Copy Meet link" stays for wordy folks.
+    // Always-visible share affordance: a small copy glyph beside Join on rows with a Meet link.
+    // Quiet at rest so it doesn't compete with Join.
     static FrameworkElement CopyIcon(string url)
     {
         var tb = new TextBlock
         {
             Text = "",   // Fluent: Copy
             FontFamily = Icons, FontSize = 12, Foreground = Br("TextDim"),
-            Cursor = System.Windows.Input.Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0), Padding = new Thickness(3),
-            ToolTip = "Copy Meet link",
         };
+        // A 12px glyph is a very small thing to aim at. The box around it is the button.
+        var box = HitTarget.Wrap(tb, corner: 8, padX: 7, padY: 5, tooltip: "Copy Meet link");
+        box.MinWidth = HitTarget.MinSide;
+        box.Margin = new Thickness(0, 0, 6, 0);
         var copied = false;
-        tb.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
-        tb.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
-        tb.MouseLeftButtonUp += (_, ev) =>
+        box.MouseEnter += (_, _) => { if (!copied) tb.Foreground = Br("Text"); };
+        box.MouseLeave += (_, _) => { if (!copied) tb.Foreground = Br("TextDim"); };
+        box.MouseLeftButtonUp += (_, ev) =>
         {
             ev.Handled = true;
             var ok = false;
             try { System.Windows.Clipboard.SetText(url); ok = true; } catch { }   // clipboard can be locked
             if (!ok) return;
             copied = true;
-            tb.Text = ""; tb.Foreground = Br("Green"); tb.ToolTip = "Copied";   // Fluent: CheckMark
+            tb.Text = ""; tb.Foreground = Br("Green"); box.ToolTip = "Copied";   // Fluent: CheckMark
             var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
-            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = ""; tb.Foreground = Br("TextDim"); tb.ToolTip = "Copy Meet link"; };
+            t.Tick += (_, _) => { t.Stop(); copied = false; tb.Text = ""; tb.Foreground = Br("TextDim"); box.ToolTip = "Copy Meet link"; };
             t.Start();
         };
-        return tb;
+        return box;
     }
 
     public static FrameworkElement SkeletonRow()
@@ -400,14 +502,13 @@ static class CalendarRows
     {
         if (e.IsAllDay) return "All day";
         var s = e.StartLocal; var en = e.EndLocal;
-        // "9:41 – 10:11 AM" — drop the first meridiem when both sides share it.
+        // "9:41 – 10:11 AM" - drop the first meridiem when both sides share it.
         var sameMeridiem = (s.Hour < 12) == (en.Hour < 12);
         var startFmt = sameMeridiem ? "h:mm" : "h:mm tt";
         return $"{s.ToString(startFmt, CultureInfo.InvariantCulture)} – {en.ToString("h:mm tt", CultureInfo.InvariantCulture)}";
     }
 
-    // Agenda sub-line: duration · place. (People are no longer words here — the avatar stack beside
-    // this text carries them; "Meet" as a venue would be redundant next to the Join button.)
+    // Agenda sub-line: duration · place. People are carried by the avatar stack, not words.
     static string SubtitleText(CalEvent e)
     {
         var parts = new List<string>();
@@ -434,7 +535,7 @@ static class CalendarRows
         return $"in {(int)until.TotalDays} d";
     }
 
-    /// <summary>Starts within 15 minutes (and hasn't started) — gets the amber urgency treatment.</summary>
+    /// <summary>Starts within 15 minutes (and hasn't started) - gets the amber urgency treatment.</summary>
     public static bool Imminent(CalEvent e) => e.Until > TimeSpan.Zero && e.Until <= TimeSpan.FromMinutes(15);
 
     // ── shared helpers ──
@@ -454,11 +555,11 @@ static class CalendarRows
         return b;
     }
 
-    // Web links ONLY — calendar data (a conferenceData join link on any invite) is
+    // Web links ONLY: calendar data (a conferenceData join link on any invite) is
     // attacker-influenceable, so every open goes through the one shell choke point.
     public static void OpenUrl(string? url) => Toki.Interop.SafeShell.OpenUrl(url);
 
-    // Smooth opacity fade (Motion.Micro, ease-out) — hover reveals appear/vanish gently.
+    // Smooth opacity fade for hover reveals.
     static void Fade(UIElement el, double to) =>
         el.BeginAnimation(UIElement.OpacityProperty,
             new System.Windows.Media.Animation.DoubleAnimation(to, Motion.Dur(Motion.Micro))

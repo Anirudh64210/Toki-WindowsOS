@@ -4,7 +4,7 @@ using Xunit;
 namespace Toki.Tests.Brain;
 
 /// <summary>
-/// Temporal recall golden set (taxonomy §2) — frozen-clock assertions on QueryUnderstanding.Parse:
+/// Temporal recall golden set (taxonomy §2) - frozen-clock assertions on QueryUnderstanding.Parse:
 /// window semantics, recency ranks, past/future, and the specific-past-date rule (§2.3 / Rule D).
 /// NOW = Wed 2026-08-05; this week = Mon Aug 3 – Sun Aug 9.
 /// </summary>

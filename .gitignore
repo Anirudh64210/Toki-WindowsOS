@@ -53,3 +53,21 @@ Recordings/
 *.db
 *.db-shm
 *.db-wal
+
+# design-sync machine state (staged scripts, build output, caches)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+design-web/node_modules/
+design-web/dist/
+
+# WPF temp project files (build artifacts, never commit)
+*_wpftmp.csproj
+
+# The demo film (Remotion). The footage and the build output are large and regenerable;
+# the composition source in video/src IS worth keeping.
+video/node_modules/
+video/out/
+video/public/raw.mp4

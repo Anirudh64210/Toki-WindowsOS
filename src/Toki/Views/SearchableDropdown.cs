@@ -35,13 +35,13 @@ public sealed class SearchableDropdown : Border
 
     public SearchableDropdown()
     {
-        // Use resource REFERENCES (not captured brushes) for every persistent surface, so the whole
-        // control recolours live on a light/dark swap. (The transient popup rows are rebuilt per open.)
-        SetResourceReference(BackgroundProperty, "SurfaceHi");
-        // A hairline outline so the control reads as a distinct button and never blends into a
-        // same-coloured surface behind it (the light-theme "invisible dropdown" bug).
-        SetResourceReference(BorderBrushProperty, "Hairline");
+        // Resource REFERENCES (not captured brushes) on every persistent surface, so the control
+        // recolours live on a theme swap; the transient popup rows are rebuilt per open.
+        SetResourceReference(BackgroundProperty, "GlassFill");
+        // Hairline outline so the control never blends into a same-coloured surface behind it.
+        SetResourceReference(BorderBrushProperty, "GlassRim");
         BorderThickness = new Thickness(1);
+        Theme.GlassSurface.CrispRim(this);   // whole device pixels, or the r9 rim reads as soft
         CornerRadius = new CornerRadius(9);
         Height = 34;
         Padding = new Thickness(11, 0, 9, 0);
@@ -72,10 +72,11 @@ public sealed class SearchableDropdown : Border
         // ── popup ──
         _searchBox = new Border
         {
-            CornerRadius = new CornerRadius(7),
+            // Concentric with the popup card: r14 with a 6px pad holds an r8 field.
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(9, 0, 9, 0), Margin = new Thickness(0, 0, 0, 6), Height = 32,
         };
-        _searchBox.SetResourceReference(BackgroundProperty, "Surface");
+        _searchBox.SetResourceReference(BackgroundProperty, "GlassFill");
         _search.Background = Brushes.Transparent;
         _search.BorderThickness = new Thickness(0);
         _search.SetResourceReference(Control.ForegroundProperty, "Text");
@@ -94,31 +95,28 @@ public sealed class SearchableDropdown : Border
         stack.Children.Add(_searchBox);
         stack.Children.Add(scroll);
 
-        var box = new Border
-        {
-            CornerRadius = new CornerRadius(10), Padding = new Thickness(6), Child = stack, Effect = null,
-            BorderThickness = new Thickness(1),
-        };
-        box.SetResourceReference(BackgroundProperty, "SurfaceHi");
-        box.SetResourceReference(BorderBrushProperty, "Hairline");
+        var box = new Toki.Theme.GlassCard(14) { CardPadding = new Thickness(6), Content = stack };
         _popup.Child = box;
         _popup.PlacementTarget = this;
         _popup.Placement = PlacementMode.Bottom;
         _popup.StaysOpen = false;
         _popup.AllowsTransparency = true;
         _popup.PopupAnimation = PopupAnimation.Fade;
-        _popup.VerticalOffset = 4;
+        // The card is inset inside its own shadow gutter; both offsets give that back so the list still
+        // opens flush under the pill.
+        _popup.VerticalOffset = 4 - Toki.Theme.GlassCard.ShadowGutter;
+        _popup.HorizontalOffset = -Toki.Theme.GlassCard.ShadowGutter;
 
         MouseLeftButtonUp += (_, _) => Toggle();
         _popup.Opened += (_, _) =>
         {
             NotchPopups.Register(_popup);   // the open list counts as part of the notch (don't let it retract)
-            box.MinWidth = ActualWidth;
+            box.CardMinWidth = ActualWidth;
             if (_searchBox.Visibility == Visibility.Visible)
                 Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => _search.Focus()));
         };
-        // When the popup closes (a pick, Esc, or a StaysOpen=false click-away), remember WHEN — so a
-        // click that lands back on this pill row is read as "close", never as an immediate re-open.
+        // Remember WHEN the popup closed, so a click landing back on this pill reads as "close",
+        // never as an immediate re-open.
         _popup.Closed += (_, _) => { NotchPopups.Unregister(_popup); _justClosedTick = Environment.TickCount64; };
     }
 
@@ -140,9 +138,8 @@ public sealed class SearchableDropdown : Border
     void Toggle()
     {
         if (_popup.IsOpen) { _popup.IsOpen = false; return; }
-        // Clicking the pill while its popup is open first triggers StaysOpen=false to CLOSE the popup
-        // (on the mouse-down), THEN this mouse-up would re-open it — so it never seemed to close. If it
-        // only just closed, treat this click as the close and stay shut.
+        // StaysOpen=false closes the popup on mouse-down; this mouse-up would then re-open it.
+        // If it only just closed, treat this click as the close and stay shut.
         if (Environment.TickCount64 - _justClosedTick < 250) return;
         if (_items.Count == 0) return;
         _searchBox.Visibility = _items.Count > SearchThreshold ? Visibility.Visible : Visibility.Collapsed;
@@ -171,7 +168,8 @@ public sealed class SearchableDropdown : Border
         };
         var row = new Border
         {
-            Padding = new Thickness(10, 7, 10, 7), CornerRadius = new CornerRadius(7),
+            // Concentric: the card is r14 with a 6px pad, so a row seated in it is r8.
+            Padding = new Thickness(10, 7, 10, 7), CornerRadius = new CornerRadius(8),
             Background = isSel ? Res<Brush>("Chip") : Brushes.Transparent,
             Cursor = Cursors.Hand, Child = text,
         };
