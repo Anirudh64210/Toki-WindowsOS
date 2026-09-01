@@ -4,7 +4,7 @@
         xmlns:controls="clr-namespace:Toki.Controls"
         xmlns:views="clr-namespace:Toki.Views"
         xmlns:theme="clr-namespace:Toki.Theme"
-        Title="Toki" Height="640" Width="960" MinWidth="720" MinHeight="460"
+        Title="Library" Height="640" Width="960" MinWidth="720" MinHeight="460"
         WindowStartupLocation="Manual" Background="{DynamicResource Ink}"
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
@@ -22,7 +22,7 @@
              window chrome; a card reads as a panel, which is what it is. -->
         <!-- It wears the CARD MATERIAL, not a flat tint: the plate gradient (lighter at the top,
              because light comes from above), a rim that is brightest along the top edge, and the
-             sheen/light-field/inner-edge stack the notch card has. Same material, one surface smaller.
+             sheen and inner-edge stack the notch card has. Same material, one surface smaller.
 
              THE LIFT IS CAST BY TWO SEPARATE BORDERS, never by an Effect on the card. Every nav row
              in here animates its hover and press, and an Effect renders its whole subtree in software
@@ -128,7 +128,7 @@
                                 </Button>
                                 <!-- New Chat is the WHITE pill (figma): the one primary action on this bar. -->
                                 <Button x:Name="NewChatBtn" Style="{StaticResource WhiteButton}"
-                                        Padding="13,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New Chat"/>
+                                        Padding="13,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New chat"/>
                             </StackPanel>
                         </Grid>
 
@@ -234,11 +234,22 @@
                                                 </Viewbox>
                                             </Button>
                                         </Grid>
-                                        <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="30" FontWeight="SemiBold"
+                                        <!-- DEMOTED from 30px (taste audit 2026-08-24). Squint at this page
+                                             and the greeting was the only thing that survived, while the
+                                             chips below it - the reason the page exists - read as
+                                             secondary. A greeting carries no information; it should not
+                                             be the largest type in the window. Demote, never promote. -->
+                                        <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="14" FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextSoft}"
                                                    TextAlignment="Center" TextWrapping="Wrap"/>
+                                        <!-- AskHint no longer carries an identity line ("Your meeting
+                                             assistant."): a sentence describing the interface to somebody
+                                             already using it is narration. It still shows voice hints. -->
                                         <TextBlock x:Name="AskHint" Style="{StaticResource Dim}" FontSize="12.5" TextAlignment="Center"
-                                                   Margin="0,10,0,26" TextWrapping="Wrap"/>
-                                        <WrapPanel x:Name="Suggestions" HorizontalAlignment="Center"/>
+                                                   Margin="0,6,0,22" TextWrapping="Wrap"/>
+                                        <!-- A uniform 2-col grid, not a ragged wrap: equal-width chips
+                                             read as one considered set, not offcuts. -->
+                                        <UniformGrid x:Name="Suggestions" Columns="2" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                     <StackPanel x:Name="Messages" HorizontalAlignment="Stretch" MaxWidth="720"
                                                 Margin="40,28,40,20" Visibility="Collapsed"/>
@@ -283,10 +294,11 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <!-- ONE LINE, as the frame draws it: "Library   48 | all on this PC". It was
-                                 a stacked title with a caption under it, which cost a second line for
-                                 two facts that fit comfortably beside the word. The rule between the
-                                 count and the scope is the frame's 1px white-15% divider. -->
+                            <!-- ONE LINE, as the frame draws it: "Library   48". It was a stacked title
+                                 with a caption under it, which cost a second line for facts that fit
+                                 beside the word. The scope label and its 1px divider appear ONLY for a
+                                 filter that is actually on ("my notes"); "all on this PC" was a
+                                 permanent label restating the product's whole premise. -->
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="Library" FontFamily="{StaticResource UiFont}" FontSize="20"
                                            FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
@@ -296,7 +308,7 @@
                                            Margin="12,1,0,0"/>
                                 <Border x:Name="CountRule" Width="1" Height="15" Margin="10,1,10,0"
                                         Background="{DynamicResource GlassBorder}" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="ScopeLabel" Text="all on this PC" FontFamily="{StaticResource UiFont}"
+                                <TextBlock x:Name="ScopeLabel" Visibility="Collapsed" FontFamily="{StaticResource UiFont}"
                                            FontSize="14" Foreground="{DynamicResource TextMid}"
                                            VerticalAlignment="Center" Margin="0,1,0,0"/>
                             </StackPanel>
@@ -429,7 +441,10 @@
                 <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
                               Padding="40,34,40,34" controls:SmoothScroll.Enabled="True">
                     <!-- The redesign's settings page (figma 353:9154): ONE centred column, each section a
-                         big title + a dim one-line explainer + a rounded CARD of rows. -->
+                         big title and a rounded CARD of rows. NO explainer under a title and no caption
+                         under a row (owner, 2026-08-20: "there's a lot of text, keep it minimal and
+                         clean"). A page that narrates each of its own controls reads as generated copy.
+                         Where a label needs help, rename the label. -->
                     <StackPanel MaxWidth="640" HorizontalAlignment="Center">
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,26">
                             <TextBlock Text="Settings" Style="{StaticResource PageTitle}"/>
@@ -438,8 +453,7 @@
                                        VerticalAlignment="Bottom" Margin="14,0,0,4"/>
                         </StackPanel>
 
-                        <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"
-                                   Margin="0,0,0,12"/>
+                        <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"/>
                         <Border x:Name="NameCard" Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="14,0"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 HorizontalAlignment="Stretch">
@@ -469,10 +483,14 @@
                         <!-- ── Appearance: the redesign's CARD of rows - one rounded surface, rows split
                              by hairlines, the switch on the right. Directly under the name, as the frame
                              orders it (353:9154). ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
-                        <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="How Toki sits on your screen and in what you share."
-                                   Style="{StaticResource Dim}" FontSize="12" Margin="0,6,0,14"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- NO CAPTION under this heading (taste audit 2026-08-24). It read "How Toki
+                             looks and what it shows in a share." - the first half restates the word
+                             "Appearance" to somebody who just read it, which is the interface narrating
+                             itself. The second half was real information, and it has moved to the row it
+                             actually describes ("Show Toki in screen recordings"), where it can be
+                             acted on. -->
+                        <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}" Margin="0,0,0,12"/>
                         <Border x:Name="AppearanceCard" Background="{DynamicResource SurfaceHi}" CornerRadius="16"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
                             <StackPanel>
@@ -493,8 +511,6 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                         <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"/>
-                                        <TextBlock Text="Let more of your screen show through the notch."
-                                                   Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <CheckBox x:Name="LibGlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
                                               VerticalAlignment="Center" Click="OnLibGlassToggle"/>
@@ -507,8 +523,13 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                         <TextBlock Text="Show Toki in screen recordings" Style="{StaticResource BodyStrong}"/>
-                                        <TextBlock Text="Off = invisible to recordings and screen shares."
-                                                   Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
+                                        <!-- The one real fact from the deleted "Appearance" caption, on the
+                                             row it describes: a CONSEQUENCE, which is what helper text is
+                                             for. Off means Toki is invisible to anything that captures the
+                                             screen, which is not guessable from the label alone. -->
+                                        <TextBlock Text="Off keeps Toki out of screen shares and recordings."
+                                                   Style="{StaticResource Dim}" FontSize="11" Margin="0,2,0,0"
+                                                   TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <CheckBox x:Name="LibGhostToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
                                               VerticalAlignment="Center" Click="OnLibGhostToggle"/>
@@ -522,14 +543,12 @@
                              escape hatch existed with no handle on it. A name typed here is TRUSTED: it
                              beats what the recogniser heard, it lets a spoken name be attached to a voice,
                              and it is the only fix for a name the library cannot settle by frequency. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
                         <TextBlock Text="People Toki should spell right" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
-                                   Margin="0,6,0,12" MaxWidth="420" HorizontalAlignment="Left"
-                                   Text="Names your meetings use often. Toki trusts these over what it thinks it heard, and uses them to put a name to a voice. One per line, or separated by commas."/>
+                        <TextBlock Text="One per line, or comma separated." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
                         <Border x:Name="PinnedCard" Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
-                                Width="340" HorizontalAlignment="Left">
+                                HorizontalAlignment="Stretch">
                             <TextBox x:Name="LibPinnedBox" Background="Transparent" BorderThickness="0"
                                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                                      MinHeight="72" MaxHeight="150" FontSize="13.5" FontFamily="{StaticResource UiFont}"
@@ -556,11 +575,9 @@
                              fix them quietly at startup. A transcript is a record of what people said;
                              rewriting one the user has already read is not a favour. So: a button, a
                              plain statement of what it will and will not touch, and a count afterwards. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
                         <TextBlock Text="Re-clean saved transcripts" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
-                                   Margin="0,6,0,12" MaxWidth="420" HorizontalAlignment="Left"
-                                   Text="Runs today's transcript clean-up over meetings you already have: joins split-up lines back into whole turns, spells names the way you do, and drops the discarded half of spoken corrections. Your summaries, to-dos and tick boxes are not touched."/>
+                        <TextBlock Text="Tidies older transcripts. Your notes and ticks stay." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="LibRecleanButton" Style="{StaticResource PillButton}"
                                     Background="{DynamicResource Chip}" Content="Re-clean transcripts"
@@ -570,8 +587,9 @@
                         </StackPanel>
 
                         <!-- ── AI summaries (the mode + BYO-API-key flow, moved whole from the notch) ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
                         <TextBlock Text="AI summaries" Style="{StaticResource SectionTitle}"/>
+                        <TextBlock Text="On-device by default, or bring your own key." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
                         <views:AiSummariesSection x:Name="AiSection"/>
 
                         <!-- ── Calendars ──
@@ -583,11 +601,9 @@
                              A CONNECTED row shrinks to a small provider mark plus the account it is
                              signed in as (owner's ask): once it is done, it is a fact to confirm at a
                              glance, not an action taking up a button's worth of space. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
                         <TextBlock Text="Calendars" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Style="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
-                                   Margin="0,6,0,14" MaxWidth="420" HorizontalAlignment="Left"
-                                   Text="Connect one or both. Toki shows them as a single agenda and never writes a change back to the wrong account."/>
+                        <TextBlock Text="Connect one or both. Toki merges them into one agenda." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
 
                         <!-- Google -->
                         <Grid x:Name="LibGoogleRow">
@@ -652,7 +668,7 @@
                         </Grid>
 
                         <!-- ── About ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,24"/>
+                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
                         <TextBlock Text="About" Style="{StaticResource SectionTitle}"/>
                         <!-- A BUTTON, and its hover comes from the shared style rather than from two
                              hand-written MouseEnter/MouseLeave handlers that had to re-implement what
@@ -667,8 +683,6 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
                                     <TextBlock Text="Built with - open source &amp; licences" Style="{StaticResource BodyStrong}"/>
-                                    <TextBlock Text="The open models and libraries that power Toki."
-                                               Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
                                            FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>

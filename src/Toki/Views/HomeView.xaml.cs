@@ -64,7 +64,9 @@ public partial class HomeView : UserControl
     void RefreshGreeting()
     {
         var name = Toki.Llm.AppSettings.Current.DisplayName;
-        Greeting.Text = string.IsNullOrEmpty(name) ? "Welcome back!" : $"Welcome back, {name}!";
+        // NO EXCLAMATION MARK (taste audit 2026-08-24). The hub's greeting already ends in a full
+        // stop and this one did not, so the same sentence had two voices depending on the surface.
+        Greeting.Text = string.IsNullOrEmpty(name) ? "Welcome back" : $"Welcome back, {name}";
     }
 
     void OnCalendarChanged() => Dispatcher.Invoke(RefreshGoogle);

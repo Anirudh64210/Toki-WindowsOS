@@ -23,6 +23,30 @@ public sealed class LlmService
     public static bool LocalModelInstalled => ModelManager.QwenInstalled;
     public bool LocalLoaded => _local is not null;
 
+    /// <summary>The local model tried to load this session and threw. While true, note-writing
+    /// silently falls back to the heuristic floor - the state the fallback banner reports.</summary>
+    public bool LocalFailed => _localFailed;
+
+    /// <summary>The load failure was a NATIVE type-initializer crash (the Vulkan/llama.cpp backend).
+    /// .NET caches that failure for the whole process, so an in-process retry cannot recover it: the
+    /// app has to be restarted. The banner uses this to say "restart" instead of "try again" when a
+    /// retry would be futile.</summary>
+    public bool LocalPoisoned { get; private set; }
+
+    /// <summary>Clear a stuck load failure and attempt the local model ONE more time, on the calling
+    /// (background) thread. Returns true if the model is now loaded. This is the "try again with the
+    /// on-device model" action: a transient failure (a busy GPU, a momentary driver hiccup) recovers;
+    /// a native poisoning does not (see <see cref="LocalPoisoned"/>).</summary>
+    public bool RetryLocal()
+    {
+        lock (_gate)
+        {
+            if (_local is not null) return true;
+            _localFailed = false;   // let EnsureLocal attempt the load again
+        }
+        return EnsureLocal() is not null;
+    }
+
     /// <summary>The active model per settings: BYO API key if set, else local Qwen if installed.</summary>
     public ILlm? Active()
     {
@@ -63,9 +87,26 @@ public sealed class LlmService
             {
                 var llama = new LlamaLlm(ModelManager.QwenPath);
                 _local = llama;
+                _localFailed = false;
+                LocalPoisoned = false;
                 App.Log($"LLM loaded on {(llama.OnGpu ? "GPU" : "CPU")}");
             }
-            catch (Exception ex) { App.Log($"LLM load failed: {ex.Message}"); _localFailed = true; }
+            catch (Exception ex)
+            {
+                // Log the WHOLE chain: the top is usually "type initializer threw", and the real
+                // cause (a missing native DLL, a Vulkan init failure) is an inner exception.
+                var detail = $"{ex.GetType().Name}: {ex.Message}";
+                for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+                    detail += $"  <-  {inner.GetType().Name}: {inner.Message}";
+                App.Log($"LLM load failed: {detail}");
+                _localFailed = true;
+                // A native type-initializer crash (llama.cpp/Vulkan backend) is cached by .NET for
+                // the whole process - retrying in-process throws the same cached exception, so the
+                // only real recovery is an app restart. Flag it so the banner says so honestly.
+                LocalPoisoned = ex is TypeInitializationException
+                    || ex.InnerException is TypeInitializationException
+                    || (ex.Message?.Contains("type initializer", StringComparison.OrdinalIgnoreCase) ?? false);
+            }
             return _local;
         }
     }

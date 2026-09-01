@@ -24,7 +24,7 @@
                 </Viewbox.RenderTransform>
                 <controls:TokiBlob x:Name="TokiChar"/>
             </Viewbox>
-            <TextBlock x:Name="Greeting" Grid.Column="1" Text="Welcome back!"
+            <TextBlock x:Name="Greeting" Grid.Column="1" Text="Welcome back"
                        FontFamily="{StaticResource UiFont}" FontSize="14" FontWeight="Medium"
                        Foreground="{DynamicResource TextHi}" Margin="1,0,0,0" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal">

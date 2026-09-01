@@ -1,12 +1,201 @@
 # Toki - backlog & "what's next" (living doc)
 
-## 📋 THE OPEN LIST as of 2026-08-19 (after the glass + details + film rounds)
+## 🧭 OWNER RE-PRIORITISATION (2026-08-25) - THIS is the current order
+
+Supersedes the 2026-08-19 open list below for ordering. Priority: (1) transcription/speaker quality,
+(2) assistant & Ask, (3) UI polish, then blocked/rated, dismissed, MCP + debating (PRE-launch),
+post-launch. Ratings and the live-transcription diagnosis are the owner's asks from this session.
+
+### 1) Transcription & speaker quality  [TOP]
+
+- **Live transcription preview - BUILT 2026-08-25 (streaming, roadmap #1).** Implemented option (b):
+  a streaming zipformer-transducer (20M, k2-fsa, via sherpa-onnx - no new native lib) as the LIVE-preview
+  decoder emitting words ~1s as spoken, with a pulsing "Live" readiness cue in the recording view. The
+  SAVED transcript stays the whole-file Parakeet pass. Verified offline via `--streamtest`; the LIVE
+  feel awaits the owner's real-meeting test. Original diagnosis kept below for the record.
+  DIAGNOSIS: The live transcript
+  appears in ~15-21s CHUNKS on Windows (fast on the Mac build). Cause: `LiveTranscriber` decodes a
+  WINDOW only once `WinSec=15s` (+2x`SearchSec`=6s) of audio has piled up - so the FIRST line takes
+  ~21s, then one every ~15s. Parakeet is an OFFLINE/windowed recogniser, not streaming, so there are
+  no partial words. The Mac build is fast because it uses a truly streaming decode.
+  RESEARCH VERDICT (2026-08-25, agent-sourced): live transcript IS a real product signal - Otter,
+  Granola (it DOES show a live panel now), and open-source Meetily all show it - but NOT universal:
+  Fireflies and Fathom deliberately show NO live transcript, so a fast POST-meeting transcript is a
+  defensible choice too. Meetily does live in ~5s VAD-gated chunks (whisper.cpp / Parakeet-ONNX);
+  whisper.cpp `stream` uses a 5s window / 0.5s step. THREE implementation options, cheapest first:
+  (a) SHORTEN the existing offline window (WinSec 15 -> ~5s, `TOKI_LIVE_WINSEC`) + a LocalAgreement-2
+  commit (only show words two consecutive windows agree on) so the preview doesn't flicker/rewrite -
+  least new code, some extra CPU from overlap, closes most of the gap; (b) BEST for Toki's stack - a
+  small STREAMING Zipformer-transducer via sherpa-onnx (already in-process, ~60-80MB model, true
+  emit-as-you-go, ~160ms-1s latency, cheap CPU) as a live-preview-only path; (c) `nvidia/
+  parakeet-unified-en-0.6b` (ONE model, offline+streaming, selectable 160ms-1.12s latency) IF sherpa
+  supports its buffered-streaming cache. In ALL cases the FINAL saved transcript stays the whole-file
+  Parakeet pass (accuracy floor + the "one whole-file call per stream" law); the live view is a
+  disposable preview. RECOMMENDED: (a) as the quick win to validate the UX, then (b) for the
+  instant-like-Mac feel. Gate the live decode behind the existing Silero VAD (Meetily credits VAD with
+  ~70% of its efficiency).
+- **Speaker diarisation (T8) - MOSTLY BUILT 2026-08-25 (roadmap #2).** Was already implemented
+  (`SpeakerResolver`, transient) but (a) the models were NEVER downloaded by the app (only self-tests),
+  so fresh users had no diarisation, and (b) it ran AFTER notes. Fixed: models now download at launch
+  (segmentation + CampPlus); diarisation runs BEFORE notes (`TagSpeakers`) so the writer sees distinct
+  labels (real names or "Speaker 1/2") not everyone "Them"; owners inferred after (`InferOwners`).
+  Measured ~5s on a real meeting (RTF 0.005). Voiceprints TRANSIENT (no saved acoustic records);
+  CampPlus already credited. LIVE flow (a fresh recording naming speakers) needs the owner's test.
+  Remaining polish: the naming UX (rename "Speaker 1" -> a real name via SpeakerChips) and whether a
+  note already written with "Speaker 1" should update on rename (regenerate covers it for now).
+- **Warm mic + pre-roll ring buffer - DROPPED (research-decided 2026-08-25).** Wispr Flow (category
+  leader) does NOT keep an always-on mic; it solves first-word clipping with a READINESS CUE ("start
+  speaking when you hear the ping / see the bars move") + a fast wired mic. Genuine warm-mic exists only
+  as an opt-in community workaround for macOS/Bluetooth's 2-5s wake; on Windows WASAPI startup is ~100ms
+  (10x smaller), so the problem barely exists. KEEP the hard "NO always-on mic" rule. Instead do the
+  rule-preserving fix = **gate the "Listening" indicator on the mic's FIRST real audio frame** (not the
+  keypress), optionally with a tiny ready cue - literally Wispr's mechanism. A keypress-opened ring
+  buffer can't recover audio spoken before readiness, so it adds little over the indicator gate on
+  Windows and isn't worth the complexity unless testing shows clipping past the cue.
+- **#3 items - ALREADY BUILT (confirmed 2026-08-25), backlog was stale:** **T4 action-item owners** now
+  handled by #2's diarise-before-notes reorder (`InferOwners`); **pinned names** = `AppSettings.PinnedNames`
+  + a Library Settings box (`LibPinnedBox`/`LoadPinnedSettings`), merged by `NameLexicon.Trusted` into the
+  name-corrector AND the diarisation roster; **"Re-clean saved transcripts"** = the `LibRecleanButton` ->
+  `OnLibReclean` -> `TranscriptCleanup.RunAll` (progress + status, notes/to-dos untouched); **underline
+  corrected words** = `NoteRenderer.MarkCorrections` renders a dotted underline + a hover tooltip with the
+  original ("Self-corrected from ..." / "Also transcribed as ..."). Nothing to build; owner can verify in
+  the running app.
+- **Multilingual Whisper opt-in** (~500MB, Hinglish); **add Whisper base.en to the ONBOARDING download
+  list** (today new users get it via the launch background fetch, degrading to Parakeet until it lands).
+- **Owner WER baseline recording** (real mic, `docs/wer-eval.md`); **rebuild meetings 92/93** from WAVs.
+- **Five-critic ASR deferrals** (live-window seams at VAD boundaries, device-change gaps, drift
+  accounting, handover-names-backchannel, inherited clusters, evidence-cap-keeps-head) - see the full
+  list lower in this file.
+- **Owed (licence, NOT parked):** CampPlus (Apache-2.0) attribution row in AboutView + notices now that
+  diarisation ships.
+
+### 2) Assistant & Ask
+
+- **Fuzzy content & person-name matching** ("acton items", "Ana"/"Anna"), **nested attribution**
+  ("what did Ana say Bob should do"), **multi-intent** utterances ("recap Monday and what's due Fri").
+- **BYO-API path surfaced better** in-product (the real "sharp brain" lever); a small fallback model
+  for tiny machines.
+- **P10 dialogue-brain live-verify** - owner still owes a verdict on conversational feel.
+
+### 3) UI polish
+
+- **#39 revamp remainders:** shared empty-state control; layout-stability/text-trim sweep;
+  **hover-expand "section pills"** (the revamp's signature).
+- **Instant-hover holdouts** (AiSummaries SegButton, Calendar rows, About credit rows); **SpeakerChips
+  rename popup** still pre-glass.
+- **notch Home has no primary action** (wants a layout proposal); **focus/error/disabled/long-data
+  states never audited** (biggest untested hole).
+- Small nits: dead button styles, `TokiCheckOpen`'s undrawn outline, manual-note bullet superscript,
+  `NotesReadyPeekMs` tightness, recording-stop snap, faint light-theme loader plate first-moments,
+  `--themetest` gradient sampling, green-toggle/pink-sliver colour double-meaning.
+
+### 4) Blocked / to-rate - do we still need these for a well-rounded product?
+
+- **On-device meaning-search (embeddings) - RATING: MEDIUM-LOW, not required for launch.** What it is:
+  semantic search over meetings by MEANING (vector embeddings) instead of only keyword (FTS5/BM25), so
+  Ask finds a meeting even when the user's phrasing differs from the transcript wording ("what did we
+  conclude about budget" when the transcript says "we agreed on the finances"). STATUS UPDATE: the
+  embedder (bge-small) already SHIPS via LLamaSharp (not the old ONNX conflict), but it is NOT WIRED
+  into retrieval - only self-tests touch it. Why it can wait: meeting search is mostly by names/topics/
+  decisions that appear LITERALLY in the transcript, so keyword + the query-understanding layer covers
+  most cases; and the recent Ask failures were transcription/routing bugs, never recall misses. VERDICT:
+  a nice-to-have that a clean high-quality v1 can ship WITHOUT. Owner chose to add it (2026-08-25), but
+  **EMPIRICAL RE-TEST (2026-08-25, `--embedconflicttest`) CONFIRMS THE BLOCKER IS REAL AND CURRENT:** the
+  bge embedder runs fine ALONE, but loading it in-process ALONGSIDE Qwen (llama.cpp) - exactly the
+  Ask-time scenario - HANGS (the embed never returns; sat minutes until killed). No crash, a HANG. So
+  wiring it in-process would hang the Ask feature. It is NOT the old ONNX-conflict story (it's a
+  two-llama.cpp-models coexistence hang). Proper fix = the OUT-OF-PROCESS CPU embedder (separate process +
+  IPC) - a real milestone, not a quick wire. **DECIDED 2026-08-25: DEFER to post-launch (owner).**
+  Research confirmed an Ask assistant is table-stakes (Toki has one) and semantic search is the recall
+  failure users notice (Granola markets against keyword-only; Natively proves on-device RAG via SQLite +
+  `sqlite-vec`), so it is worth building EVENTUALLY - but v1 ships fine on keyword + the guards. Parked.
+  Model download deliberately NOT in production (unused 36MB until solved). `--embedconflicttest` kept as
+  the diagnostic that proved the in-process hang.
+- **RAM-tiering - SLICE DONE 2026-08-25.** The load-on-demand slice is built: `App.PrewarmLlm` (>=32GB
+  prewarms + keeps the LLM resident; everyone else loads on demand for a lighter startup), distinct from
+  `LowMemoryMode` (<8GB). Verified in the startup log on the 11.4GB box. The rest of RAM-tiering below is
+  the marginal part, still parked. ORIGINAL RATING: LOW-MEDIUM overall; ONE slice worth doing. Today RAM is a single 8GB binary
+  switch (a 12GB and a 64GB box behave identically). Full tiering (bigger context on 32GB+, etc.) is
+  marginal polish. The ONE piece that is a real felt win: **load-on-demand model residency** (auto by
+  RAM tier) - on a ~12GB box Toki prewarms + holds the 2.5GB LLM and feels heavy at startup; loading it
+  on demand (first note of the session) would fix that. Do that slice; skip the rest for now.
+
+### 5) MCP + debating features (PRE-LAUNCH, still deciding)
+
+- **Local read-only MCP server** (localhost, Settings-gated) - lets Claude/other on-device AI read the
+  meeting library. Safe, additive, honors every constraint; the low-risk half.
+- **MCP client** (Toki reaches OUT to Notion/Linear/etc. on explicit per-send approval) - the outward-
+  sending half; owner-gated, human-in-the-loop, start with ONE connector.
+- **Follow-up email draft** from a note (one local-LLM pass + copy) - "can be there as an option, idk".
+- **Link-sharing** for summaries / to-dos (share a meeting's summary or action items via a link).
+  NOTE: sharing is an OUTWARD-sending feature like the MCP client - same constitution tension (crosses
+  "nothing leaves the laptop"), same rule: opt-in, explicit, user approves every share.
+
+### 6) Post-launch (parked until traction says so)
+
+- **Toki 2.0 student-notetaker niche** - a class notetaker (homework/assignment due dates, test
+  notices, lesson topics). Same engine, mostly prompts + a Class template + student framing. Build
+  AFTER the general v1 launch, only if the Lecture gate shows students concentrating there.
+
+### Building NOW
+
+- **Mac version** - in active development (was parked; `HANDOFF-MAC.md` at repo root). The fast live
+  transcription the owner sees is the Mac build's streaming decode (see item 1).
+
+### Still undecided (explain, then owner picks)
+
+- **Topic Trackers** - a SAVED search (an FTS5 query) pinned with a live badge/count, e.g. a "Pricing"
+  tracker that shows how many meetings mention pricing and jumps to them, or an "Action items due this
+  week" tracker. Cheap on the existing FTS index. Owner: "idk about topic trackers" - not parked, not
+  picked. Decide: worth a shelf of saved queries, or clutter?
+
+### 🗑 DISMISSED by the owner (2026-08-25) - do NOT build
+
+- **Drag-reorder in the Library** - dead, not pursued. (Already removed from the code; this just
+  confirms it stays gone.)
+- **Bold / Italic in the note editor** - trashed. The numeric size dial replaced it; not coming back.
+- **Per-app "always record"** - not needed. Toki already DETECTS a call and offers to record it, so a
+  per-app always-on rule adds nothing but a consent-posture headache.
+
+### Library virtualization - NOT dismissed (re-clarified 2026-08-25: now LOW-RISK, medium priority)
+
+The owner's earlier "forget it" was conditional on the drag-reorder risk - but drag-reorder is already
+GONE from the code, so that risk is moot and this is now a safe optimization. What it is: the Library's
+`Cards` is a plain non-virtualizing `StackPanel` that builds a card for EVERY meeting (LibraryView.xaml
+`Cards.Children.Add(Card(m))` in a foreach), so open/search/sort rebuild them all - measured 424ms at
+54 meetings, ~343ms of it arranging off-screen cards, growing LINEARLY to ~3.9s at 500. Virtualization
+= build only the ~6 visible rows (+buffer) and recycle containers on scroll, so the Library stays
+instant at any count. NOT a launch blocker (dozens of meetings is fine); NEEDED within the first months
+of heavy use before the count climbs, or the Library gets slower every week. Cheap alternative if
+preferred: render first N cards + load more on scroll (paging), no container recycling. The "five other
+`Cards.Children`-by-index sites" that made this risky are simple reads now that drag-reorder is gone.
+
+---
+
+## 📋 THE OPEN LIST as of 2026-08-19 - SUPERSEDED for ORDER by the 2026-08-25 section above (kept for the item detail)
 
 Everything below was surfaced during the 2026-08-18/19 design-quality rounds and is NOT done.
 Grouped by what unblocks it. This section supersedes older "next up" lists further down for
 anything they disagree on.
 
 ### Waiting on the owner's word (posed as questions, never started)
+
+- **DONE 2026-08-25: Short-utterance transcription for Ask ("Hi Toki" -> "Yeah").** Built the
+  **Whisper base.en** decoder for the Ask path (owner chose it) - runs through the existing sherpa-onnx
+  runtime as ONNX (no new native lib), robust on short clips because whisper pads to its 30s window.
+  Parakeet stays the meeting engine. Downloads in the background at launch; credited MIT in AboutView +
+  notices. Optional follow-up: add whisper to the ONBOARDING download list too (today new users get it
+  via the launch background fetch, degrading to Parakeet until it lands). See
+  [[ask-voice-hotkey-flicker-listening]].
+
+- **Warm mic + pre-roll ring buffer for Ask-by-voice?** (2026-08-25) The single biggest listening
+  win in the push-to-talk research: keep the WASAPI mic stream open continuously with a ~300-500ms
+  lookback ring buffer, so key-down has ZERO init latency and the first word is never clipped. It
+  directly contradicts the hard rule **"Voice: push-to-talk ONLY, NO always-on mic (owner decision)"**
+  - a continuously-open mic IS an always-on mic, even if nothing is recorded until the key is held.
+  NOT built. If the owner keeps the rule, the no-privacy-cost fallback is to gate the "Listening"
+  indicator on the mic's first real audio buffer (so the user doesn't speak into a still-initialising
+  mic). Owner to decide. See memory [[ask-voice-hotkey-flicker-listening]].
 
 - **Delete the two dead button styles?** `ChipButton` and `SquareButton` in Theme.xaml have zero
   consumers since the glass wave. One-commit cleanup if yes.
@@ -587,3 +776,146 @@ plausible but deliberately deferred, each because the fix is invasive relative t
   one teaching phrase can pass as Lecture (cue count keeps this rare).
 - **Attendee named an ordinary word ("May", "Will")** is now never auto-corrected toward (the
   correction-magnet fix) - a deliberate miss; pinning can't override it currently.
+
+
+## Design taste audit, 2026-08-24 (MOSTLY APPLIED same day - see below)
+
+Full findings: `docs/design-audit-2026-08-24.md`. Every notch state and Library page run against
+`.claude/skills/design-taste/SKILL.md`. The owner asked for the findings to be applied; what shipped
+and what did not is in ARCHITECTURE under "Acting on the taste audit". Still OPEN from this list:
+
+- ~~**Green Settings toggles and the pink Summarizing sliver**~~ DONE 2026-08-26: both moved to brand
+  Blue (= Toki-active chrome), off the reserved content colours.
+- **notch Home has three actions in two treatments and no primary.** Real; layout redesign, not a
+  refinement. PROPOSAL OUT 2026-08-26 as an artifact (unified-quiet-nav [recommended] / take-note-primary
+  / library-primary) - awaiting owner pick, then build in WPF.
+- **Focus / error / disabled / long-data states** - AUDITED 2026-08-26 (Fix 5). DISABLED gap fixed
+  (shared button styles dim + Arrow cursor on IsEnabled=False). FOCUS: app is deliberately mouse/hotkey-
+  driven (Focusable=False; notch never focuses) - added `TokiFocus` ring + made Settings toggles
+  keyboard-operable; **full button keyboard-nav is a bigger a11y project still OPEN** (needs tab-order
+  design + testing). LONG-DATA + ERROR were already handled (trimming/measuretest; FallbackBanner/
+  ShowError/voice-hints/AskView.Failed). Also DONE this batch: greeting demoted, chips uniform, Library
+  window renamed.
+
+The findings as originally reported:
+
+- The greeting is the loudest element on notch Home and hub Ask while carrying no information (plus
+  an exclamation mark the skill forbids and the hub version does not have).
+- Two narrating sentences to delete: "Your meeting assistant." (hub Ask) and "How Toki looks and what
+  it shows in a share." (hub Settings).
+- Summarizing, the longest wait in the product, names no stage and gives no estimate.
+- One-meaning-one-colour has two exceptions: green Settings toggles (green means decisions) and the
+  pink Summarizing sliver (pink means questions).
+- Two left edges on hub Templates; ragged suggestion chips on hub Ask.
+- hub Templates section chips are constants, so they are labels wearing badge clothing, and the nine
+  template blocks are unranked.
+- notch Home has three actions in two treatments and no primary.
+
+## Ask cannot see hand-written notes (found AND FIXED 2026-08-24)
+
+The Ask assistant is recorded-meetings-only, by three query filters, and this is invisible to the
+user because the Library search box behaves differently:
+
+- `MeetingStore.SearchRelevant` joins `AND m.kind = 'Meeting'`, so manual-note text IS in the FTS
+  index (`FtsSelect` includes `m.body`) and is filtered out on read.
+- `TitleMatchIds` and `MeetingTimes` are `WHERE kind='Meeting'` too, so a hand-written note cannot be
+  found by title, is never counted by "how many meetings", and never appears in a date range.
+- The FTS-unavailable fallback re-applies the same rule in C#, and the router's evidence probe uses
+  the same filtered calls - so a question whose only answer is in a manual note is classified as
+  GENERAL and answered from the model's own knowledge with no citation, rather than "I could not
+  find it". That is the worst part: it is silently wrong, not visibly empty.
+- Opening a manual note in the Library and asking "summarise this" cannot work either: `VisibleMeeting`
+  requires `Kind: MeetingKind.Meeting`.
+- Sticky notes are excluded structurally (own tables, never in `FtsSelect`) and that is deliberate.
+- The Library search box uses a plain `LIKE` over `m.body` with NO kind filter, so the user can find a
+  note by typing its text and then be told by Ask that it does not exist.
+
+FIXED the same day. Content search and title search are open to notes; the temporal/counting queries
+are deliberately still meeting-only, so "how many meetings" stays right. `BuildContext` renders a
+note's body (without that, a retrieved note would have been cited empty) and `VisibleMeeting` accepts
+a viewed note so "summarise this" works. Sticky notes stay out. See ARCHITECTURE, "Ask reaches
+hand-written notes", and the `--dbtest` guard.
+
+## Toki 2.0: student-notetaker niche (POST-LAUNCH idea, 2026-08-24)
+
+Owner's direction: launch Toki as a GENERAL notetaker; if traction concentrates on students, niche
+it down later into a class notetaker that listens to online (or in-person) classes and extracts
+homework notices, assignment due dates, test/exam announcements, lesson topics/definitions/readings,
+plus the usual transcription. Captured now, to build AFTER the v1 general launch, only if traction
+says so.
+
+**Feasibility: high, no engine rewrite.** The engine (ASR, on-device LLM, diarisation, SQLite +
+Markdown, evidence-audio, calendar) is domain-neutral - a class is a meeting with one dominant
+speaker. Two mechanisms already anticipate this: the **Lecture gate** (detects lecture-shaped audio)
+and **TemplateGate** (a specialised template must be EARNED by the transcript). Student mode rides
+the same build, no fork.
+
+**What actually changes (mostly prompts + framing, not machinery):**
+1. **Extraction schema + prompts** - the real work, the good kind. Add a "Class/Lecture" template:
+   homework/assignments (structurally identical to an action item with a due date, already modelled),
+   test/exam notices (item + date + scope), lesson topics/concepts/definitions/readings (new
+   sections). The **"a template is a claim"** guard is critical here - a hallucinated "test Friday" is
+   worse than none.
+2. **UI framing** - a Homework/Tests view; auto-offer to push assignment/test due dates into the
+   calendar (create/edit events already exist).
+3. **Capture - the one genuine decision, not just tuning:** live classes in Zoom/Teams/Meet work
+   TODAY (a class is a "call"); in-person via laptop mic works (the "you" mic path exists); a
+   PRE-RECORDED lecture playing in a browser tab does NOT - Hard Constraint #3 taps only a detected
+   call's process tree, never tab/system audio, so this needs a deliberate "record this" affordance or
+   a browser-as-source decision.
+
+**Why the constraints fit students BETTER:** $0-forever + on-device + offline (flaky campus wifi),
+one-time $20 (student budget), all-local/no-account (no consent/FERPA headache). Diarisation matters
+less for a single-teacher lecture, so student mode is technically SIMPLER in that respect.
+
+**Clean path:** ship general; the Lecture gate already gives free signal on how much class-taking
+happens; if it concentrates there, add the Class template (TemplateGate activates it on
+lecture-shaped transcripts) + student framing. Same engine, same build.
+
+## MCP integration - CLIENT side wanted (owner ask, 2026-08-25)
+
+Owner wants to build the MCP CLIENT side. MCP (Model Context Protocol) is a standard plug between an
+AI assistant and a tool/data source; there are always two ends and Toki can be either or BOTH at once
+(they are independent subsystems - see the coexistence note below).
+
+**Direction the owner asked for - Toki as MCP CLIENT (Toki reaches OUT):** Toki's own Ask/notes flow
+connects to the user's other services (Notion, Linear/Jira, Google Tasks, Slack, calendar) to push
+things out or pull context in. Concretely: after a meeting, "Send these 3 action items to your Notion
+tasks?" and on the user's click, it does; or Ask answers "is this deadline already on my calendar?"
+by querying it.
+
+- **Constitution tension - this is the one real decision.** A client crosses "nothing leaves the
+  laptop": it sends the user's data to the user's own accounts, on the user's click. Defensible the
+  same way the BYO API key is, but it is the FIRST outward-sending feature, so it is an owner-gated,
+  opt-in, human-in-the-loop feature - Toki PROPOSES, the user APPROVES every send, never silent sync.
+- **Cost/upkeep:** every connector is an OAuth integration to build and maintain (real surface area,
+  the kind of upkeep the constitution otherwise avoids). Start with ONE connector, prove the pattern,
+  add more only on demand. Natural first target: whatever the owner already lives in.
+- **Data still stays local except the explicit push:** the transcript/recordings never go out; only
+  the specific action items / query the user approves do.
+
+**Coexistence with Toki as MCP SERVER - YES, both at once, no conflict.** Client and server are
+opposite ends of the same protocol and share no state. Toki can run a tiny LOCAL, read-only MCP
+server (localhost only) so Claude Desktop / Claude Code / other on-device AI apps can query the
+meeting library ("what did I commit to in yesterday's standup?", "list this week's action items
+assigned to me") - and simultaneously act as a client that pushes items out. Recommended split:
+- **Server = the clean, purely-additive half.** Read-only, localhost, nothing leaves the laptop,
+  ~zero upkeep, gated behind a Settings toggle ("Let AI assistants on this PC read my Toki notes").
+  Honors every hard constraint. This is the low-risk win and arguably should ship FIRST or alongside.
+- **Server tools it would expose:** search_meetings, get_transcript, list_action_items,
+  get_notes_for(date). All read-only.
+- Building the client does NOT block or complicate the server; do them as two independent tracks.
+
+**Build order suggestion (owner decides):** (1) local read-only MCP server - safe, additive, tiny;
+(2) MCP client with ONE approved connector + explicit per-send approval UI. Both are post-launch (M8
+ship path comes first), but the server half is small enough it could ride earlier if wanted.
+
+## Spec-driven self-building loop (PARKED idea, 2026-07-31)
+
+How to build a system where Sid writes one detailed brief (goals, guardrails, rules, a checkable
+"done") and Claude prompts itself to build and iterate, interrupting only at real decisions. Full
+write-up in `docs/self-driving-build-system.md`: the oracle (tests / self-test flags as the pass/fail
+engine), the three layers (Brief / Loop / Guardrails), the Claude Code mechanisms (`/loop`, custom
+slash command, `/schedule`, Workflows, headless SDK), and a starter kit to build when we revisit
+(`BRIEF.md` + `TASKS.md` + a `/build-next` command). Not built; deliberately NOT put in CLAUDE.md
+(constitution stays rules-only).

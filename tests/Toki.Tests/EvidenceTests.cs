@@ -92,6 +92,44 @@ public sealed class EvidenceTests
         Assert.Equal(0, Evidence.BestSegment("Blockers: token refresh", t));
     }
 
+    // ── clip precision: two points inside one run-on utterance get their own moments ──
+
+    [Fact]
+    public void TwoPointsInOneUtteranceGetTheirOwnNarrowedClips()
+    {
+        // One long utterance carries two distinct points. The audio window for each must narrow to
+        // the phrase that carries THAT point, so the first clip does not swallow the second (the bug
+        // the owner reported: "the first action item's recording covers all of them").
+        var seg = new TranscriptSegment(Speaker.Them, 10_000, 18_000,
+            "we should fix the authentication bug and then update the pricing page renewal terms with finance");
+        var tr = new[] { seg };
+
+        var a = EvidenceAudio.Window(tr, tr, "fix the authentication bug");
+        var b = EvidenceAudio.Window(tr, tr, "update the pricing page renewal terms with finance");
+        var whole = EvidenceAudio.Window(tr, tr);   // no point text -> the base utterance window
+
+        // MUTATION PROBE: delete the NarrowToPhrase step in EvidenceAudio.Window and both a and b
+        // become `whole`, so a.StartMs == b.StartMs and this first assertion fails.
+        Assert.True(a.StartMs < b.StartMs, $"clips did not separate: a={a}, b={b}");
+        // Neither clip contains the other - the earlier phrase's moment does not play inside the later.
+        Assert.False(a.StartMs <= b.StartMs && a.EndMs >= b.EndMs, $"a contains b: a={a}, b={b}");
+        Assert.False(b.StartMs <= a.StartMs && b.EndMs >= a.EndMs, $"b contains a: a={a}, b={b}");
+        // And each narrowed clip is shorter than the whole utterance window.
+        Assert.True(a.EndMs - a.StartMs < whole.EndMs - whole.StartMs, "clip a was not narrowed");
+        Assert.True(b.EndMs - b.StartMs < whole.EndMs - whole.StartMs, "clip b was not narrowed");
+    }
+
+    [Fact]
+    public void AClipIsAMomentNotARecording()
+    {
+        // A point in a very long utterance must still play a moment, never the whole minute.
+        var words = string.Join(" ", Enumerable.Range(0, 200).Select(i => $"word{i}"));
+        var seg = new TranscriptSegment(Speaker.You, 0, 60_000, "the launch blocker is the webhook " + words);
+        var tr = new[] { seg };
+        var (start, end) = EvidenceAudio.Window(tr, tr, "the launch blocker is the webhook");
+        Assert.True(end - start <= 12_000, $"clip was {(end - start) / 1000.0:0.0}s, longer than a moment");
+    }
+
     [Fact]
     public void Greetings_never_win()
     {

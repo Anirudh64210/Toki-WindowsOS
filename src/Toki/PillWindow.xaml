@@ -67,7 +67,7 @@
         <!-- The card. Its Background is the PLATE gradient (lighter at the top, because light comes
              from above) and its rim is a gradient too - brightest along the top edge, which is the
              cheap specular cue a flat 10% white rim can never give. The rest of the material (sheen,
-             light field, inner edges) is the CardMaterial stack below. Rim thickness is set in code to a
+             inner edges) is the CardMaterial stack below. Rim thickness is set in code to a
              whole number of DEVICE pixels so the stroke lands crisp at 125%/150%. -->
         <Border x:Name="Root" Margin="68,0,20,24" CornerRadius="24" BorderThickness="1"
                 Background="{DynamicResource CardPlateOpaque}" BorderBrush="{DynamicResource CardRim}">

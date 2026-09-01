@@ -138,7 +138,10 @@ public sealed class DueWindowAnswerTests : IDisposable
     public async Task TasksThisWeek_ScopesByDueDate_NotEveryOpenTask()
     {
         var now = DateTimeOffset.Now;
-        var weekStart = now.Date.AddDays(-(int)now.DayOfWeek);   // Sunday
+        // MONDAY-anchored, because the product's temporal parser is (NotesQa.WindowLabel). Anchored
+        // on Sunday this test failed one day in seven: run it ON a Sunday and "weekStart + 4" lands
+        // in the NEXT Monday-start week, so the task it plants is legitimately out of scope.
+        var weekStart = now.Date.AddDays(-(((int)now.DayOfWeek + 6) % 7));
         // A meeting THIS week with a mix of due dates.
         _store.Save(MeetingOn(weekStart.AddDays(1),   // Monday this week
             "Sprint planning",

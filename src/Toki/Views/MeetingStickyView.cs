@@ -47,6 +47,32 @@ public sealed class MeetingStickyView : Border
         };
         _delete.Click += (_, _) => OnDelete();
 
+        // An EXPLICIT save, even though typing autosaves on a debounce. The autosave is a safety
+        // net against losing text; it is not an answer to "is my note kept?". Without a button the
+        // only feedback is a status word that fades, and the user has nothing to press to be sure.
+        _saveButton = new Button
+        {
+            Content = "Save", Style = (Style)Res("PillButton"), FontSize = 10.5,
+            Padding = new Thickness(12, 4, 12, 4), Background = B("Chip"),
+            Cursor = System.Windows.Input.Cursors.Hand, Margin = new Thickness(0, 0, 6, 0),
+        };
+        _saveButton.Click += (_, _) => SaveAndShow();
+
+        // The pencil is the way back in once the note is saved and reading as a section.
+        _edit = new Button
+        {
+            Style = (Style)Res("IconButton"), FontSize = 12, Visibility = Visibility.Collapsed,
+            Cursor = System.Windows.Input.Cursors.Hand, Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = "Edit this note",
+            Content = new TextBlock
+            {
+                Text = "", FontFamily = (FontFamily)Res("IconFont"), FontSize = 12,
+                Foreground = B("TextDim"),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        _edit.Click += (_, _) => EditAgain();
+
         var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 9) };
         var left = new StackPanel { Orientation = Orientation.Horizontal };
         left.Children.Add(new TextBlock
@@ -57,7 +83,11 @@ public sealed class MeetingStickyView : Border
         left.Children.Add(_status);
         DockPanel.SetDock(left, Dock.Left);
         DockPanel.SetDock(_delete, Dock.Right);
+        DockPanel.SetDock(_saveButton, Dock.Right);
+        DockPanel.SetDock(_edit, Dock.Right);
         header.Children.Add(_delete);
+        header.Children.Add(_saveButton);
+        header.Children.Add(_edit);
         header.Children.Add(left);
 
         _slot = new ContentControl();
@@ -93,7 +123,10 @@ public sealed class MeetingStickyView : Border
     /// <summary>True when this meeting already has a note - decides what the button above it says.</summary>
     public bool HasNote => _stickyId is not null;
 
+    readonly Button _saveButton;
+    readonly Button _edit;
     Button? _toggle;
+    TextBlock? _saved;          // the read-only rendering shown after Save
 
     /// <summary>
     /// The button that opens this note, at the top of the meeting note. Not in the Copy/Delete
@@ -134,8 +167,8 @@ public sealed class MeetingStickyView : Border
     }
 
     void RelabelToggle(TextBlock label) =>
-        label.Text = !HasNote ? "Add a sticky note"
-            : Visibility == Visibility.Visible ? "Hide my sticky note" : "My sticky note";
+        label.Text = !HasNote ? "Add sticky note"
+            : Visibility == Visibility.Visible ? "Hide sticky note" : "My sticky note";
 
     /// <summary>Show the note, creating an empty one if this meeting hasn't got one yet.</summary>
     public void Reveal()
@@ -148,7 +181,7 @@ public sealed class MeetingStickyView : Border
 
         if (_editor is null)
         {
-            _editor = new NoteEditor { MinHeight = 150 };
+            _editor = new NoteEditor { MinHeight = 150, Jotting = true };
             _editor.Markdown = App.Store.GetSticky(_stickyId.Value)?.Body ?? "";
             _editor.Changed += (_, _) =>
             {
@@ -158,6 +191,11 @@ public sealed class MeetingStickyView : Border
             _slot.Content = _editor;
         }
 
+        _slot.Content = _editor;
+        _saved = null;
+        _edit.Visibility = Visibility.Collapsed;
+        _saveButton.Visibility = Visibility.Visible;
+
         Visibility = Visibility.Visible;
         BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Enter))
         { EasingFunction = Theme.Motion.EaseOut });
@@ -166,6 +204,39 @@ public sealed class MeetingStickyView : Border
         // Focus AFTER layout, never in the same breath as adding the editor: Focus() on a control not
         // yet in a laid-out visual tree silently returns false, leaving keyboard focus on the hosting
         // read-only RichTextBox, which swallows every keystroke.
+        Dispatcher.BeginInvoke(new Action(FocusEditorNow), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Save, then STOP being a text box: the note becomes a read-only part of the meeting note,
+    /// which is what "saved" should look like. The pencil is the way back in. An empty note is not
+    /// worth a section, so saving nothing simply closes it.
+    /// </summary>
+    void SaveAndShow()
+    {
+        Flush();
+        var text = (_editor?.Markdown ?? "").Trim();
+        if (text.Length == 0) { Hide(); return; }
+
+        _saved = new TextBlock
+        {
+            Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 13,
+            FontFamily = (FontFamily)Res("UiFont"), Foreground = B("TextSoft"), LineHeight = 21,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+        };
+        _slot.Content = _saved;
+        _saveButton.Visibility = Visibility.Collapsed;
+        _edit.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Back to editing, with the caret in the text.</summary>
+    void EditAgain()
+    {
+        if (_editor is null) return;
+        _slot.Content = _editor;
+        _saved = null;
+        _edit.Visibility = Visibility.Collapsed;
+        _saveButton.Visibility = Visibility.Visible;
         Dispatcher.BeginInvoke(new Action(FocusEditorNow), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
@@ -235,9 +306,10 @@ public sealed class MeetingStickyView : Border
     {
         if (!_deleteArmed)
         {
+            // Ask in WORDS. "Sure?" is a shrug; this is the user's own writing and the only copy.
             _deleteArmed = true;
-            _delete.Content = "Sure?";
-            _delete.Foreground = B("Red");
+            _delete.Content = "Delete this note?";
+            _delete.Foreground = B("Danger");
             return;
         }
 
@@ -248,7 +320,10 @@ public sealed class MeetingStickyView : Border
 
         _stickyId = null;
         _editor = null;
+        _saved = null;
         _slot.Content = null;
+        _edit.Visibility = Visibility.Collapsed;
+        _saveButton.Visibility = Visibility.Visible;
         _deleteArmed = false;
         _delete.Content = "Delete";
         _delete.Foreground = B("TextDim");
@@ -256,6 +331,6 @@ public sealed class MeetingStickyView : Border
         Deleted?.Invoke();
     }
 
-    /// <summary>Raised after a delete so the button above can go back to reading "Add a sticky note".</summary>
+    /// <summary>Raised after a delete so the button above can go back to reading "Add sticky note".</summary>
     public event Action? Deleted;
 }

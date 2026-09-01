@@ -1,4 +1,4 @@
-# Toki for Windows
+﻿# Toki for Windows
 
 A meeting assistant that lives quietly at the edge of your screen. It notices when you're in a meeting, offers to record it, transcribes it, writes clean structured notes, and remembers every meeting in a searchable local Library - **entirely on your machine**. One-time $20, no subscription, nothing ever leaves the laptop.
 
@@ -25,7 +25,811 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## Grain out, light in (2026-08-20, latest)
+## UI polish: rename, colour collisions, and the never-audited states (Fix 5) (2026-08-26, latest)
+
+A batch of visual-polish work, added the `apple-design-motion` skill (MIT) as the source-of-numbers
+under `motion-and-feel`, and audited/fixed the design-audit's "missing states" hole.
+
+- **Library WINDOW renamed** "Toki" -> "Library" (the in-app nav brand + "Back to Toki" kept).
+- **Greeting quieted** (hub Ask): 19px SemiBold -> 14px Medium TextSoft, so the mascot leads, not an
+  info-less line (the comment already said "demote, never promote").
+- **Suggestion chips**: ragged `WrapPanel` -> a uniform 2-col `UniformGrid`, equal-width chips.
+- **Colour double-meaning removed**: the Settings toggle-on and the loader shimmer both moved OFF the
+  reserved content colours (green=decisions, pink=questions) to brand **Blue** = "Toki active" chrome.
+- **Motion audit** (against the new Apple-numbers skill): `Motion.cs` already well-aligned and
+  deliberately SNAPPIER than Apple's midpoints - that IS the "premium speed"; no value changes.
+
+**Fix 5 - the states the harness never photographs:**
+- **Disabled** was a real gap (a disabled button looked live) -> shared button styles now dim to 0.38 +
+  drop the hand cursor when `IsEnabled=False`.
+- **Focus**: the app is deliberately mouse/hotkey-driven (`Focusable=False`; the notch is never focused).
+  Added a keyboard-focus RING (`TokiFocus`, blue) and made the **Settings toggles keyboard-operable**
+  (Space toggles) - a real win for the focusable Library window. Full keyboard-nav of every button is a
+  bigger a11y project, flagged not blind-done.
+- **Long-data**: already handled (ellipsis + max-width/height throughout; `--measuretest` = no clipping).
+- **Error**: already handled (fallback banner, calendar `ShowError`, voice hints, Ask `Failed`).
+
+Objective UI gates all pass: `--hittest`, `--themetest`, `--measuretest`. 2115 tests; dist republished,
+launched. Home layout (Fix 1) is out for the owner's pick as an artifact, not yet built.
+
+## Load-on-demand LLM on mid-RAM machines [roadmap #5 slice] (2026-08-25)
+
+The owner noticed Toki felt heavy at startup on a 12GB box: it prewarmed and kept the 2.5GB notes LLM
+resident on every machine >=8GB. The RAM-tier slice: only a HIGH-RAM box (>=32GB) prewarms + keeps the
+LLM resident for instant notes; everyone else (the common 8-16GB laptop) now LOADS ON DEMAND - the LLM
+loads when a meeting's notes or an Ask first needs it (~10s once per session, under the loader), so idle
+Toki stays light and startup isn't heavy. New `App.PrewarmLlm` (>=32GB), distinct from `LowMemoryMode`
+(<8GB, one-model-at-a-time, unchanged). `EnsureLocal` already loaded lazily, so skipping the prewarm IS
+the slice - no other change. Verified in the startup log: "load-on-demand: LLM loads when first needed"
+on the 11.4GB dev box (was "normal mode"). 2115 tests, `--notetest`, launched. This is the ONE RAM
+piece worth doing; the rest of RAM-tiering (bigger context on 32GB+) is marginal and stays parked.
+
+## Speaker diarisation: now downloaded, and run BEFORE the notes [roadmap #2] (2026-08-25)
+
+The owner's complaint (meeting 118): two clear speakers, but nobody could be named and every to-do went
+to "me". Two root causes fixed:
+
+- **The diarisation models were never downloaded by the app** - only the self-tests fetched them, so a
+  fresh install never had diarisation at all and every remote voice stayed "Them". They now download in
+  the background at launch (pyannote segmentation + CampPlus embedding), same as the other models, once
+  Parakeet is present.
+- **Diarisation ran AFTER the notes** (an old decision from when it took ~7 min). It is now measured at
+  ~5s on a real meeting (RTF 0.005), so it runs BEFORE the notes (owner decision): the writer sees real
+  names / "Speaker 1/2" labels instead of everyone "Them", which is what lets it attribute to-dos to the
+  right person and recognise a roll-call as introductions, not tasks. The loader shows an "Identifying
+  speakers" stage. `ResolveSpeakers` split into `TagSpeakers` (before notes) + `InferOwners` (after).
+
+Unchanged and re-confirmed: **transient by design - no acoustic record of anyone's voice is ever saved**
+(clusters live and die inside `SpeakerResolver`; only renameable text lands in the DB). CampPlus is
+already credited (About + notices). Verified: `--diartest` split a real meeting into 2 speakers in 5.5s;
+2115 tests; the LIVE flow (a fresh recording naming its speakers) needs the owner's real-meeting test.
+Historical meetings stay as they were until re-transcribed. dist republished, launched.
+
+## Live transcription now streams (fixes the ~21s Windows lag) [roadmap #1] (2026-08-25)
+
+The owner: the live transcript shows up in ~15-21s chunks on Windows (instant on the Mac build).
+Diagnosed: `LiveTranscriber` decodes an offline Parakeet WINDOW only once ~15s (+6s search) of audio
+piles up, so the first line takes ~21s. Researched how the good tools do it (agents): Meetily does live
+in ~5s chunks; the confident pattern is a STREAMING model for the preview while the whole-file pass
+stays the saved record. Owner chose the proper implementation, not the cheap window-shorten.
+
+Built: a **streaming zipformer-transducer (20M, k2-fsa, via the existing sherpa-onnx runtime - no new
+native lib)** as the LIVE-PREVIEW decoder. It emits words as they are spoken (~1s), proven by the new
+`--streamtest` (feed a WAV in 1s chunks, watch the partial grow: "THE YELLOW LAMPS" -> "...WOULD LIGHT
+UP HERE" -> finalized). New `StreamingTranscriber`; `LiveTranscriber` taps the same resampled audio to
+it and raises `PreviewPartial`/`PreviewFinalized`; `RecordingOpenView` shows a per-speaker in-progress
+line that commits when the utterance ends, under a pulsing **"Live" readiness cue**. The streaming
+output is disposable and PREVIEW-ONLY - the SAVED transcript is still the accurate whole-file Parakeet
+pass (the "one whole-file call per stream" law holds). Downloads in the background at launch; falls
+back to the Parakeet window until it lands. Credited (Apache-2.0, k2-fsa) in About + notices.
+
+Verified offline: `--streamtest` shows incremental partials + finalized lines on real speech; the
+expanded recording view still renders; 2115 tests. The LIVE feel needs a real-meeting test (audio paths
+always do). dist republished, `--llmtest` + `--notetest`, Toki launched.
+
+## The loader peek's "two inner lines" - the ACTUAL cause this time (2026-08-25)
+
+The owner, rightly frustrated after two wrong fixes: inside the squircle of the peeked loader there
+are two curved lines cutting in like false edges. My earlier passes chased the SHIMMER poking out
+(capping the track width) - a real thing, but NOT what the owner was seeing. The real cause, found by
+rendering the tucked sliver crisply and zooming the rounded ends: `CardMaterial`'s inner top/bottom
+edge-light RINGS are drawn at the full-card radius (23), but a 13px sliver's plate clamps its corner
+to ~6.5 - so each ring's radius-23 corner arc sweeps ACROSS the short sliver as a crescent "edge",
+one at each rounded end. The material even had a `Radius` setter for exactly this ("a ring at the
+wrong radius cuts across the corner arcs"), but nothing set it for the sliver.
+
+Fix: `PillWindow.ApplyCornerGeometry` now sets `Material.Radius` to the plate's CLAMPED radius minus
+the rim, every time it lays the corners out - so the edge-lights stay concentric with the real
+corner at any height. Full cards are unchanged (still 23); only slivers/short cards shrink the ring.
+
+Verified by render: the `Summarizing_sliver_*` shots show clean rounded ends now, versus the two
+crescents before; `--themetest` + `--revealtest` pass; 2115 tests; dist republished, `--llmtest` +
+`--notetest`, Toki launched.
+
+Also undid a bad earlier idea in the same breath: an earlier pass had capped the shimmer TRACK to a
+fixed 188px centred (chasing a shimmer-poke-out that was never the real bug). On a sliver wider than
+220 that left the outer bar un-swept, so the loading highlight appeared to start from the MIDDLE. The
+track is full-width again (Margin 16), and the sweep range is now computed from the track's REAL width
+(`StartShimmer` + `OnTrackSizeChanged`: `-70 -> trackWidth`), so the highlight travels the whole bar
+edge to edge at any width - no magic numbers.
+
+## Ask-by-voice now transcribes with Whisper (fixes "Hi Toki" -> "Yeah") (2026-08-25)
+
+The real fix for the owner's "Hi Toki records as Yeah": Parakeet is excellent on whole meetings but
+collapses 1-2 word push-to-talk clips, because there's too little audio to lock onto. Whisper pads
+every clip to its 30s window internally, so it stays accurate on short phrases - so the ASK-BY-VOICE
+path now uses **Whisper base.en**, while Parakeet stays the meeting engine.
+
+- Runs through the SAME sherpa-onnx runtime already shipping (whisper as ONNX) - no new native
+  library, no Microsoft.ML.OnnxRuntime conflict. New `WhisperTranscriber`; `TranscribeFile` prefers
+  whisper and falls back to Parakeet only until whisper finishes downloading.
+- Downloads in the BACKGROUND at launch (base.en, ~200MB archive), never mid-meeting; warms at launch
+  beside Parakeet. Existing setups fetch it automatically; the Ask feature degrades to Parakeet in the
+  meantime, so it never breaks.
+- Guarded against Whisper's one known failure: trained on YouTube captions, it emits stock phrases
+  ("you", "Thanks for watching", music glyphs) on near-silence - those whole-output hallucinations are
+  rejected as "nothing said", while real greetings ("thank you", "bye") pass through.
+- Credited (MIT, OpenAI) on the "Built with" screen and in THIRD-PARTY-NOTICES - it ships now, so the
+  licence obligation is met.
+
+Verified end-to-end: `--voicetest` decodes the model's own test clips cleanly through the Ask path
+(Whisper, not Parakeet); 2115 tests (new whisper-noise + earlier guard probes); build clean; dist
+republished (folder), `--llmtest` + `--notetest`, Toki launched. Test it: hold Ctrl+Alt+Space and say
+"Hi Toki" - it should transcribe right and greet you, not dump a task.
+
+## Ask-by-voice: a garbled clip no longer gets a confident wrong answer (2026-08-25)
+
+The owner: saying "Hi Toki" records as "Yeah" and then the assistant dumps a random task from the
+notes (screenshot). Diagnosed two stacked failures: (1) Parakeet mangles a ~1s clip ("Hi Toki" ->
+"Yeah") - a known weakness of the model on 1-2 word utterances; (2) "Yeah" then slipped past the
+greeting guard (it wasn't in the small-talk list) and, because the notch was open over a meeting's
+notes, got GROUNDED on that on-screen note and summarised it - a confident answer to a non-question.
+
+Fixed the second (the symptom the owner sees): bare backchannels/affirmations ("yeah", "yep",
+"mm-hmm", "yes", "no", "nah") now intercept as small-talk and get a light canned reply, NEVER a
+notes answer. So a mis-heard 1-word clip degrades to "Cool." instead of a wrong, grounded-sounding
+task. Also made the Ask silence-trim TRAILING-ONLY (was head+tail): the Parakeet empty-decode bug is
+about trailing silence, and trimming the head risked eating a soft first word (the "Hi" in "Hi
+Toki") - leading silence is harmless to the recogniser, so it stays.
+
+NOT fixed, and honest about it: the transcription itself. "Hi Toki" -> "Yeah" is Parakeet's
+short-clip weakness, and the two real fixes are both milestone-sized - a whisper.cpp fallback for the
+Ask path (whisper's language model handles short phrases far better; needs a new native lib + model
+download + attribution) OR the warm-mic pre-roll ring buffer (blocked by the "no always-on mic"
+rule). Put to the owner as a decision (backlog).
+
+Verified: 2103 tests (new SmallTalk + silence-trim probes); build clean; dist republished (folder),
+`--llmtest` + `--notetest`, Toki launched.
+
+## Ask-by-voice: hotkey no longer leaks, notch stops flickering, better listening (2026-08-25)
+
+The owner: holding Ctrl+Alt+Space fires Claude's search bar every split second; Toki is "very bad at
+listening and replying"; and the notch FLICKERS while the answer generates (screenshot showed a
+cut-off answer under three stacked "I didn't catch that" lines). Researched push-to-talk capture and
+compact streaming-answer UX (agents: Wispr Flow, superwhisper, Talon, Raycast, MS Copilot CUX, plus
+the sherpa/whisper/NeMo issue trackers). Fixes:
+
+- **The chord no longer leaks.** `PushToTalkHook` returned `CallNextHookEx` unconditionally, so
+  Ctrl+Alt+Space (and its auto-repeat) reached whatever app had that binding. It now SWALLOWS the
+  chorded Space and its repeats (returns 1) while Ctrl+Alt are held; a BARE space is never swallowed,
+  so typing is safe and a missed key-up can never lock the spacebar.
+- **The notch stops flickering while answering.** The 70ms stream flush called `GrowNotch` every
+  patch, re-morphing the window ~14x/sec (the exact anti-pattern the research names). Now the answer
+  text mutates IN PLACE and scrolls; the window only grows on a coarse ~280ms throttle and settles
+  once at the end - size changes on state changes, not per token.
+- **Listening is better on real speech.** Parakeet TDT returns an EMPTY decode when fed trailing
+  silence (NVIDIA-NeMo #15757) and a push-to-talk clip always ends in silence - a top cause of
+  "I didn't catch that" on speech that WAS there. The Ask path now trims the quiet head/tail (125ms
+  keep-pad so no consonant is clipped) before the recognizer, isolated from the shared meeting decode.
+- **Errors escalate instead of stacking.** A repeated identical Toki line now PULSES in place instead
+  of walling three copies; a second empty capture in a row switches copy - points at a muted mic and
+  offers "type it in the Library" - rather than repeating the same hint (research: never a 3rd
+  identical attempt).
+
+PROPOSED, owner's call: the single biggest listening win in the research is a warm mic + pre-roll ring
+buffer (no clipped first word, no per-press init latency). That means keeping the mic stream open
+continuously, which CROSSES the hard "NO always-on mic" rule - so it is NOT built; flagged for an
+owner decision (see backlog).
+
+Verified: 2092 tests (4 new silence-trim mutation probes); build clean; dist republished (folder),
+`--llmtest` + `--notetest`, Toki launched. Test it: hold Ctrl+Alt+Space (Claude's bar should stay
+shut), speak a question (answer should stream without the notch flickering), and try a silent hold
+(one line, then an escalated one - no stack).
+
+## Tighter deliverables, and more filler out of the transcript (2026-08-25)
+
+The owner: the notes are still too long and filler-heavy - "the to-do, the summary, key points should be
+small, straight to the point, clean". Two changes, after researching how the best tools do it (Wispr
+Flow, Otter, Granola - agents dispatched per the standing rule):
+
+**Deliverables are now Tight (owner's pick).** The summary was the ONE block the concise pass never
+touched, so it stayed a 3-4 sentence corporate paragraph. It now runs through the same pass: hedges out,
+capped to a 2-sentence outcome-first lead. Bullets dropped from a 22-word backstop to 15 and actions
+from 14 to 11, and the writer prompt now asks for 6-12 word bullets, outcome-first, no reported-speech
+frame. Same pass runs on the LLM note and the heuristic floor, so the two stay the same shape.
+
+**The transcript loses more filler, safely.** Research verdict: Otter strips disfluencies delete-only
+(no verbatim mode - a common complaint); Wispr goes further and even re-tones, and reviewers catch it
+"improving" what people said; Granola keeps the transcript verbatim as auditable ground truth and cleans
+only the notes. Toki's model IS Granola's (the transcript is the ground truth our evidence clips are cut
+from), so we took the safe floor everyone shares: the readability pass now also drops the er/eh/ah
+interjection family and comma-parenthetical discourse fillers ("it was, you know, huge" -> "it was
+huge"). Delete-only, never a rephrase - the literal uses ("do you know what time", "a tool like this",
+"I really like it") have no comma and are never touched, so evidence links still match. Genuinely
+rambling speech and side-talk that was really said still stays; that is faithful, not a bug.
+
+Verified: 2088 tests (14 new, each a mutation probe that fails against the old code); `--llmtest` shows
+the tight 2-sentence summary + terse actions; dist republished (folder), `--llmtest` + `--notetest`,
+Toki launched. Existing saved notes keep their old text until re-transcribed; new meetings and any
+re-transcribe use the tight style.
+
+## The loader shimmer can no longer poke past the sliver's rounded ends (2026-08-25)
+
+The owner: the "Tidying up your notes" loading bar keeps showing its shimmer sticking out past the
+rounded edges of the sliver, a bug we thought was fixed. Root cause found by rendering the tucked
+sliver faithfully (new `Summarizing_sliver_*` shots in `--render`): the shimmer's track used
+`Margin="16,0"`, which stretches it to the CONTENT width. During the tuck morph `PillWindow` lays the
+content out at a UNION width WIDER than the card while the card's clip animates over it, so the track
+- and the bar sweeping inside it - reached past the card's rounded end and stayed hidden only while
+`Root.Clip` kept exact pace. It didn't always, so a 3px nub of shimmer poked out of the rounded ends
+intermittently: why it "kept coming back". Fixed structurally: the track is now `MaxWidth="188"` +
+`HorizontalAlignment="Center"`, so its OWN `ClipToBounds` is always inside the 220 card no matter how
+wide the content is laid out or where the morph clip is - the fragile timing dependency is gone.
+
+Verified: the new `union` render variant (content 264, card 220 centred) reproduces the old escape
+condition and now shows the bar fully contained at every sweep position; `--revealtest` passes; full
+suite green; dist republished (folder), `--llmtest` + `--notetest`, Toki launched.
+
+## The note scrollbar is always reserved, so the summary stops reflowing (2026-08-25)
+
+The owner: with the transcript collapsed there is no scrollbar and the text is wider; expand the
+transcript and the scrollbar appears, narrows the column, and the summary reflows. Cause: the note
+ScrollViewers used `VerticalScrollBarVisibility="Auto"`, which adds/removes the bar's 10px of width as
+content overflows. Fixed: they are `Visible` now (notch `NotesView` scroll, the Library standalone note
+box, and the sticky-note outer scroll), so the slim bar's width is ALWAYS reserved and the column width
+never changes. The bar's track is transparent, so a not-needed scrollbar is invisible - only the thumb
+shows when there is something to scroll.
+
+Verified: 2074 tests, `--hittest`, `--libshot` (reserved bar is subtle, summary width stable); dist
+republished (folder), `--llmtest` + `--notetest` 53/53, Toki launched.
+
+## Speaker naming for two-party calls, editable-looking tags, retitle on re-transcribe, one ghost icon (2026-08-25)
+
+Four owner findings:
+
+1. **The other speaker could not be named.** Meeting 118 was a two-person call (You: 20 lines, Them: 19)
+   but diarisation left every `speaker_tag` null, so `SpeakerChips.Build` showed only the "You" chip and
+   the other person was unnameable - and the notes read as if the owner was the only participant. Fixed:
+   the chip row now offers a "Them" chip whenever there are untagged non-You lines, and `RenameSpeaker`
+   was taught that a stream label ("You"/"Them") also names the UNTAGGED lines of that stream (the
+   `speaker` column is text). Name "Them", regenerate, and the model can attribute to that person.
+2. **The name tags did not look editable.** They were transparent `PillButton`s that vanished into the
+   light theme. Now `ChipButton` (visible hairline rim) + a fill, so a tag reads as a tappable field.
+3. **Re-transcribe did not retitle.** `RegenerateNotesAsync` now replaces the floor placeholder title
+   with the model's title (only when the current title IS the placeholder - a user-typed title is kept).
+4. **Two ghost icons.** The recording bar had an eye; Settings has a crossed-out video camera. The bar
+   now uses the SAME camera-with-strike, so the ghost control is one design across every state.
+
+Verified: 2074 tests green; `--hittest`; `--render` (recording bar camera icon confirmed); dist
+republished (folder), `--llmtest` + `--notetest` 53/53. The speaker chips live in the Library's expanded
+transcript and the action rows are below the harness fold, so those two are for the owner to eyeball.
+
+## Notes visualisation revamp, researched against Granola + Apple (2026-08-25)
+
+The owner: the note layout looks cheap - emoji-ish section icons, bullets not on the text line, to-do
+tags (owner/due) as tan pills sitting left of the text with a gap, and "look at Granola like I asked."
+This time I sent two research agents (Granola note UI via Mobbin screenshots + web; Apple Notes/Bear/
+Craft typography), and they converged hard. What changed, per the findings:
+
+- **No section icons.** The round icon chips ("emoji") are gone. Headers are now sentence case,
+  semibold, full-ink, body+1 size, separated by whitespace (24 above / 8 below) - differentiated by
+  WEIGHT, not colour or an icon (exactly what Granola and Apple Notes do).
+- **Real dot bullets, hanging indent.** Dropped WPF's `List` (its marker floats off the text line -
+  that was the "bullet not on the same line" bug). Each bullet is now a hanging-indent paragraph with
+  a drawn 4.5px disc in a fixed marker column; the dot and text sit on ONE line and wrapped lines
+  align under the text.
+- **To-do tags are inline muted prose, not pills.** The tan owner/due chips are gone; owner (only when
+  it is a named person, not "You") and due date now trail the task as dimmed text - Granola writes
+  dates in the prose, no chips, no colour. The checkbox hangs in its own column, centred on the text
+  line.
+- **Monochrome body.** One ink for headers/text, muted for markers and metadata; the only colour left
+  in the body is the action checkbox. No rails, no chips, no dividers.
+- **Alignment: LEFT, not justified.** The owner asked for justified, but BOTH references are
+  left-aligned, and justified in a ~300-520px column with no WPF hyphenation makes rivers and hurts
+  reading - so I implemented left-aligned and flagged it; flipping to justified is a one-line change if
+  the owner still wants it after seeing this.
+
+Verified: 2074 tests green; `--hittest`, `--themetest` (both themes), `--libshot` (headers/bullets/
+spacing confirmed clean); dist republished (folder), `--llmtest` + `--notetest` 53/53. The action-row
+render is below the harness fold, so the checkbox/inline-meta is for the owner to eyeball in the app.
+
+## Evidence clips get their own moment, and the note page gets one gutter (2026-08-25)
+
+The owner: the first to-do's clip covers ALL the to-dos, the last bleeds into the next part, the play
+button is bulky, the jump arrow is ugly, and the note layout is misaligned. Four things:
+
+1. **Evidence clips are per-point now, not "disjoint".** Last session's `DisjointRanges` forced every
+   clip onto different transcript lines so none overlapped - a greedy assignment that gave the FIRST
+   point the whole run-on stretch and the rest scraps. Removed. Each point resolves on its own, its
+   clip is capped at 12s (was 45s), and the clip NARROWS to the phrase inside the utterance that
+   carries the point (proportional word timing, since we store per-utterance not per-word times). Two
+   points that share words may overlap a little; none swallows the others. HONEST LIMIT, measured with
+   `--evidencetest`: when several to-dos are spoken in one continuous breath (one 25s utterance),
+   sub-second cuts are a guess - the proper fix is storing the recogniser's per-WORD timestamps
+   (which it emits and we currently discard); left as a TODO. Points on separate utterances already
+   cut cleanly (meeting 117: 5/5).
+2. **The play control is quiet** - a bare 16px triangle, dim at rest, brightening on hover (was a 20px
+   filled disc with a rim, a bead in the sentence).
+3. **The jump "↳" is gone.** One evidence affordance per line, not two.
+4. **The note template got one gutter.** The section heading and its rows now share a left edge and
+   group by SPACE (heading-above 24, heading-below 8, rows 8) instead of a decorative accent rail that
+   put the heading and its content on two different left edges. Action checkboxes sit on the text's
+   line (centre-aligned, was top-aligned). Applies to both the notch and the Library (one renderer).
+
+Verified: 2074 unit tests green (2 new evidence-precision probes, incl. one that fails if narrowing is
+removed); `--evidencetest` (per-point, containment check); `--hittest`, `--themetest`, `--measuretest`;
+`--render`/`--libshot` for the layout; dist republished (folder) and `--llmtest` + `--notetest` 53/53.
+
+## The transcript leaked into the summary (2026-08-25)
+
+The owner opened a recent meeting and the summary and to-dos were the first lines of the
+conversation, pasted in verbatim. Root cause was a stacked failure: the on-device model FAILED to
+load that session (`The type initializer for 'LLama.Native.NativeApi' threw` - the Vulkan/llama.cpp
+native backend crashed, and .NET caches that failure for the whole process, so every meeting after
+it silently fell back), and the heuristic FLOOR that then ran was itself leaky - its "summary" was
+just the opening ~140 characters of speech, and it accepted any sentence containing an action word
+as a to-do, which the brevity pass then truncated into fragments. Prior fixes had hardened the
+MODEL path against exactly this; nobody had applied the same rule to the floor, and the floor is
+what runs when the model dies.
+
+Four things, each verified:
+1. **The floor is honest now.** No raw-transcript summary (empty, like the model path - the renderer
+   drops it); a to-do must be SHAPED like a task (a commitment or an imperative opener), not merely
+   contain a task word. Two mutation probes in `NoteExtractorTests` fail against the old code.
+2. **The trigger + a real retry.** `LlmService` now distinguishes a native poisoning (needs a
+   restart) from a transient failure, and `RetryLocal` / `App.RegenerateNotesAsync` clear the stuck
+   flag and re-attempt, so a session isn't locked to floor quality.
+3. **Two honest banners on the notes** (`NoteRenderer.FallbackBanner`): "Basic notes" with **Show
+   transcript** + **Try again with the on-device model** when the floor ran, and a privacy-clean
+   "Private, on this device" nudge when the API model was chosen but no key is saved. The retry
+   regenerates in place.
+4. **A ghost toggle on the recording bar** (an eye / eye-off puck), so a meeting started with ghost
+   mode off can be hidden mid-recording without leaving the bar.
+
+Then the banner kept saying "restart and try again" - so the model was not just crashing once, it
+could not load AT ALL in the packaged build. The root cause turned out to be PACKAGING, not the
+model: the single-file dist launches (WPF works) but the on-device model never loads in it
+(`NativeApi` type-init throws: "the native library cannot be correctly loaded"). LLamaSharp finds its
+GPU backend under `runtimes/win-x64/native/{vulkan,...}/` relative to the app base dir, and a
+single-file app's base dir is the TEMP EXTRACTION folder, which does not reproduce that per-backend
+tree. The dev build loads Qwen and writes notes in ~29s from identical source. Fix: **publish the dist
+as a FOLDER, not single-file** (`-p:PublishSingleFile=false`), which keeps the `runtimes/` tree beside
+the exe where LLamaSharp looks. This is also what the M8 installer (Velopack) ships. Every prior
+single-file dist has silently run the heuristic floor for notes; the AI notes seen before were from a
+non-single-file build.
+
+Verified: 2075 unit tests green; `--hittest` (321 controls, the new puck included), `--themetest`
+(banner contrast both themes), `--render` (eye glyph + bar layout); dist republished as a FOLDER and
+`--llmtest` (Qwen loads, real notes) + `--notetest` 53/53 + `--hittest` all pass on it. CLAUDE.md's
+publish command still says single-file - owner's call to change (see the packaging memory).
+
+## Every marker on the canvas was a slice (2026-08-24, latest)
+
+The owner sent four screenshots of the note canvas and one sentence: it is a small simple canvas to
+type on, so why is anything wrong with it. Everything they photographed was real, and every one of
+them was invisible to a suite that had just gone 2,071 green.
+
+**The tick boxes and the numbers were being CUT IN HALF.** A marker lives in an `InlineUIContainer`
+inside a `Border`, and that Border was given a Height of exactly the text's cap height (11px at a
+16px body) so the marker would sit on the same optical band as the capitals beside it. The
+arithmetic was right and the picture was wrong: an `InlineUIContainer` CLIPS its child to that box,
+so a 24px tick box lost thirteen of its twenty four pixels and every "1." lost the top of the digit
+and read as "l.". The alignment self-test measured where the marker's CENTRE sat and reported 0.10px
+off, correctly, the entire time. Centred and visible are two different questions and only one of them
+was being asked. The Border now sizes to what it holds, a `RenderTransform` (ink, not layout) drops it
+onto the cap band, and each marked line is pinned to the body text's own line height so a taller
+marker overflows its line instead of stretching it. `--notetest` now asks the second question too:
+put the Height back and it fails at "13.0px of it is outside its box" while the offset check still
+passes.
+
+**Picking a command with the mouse left the "/" in the note.** The keyboard path took the typed
+"/todo" back out before running the command; the row's own Click handler did not. So Enter came out
+clean and a click left "/" or a whole "/standup template" sitting in the writing. There is now one
+commit path in `SlashMenu.Run` that both go through, and a self-test that chooses a command the way a
+pointer does.
+
+**A template handed over nowhere to write.** The skeleton was headings separated by blank lines, and
+a blank line is deliberately drawn at a third of a row, so what arrived was a stack of titles with
+unclickable slivers between them and about seventy pixels of nothing in each gap. Templates are now
+built as BLOCKS rather than through Markdown (Markdown cannot hold an empty body line, which is what
+collapsed them), every heading is followed by a real full-height line, Action items opens with a tick
+box, and the caret lands on the first line you can type on.
+
+**The writing started two hundred pixels in from the panel.** The note page was `Stretch` +
+`MaxWidth`, which is WPF for "centred up to this measure" - fine in a 300px pane, and on a wide window
+with the list put away it left the first letter of every line adrift from the page's own edge. It is
+left-aligned now, at the same left edge and the same padding as Templates and Settings.
+
+**And the block across the middle of the page** was a 560px-tall editor followed by a hairline and a
+Delete row, so on any taller window the writing appeared to stop at a rule with blank space under it.
+The canvas takes the whole page now (a star row with a MinHeight bound to the viewport), the footer is
+pushed to the bottom, and the editor no longer scrolls itself inside the page's scroll.
+
+Found along the way: `LineStackingStrategy.MaxHeight` (a FlowDocument's default) ignores `LineHeight`
+entirely, so the document's documented 1.5em leading has never actually been in force - the real
+leading is the typeface's own ~1.33em. Marked lines are pinned to THAT, so lists and paragraphs share
+one rhythm. Raising the whole document to 1.5em would re-space every note ever written and is the
+owner's call, not a side effect of fixing a list.
+
+Verified by rendering, not by reasoning: `--render` now photographs a note with a template just
+inserted, and `--libshot` photographs the note page wide with the list collapsed and blank - the two
+shapes the old narrow three-column shot could never show. 2,071 unit tests and `--notetest` 50/50,
+`--hittest`, `--measuretest`, `--stickytest`, `--uitest`, `--themetest` all green.
+
+## The onboarding card kept space it never used (2026-08-24, latest)
+
+The notch sizes an auto-height page as `max(designHeight, measuredContent)`, so the design height is a
+FLOOR, not a size. Onboarding's floor was 250 while its three steps really measure 203, 227 and 152 -
+so every step was padded out, worst on the last one at 98px of dead card. Floor is 130 now and the
+measure wins.
+
+No test could see it, because every check around panel sizing asked whether a page was CLIPPED and
+none asked whether it was PADDED. `--measuretest` now checks the floor against real content for every
+auto-height page and names the dead pixels; reverting the number fails it.
+
+Also written this session: a full technical audit of the Windows build for the macOS port, in the Mac
+repo. Every subsystem, every state, every paid-for lesson, with the Windows-specific mechanisms
+separated from the portable logic.
+
+## Ask can read your own notes, and the audit got acted on (2026-08-24)
+
+**Manual notes are retrievable now.** They always were indexed - their text sits in the FTS table -
+and three queries filtered them out on the way back. The worst part was not that Ask could not find
+them: the router used those same filtered queries to decide whether any evidence existed, so a
+question whose only answer was in a hand-written note got classified as general knowledge and
+answered from the model's own head with no citation. A confident answer about something else, not an
+empty one.
+
+Content search and title search are open now. Counting is not: "my last meeting", "how many meetings
+did I have" and "meetings last week" still see only real meetings, because a hand-written note is not
+a meeting and an answer the user can check against their own calendar has to stay right.
+
+The trap on the way was `BuildContext`, which renders a summary, sections and actions - none of which
+a manual note has, all of it being in `Body`. Opening retrieval without fixing that would have
+retrieved a note and cited it as empty, which is worse than not finding it. Notes render their body
+now, labelled "(your own note)" so the assistant says "in your note" rather than implying somebody
+said it out loud. `VisibleMeeting` also required a real meeting, so opening your own note and asking
+"summarise this" had grounded on nothing; it accepts any viewed note now. Sticky notes stay excluded,
+deliberately. Guarded in `--dbtest`, both directions.
+
+**And the taste audit got applied.** The Ask greeting dropped from 30px to 19px (it was the largest
+type in the window and the only thing on it carrying no information). "Your meeting assistant." and
+"How Toki looks and what it shows in a share." are deleted; the one real fact in the second moved onto
+the row it describes. The notch greeting lost its exclamation mark, and "New Chat" became "New chat".
+The Templates page lost its cards - they were putting every template's text 16px right of the page
+title, which is two left edges in one column - and its constant grey chips became plain text, with a
+"Default" tag on the one that actually is. And the loader says what it is doing ("Transcribing", then
+"Writing your notes") instead of one unchanging friendly phrase across a wait that can run minutes.
+
+Four findings were deliberately left: the icon-plus-label buttons on Home (platform convention beats
+the rule), the green toggles and pink progress sliver (two colours with two meanings - a real finding,
+but the call is the owner's), the ragged Ask chips (content-sized pills that wrap are normal), and
+Home's three-actions-two-treatments (a real finding whose fix is a redesign of the front door, not a
+refinement). All of it, applied and not, is in `docs/design-audit-2026-08-24.md` and `docs/backlog.md`.
+
+## Second pass: measured against Notes, Notion and Notepad (2026-08-24)
+
+First, the reason none of the above appeared to work: the fixes went into the dev build and the
+owner's shortcut launches `dist\Toki.exe`, which was still the 23:09 publish. They restarted, saw the
+identical bug, and were right to. `dist` is now published from this work and `dist/Toki.exe
+--notetest` passes 51/51 - the packaged artifact, not the dev one.
+
+Then the real question: why does it still not feel like Apple Notes or Notion. Audited against the
+numbers measured from Notion's production CSS that were already sitting in the block-editor skill.
+Four things, all measurable, none of them opinions:
+
+- **The markers did not share a left edge.** Every marker was right-aligned in its gutter, so a
+  bullet's ink started at 24.0px, a number's at 19.6px and a tick box's at 8.0px. Sixteen pixels of
+  raggedness down the left of every mixed list, while the headings and paragraphs beside them all
+  started at 0. Right-alignment is right for numbers alone and had been applied to all three. One
+  left edge now, for markers, headings, paragraphs and all.
+- **The marker column was 1.75em**, against Notion's measured 24px at a 16px body. It is 1.5em now.
+- **The leading was 1.33, not the 1.5 the code claimed** - see the entry above for why nobody
+  noticed. Every line kind now pins its own line height: 1.5em for body and lists, 1.3 for headings.
+  This re-spaces every existing note, on purpose.
+- **A heading owned space below it as well as above.** Notion's rule is that a heading owns the space
+  above and nothing owns the space below; ours added 0.62em underneath, which is why a template
+  opened seventy-pixel holes. Zero now.
+
+And **a blank line is a full line again**. It was drawn at 9/13 of a row so that Enter-Enter gave "a
+beat, not an empty row" - a considered decision that turned out to be a gap you cannot predict and a
+target you can barely click, and it is not what Notepad, Notes, Notion or Word do. Superseded and
+dated in ARCHITECTURE.
+
+Then a third round from the same session, all measured rather than guessed:
+
+- **The caret was drawn inside the W of "Write".** The editor draws its first character at x=5 (a
+  RichTextBox keeps a content offset of its own) and the hint was pinned at x=1 - so the placeholder
+  sat four pixels LEFT of the cursor. The hint's position is read from the document now, not
+  hard-coded, so it survives the text-size dial. It is also drawn at the body size; it had been stuck
+  at 13px while the body moved to 16, so the placeholder was visibly smaller than the writing it
+  promised.
+- **The note filled half the pane.** The 600px reading measure (66 characters, Bringhurst) was correct
+  typography and not what the owner wanted: on a wide window it read as a page that had stopped early.
+  OWNER DECISION: the note fills the pane. The argument for a cap, and the number, are kept in the code
+  at the point where the width is decided.
+- **The title sat 5px left of its own body**, for the same content-offset reason. The title now reads
+  the origin from the editor after layout, so a note has ONE left edge from its title to its last
+  bullet.
+
+A note on method, because it cost a round: a build error was masked by grepping for `error CS` when the
+failure was `error MC3000` (a XAML comment cannot contain a double hyphen). The rule was already in
+memory - grep for `error`, not `error CS` - and I broke it. The tests then "passed" against a stale
+binary.
+
+2,071 unit tests, `--notetest` 53/53 (four new checks: pitch, left edge, caret clearance, hint size,
+all mutation-probed), `--hittest`, `--measuretest`, `--stickytest`, `--uitest`, `--themetest` green, in
+`dist` as well as dev.
+
+**Also reported, not changed** (both in `docs/backlog.md`): a taste audit of every notch state and
+Library page (`docs/design-audit-2026-08-24.md`), and the finding that the Ask assistant is
+recorded-meetings-only - hand-written notes are in the FTS index but filtered out on read by
+`AND m.kind = 'Meeting'` in three queries, while the Library search box has no such filter.
+
+## The caret that forgot its column (2026-08-23)
+
+CORRECTION, same day: the first fix for this reached into WPF's internals by reflection to clear the
+cached column. It passed every check in development and did NOTHING in the shipped build. The app
+publishes SELF-CONTAINED, so it carries its own PresentationFramework, the private field was not
+found there, and the catch swallowed the failure silently. Running the harness on the PACKAGED exe
+is what caught it: 39 checks in the dev build, 38 and one failure in dist, deterministically, with
+"Down lost the caret's column: 67.3px -> 5.0px".
+
+It now uses public API only: nudge the caret one character with the real editing commands and back,
+which makes WPF recompute the column from where the caret actually is, then re-assert the position
+if the round trip landed elsewhere. No internals, and it passes in BOTH builds. Lesson 13 in
+CLAUDE.md exists for exactly this, and the reflection version was written and verified against the
+dev build alone.
+
+
+Researched Notion's editor end to end (the block model, every key, the markdown input rules, the
+slash menu, the published measurements) and the research found a bug in the editor we shipped this
+morning.
+
+WPF caches the x position a vertical arrow key should aim for, and does NOT clear that cache when
+code sets `CaretPosition`. This is dotnet/wpf#3757, open, and the triage note on it says the fix is
+"very unlikely" to land. Toki moves the caret in code constantly: every Enter, every paste, every
+slash command, every click seam. So the first Down or Up after any of those snapped the caret to the
+left edge of the line instead of leaving it under the text where the reader put it.
+
+MEASURED, in the live editor: with the caret 67.3px into a line, Down landed at **5.0px**. It now
+lands at 65.6px, which is the nearest character to where it started.
+
+The fix is one function. `SetCaret` is now the ONLY way the editor moves the caret in code, all
+eight sites go through it, and it clears the stale cache after every move. The cache is internal to
+WPF, so reaching it needs reflection, and the whole call is wrapped: if a future .NET moves the
+field, the caret still works, it just forgets its column again.
+
+The mutation probe is the test's own numbers. Reverting `SetCaret` to a plain assignment fails
+`--notetest` with "Down lost the caret's column: 67.3px -> 5.0px", so the check cannot pass
+vacuously, and it carries a floor on the starting x so it cannot pass at zero either.
+
+Verified: `--notetest` 39 of 39 (one new check), full suite green (2,071), `--stickytest`,
+`--measuretest` and `--hittest` all pass.
+
+**Found by the same research and NOT changed, because each is a product decision for the owner:**
+Tab currently types a literal tab into the note (`AcceptsTab="True"`), which is neither indenting
+nor nothing; Enter and Backspace over a selection hand off to WPF, whose split copies formatting but
+not markers, the exact fault the editor's own comment says it was built to avoid; and the repair
+pass runs on every text change including mid-IME-composition, which is how CJK input gets eaten. The
+IME one cannot be verified on this machine without an IME, so it is written down rather than guessed
+at.
+
+## The note canvas (2026-08-23)
+
+The owner: the manual note is "the least intuitive feature", the option names are bad, the template
+picker covers the text, and a bullet and its text are "not even on the same line". Researched
+Notion's block editor and Notability's canvas thinking, then rebuilt.
+
+**The permanent toolbar is gone.** It sat above every note, cost a row of a 356px panel, and named
+things badly ("Steps", "Style", "Aa 10"), which is an interface explaining its own capabilities
+instead of getting out of the way. Notion's rule is that a blank line is a blank line with a faint
+hint, and the menu exists the instant you ask for it and not before. So: **type "/" at the start of
+a line** and the commands appear AT THE CARET, filtered as you type, with arrows to move, Enter or
+click to run, Escape or space to cancel. Mid-sentence a slash stays a slash, because a menu that
+opens while somebody types "and/or" is the interface fighting the writing.
+
+Names now say what they do: "Steps" became "Numbered list", "Style" split into the three block names
+it was hiding (Text, Heading, Subheading), and every template is its own entry. Text size left the
+writing surface entirely: it is a page preference, not a per-line command.
+
+**The template picker was anchored to the whole toolbar**, so it opened across the full width and
+landed on top of the writing. It is a slash entry now, opening at the caret.
+
+**Markers sit on the text's line.** The bullet was the character "•" at a hardcoded 12px, whose
+ink rides high in its own box and did not scale with the note, and the marker container used
+BaselineAlignment.Center, which centres on the LINE BOX including the room a font reserves for
+descenders. The bullet is now a drawn ellipse sized in ems, the number matches the body size, and
+the container is baseline-aligned inside a box of exactly the cap height.
+
+MEASURED, in the live editor: `--notetest` now reports how far each marker's ink centre sits from
+the middle of the text's cap band. Bullet, number and tick box all read **0.05px**. The first
+tolerance was 1.5px and the mutation probe walked straight through it at -0.83px, so the bar is
+0.6px, where reverting the alignment fails all three.
+
+**Click anywhere on the page to write.** A page of paper has no edge past which a pen stops working.
+
+The sticky note inherits all of it, and in jotting mode the slash menu offers bullets only.
+
+Verified: 33 editor checks (was 23), full suite green (2,071), six UI self-tests pass.
+
+## Provenance: the note remembers what it read (2026-08-23)
+
+The deeper fix for evidence links, and the first change in this area to ship on numbers rather than
+on an argument.
+
+**The problem with matching text.** Recovering where a bullet came from means finding the line that
+shares the most words with it, and shared words are exactly what makes a wrong line look right. A
+meeting that says "send the pricing deck" twice offers two equally good answers.
+
+**The fix.** The note writer reads a long meeting in windows and maps each to a digest, so it always
+knew which lines it was reading; it just threw that away. Now each digest keeps its line range, each
+written bullet is matched to the digest it came from, and that range is stored with the note. The
+evidence link then searches those lines instead of the whole meeting.
+
+**Measured with --linktest**, 400 synthetic bullets per condition, paired on identical cases:
+easy 95.9% to 97.7% (+7, chi 5.14, p<0.05), hard 82.9% to 87.5% (+16, chi 14.06, p<0.01), and
+ZERO cases made worse in either condition. Provenance is a smaller haystack, not a different guess.
+
+For contrast, rarity weighting - the intuitively obvious fix, where a rare word should count for
+more than a common one - was measured the same way and came out as noise, trending slightly the
+wrong way. It is implemented, off, and kept only as the control arm of the benchmark. The intuition
+was mine and the data disagreed.
+
+Old notes are unaffected: the stored range is null on everything written before today, which reads
+as "no record" and falls back to the previous behaviour.
+
+## The clip that played the wrong half-second (2026-08-23)
+
+The owner reported that the audio beside a to-do plays the wrong moment, and that the timeline
+points are inaccurate. Three causes were possible and reasoning could not separate them, so the
+first thing built was the instrument, not a fix.
+
+**`--evidencetest [id]`** cuts every evidence clip in a stored meeting, runs it back through the
+REAL recogniser, and compares what it heard with the transcript line the link claims. Read-only.
+On meeting 108: 8 note lines, 8 linked, only 3 played the words they claimed, median match 37%.
+
+**What it found, in one line of output:** `raw span 169243ms..-2147483648ms`. Some stored segments
+carry an `EndMs` of `int.MinValue`. C# casts a NaN double to int as `int.MinValue`, silently, and
+the recogniser occasionally returns a NaN token time. The evidence window then collapsed to its
+500ms floor, so a ten-word line played half a second of itself.
+
+Fixed at the source: token times and durations that are not real numbers are ignored rather than
+propagated, the millisecond conversion is clamped instead of cast, and an end can never precede its
+own start. Separately, `TranscriptMerger` took the newer segment's end unconditionally, so a short
+interjection nested inside a longer turn SHRANK the merged line while its text grew; it now takes
+the later of the two.
+
+**What research says about the rest.** WhisperX exists because Whisper's timestamps are segment
+level, roughly plus or minus 500ms, and it recovers word timings with a forced-alignment pass at
+about plus or minus 50ms. We do not need that: Parakeet TDT through sherpa-onnx already returns
+per-token timestamps AND durations, verified 1:1 with the token array on real audio. Our timing
+problem was never the model. Granola keeps no audio at all, so it has no equivalent feature; Otter
+keeps word timings and syncs the playhead to the transcript rather than matching summary text.
+
+**Known and NOT yet changed:** the remaining low scores are long matched ranges (15s, 33s) where
+the clip cap plays only the opening, and the link itself is bag-of-words overlap, which weights a
+common word the same as a rare one. Both need a decision rather than a guess, and the owner asked
+for research before implementation on this one. Also, meetings already stored keep their poisoned
+timestamps; only new transcripts get the fix.
+
+## Taste, spacing, and the letter in the circle (2026-08-23)
+
+**Two skills, researched and written down.** `.claude/skills/symmetry-and-spacing` (the scale,
+vertical rhythm, one gutter, optical centring, symmetry defects, concentric radii, and how to
+assert each in code) and `.claude/skills/design-taste` (the tells of generated UI, the principles
+that replace them, how to write UI copy, and an ordered audit). Both are mirrored to the Mac repo
+and registered in both constitutions. Both indict decisions we shipped: the settings captions were
+the "interface narrating itself" tell, and a rename chip on the user's own name was a control that
+looked like a choice and was not.
+
+**The initial in its disc, on the fourth attempt, measured.** Three plausible theories failed in a
+row: an inherited paragraph line height, then a pinned one, then a Path whose layout box included
+the empty space above the glyph, because BuildGeometry lays a glyph out from the TEXT origin and
+Stretch.None measures from there. Translating the geometry by its own negative bounds makes the
+layout box exactly the ink. `--stickytest` now MEASURES it: geometry bounds transformed into the
+disc, centres compared. Reads 0.00 by 0.00; with the fix removed it reads 1.61px low. The first
+version of that check measured the Path's RenderSize rather than the ink and passed on broken code,
+which the mutation probe caught.
+
+**The local speaker is not a guess.** The transcript prints the user's own name from Settings
+instead of "You", and their chip is quieter than the voices Toki had to work out. Renaming the
+wrong one of two identical chips is what pushed the owner's own lines back to "Speaker 1". Still
+renameable, and never an oval: chips are the design's 13px rounded rectangle, guarded by a test.
+
+**One gutter in the notch settings.** Both row labels and the page share a 16px inset. The first
+attempt bled the row button outward on a negative margin and the hit-target harness failed it: a
+scroll area clips what hangs past its content, so the row went dead at both edges. The run after
+that passed against a STALE binary, because the build had failed on an XML comment containing a
+double hyphen. Both traps are in our own lessons file.
+
+**The window opens like the notch now.** The page switch ran AFTER the open animation started, so
+the opening frames were spent building a view. Page first, one layout pass, then animate. The curve
+is the notch's own ArriveStrong over Morph (280ms) instead of stock CubicEase over 230ms, and the
+scale starts at 0.96 rather than 0.9, because on a 960px window a 10% jump is nearly 100px of
+travel and reads as a lurch. The close keeps its character at 70% of the enter.
+
+**Sticky notes lost the document toolbar** (headings, text size, numbered steps, template picker).
+A scratchpad gets bullets.
+
+Verified: suite green (2,067), all seven UI self-tests pass, packaged exe re-tested after publish.
+
+## The note page stops shouting (2026-08-23)
+
+**The transcript is a disclosure now.** It was an amber section with a three-line preview and a
+"show full transcript" pill, which meant the longest and least-read thing on the page was always
+half-open. It is now ONE full-width button: the section's amber icon and label on the left, the
+line count and a chevron on the right, collapsed by default, expanding in place. The research bar
+for a collapsed row is that it answers "what will I find if I click this?" without opening, which
+the count does. Evidence links still open it on their way to a line, and the expansion is still
+chunked so a thousand-paragraph meeting cannot freeze the window.
+
+**The sticky note has an explicit Save.** Typing already autosaved on a debounce, but an autosave
+is a safety net against losing text, not an answer to "is my note kept?" - the only feedback was a
+status word that faded. Save and Delete now sit together in the sticky's header, and the entry
+point reads "Add sticky note" when there is none.
+
+**Settings subtext came back, small.** The previous round removed every caption; the ask was
+concise, not zero. Five section titles carry one short line at 11.5px (Appearance, pinned names,
+re-clean, Calendars, AI summaries). Captions inside rows stay gone - a toggle labelled "Dark theme"
+explains itself.
+
+**The notch Settings rows are one list.** The switch row and the "All other settings" row now share
+the same 12px inset and 10px vertical padding with the hairline inset to match, so they read as two
+rows of one list rather than two unrelated decisions.
+
+**Speaker rename: two real defects.** The rename field was focused synchronously right after the
+popup opened, and a Popup builds its child and its own window when it opens, so the focus can fail
+silently and every keystroke goes to the read-only document behind it. Focus now happens on the
+popup's Opened event at input priority. And renaming "You" opened on the literal word although Toki
+has the user's name in Settings, so it now pre-fills with it. `--stickytest` grew five checks over
+the rename popup (real button, opens, editable, pre-filled, focused).
+
+HONEST NOTE: the mutation probe for the focus fix did NOT fail against the old code, so the harness
+cannot tell the two apart and the diagnosis is unproven. The hazard is real and worth fixing; it may
+not be the owner's bug. Awaiting a description of the exact symptom.
+
+Verified: suite green (2,065), all six UI self-tests pass, packaged exe re-tested.
+
+## Shorter notes, quieter chrome (2026-08-23)
+
+A batch from the owner's field test.
+
+**The mascot stopped disappearing on white.** The body faded to near-white at the feet and carried a
+pale cyan crown wash, both straight from the design; against a light surface the character lost its
+top and bottom edges. It is now ONE blue that only darkens (#01A4FF to #0E82D6), in both themes,
+with the crown wash cut to a tenth of its alpha. The per-theme body values are gone: a character
+that needs a different palette to survive a light background was drawn wrong, not themed wrong.
+
+**The loader is only the bar now.** The pink highlight ran through a dim track, and the track's
+rounded caps read as a second colour sitting either side of the bar. The track is deleted (and its
+token with it); the bar runs in a bare clip.
+
+**Settings lost its narration.** Every caption under every row, and every one-line explainer under
+every section title, is gone from both the notch page and the Library page: a page that explains
+each of its own controls reads as generated copy. "Toki 1.0 - all on this PC" is now "Toki 1.0", and
+"all on this PC" is gone from the Library header, the notch library, the record prompt and the Ask
+landing (now just "Your meeting assistant"). The Library scope label only appears when a filter is
+actually on.
+
+**An edited title updates the card you are looking at.** `MarkDirty` only set a flag for the next
+open, so renaming a manual note left the old title on the list card. An open window now refreshes
+its list in place (list only, never the detail pane, which is the editor the edit came from).
+
+**Initial discs are centred by measurement.** `DiscLabel` carried a fixed half-pixel lift, which is
+right at exactly one font size, so the Y/T discs in the notch sat low while the Library's looked
+fine. The lift now comes from the typeface, through the same `OpticalCenter.OffsetFor` the buttons
+use.
+
+**Notes got shorter, in code rather than in the prompt.** See ARCHITECTURE; the short version is
+that the prompt has always asked for concision and a model at temperature writes reported speech
+anyway, so a deterministic pass now strips the frame ("Craig mentioned that"), the hedges
+("basically", "I think", "in order to"), and the owner's name from an action item whose row already
+prints it, then caps length at a clause boundary or leaves the line whole.
+
+**Carry-forward stopped guessing.** "Open from previous meetings" matched on ANY one shared title
+word within 45 days, so everything containing "sync" or "review" inherited everything else's
+unfinished work. Generic title words are now dropped before matching, and one coincidence is not a
+match when both titles have more than one distinctive word.
+
+Verified: full suite green (2,065, up 11), `--hittest --themetest --measuretest --notetest
+--stickytest --revealtest` all pass, renders checked in both themes, packaged exe re-tested after
+publish. Two mutation probes verified failing against the unfixed code.
+
+Also fixed: `TaskSchedulingTests` anchored its week on Sunday while the product anchors on Monday,
+so it failed one day in seven. It surfaced because this session ran on a Sunday.
+
+## Grain out, light in (2026-08-20)
 
 The owner compared the notch against Figma node 293:1875 and asked why our card is ~95% opaque
 where the frame says `rgba(33,30,30,0.5)`. It is the glass-vs-ghost tradeoff: the frame's 50% only

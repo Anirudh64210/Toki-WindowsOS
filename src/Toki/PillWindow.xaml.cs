@@ -34,7 +34,11 @@ public partial class PillWindow : Window
         [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
         [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short
         [PillState.About]         = (380, 430),   // FIXED height + internal scroll (credits list) - mirrors Settings
-        [PillState.Onboarding]    = (330, 250),   // auto-height: steps differ in height
+        // AUTO-HEIGHT: each step sizes to its own content (name ~188, privacy ~212, all-set ~137), so
+        // no page is padded or clipped. 130 is only the floor. The step-to-step size change is SNAPPED,
+        // not animated (see SnapResize) - the next page simply appears at its size, so the user never
+        // watches the card actively resize.
+        [PillState.Onboarding]    = (330, 130),
     };
 
     // ── the HOVERING card ──
@@ -83,6 +87,11 @@ public partial class PillWindow : Window
     static readonly HashSet<PillState> AutoHeight =
         [PillState.Home, PillState.MeetingPrompt, PillState.NoSpeech, PillState.RecordingOpen, PillState.Ask,
          PillState.PrepCard, PillState.Onboarding, PillState.Settings];
+
+    // Auto-height states whose step-to-step size change must be INSTANT, not the 150ms morph the Ask
+    // notch uses. Onboarding is a stepped flow: each page has its own height, but the resize between
+    // them must not be a visible animation - the next page appears already at its size.
+    static readonly HashSet<PillState> SnapResize = [PillState.Onboarding];
 
     /// <summary>States whose VIEW draws the visible capsules itself (separate floating pills with
     /// air between them) rather than sitting inside the one glass card. The window still supplies
@@ -1059,6 +1068,16 @@ public partial class PillWindow : Window
         // card. More than a pixel of difference means the card is deliberately smaller: card wins.
         if (_cardH > 0 && rh - _cardH > 1.0) rh = _cardH;
         if (_cardW > 0 && rw - _cardW > 1.0) rw = _cardW;
+
+        // Keep the material's edge-lights CONCENTRIC with the plate. The plate's corner clamps to
+        // half the shorter side (a 13px sliver rounds at 6.5, not 24), but the material's inner
+        // top/bottom light rings stay at their full-card radius unless told otherwise - and a ring at
+        // the wrong radius cuts its corner arc ACROSS the sliver as two crescent "edges" inside the
+        // squircle (the loader-peek artifact the owner kept seeing). Match the ring radius to the
+        // plate's clamped radius, minus the rim it sits inside, so the arcs hug the real corners.
+        var plateRadius = Math.Min(CornerRadius, Math.Min(rw, rh) / 2);
+        Material.Radius = Math.Max(0, plateRadius - rim);
+
         if (_cornersPinned || rw <= 4 * rim || rh <= 4 * rim)
         {
             Root.CornerRadius = new System.Windows.CornerRadius(CornerRadius);
@@ -1883,6 +1902,13 @@ public partial class PillWindow : Window
         catch { return fallback; }
     }
 
+    /// <summary>Self-test seams for --measuretest: the auto-height set, the breath and the Sizes floor.
+    /// A floor set ABOVE a page's real content pads the card with space the page never uses, which is
+    /// invisible to every check that only asks whether a page is clipped.</summary>
+    internal static bool DebugIsAutoHeight(PillState s) => AutoHeight.Contains(s);
+    internal static double DebugBottomBreath => BottomBreath;
+    internal static double DebugSizeFloor(PillState s) => Sizes.TryGetValue(s, out var v) ? v.H : 0;
+
     // Bottom breathing room added to every auto-height page's measured content (see ContentHeight):
     // covers the few px lost to DPI rounding + the notch's bottom chrome.
     const double BottomBreath = 14;
@@ -1907,13 +1933,34 @@ public partial class PillWindow : Window
         try
         {
             var (w, h) = CardSize(s);
+            // The view's content just changed (the onboarding step advanced, the Ask answer streamed
+            // in). Flush the pending layout FIRST: ContentHeight measures the view out-of-tree, and an
+            // out-of-tree Measure() on a view already hosted in the visual tree returns the PREVIOUS
+            // content's height until a layout pass has run - which sized the card for the page it just
+            // replaced and clipped the taller one.
+            ViewFor(s).UpdateLayout();
             var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
             var work = PhysicalWorkArea();
             var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
             var target = Math.Min(ContentHeight(s, w, h), availH);
-            // Width as well as height: the recording bar's chevron widens the card without
-            // changing its height, and comparing height alone would swallow that.
-            if (Math.Abs(target - ActualHeight) < 2 && Math.Abs(WinW(w) - ActualWidth) < 2) return;
+            // Compare in WINDOW space on BOTH axes: target/w are CARD sizes, ActualHeight/ActualWidth
+            // are WINDOW sizes (card + pads). Comparing the card target against the window height was
+            // an apples-to-oranges test that read "no change" whenever two steps' heights differed by
+            // ~CardPadB - which silently skipped the onboarding name->privacy grow and clipped it.
+            // Width as well as height: the recording bar's chevron widens the card without changing
+            // its height, and comparing height alone would swallow that.
+            if (Math.Abs(WinH(target) - ActualHeight) < 2 && Math.Abs(WinW(w) - ActualWidth) < 2) return;
+            if (SnapResize.Contains(s))
+            {
+                // Stepped flow (onboarding): resize INSTANTLY, composed in the same frame as the new
+                // page's content, so the card never appears to animate its size. No morph, no clip
+                // machinery - one synchronous resize onto the target.
+                SetCardSize(w, target);
+                PlaceMascot(target, 0);
+                SizeWindowNow(w, target);
+                SettleCorners();
+                return;
+            }
             AnimateSize(w, target, 150);   // snappy so it keeps up as the answer streams in patches
         }
         finally { _growing = false; }

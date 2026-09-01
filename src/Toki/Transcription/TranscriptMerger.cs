@@ -90,7 +90,10 @@ public static class TranscriptMerger
                     && s.StartMs - prev.EndMs <= SameSpeakerGapMs
                     && prev.Text.Length + text.Length + 1 <= MaxTurnChars)
                 {
-                    outp[^1] = prev with { EndMs = s.EndMs, Text = Stitch(prev.Text, text) };
+                    // An end never moves BACKWARDS. A short interjection nested inside a longer turn would
+                    // otherwise shrink the merged line's span while its text grew, which is how a
+                    // ten-word line ends up claiming half a second of audio.
+                    outp[^1] = prev with { EndMs = Math.Max(prev.EndMs, s.EndMs), Text = Stitch(prev.Text, text) };
                     continue;
                 }
             }

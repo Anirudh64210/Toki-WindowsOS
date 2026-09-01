@@ -79,13 +79,42 @@ public static class OpenFromLastTime
         return best;
     }
 
-    /// <summary>Whole-WORD overlap, not substring: substring fragments ("just" in "AdJUST") connect
-    /// unrelated meetings and hand this one somebody else's unfinished work.</summary>
+    /// <summary>Words that appear in half the meeting titles ever written. Shared, they say nothing:
+    /// "Design review" and "Budget review" are not the same meeting.</summary>
+    static readonly System.Collections.Generic.HashSet<string> Generic = new(StringComparer.Ordinal)
+    {
+        "meeting", "meet", "sync", "call", "chat", "review", "session", "discussion", "discuss",
+        "weekly", "daily", "monthly", "biweekly", "standup", "stand", "catch", "catchup", "check",
+        "checkin", "update", "updates", "touch", "base", "quick", "team", "general", "misc",
+        "morning", "afternoon", "evening", "recurring", "regular", "followup", "follow",
+    };
+
+    /// <summary>
+    /// Does this title cover the same ground? Whole-WORD overlap, never substring ("just" inside
+    /// "adJUST" connects unrelated meetings), and the shared words have to MEAN something.
+    ///
+    /// ONE shared word used to be enough, which is what made this feature wrong so often: every
+    /// title carrying "sync" or "review" inherited the unfinished work of every other one. Generic
+    /// words are dropped first, and when both titles have more than one distinctive word, a single
+    /// coincidence is not a match. The cost is asymmetric - a missed carry-forward is a note that
+    /// says nothing, a wrong one attributes somebody else's unfinished work to this meeting - so
+    /// this stays strict, and the user can dismiss whatever survives.
+    /// </summary>
     static bool Shares(string? title, string[] terms)
     {
         var words = (title ?? "").ToLowerInvariant()
-            .Split(new[] { ' ', '-', ',', ':', ';', '(', ')', '/', '.', '\'' }, StringSplitOptions.RemoveEmptyEntries);
-        return terms.Any(term => words.Contains(term));
+            .Split(new[] { ' ', '-', ',', ':', ';', '(', ')', '/', '.', '\'' }, StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var mine = terms.Where(t => !Generic.Contains(t)).ToArray();
+        var theirs = words.Where(w => w.Length >= 3 && !Generic.Contains(w)).ToArray();
+        if (mine.Length == 0 || theirs.Length == 0) return false;   // nothing distinctive to agree on
+
+        var shared = mine.Count(theirs.Contains);
+        if (shared == 0) return false;
+        // A single shared word carries a match only when one side has nothing else to offer: a
+        // one-word project title ("PixelFlow") is a strong signal on its own.
+        return shared >= 2 || mine.Length == 1 || theirs.Length == 1;
     }
 
     /// <summary>The carried line, keeping the owner when one is known - "who still owes this" is half

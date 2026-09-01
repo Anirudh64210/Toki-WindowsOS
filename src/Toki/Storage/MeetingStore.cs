@@ -94,6 +94,17 @@ public sealed partial class MeetingStore
                 alter2.ExecuteNonQuery();
             }
 
+        // Provenance: the transcript lines the model was reading when it wrote this to-do. NULL on
+        // every row written before 2026-08-23 and on meetings short enough to be written in one
+        // pass, which fall back to matching the words.
+        foreach (var col in new[] { "src_first", "src_last" })
+            if (!ColumnExists(c, "action_items", col))
+            {
+                using var alter3 = c.CreateCommand();
+                alter3.CommandText = $"ALTER TABLE action_items ADD COLUMN {col} INTEGER;";
+                alter3.ExecuteNonQuery();
+            }
+
         // Full-text search index for "Ask your notes" (FTS5, bundled in e_sqlite3). A standalone
         // table keyed by meeting id; body = every searchable field concatenated. If FTS5 is somehow
         // unavailable, retrieval falls back to keyword LIKE - never fatal.
@@ -190,7 +201,7 @@ public sealed partial class MeetingStore
             using var cmd = c.CreateCommand();
             cmd.CommandText = """
                 SELECT f.rowid FROM meeting_fts f JOIN meetings m ON m.id = f.rowid
-                WHERE meeting_fts MATCH $q AND m.kind = 'Meeting'
+                WHERE meeting_fts MATCH $q
                 ORDER BY bm25(meeting_fts, 5.0, 1.0) LIMIT $n;
                 """;
             cmd.Parameters.AddWithValue("$q", match);
@@ -202,9 +213,10 @@ public sealed partial class MeetingStore
         return ids;
     }
 
-    /// <summary>Meetings whose title contains any given term (case-insensitive substring), newest
-    /// first. Recall backstop for Ask retrieval: a title hit is near-certain relevance and must not
-    /// drown in BM25 noise. Terms under 3 chars are ignored so a fragment can't over-match.</summary>
+    /// <summary>Meetings AND hand-written notes whose title contains any given term (case-insensitive
+    /// substring), newest first. Recall backstop for Ask retrieval: a title hit is near-certain
+    /// relevance and must not drown in BM25 noise. Terms under 3 chars are ignored so a fragment
+    /// can't over-match.</summary>
     public List<long> TitleMatchIds(IEnumerable<string> terms)
     {
         var ts = (terms ?? []).Where(t => !string.IsNullOrWhiteSpace(t) && t.Trim().Length > 2)
@@ -222,7 +234,7 @@ public sealed partial class MeetingStore
                 var esc = ts[i].Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
                 cmd.Parameters.AddWithValue($"$t{i}", $"%{esc}%");
             }
-            cmd.CommandText = $"SELECT id, started_at FROM meetings WHERE kind='Meeting' AND ({string.Join(" OR ", clauses)})";
+            cmd.CommandText = $"SELECT id, started_at FROM meetings WHERE ({string.Join(" OR ", clauses)})";
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 if (DateTimeOffset.TryParse(r.GetString(1), out var at)) found.Add((r.GetInt64(0), at));
@@ -233,6 +245,12 @@ public sealed partial class MeetingStore
 
     // (id, started_at) for every real meeting - the basis for deterministic temporal resolution
     // (recency / date-range), parsed in C# so it's robust to timezone-offset string differences.
+    //
+    // STILL kind='Meeting', DELIBERATELY, while content search and title search are not (2026-08-24).
+    // This is what backs "my last meeting", "how many meetings did I have" and "meetings last week".
+    // A hand-written note is not a meeting: counting one would make an answer the user can check
+    // against their own calendar wrong, which is worse than not finding it. Notes are reached by what
+    // they SAY and what they are CALLED, which is how a person looks for something they wrote.
     List<(long Id, DateTimeOffset At)> MeetingTimes()
     {
         var list = new List<(long, DateTimeOffset)>();
@@ -445,13 +463,16 @@ public sealed partial class MeetingStore
         foreach (var (a, i) in m.Notes.Actions.Select((a, i) => (a, i)))
         {
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT INTO action_items (meeting_id, text, owner, due, done, ord) VALUES ($m,$t,$o,$d,$done,$ord)";
+            cmd.CommandText = "INSERT INTO action_items (meeting_id, text, owner, due, done, ord, src_first, src_last) " +
+                              "VALUES ($m,$t,$o,$d,$done,$ord,$sf,$sl)";
             cmd.Parameters.AddWithValue("$m", id);
             cmd.Parameters.AddWithValue("$t", a.Text);
             cmd.Parameters.AddWithValue("$o", (object?)a.Owner ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$d", (object?)a.Due ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$done", a.Done ? 1 : 0);
             cmd.Parameters.AddWithValue("$ord", i);
+            cmd.Parameters.AddWithValue("$sf", (object?)a.Source?.First ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sl", (object?)a.Source?.Last ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
 
@@ -772,10 +793,19 @@ public sealed partial class MeetingStore
         {
             using var c = Open();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "UPDATE transcript SET speaker_tag=$to WHERE meeting_id=$m AND speaker_tag=$from";
+            // A stream label ("You"/"Them") also names the UNTAGGED lines of that stream - a two-party
+            // call, or a meeting diarisation never tagged, has "them" lines with a null speaker_tag,
+            // and naming "Them" has to reach those or the other person can never be named. The `speaker`
+            // column stores the stream as text ("You"/"Them").
+            var stream = from.Equals("You", StringComparison.OrdinalIgnoreCase) ? "You"
+                       : from.Equals("Them", StringComparison.OrdinalIgnoreCase) ? "Them" : null;
+            cmd.CommandText = stream is null
+                ? "UPDATE transcript SET speaker_tag=$to WHERE meeting_id=$m AND speaker_tag=$from"
+                : "UPDATE transcript SET speaker_tag=$to WHERE meeting_id=$m AND (speaker_tag=$from OR (speaker=$stream AND (speaker_tag IS NULL OR speaker_tag='')))";
             cmd.Parameters.AddWithValue("$to", to.Trim());
             cmd.Parameters.AddWithValue("$from", from);
             cmd.Parameters.AddWithValue("$m", meetingId);
+            if (stream is not null) cmd.Parameters.AddWithValue("$stream", stream);
             cmd.ExecuteNonQuery();
 
             // The to-dos carry the same labels ("Speaker 2 owns this"); renaming the voice and not
@@ -804,7 +834,7 @@ public sealed partial class MeetingStore
     static List<ActionItem> ReadActions(SqliteConnection c, long id)
     {
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, text, owner, due, done FROM action_items WHERE meeting_id=$id ORDER BY ord";
+        cmd.CommandText = "SELECT id, text, owner, due, done, src_first, src_last FROM action_items WHERE meeting_id=$id ORDER BY ord";
         cmd.Parameters.AddWithValue("$id", id);
         var list = new List<ActionItem>();
         using var r = cmd.ExecuteReader();
@@ -815,6 +845,9 @@ public sealed partial class MeetingStore
                 Owner = r.IsDBNull(2) ? null : r.GetString(2),
                 Due = r.IsDBNull(3) ? null : r.GetString(3),
                 Done = r.GetInt32(4) != 0,
+                Source = r.IsDBNull(5) || r.IsDBNull(6)
+                    ? null
+                    : new SourceSpan { First = r.GetInt32(5), Last = r.GetInt32(6) },
             });
         return list;
     }

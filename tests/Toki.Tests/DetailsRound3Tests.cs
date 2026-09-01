@@ -178,16 +178,24 @@ public sealed class DetailsRound3Tests
     [Fact]
     public void Disc_labels_pin_their_own_line_metrics()
     {
-        // THE BUG: Paragraph.LineHeight is INHERITED, so the transcript's 19.5px line height
-        // reached the TextBlock inside the avatar's 16px disc and inflated its line box - the "Y"
-        // rode the top of the circle with its cap clipped (the owner photographed it). Pinning
-        // LineHeight to the font size with BlockLineHeight makes the label context-immune;
-        // measured on an 8x render, the ink centre moved from 1.4px-from-top to centred.
+        // THE ORIGINAL BUG: Paragraph.LineHeight is INHERITED, so the transcript's 19.5px line
+        // height reached the TextBlock inside the avatar's 16px disc and inflated its line box -
+        // the "Y" rode the top of the circle with its cap clipped (the owner photographed it).
+        // The first fix pinned LineHeight to the font size with BlockLineHeight.
+        //
+        // SUPERSEDED 2026-08-23: pinning made the label immune to the paragraph, but centring TEXT
+        // still centres a LINE BOX, and the offset between that box and the cap ink depends on the
+        // font, the size, and the pinning itself. The owner reported the letter still off-centre.
+        // The label is now the glyph's own GEOMETRY, whose layout box IS the ink, so centring the
+        // element centres the letter with no metric to keep in sync. The inheritance finding still
+        // holds and is why a bare TextBlock must never come back here.
         var parts = CodeOnly(Src("src", "Toki", "Views", "PillParts.cs"));
-        var disc = Regex.Match(parts, @"public static TextBlock DiscLabel\(.*?\.SubPixel\(\);", RegexOptions.Singleline);
-        Assert.True(disc.Success, "DiscLabel not found");
-        Assert.Contains("LineHeight = fontSize", disc.Value);
-        Assert.Contains("LineStackingStrategy = LineStackingStrategy.BlockLineHeight", disc.Value);
+        var disc = Regex.Match(parts, @"public static Shape DiscLabel\(.*?
+    \}", RegexOptions.Singleline);
+        Assert.True(disc.Success, "DiscLabel is no longer a Shape factory");
+        Assert.Contains("BuildGeometry", disc.Value);
+        Assert.Contains("Stretch.None", disc.Value);
+        Assert.DoesNotContain("new TextBlock", disc.Value);
         // Both disc sites use it - a bare TextBlock in either is the bug back.
         var avatar = Regex.Match(CodeOnly(Src("src", "Toki", "Views", "NoteRenderer.cs")),
             @"static Border Avatar\(.*?\n    \}", RegexOptions.Singleline);

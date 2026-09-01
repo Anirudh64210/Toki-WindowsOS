@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -165,14 +165,41 @@ public static class NoteMarkdown
     /// <summary>Template skeleton for a hand-written note. Summary and Action items are added here
     /// because <see cref="Llm.NoteTemplate"/> declares only the middle sections; the AI writer adds
     /// those two implicitly, and both note kinds must share one shape.</summary>
-    public static string TemplateSkeleton(Llm.NoteTemplate template)
+    public static string TemplateSkeleton(Llm.NoteTemplate template) => Write(TemplateBlocks(template));
+
+    /// <summary>
+    /// The template as LINES, which is what the editor inserts.
+    ///
+    /// Every heading is followed by an empty BODY line - a real, full-height line waiting to be typed
+    /// into. The skeleton used to be headings separated by blank lines, and a blank line is
+    /// deliberately squashed to a third of a row: what arrived on screen was a stack of titles with
+    /// unclickable slivers between them and nowhere obvious to write. A template is a shape to fill
+    /// in, so it has to hand over the places to fill.
+    ///
+    /// Those empty body lines are not expressible in Markdown (an empty line IS a blank line), so
+    /// they last until the note is next saved - which is exactly long enough, because by then they
+    /// have been typed in or they were not wanted.
+    /// </summary>
+    public static IReadOnlyList<NoteBlock> TemplateBlocks(Llm.NoteTemplate template)
     {
-        var sb = new StringBuilder();
-        sb.Append("## Summary\n\n");
-        foreach (var section in template.Sections)
-            sb.Append("## ").Append(section).Append("\n\n");
-        sb.Append("## Action items\n");
-        sb.Append("- [ ] \n");
-        return sb.ToString().TrimEnd('\n');
+        var blocks = new List<NoteBlock>();
+
+        // NO SPACER LINE between sections. A heading already carries 1.75em above it and 0.62em
+        // below; adding a blank line on top of that put roughly seventy pixels of nothing between one
+        // title and the next, which is why a freshly-picked template read as a broken page rather than
+        // as a page waiting to be filled. The writing line under each heading is the gap now.
+        void Section(string heading, NoteBlockKind opening)
+        {
+            blocks.Add(new NoteBlock(NoteBlockKind.Subheading, heading));
+            blocks.Add(new NoteBlock(opening, ""));
+        }
+
+        Section("Summary", NoteBlockKind.Body);
+        foreach (var section in template.Sections) Section(section, NoteBlockKind.Body);
+
+        // Action items is the one section whose shape is known, so it opens with a tick box rather
+        // than a plain line - an empty to-do is the thing people came to a template for.
+        Section("Action items", NoteBlockKind.Todo);
+        return blocks;
     }
 }

@@ -5,7 +5,13 @@ namespace Toki.Interop;
 /// <summary>
 /// Push-to-talk detector for Ctrl+Alt+Space. RegisterHotKey never reports the release, so
 /// hold-to-talk needs a low-level keyboard hook, run on its own thread so a UI stall can't lag
-/// global keystrokes. Keys are not swallowed; auto-repeat is de-duped via the <c>_active</c> latch.
+/// global keystrokes. Auto-repeat is de-duped via the <c>_active</c> latch.
+///
+/// SWALLOWS the chorded Space (2026-08-25): while Ctrl+Alt are held, every Space down/up/repeat is
+/// consumed (return 1), so the combo NEVER reaches the foreground app - it was leaking to whatever
+/// had a Ctrl+Alt+Space binding (the owner saw Claude's search bar fire every repeat while holding).
+/// A BARE Space (no chord) is never swallowed, so normal typing is untouched and a missed key-up can
+/// never lock the spacebar. The mic still ends on Space-up even if Ctrl/Alt were released first.
 /// </summary>
 public sealed class PushToTalkHook : IDisposable
 {
@@ -53,17 +59,25 @@ public sealed class PushToTalkHook : IDisposable
                 bool down = w is WmKeyDown or WmSysKeyDown;
                 bool up = w is WmKeyUp or WmSysKeyUp;
 
-                if (down && vk == VkSpace && !_active && Held(VkControl) && Held(VkMenu))
+                if (vk == VkSpace)
                 {
-                    _active = true;
-                    _onStart();
-                }
-                else if (up && _active && vk == VkSpace)
-                {
-                    // End the utterance only when Space is released: once the chord has engaged,
-                    // the user may relax Ctrl/Alt mid-sentence without cutting the mic.
-                    _active = false;
-                    _onStop();
+                    bool chord = Held(VkControl) && Held(VkMenu);
+                    if (down)
+                    {
+                        if (!_active && chord) { _active = true; _onStart(); }
+                        // Swallow the chorded Space AND its auto-repeat: this is what leaked to other
+                        // apps. A bare Space (no chord) falls through untouched, so typing is safe.
+                        if (chord) return (IntPtr)1;
+                    }
+                    else if (up)
+                    {
+                        // End the utterance when Space is released - the chord may have relaxed
+                        // mid-sentence (Ctrl/Alt let go first), which must not cut the mic.
+                        bool wasActive = _active;
+                        if (_active) { _active = false; _onStop(); }
+                        // Only swallow the release while still chorded; a bare Space-up types normally.
+                        if (wasActive && chord) return (IntPtr)1;
+                    }
                 }
             }
         }

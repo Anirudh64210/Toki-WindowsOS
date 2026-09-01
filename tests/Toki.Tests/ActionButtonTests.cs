@@ -126,7 +126,10 @@ public sealed class ActionButtonTests
         // at 125% - count both sides so adding one without the other fails here.
         Assert.Equal(3, Regex.Matches(parts, @"public static Path (StopGlyph|PlayGlyph)").Count);
         Assert.Equal(1, Regex.Matches(parts, @"public static Path Outline").Count);
-        Assert.Equal(1, Regex.Matches(parts, @"public static TextBlock DiscLabel").Count);
+        // The disc initial is a Shape now, not a TextBlock: it is built from the glyph's own
+        // geometry so its layout box IS the ink, which centres it without any nudge to keep in
+        // sync. See DiscLabelTests.
+        Assert.Equal(1, Regex.Matches(parts, @"public static Shape DiscLabel").Count);
         Assert.Equal(5, Regex.Matches(parts, @"\.SubPixel\(\)").Count);
     }
 
@@ -157,7 +160,7 @@ public sealed class ActionButtonTests
         Assert.DoesNotContain("▶", player);
         Assert.DoesNotContain("■", player);
         Assert.DoesNotContain("new TextBlock", player);
-        Assert.Contains("PillParts.PlayGlyph(\"TextDim\")", player);
+        Assert.Contains("PillParts.PlayGlyph(\"TextMid\")", player);
         Assert.Contains("PillParts.StopGlyph(\"Pink\")", player);
         // The triangle's optical nudge has to be a render transform, for the same reason the send
         // disc's is: a margin inside a centre-aligned ContentPresenter only moves it half a pixel.
@@ -166,24 +169,28 @@ public sealed class ActionButtonTests
     }
 
     [Fact]
-    public void The_evidence_chip_wears_the_house_glass_grammar()
+    public void The_evidence_player_is_a_quiet_bare_control()
     {
+        // The play control used to be a 20px filled disc with a rim (EvidenceChip) - a bulky bead in
+        // the middle of a sentence. It is now EvidencePlay: a bare triangle, resting dim, brightening
+        // on hover, with the house press-compress. No disc, no rim.
         var player = Src("src", "Toki", "Views", "EvidencePlayer.cs");
-        Assert.Contains("Application.Current.Resources[\"EvidenceChip\"]", player);
+        Assert.Contains("Application.Current.Resources[\"EvidencePlay\"]", player);
         // The instant background swap it used to do on MouseEnter/MouseLeave.
         Assert.DoesNotContain("MouseEnter +=", player);
         Assert.DoesNotContain("MouseLeave +=", player);
 
         var style = Regex.Match(Src("src", "Toki", "Theme", "Theme.xaml"),
-            @"<Style x:Key=""EvidenceChip"".*?</Style>", RegexOptions.Singleline);
-        Assert.True(style.Success, "the EvidenceChip style is missing");
+            @"<Style x:Key=""EvidencePlay"".*?</Style>", RegexOptions.Singleline);
+        Assert.True(style.Success, "the EvidencePlay style is missing");
         var xaml = style.Value;
-        Assert.Contains("BorderBrush=\"{DynamicResource GlassRim}\" BorderThickness=\"1\"", xaml);
-        // A FADING sibling overlay, 130ms in and 90ms out (exits run at ~70% of enters), and a press
-        // that compresses the box - the same three things every other button in Toki does.
+        Assert.Contains("Background=\"Transparent\"", xaml);
+        Assert.DoesNotContain("GlassRim", xaml);   // bare: no rim
+        // Hover brightens (130ms in, 90ms back to the resting 0.5) and a press compresses the box -
+        // the same feel grammar the rest of Toki uses, just as opacity instead of an overlay.
         Assert.Contains("To=\"1\" Duration=\"0:0:0.13\"", xaml);
-        Assert.Contains("To=\"0\" Duration=\"0:0:0.09\"", xaml);
-        Assert.Contains("To=\"0.94\"", xaml);
+        Assert.Contains("To=\"0.5\" Duration=\"0:0:0.09\"", xaml);
+        Assert.Contains("To=\"0.82\"", xaml);
     }
 
     // ── 6. the chat-history delete cross ──

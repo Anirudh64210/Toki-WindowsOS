@@ -14,7 +14,8 @@ namespace Toki.Views;
 /// </summary>
 public partial class AboutView : UserControl
 {
-    // Only what Toki actually ships is credited; Whisper is a stubbed fallback and intentionally absent.
+    // Only what Toki actually ships is credited. Whisper base.en now ships (the ask-by-voice decoder),
+    // so it is credited; it was intentionally absent while it was a stub.
     record Credit(string Name, string Role, string Author, string Licence, string Url);
 
     static readonly (string Section, Credit[] Items)[] Sections =
@@ -23,6 +24,10 @@ public partial class AboutView : UserControl
         {
             new Credit("Parakeet TDT 0.6b v2", "Speech-to-text · quantised to int8", "NVIDIA",
                        "CC-BY-4.0", "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2"),
+            new Credit("Whisper base.en", "Ask-by-voice speech-to-text", "OpenAI",
+                       "MIT", "https://github.com/openai/whisper"),
+            new Credit("Streaming Zipformer (en, 20M)", "Live transcript preview", "k2-fsa",
+                       "Apache-2.0", "https://github.com/k2-fsa/icefall"),
             new Credit("Qwen3-4B-Instruct-2507", "On-device notes & chat", "Alibaba Qwen",
                        "Apache-2.0", "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507"),
             new Credit("bge-small-en-v1.5", "Meaning search", "BAAI",

@@ -16,13 +16,17 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- The sliver's heartbeat: a soft coral highlight glides through a thin dim track, on loop.
-             This is the ONLY thing visible when the loader is tucked away. -->
-        <!-- Track and highlight are THEMED tokens (2026-08-18). Both were hardcoded - a white-8%
-             track and a pink gradient built inline - so in the light theme the track was white on
-             white and the shimmer ran through nothing anyone could see. -->
-        <Border Grid.Row="0" Height="3" VerticalAlignment="Center" Margin="16,0" CornerRadius="1.5"
-                Background="{DynamicResource ShimmerTrack}" ClipToBounds="True">
+        <!-- The sliver's heartbeat: a soft coral highlight glides on loop, and it is the ONLY thing
+             visible when the loader is tucked away. The bar runs in a BARE clip, no track behind it:
+             a dim track reads as two rounded caps in a second colour sitting either side of the bar.
+             The highlight is a THEMED token; hardcoded, it was invisible in the light theme.
+
+             The track spans the FULL sliver (Margin 16 each side), and its own ClipToBounds keeps the
+             bar inside it. The sweep range is computed from the track's real width in code (StartShimmer
+             + SizeChanged), so the highlight always travels the WHOLE bar edge to edge, at any sliver
+             width - no hardcoded range that only covers part of a wider bar. -->
+        <Border x:Name="Track" Grid.Row="0" Height="3" VerticalAlignment="Center" Margin="16,0"
+                ClipToBounds="True" SizeChanged="OnTrackSizeChanged">
             <Border x:Name="Shimmer" Width="70" HorizontalAlignment="Left" CornerRadius="1.5"
                     Background="{DynamicResource Shimmer}" RenderTransformOrigin="0.5,0.5">
                 <Border.RenderTransform><TranslateTransform x:Name="ShimmerMove"/></Border.RenderTransform>
@@ -35,7 +39,7 @@
             <controls:TokiBlob x:Name="Toki" Width="26" Height="24" Margin="0,0,10,0" Visibility="Collapsed"
                                VerticalAlignment="Center" RenderTransformOrigin="0.5,1"/>
             <!-- 13 SemiBold at white 90% - the frame's label size for every one of these pills. -->
-            <TextBlock Text="Tidying up your notes" FontFamily="{StaticResource UiFont}"
+            <TextBlock x:Name="StageLabel" Text="Tidying up your notes" FontFamily="{StaticResource UiFont}"
                        FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
                        VerticalAlignment="Center"/>
             <TextBlock x:Name="Dots" Text="" FontFamily="{StaticResource UiFont}" FontSize="13"

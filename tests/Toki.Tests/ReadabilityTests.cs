@@ -71,6 +71,32 @@ public sealed class ReadabilityTests
     public void Umbrella_is_not_a_filler() =>
         Assert.Equal("bring the umbrella", Clean("bring the umbrella"));
 
+    // ── extended fillers (2026-08-25): er/eh/ah interjections + parenthetical discourse markers ──
+
+    [Theory]
+    [InlineData("so er, I think that works", "so I think that works")]     // MUTATION PROBE: "er" must go
+    [InlineData("Ah, right, that makes sense", "Right, that makes sense")]  // head interjection hands the capital
+    public void Interjection_family_is_extended_past_um_and_uh(string heard, string expected) =>
+        Assert.Equal(expected, Clean(heard));
+
+    [Theory]
+    [InlineData("it was, you know, huge", "it was huge")]                   // MUTATION PROBE: parenthetical removed, no seam
+    [InlineData("we could, I mean, ship it today", "we could ship it today")]
+    [InlineData("it was, like, twice as fast", "it was twice as fast")]
+    [InlineData("You know, we should just ship it", "We should just ship it")] // head form, capital handed over
+    [InlineData("let's just ship it, you know.", "let's just ship it.")]     // tail form, keeps the stop
+    public void Comma_parenthetical_discourse_fillers_are_dropped(string heard, string expected) =>
+        Assert.Equal(expected, Clean(heard));
+
+    [Theory]
+    [InlineData("do you know what time it works")]      // "you know" is literal here - no commas, untouched
+    [InlineData("tell me what you mean by that")]       // "mean" the verb
+    [InlineData("build a tool like this one")]          // "like" the preposition
+    [InlineData("I really like the new design")]        // "like" the verb
+    [InlineData("sort of the whole point")]             // "sort of" mid-phrase, no commas
+    public void Discourse_words_in_their_literal_use_are_never_touched(string line) =>
+        Assert.Equal(line, Clean(line));
+
     // ── stutters ──
 
     [Theory]

@@ -24,6 +24,20 @@ Toki itself is not open source; the components below are, under their own licenc
 > that the material was modified. All three are provided here and on the in-app
 > "Built with" screen.
 
+### Whisper base.en - ask-by-voice speech-to-text
+- **Author:** OpenAI
+- **Licence:** MIT
+- **Source:** https://github.com/openai/whisper
+- **Redistribution:** base.en exported to ONNX (int8), as packaged by the sherpa-onnx project.
+  Used only for the push-to-talk "Ask by voice" feature; Parakeet remains the meeting engine.
+
+### Streaming Zipformer (English, 20M) - live transcript preview
+- **Author:** k2-fsa (Next-gen Kaldi)
+- **Licence:** Apache License 2.0
+- **Source:** https://github.com/k2-fsa/icefall
+- **Redistribution:** ONNX int8, as packaged by the sherpa-onnx project. Drives the fast during-meeting
+  live-transcript PREVIEW only; the saved transcript is the whole-file Parakeet pass.
+
 ### Qwen3-4B-Instruct-2507 - on-device notes & chat
 - **Author:** Alibaba Cloud (Qwen team)
 - **Licence:** Apache License 2.0
@@ -78,6 +92,5 @@ redistributed by Toki.
 
 ---
 
-*Whisper (whisper.cpp) is referenced in the codebase only as a deferred error-fallback
-and is **not** shipped in the current build; it is intentionally omitted from these
-notices until it is actually bundled.*
+*Whisper base.en now ships as the ask-by-voice decoder (credited above). The separate
+whisper.cpp error-fallback for the meeting path is still a deferred stub and is not bundled.*

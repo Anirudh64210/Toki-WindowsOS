@@ -1137,8 +1137,10 @@ public static class NotesQa
             foreach (var w in words)
                 try
                 {
+                    // Hand-written notes count here too, exactly as they do in SearchRelevant: this is
+                    // the same search with FTS unavailable, and it must not be able to find LESS.
                     foreach (var m in store.List(w))
-                        if (m.Kind == MeetingKind.Meeting) scores[m.Id] = scores.GetValueOrDefault(m.Id) + 1;
+                        scores[m.Id] = scores.GetValueOrDefault(m.Id) + 1;
                 }
                 catch { }
             ids = scores.OrderByDescending(kv => kv.Value).Take(3).Select(kv => kv.Key).ToList();
@@ -1195,6 +1197,19 @@ public static class NotesQa
         var sb = new StringBuilder();
         foreach (var m in meetings)
         {
+            // A HAND-WRITTEN NOTE HAS NO TRANSCRIPT AND NO SECTIONS - all of it is in Body. Without
+            // this it was retrieved and then contributed a heading and nothing else, which is the
+            // worst outcome available: a citation to a note that appears empty. Labelled, so the
+            // assistant can say "in your note" rather than implying somebody said it in a meeting.
+            if (m.Kind == MeetingKind.Manual)
+            {
+                sb.AppendLine($"### {m.Title} (your own note) - {m.StartedAt:MMM d, yyyy}");
+                var body = (m.Body ?? "").Trim();
+                if (body.Length > 0) sb.AppendLine(body.Length > 1200 ? body[..1200] : body);
+                sb.AppendLine();
+                continue;
+            }
+
             sb.AppendLine($"### {m.Title} - {m.StartedAt:MMM d, yyyy}");
             if (!string.IsNullOrWhiteSpace(m.Notes.Tldr)) sb.AppendLine(m.Notes.Tldr);
             foreach (var sec in m.Notes.EffectiveSections())

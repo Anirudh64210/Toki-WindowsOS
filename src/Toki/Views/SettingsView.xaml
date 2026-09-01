@@ -12,7 +12,7 @@
     <!-- The notch Settings is UI/visibility ONLY (owner: "the notch should only have the visibility,
          UI settings"). Everything else - AI summaries, calendar, name, about - lives on the Library's
          Settings page; the row at the bottom takes you there. -->
-    <DockPanel Margin="14,12,14,8">
+    <DockPanel Margin="16,12,16,12">
         <Grid DockPanel.Dock="Top">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -20,9 +20,9 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
-            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Settings" Style="{StaticResource PanelTitle}"/>
-                <TextBlock Text="Toki 1.0 · all on this PC" Style="{StaticResource Dim}" FontSize="9.5"/>
+                <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="9.5"/>
             </StackPanel>
             <!-- Global toggles, shown ONCE in the header: screen-recording visibility (ghost) + light/dark. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -41,40 +41,46 @@
                      the button below uses. Without it this row's text started 12px to the left of the
                      button's and the two read as belonging to different pages (owner: "the glassy
                      notch and the all other settings button differ in their starting point ...
-                     alignment and symmetry is missing"). Same on the right, so the switch and the
-                     chevron line up too. -->
-                <Grid Margin="12,10,12,0">
+                     alignment and symmetry is missing").
+
+                     ONE GUTTER (2026-08-23): every piece of TEXT on this page starts at the same x.
+                     The page pads 16 and both rows sit at 0 inside it, so both labels land on 16.
+                     The row BUTTON drops its horizontal padding to reach that, which is safe ONLY
+                     because it spans the full width: its hit area is the whole row either way. A
+                     button sized to its label must never lose its padding.
+                     Bleeding the box outward with a negative margin was tried first and the
+                     hit-target harness failed it: the scroll area clips what hangs past its
+                     content, so the row went dead at both edges.
+
+                     No caption under either title: a settings page that explains each of its own
+                     rows reads as generated copy, not as a product (owner, 2026-08-20). A row whose
+                     label does not carry it should be renamed, not annotated. -->
+                <Grid Margin="0,10,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                        <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"/>
-                        <TextBlock Text="Let more of your screen show through the notch." Style="{StaticResource Caption}"
-                                   Margin="0,1,0,0" TextWrapping="Wrap"/>
-                    </StackPanel>
+                    <TextBlock Text="Glassy notch" Style="{StaticResource BodyStrong}"
+                               VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <CheckBox x:Name="GlassToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}" Click="OnGlassToggle"/>
                 </Grid>
 
                 <!-- Everything else → the Library's Settings page. -->
-                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,16,0,6"/>
+                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0"/>
                 <!-- ONE rounded button, not a row with an arrow beside it. It used to hang past both
                      edges on negative margins, so its hover box read as a full-width rectangle rather
                      than a button, and the chevron on the right looked like the thing you were meant to
                      click (owner, 2026-08-06). Now: a real Button, a proper rounded box that sits INSIDE
                      the card, and the chevron is decoration inside it - not hit-testable, so it can
                      never look like a separate control. -->
-                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings">
+                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings" Padding="0,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                            <TextBlock Text="All other settings" Style="{StaticResource BodyStrong}"/>
-                            <TextBlock Text="AI summaries · calendar · your name · about"
-                                       Style="{StaticResource Caption}" Margin="0,1,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
+                        <TextBlock Text="All other settings" Style="{StaticResource BodyStrong}"
+                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
                         <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
                                    FontSize="12" Foreground="{DynamicResource TextDim}"
                                    VerticalAlignment="Center" IsHitTestVisible="False"/>

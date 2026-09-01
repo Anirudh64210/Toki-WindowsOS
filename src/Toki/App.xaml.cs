@@ -18,12 +18,41 @@ public partial class App : Application
 {
     public static AppState State { get; } = new();
 
+    /// <summary>
+    /// What the loader is actually doing, so it can say so.
+    ///
+    /// It used to read "Tidying up your notes" for the whole wait, which on a long meeting is
+    /// transcription followed by several local-model calls and can run for minutes. A friendly phrase
+    /// that never changes is indistinguishable from a hung app: "Specific beats friendly."
+    ///
+    /// The STAGE is named and no time is promised. An estimate would have to be measured, and a
+    /// fabricated one is the same lie as a progress bar that is not tracking anything.
+    /// </summary>
+    public static string SummarizeStage
+    {
+        get => _summarizeStage;
+        set
+        {
+            if (_summarizeStage == value) return;
+            _summarizeStage = value;
+            // Raised on the UI thread: the pipeline sets this from a background task.
+            Current?.Dispatcher.BeginInvoke(new Action(() => SummarizeStageChanged?.Invoke(null, EventArgs.Empty)));
+        }
+    }
+
+    static string _summarizeStage = "Tidying up your notes";
+    public static event EventHandler? SummarizeStageChanged;
+
     /// <summary>Set by the pill: opens the Toki peek into the remembered page (click on the peek).</summary>
     public static Action? OpenPeek;
 
     /// <summary>Raised (on the UI thread) when a transcript segment finalizes DURING recording - for the
     /// live-transcript preview in the recording view.</summary>
     public static event Action<TranscriptSegment>? LivePreview;
+
+    /// <summary>Raised (on the UI thread) with a speaker's GROWING in-progress line from the fast
+    /// streaming preview - so words appear as they are spoken, not only when a line finalizes.</summary>
+    public static event Action<Toki.Transcription.Speaker, string>? LivePreviewPartial;
 
     /// <summary>The app that triggered the current prompt / is being recorded (for UI + capture).</summary>
     public static DetectedApp? CurrentApp { get; private set; }
@@ -38,6 +67,12 @@ public partial class App : Application
     /// <summary>True on a memory-constrained PC (&lt;8GB RAM): keep only ONE heavy model resident
     /// at a time and never preload the LLM - both resident starves transcription and pages the PC.</summary>
     public static bool LowMemoryMode { get; private set; }
+
+    /// <summary>True only on a HIGH-RAM PC (&gt;=32GB): prewarm the notes LLM at launch and keep it
+    /// resident for instant notes. Otherwise the LLM loads ON DEMAND (lighter startup) - see the
+    /// RAM-tier note in OnStartup. Distinct from <see cref="LowMemoryMode"/>, which is the &lt;8GB
+    /// one-model-at-a-time behaviour.</summary>
+    public static bool PrewarmLlm { get; private set; }
 
     /// <summary>True in the offscreen PNG render harness (--render). Views must not hit the
     /// network or persist settings in this mode - it runs against the user's real settings file.</summary>
@@ -170,6 +205,87 @@ public partial class App : Application
         return true;
     }
 
+    /// <summary>The outcome of a user-triggered "try again with the on-device model" on a note that
+    /// fell back to the heuristic floor.</summary>
+    public enum RegenNotesResult { Rewritten, NoModel, NeedsRestart }
+
+    /// <summary>
+    /// Re-attempt AI note-writing for a meeting whose notes fell back to the heuristic floor (the
+    /// local model failed to load this session). Clears the stuck failure flag and tries the model
+    /// once more; if it loads, the floor notes are replaced with the model's. A native poisoning
+    /// cannot recover in-process, so that case reports <see cref="RegenNotesResult.NeedsRestart"/>
+    /// rather than silently keeping the floor.
+    /// </summary>
+    public static async Task<RegenNotesResult> RegenerateNotesAsync(long meetingId, System.Threading.CancellationToken ct = default)
+    {
+        var m = Store.Get(meetingId);
+        if (m is null || m.Transcript.Count == 0) return RegenNotesResult.NoModel;
+
+        // Off the UI thread: both the model (re)load and the generation are heavy and block at the
+        // native layer. RetryLocal clears the stuck failure; WriteNotesAsync then loads on demand.
+        var notes = await System.Threading.Tasks.Task.Run(() =>
+        {
+            Llm.LlmService.Instance.RetryLocal();
+            return Llm.LlmService.Instance.WriteNotesAsync(m.Transcript, ct).GetAwaiter().GetResult();
+        });
+
+        // Never replace a good note with the floor: only a note the MODEL actually wrote may land.
+        if (notes is not { FromModel: true })
+            return Llm.LlmService.Instance.LocalPoisoned ? RegenNotesResult.NeedsRestart : RegenNotesResult.NoModel;
+
+        // The user's ticks win, exactly like the post-meeting path: carry Done across by task identity.
+        var done = m.Notes.Actions.Where(a => a.Done).Select(a => TaskKey(a.Text)).ToHashSet();
+        foreach (var a in notes.Actions)
+            if (done.Contains(TaskKey(a.Text))) a.Done = true;
+
+        m.Notes = notes;
+
+        // The re-transcribe should RETITLE too: the floor placeholder (the meeting's first spoken
+        // words) is usually exactly what the user is escaping. Replace it with the model's title, but
+        // never clobber a title the USER typed - detect the placeholder by recomputing it.
+        var placeholder = NoteExtractor.Title(NoteExtractor.Extract(m.Transcript), m.App, m.StartedAt);
+        if (string.IsNullOrWhiteSpace(m.Title) || m.Title == placeholder)
+        {
+            m.Title = NoteExtractor.Title(notes, m.App, m.StartedAt);
+            Store.UpdateTitleAndBody(meetingId, m.Title, m.Body);
+        }
+
+        if (Llm.OpenFromLastTime.Build(m, Store) is { } carried)
+            notes.Sections = notes.Sections.Prepend(carried).ToList();
+
+        Store.ReplaceNotes(meetingId, notes);
+        Storage.MarkdownMirror.Write(m);    // keep the .md mirror telling the same story as the DB
+        LibraryWindow.MarkDirty();
+        Log($"regenerated notes for meeting {meetingId} with the on-device model");
+        return RegenNotesResult.Rewritten;
+    }
+
+    /// <summary>
+    /// Drop a section from a saved note, for good. Today only the carried-forward section offers
+    /// this: matching two meetings by title alone can never be reliable, so the user gets a cheap
+    /// correction instead of a confident guess. Removing it here also stops it coming back, because
+    /// the section is PERSISTED in the note rather than recomputed on every render.
+    /// </summary>
+    public static bool DismissNoteSection(long meetingId, string heading)
+    {
+        try
+        {
+            if (Store.Get(meetingId) is not { } m) return false;
+            var before = m.Notes.Sections.Count;
+            m.Notes.Sections = m.Notes.Sections
+                .Where(x => !string.Equals(x.Heading, heading, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (m.Notes.Sections.Count == before) return false;
+
+            Store.ReplaceNotes(meetingId, m.Notes);
+            Storage.MarkdownMirror.Write(m);
+            LibraryWindow.MarkDirty();
+            Log($"dismissed section \"{heading}\" on meeting {meetingId}");
+            return true;
+        }
+        catch (Exception ex) { Log($"dismiss section failed: {ex.Message}"); return false; }
+    }
+
     /// <summary>Task identity for carrying tick-state across a notes rewrite: letters and digits
     /// only, case-folded - the same loose identity OpenFromLastTime uses.</summary>
     static string TaskKey(string? text) =>
@@ -206,7 +322,17 @@ public partial class App : Application
         // keeping both resident crashes transcription and pages the PC.
         var (totalGB, availGB) = Interop.SystemMemory.Physical();
         LowMemoryMode = totalGB > 0 && totalGB < 8.0;
-        Log($"system RAM {totalGB:F1}GB (avail {availGB:F1}GB) → {(LowMemoryMode ? "LOW-MEMORY mode: one model at a time, no LLM prewarm" : "normal mode")}");
+        // RAM-tier residency (the load-on-demand slice, owner-requested 2026-08-25): only a HIGH-RAM box
+        // (>=32GB) prewarms + keeps the 2.5GB LLM resident for instant notes. Everything else - including
+        // the common 8-16GB laptop the owner runs - LOADS ON DEMAND: the LLM loads when a meeting's notes
+        // or an Ask actually needs it (~10s once per session, covered by the loader), so idle Toki stays
+        // light and startup doesn't feel heavy. This is NOT low-memory mode (no aggressive release); it
+        // only skips the prewarm. `EnsureLocal` already loads lazily, so skipping the prewarm IS the slice.
+        PrewarmLlm = totalGB >= 32.0;
+        Log($"system RAM {totalGB:F1}GB (avail {availGB:F1}GB) → "
+            + (LowMemoryMode ? "LOW-MEMORY: one model at a time, no LLM prewarm"
+               : PrewarmLlm ? "high-RAM: prewarm + keep the LLM resident"
+               : "load-on-demand: LLM loads when first needed (lighter startup)"));
 
         // Resolve GPU layers + context BEFORE any LLamaSharp call. Load the Vulkan backend ONLY
         // when offloading - enabling it at 0 layers is the slowest possible path (see LlmRuntime).
@@ -223,7 +349,7 @@ public partial class App : Application
         // Headless self-tests: attach a console, run, exit. This list and the switch in SelfTests.Run
         // are TWO registrations of the same flag set - add every new flag in BOTH places, or the app
         // exits 0 with no output, which looks exactly like a passing test.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--wertest" or "--voicetest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--uitest" or "--diartest" or "--speakertest" or "--hittest" or "--revealtest" or "--wavetest" or "--fpstest" or "--stickytest" or "--hovershot" or "--makeicon");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--evidencetest" or "--linktest" or "--wertest" or "--voicetest" or "--streamtest" or "--embedconflicttest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--uitest" or "--diartest" or "--speakertest" or "--hittest" or "--revealtest" or "--wavetest" or "--fpstest" or "--stickytest" or "--hovershot" or "--makeicon");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -386,6 +512,41 @@ public partial class App : Application
 
             try { TranscriptionService.Instance.Warm(); }
             catch (Exception ex) { Log($"ASR warm (non-fatal): {ex.Message}"); }
+
+            // Whisper base.en: the ASK-BY-VOICE decoder (robust on 1-2 word clips where Parakeet
+            // collapses "Hi Toki" to "Yeah"). Fetched at launch, never mid-meeting, and only once
+            // Parakeet is present. Failure is silent: the Ask path falls back to Parakeet until it lands.
+            if (TranscriptionService.ModelReady && !ModelManager.WhisperInstalled)
+            {
+                try { ModelManager.EnsureWhisperAsync().GetAwaiter().GetResult(); Log("ask-by-voice: whisper base.en downloaded"); }
+                catch (Exception ex) { Log($"whisper download (non-fatal, Ask falls back to Parakeet): {ex.Message}"); }
+            }
+            try { TranscriptionService.Instance.WarmWhisper(); }
+            catch (Exception ex) { Log($"whisper warm (non-fatal): {ex.Message}"); }
+
+            // Streaming zipformer: the LIVE-PREVIEW decoder (words as spoken, ~1s) so the recording view
+            // fills instantly instead of the ~15-21s Parakeet window. Fetched at launch, never mid-meeting,
+            // only once Parakeet is present. Failure is silent: the preview falls back to the Parakeet window.
+            if (TranscriptionService.ModelReady && !ModelManager.StreamingAsrInstalled)
+            {
+                try { ModelManager.EnsureStreamingAsrAsync().GetAwaiter().GetResult(); Log("live preview: streaming zipformer downloaded"); }
+                catch (Exception ex) { Log($"streaming model download (non-fatal, preview falls back to Parakeet window): {ex.Message}"); }
+            }
+
+            // Speaker diarisation models (pyannote segmentation + CampPlus embedding). Without these,
+            // every remote voice collapses into "Them" and nobody can be named - they were only ever
+            // fetched by the self-tests, so a fresh user never got diarisation. Fetch at launch, never
+            // mid-meeting, only once Parakeet is present. Failure is silent (the meeting stays You/Them).
+            if (TranscriptionService.ModelReady && !ModelManager.DiarisationInstalled)
+            {
+                try
+                {
+                    ModelManager.EnsureAsync(ModelManager.Segmentation).GetAwaiter().GetResult();
+                    ModelManager.EnsureSpeakerEmbedAsync().GetAwaiter().GetResult();
+                    Log("diarisation models downloaded (segmentation + speaker embedding)");
+                }
+                catch (Exception ex) { Log($"diarisation model download (non-fatal, stays You/Them): {ex.Message}"); }
+            }
             // Housekeeping: recover any recording a crash/quit orphaned, and clear stale
             // push-to-talk voice snippets left in %TEMP%.
             try { RecordingRecovery.Sweep(); } catch (Exception ex) { Log($"recovery sweep (non-fatal): {ex.Message}"); }
@@ -400,9 +561,11 @@ public partial class App : Application
                         File.Delete(f);
             }
             catch (Exception ex) { Log($"voice temp cleanup (non-fatal): {ex.Message}"); }
-            // On a small-RAM PC never preload the 2.5GB LLM - it starves transcription.
-            // It loads on demand when a meeting actually ends.
-            if (LowMemoryMode) { Log("low-memory: skipping LLM prewarm (loads on demand)"); return; }
+            // Prewarm the 2.5GB LLM only on a HIGH-RAM box; everyone else loads it ON DEMAND (the
+            // load-on-demand slice) so idle Toki stays light and startup isn't heavy. It loads when a
+            // meeting's notes or an Ask first needs it (~10s once, under the loader). Below 8GB this is
+            // also true, plus the aggressive one-model-at-a-time release lives elsewhere.
+            if (!PrewarmLlm) { Log("load-on-demand: skipping LLM prewarm (loads when first needed)"); return; }
             try { System.Threading.Thread.Sleep(750); } catch { }  // don't stack the two loads
             try { LlmService.Instance.WarmBlocking(); }
             catch (Exception ex) { Log($"LLM warm (non-fatal): {ex.Message}"); }
@@ -607,9 +770,10 @@ public partial class App : Application
         State.TryGo(PillState.Home);
     }
 
-    /// <summary>Meetings whose speakers are still being resolved. Resolution runs AFTER the notes are
-    /// written (nothing may delay the notes). Nothing about anyone's voice is stored: clusters live and
-    /// die inside <see cref="SpeakerResolver"/>; only renameable text lands in the database.</summary>
+    /// <summary>Meetings whose speakers are still being resolved. Resolution now runs BEFORE the notes
+    /// (owner decision 2026-08-25) so the writer sees real names; the loader shows "Identifying speakers"
+    /// during it. Nothing about anyone's voice is stored: clusters live and die inside
+    /// <see cref="SpeakerResolver"/>; only renameable text lands in the database.</summary>
     static readonly HashSet<long> Resolving = new();
 
     /// <summary>Is this meeting still having its speakers worked out? The note shows a loader for
@@ -623,10 +787,15 @@ public partial class App : Application
     /// re-read from the store.</summary>
     public static event Action<long>? SpeakersResolved;
 
-    static void ResolveSpeakers(MeetingRecord meeting, List<string>? attendeeNames)
+    /// <summary>Tell the speakers apart and TAG the transcript - now run BEFORE the notes (owner
+    /// decision 2026-08-25): diarisation is ~50s/hour, and running it first lets the note writer see
+    /// real names, attribute to-dos correctly, and NOT turn a roll-call into to-dos. Transient by
+    /// design: nothing about anyone's voice is stored - clusters live and die inside SpeakerResolver,
+    /// only renameable text lands in the DB. Returns true if it ran and tagged.</summary>
+    static bool TagSpeakers(MeetingRecord meeting, List<string>? attendeeNames)
     {
-        if (meeting.Transcript.Count == 0 || string.IsNullOrWhiteSpace(meeting.Folder)) return;
-        if (!SpeakerDiariser.Available) return;
+        if (meeting.Transcript.Count == 0 || string.IsNullOrWhiteSpace(meeting.Folder)) return false;
+        if (!SpeakerDiariser.Available) return false;
 
         lock (Resolving) Resolving.Add(meeting.Id);
         try
@@ -643,40 +812,41 @@ public partial class App : Application
             var result = SpeakerResolver.Resolve(
                 meeting.Transcript, themWav, roster, AppSettings.Current.UserName, expected);
 
-            if (!result.Ran) { Log($"speakers not resolved for meeting {meeting.Id}: {result.Skipped}"); return; }
-
+            if (!result.Ran) { Log($"speakers not resolved for meeting {meeting.Id}: {result.Skipped}"); return false; }
             // The meeting may have been deleted while this ran - never resurrect a discarded row.
-            if (Store.Get(meeting.Id) is null) { Log($"meeting {meeting.Id} gone - dropping speaker tags"); return; }
+            if (Store.Get(meeting.Id) is null) { Log($"meeting {meeting.Id} gone - dropping speaker tags"); return false; }
 
             Store.SetSpeakerTags(meeting.Id, result.Tags);
             for (var i = 0; i < meeting.Transcript.Count && i < result.Tags.Count; i++)
                 meeting.Transcript[i] = meeting.Transcript[i] with { Tag = result.Tags[i] };
 
-            // With each line attributed, to-do owners come for free via the existing evidence links -
-            // no second model pass.
-            var owners = ActionOwners.Infer(meeting.Notes.Actions, meeting.Transcript);
-            if (owners.Count > 0)
-            {
-                Store.SetActionOwners(meeting.Id, owners);
-                foreach (var (index, owner) in owners)
-                    if (index < meeting.Notes.Actions.Count) meeting.Notes.Actions[index].Owner = owner;
-                Log($"attributed {owners.Count} to-do(s) from the transcript");
-            }
-
-            MarkdownMirror.Write(meeting);
-            LibraryWindow.MarkDirty();
-
             var named = string.Join(", ", result.Named.Select(n => n.Name));
             Log($"speakers resolved for meeting {meeting.Id}: {result.Speakers} voices in {result.Took.TotalSeconds:F1}s"
                 + (named.Length > 0 ? $" - named {named}" : " - none named"));
+            return true;
         }
-        catch (Exception ex) { Log($"speaker resolution failed (non-fatal): {ex.Message}"); }
+        catch (Exception ex) { Log($"speaker resolution failed (non-fatal): {ex.Message}"); return false; }
         finally
         {
             lock (Resolving) Resolving.Remove(meeting.Id);
-            // Always raised, even on failure, so a loader can never be left spinning over work that stopped.
             try { Current?.Dispatcher.BeginInvoke(() => SpeakersResolved?.Invoke(meeting.Id)); } catch { }
         }
+    }
+
+    /// <summary>Attribute to-do OWNERS from the (now speaker-tagged) transcript. Runs AFTER the notes,
+    /// since it needs the written action items - no second model pass, just the existing evidence links.</summary>
+    static void InferOwners(MeetingRecord meeting)
+    {
+        try
+        {
+            var owners = ActionOwners.Infer(meeting.Notes.Actions, meeting.Transcript);
+            if (owners.Count == 0) return;
+            Store.SetActionOwners(meeting.Id, owners);
+            foreach (var (index, owner) in owners)
+                if (index < meeting.Notes.Actions.Count) meeting.Notes.Actions[index].Owner = owner;
+            Log($"attributed {owners.Count} to-do(s) from the transcript");
+        }
+        catch (Exception ex) { Log($"owner inference failed (non-fatal): {ex.Message}"); }
     }
 
     public static void StopRecording()
@@ -712,6 +882,7 @@ public partial class App : Application
         // Show the loader immediately; finalize capture + transcribe + save entirely
         // off the UI thread (never freeze the pill), then advance when done.
         State.TryGo(PillState.Summarizing);
+        SummarizeStage = "Transcribing";
         System.Threading.Tasks.Task.Run(() =>
         {
             var folder = "";
@@ -806,11 +977,23 @@ public partial class App : Application
             }
             minShow.Wait();
 
+            // TELL THE SPEAKERS APART FIRST (owner decision 2026-08-25). Running diarisation before the
+            // notes lets the writer see real names, attribute to-dos to the right person, and recognise a
+            // roll-call as introductions rather than tasks. It tags meeting.Transcript in place, which is
+            // what the note writer reads below. ~50s/hour; the loader names the stage.
+            if (meeting is not null && transcript is { Count: > 0 })
+            {
+                SummarizeStage = "Identifying speakers";
+                try { TagSpeakers(meeting, attendeeNames); }
+                catch (Exception ex) { Log($"speaker tagging (non-fatal, notes stay You/Them): {ex.Message}"); }
+            }
+
             // Write the AI notes BEFORE revealing the Notes screen, so the heuristic draft never
             // flashes. A timeout guards a stuck generation so the pill can never hang; we're on a
             // background thread, so blocking on the result is safe.
             if (meeting is not null && transcript is { Count: > 0 })
             {
+                SummarizeStage = "Writing your notes";
                 try
                 {
                     // Map-reduce makes several short LLM calls for a long meeting; give it room,
@@ -818,8 +1001,10 @@ public partial class App : Application
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
                     // The TRANSCRIPT is the only input. The user's sticky note is deliberately not
                     // fed in (owner decision) - it sits beside the summary, it doesn't shape it.
+                    // meeting.Transcript, not the local `transcript`: TagSpeakers tagged the former in
+                    // place, so the writer sees the real names.
                     var llmNotes = LlmService.Instance
-                        .WriteNotesAsync(transcript, cts.Token)
+                        .WriteNotesAsync(meeting.Transcript, cts.Token)
                         .GetAwaiter().GetResult();
                     // Only a note the MODEL wrote may replace the saved one - the heuristic
                     // fallback is already in the row.
@@ -869,9 +1054,9 @@ public partial class App : Application
                     if (meeting is not null && Store.Get(meeting.Id) is { } dbTruth) meeting = dbTruth;
                 }
 
-                // Speaker resolution runs AFTER the notes (owner decision): it must never add a
-                // second to the wait for notes. It updates the transcript in place once it lands.
-                ResolveSpeakers(meeting, attendeeNames);
+                // Speakers were resolved BEFORE the notes; now attribute the to-do OWNERS from the
+                // tagged transcript (needs the written action items, so it runs here).
+                InferOwners(meeting);
 
                 // Low-memory: drop the 2.5GB model and re-warm the small recognizer so idle Toki
                 // is light and the next meeting is ready to record.
@@ -926,9 +1111,19 @@ public partial class App : Application
                 try
                 {
                     session.Start();
-                    // Stream live-finalized segments to the recording preview (marshalled to the UI thread).
+                    // Live preview to the recording view (marshalled to the UI thread). When the fast
+                    // streaming model is present it drives the preview (words as spoken + finalized lines);
+                    // otherwise the Parakeet WINDOW's finalized segments do (the ~15-21s fallback).
                     if (session.Live is { } live)
-                        live.SegmentFinalized += s => Current?.Dispatcher.BeginInvoke(() => LivePreview?.Invoke(s));
+                    {
+                        if (live.StreamingPreview)
+                        {
+                            live.PreviewPartial += (sp, text) => Current?.Dispatcher.BeginInvoke(() => LivePreviewPartial?.Invoke(sp, text));
+                            live.PreviewFinalized += s => Current?.Dispatcher.BeginInvoke(() => LivePreview?.Invoke(s));
+                        }
+                        else
+                            live.SegmentFinalized += s => Current?.Dispatcher.BeginInvoke(() => LivePreview?.Invoke(s));
+                    }
                 }
                 catch (Exception ex) { Log($"begin recording (bg): {ex.Message}"); }
             });
@@ -1034,6 +1229,7 @@ public partial class App : Application
     // ── push-to-talk on the notch: hold Ctrl+Alt+Space → listen; release → transcribe → answer.
     //    No always-on mic - the mic runs ONLY while held. ──
     bool _pttOn;
+    int _pttMisses;   // consecutive empty captures - drives the escalating "didn't catch that" copy
     Audio.MicCapture? _pttMic;
     string? _pttWav;
     Task? _pttMicStart;   // the off-thread mic start - PttStop awaits it before stopping
@@ -1127,10 +1323,18 @@ public partial class App : Application
         if (string.IsNullOrWhiteSpace(text))
         {
             // Empty capture is COMMON - never auto-reopen the mic here, or a run of empty captures
-            // becomes an endless "I didn't catch that" loop. Say it once; the user holds to retry.
-            Views.AskView.Instance?.Failed("I didn't catch that - hold Ctrl + Alt + Space and try again.");
+            // becomes an endless loop. ESCALATE rather than repeat (research: never a 3rd identical
+            // attempt): the first miss is a plain retry hint; a second in a row switches modes and
+            // points at the likely cause (muted mic) + a type-it fallback. AskView also dedupes an
+            // identical line, so even the same message never stacks.
+            _pttMisses++;
+            var msg = _pttMisses >= 2
+                ? "Still not hearing you. Check your mic is unmuted and close to you, or open the Library to type your question."
+                : "I didn't catch that - hold Ctrl + Alt + Space and try again.";
+            Views.AskView.Instance?.Failed(msg);
             return;
         }
+        _pttMisses = 0;
         await HandleNotchText(text!);
     }
 
@@ -1156,9 +1360,18 @@ public partial class App : Application
         using var cts = new System.Threading.CancellationTokenSource();
 
         // Flush the answer to the notch in PATCHES (~70ms) so words appear in chunks, not char-by-char.
+        // Text mutates IN PLACE every patch; the notch only RESIZES on a coarse throttle (~280ms, and
+        // only ever grows while streaming) so the window does not flicker by re-morphing 14x a second
+        // (research: hold the window, stream into a scrolling viewport, animate size on state changes).
         var flusher = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
             { Interval = TimeSpan.FromMilliseconds(70) };
-        flusher.Tick += (_, _) => { string cur; lock (gate) cur = acc.ToString(); Views.AskView.Instance?.SetAnswerText(StripMore(cur)); };
+        var sinceGrow = 0;
+        flusher.Tick += (_, _) =>
+        {
+            string cur; lock (gate) cur = acc.ToString();
+            Views.AskView.Instance?.SetAnswerText(StripMore(cur));
+            if (++sinceGrow >= 4) { sinceGrow = 0; GrowNotch(); }
+        };
         flusher.Start();
 
         try

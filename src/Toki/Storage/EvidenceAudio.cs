@@ -32,8 +32,10 @@ public static class EvidenceAudio
     /// makes every other clip less trusted.</summary>
     public const int MinMomentMs = 1500;
 
-    /// <summary>A hard ceiling. Evidence is a moment; anything longer is a recording.</summary>
-    const int MaxClipMs = 45_000;
+    /// <summary>A hard ceiling. Evidence is a MOMENT that refers to one note point, not the whole
+    /// utterance it sat in - a run-on utterance holding several points must not play in full for each.
+    /// (Was 45s, which let one point's clip cover a stretch that held every other point too.)</summary>
+    const int MaxClipMs = 12_000;
 
     /// <summary>Which file holds a given speaker's audio. Two streams, so the microphone and the
     /// meeting are separate recordings - and the line's own stream is the one that said it.</summary>
@@ -50,7 +52,7 @@ public static class EvidenceAudio
     /// the window (a crash-shortened recording is shorter than its transcript says).
     /// </summary>
     public static bool Available(MeetingRecord m, IReadOnlyList<TranscriptSegment> range,
-        IReadOnlyList<TranscriptSegment>? transcript = null)
+        IReadOnlyList<TranscriptSegment>? transcript = null, string? pointText = null)
     {
         if (range.Count == 0) return false;
         var speaker = range[0].Speaker;
@@ -67,7 +69,7 @@ public static class EvidenceAudio
 
         if (WavFor(m, speaker) is not { } wav) return false;
 
-        var (start, end) = Window(range, transcript);
+        var (start, end) = Window(range, transcript, pointText);
         if (end - start < MinMomentMs) return false;
         return end <= DurationMs(wav);
     }
@@ -76,11 +78,15 @@ public static class EvidenceAudio
         Available(m, new[] { segment });
 
     /// <summary>
-    /// The window a range of lines plays: lead-in before the first line, and the end snapped into the
-    /// silence before the same stream's next line when the transcript is available to find it.
+    /// The window a note point plays. Starts from the utterance span (lead-in before the first line,
+    /// end snapped into the silence before the same stream's next line), then - when the point's own
+    /// text is known - NARROWS to just the phrase inside the utterance that carries that point, so a
+    /// run-on utterance holding several points gives each point its own moment instead of the whole
+    /// stretch. Clips may then overlap only where two points genuinely share words; none swallows the
+    /// others. See <see cref="NarrowToPhrase"/>.
     /// </summary>
     public static (int StartMs, int EndMs) Window(IReadOnlyList<TranscriptSegment> range,
-        IReadOnlyList<TranscriptSegment>? transcript = null)
+        IReadOnlyList<TranscriptSegment>? transcript = null, string? pointText = null)
     {
         var startMs = range.Min(s => s.StartMs);
         var endMs = range.Max(s => s.EndMs);
@@ -99,12 +105,76 @@ public static class EvidenceAudio
         }
 
         end = Math.Max(start + 500, end);
+
+        // Narrow to the point's own phrase inside the utterance span.
+        if (NarrowToPhrase(range, pointText) is var (ps, pe))
+        {
+            var s = Math.Max(start, ps - LeadInMs);
+            var e = Math.Min(end, pe + TailMs);
+            if (e - s < MinMomentMs)   // a very tight phrase: grow to the moment floor, inside the base span
+            {
+                var need = MinMomentMs - (e - s);
+                s = Math.Max(start, s - need / 2);
+                e = Math.Min(end, e + need / 2);
+            }
+            if (e - s >= MinMomentMs) { start = s; end = e; }
+        }
+
         if (end - start > MaxClipMs) end = start + MaxClipMs;
         return (start, end);
     }
 
     public static (int StartMs, int EndMs) Window(TranscriptSegment segment) =>
         Window(new[] { segment });
+
+    /// <summary>
+    /// The time span, inside an utterance range, of the phrase that carries a note point's words -
+    /// or null when the point's words are not concentrated in a sub-part (the point is about the whole
+    /// utterance, or its text is unknown). We store per-UTTERANCE timestamps, not per-word, so word
+    /// times are distributed PROPORTIONALLY across each utterance's duration: crude, but enough to
+    /// keep a clip on the sentence the point came from rather than the paragraph around it. The
+    /// re-transcribe check in --evidencetest is what proves a narrowed clip still says its own words.
+    /// </summary>
+    static (int StartMs, int EndMs)? NarrowToPhrase(IReadOnlyList<TranscriptSegment> range, string? pointText)
+    {
+        if (string.IsNullOrWhiteSpace(pointText)) return null;
+        var want = Evidence.ContentWords(pointText);
+        if (want.Count < 2) return null;
+
+        var words = new List<(string? Fold, int Start, int End)>();
+        foreach (var seg in range)
+        {
+            var toks = seg.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (toks.Length == 0) continue;
+            var dur = Math.Max(1, seg.EndMs - seg.StartMs);
+            for (var i = 0; i < toks.Length; i++)
+                words.Add((Evidence.FoldWord(toks[i]),
+                    seg.StartMs + (int)((long)dur * i / toks.Length),
+                    seg.StartMs + (int)((long)dur * (i + 1) / toks.Length)));
+        }
+        if (words.Count == 0) return null;
+
+        int first = -1, last = -1;
+        var hit = new HashSet<string>();
+        for (var i = 0; i < words.Count; i++)
+            if (words[i].Fold is { } f && want.Contains(f)) { if (first < 0) first = i; last = i; hit.Add(f); }
+        if (first < 0) return null;
+        if (first == 0 && last == words.Count - 1) return null;   // spans the whole utterance: nothing to narrow
+
+        // CONFIDENCE GATE. Word times here are GUESSED (proportional across the utterance), so a
+        // narrowed cut is only trustworthy when the point's words are genuinely concentrated in this
+        // utterance. If under half of them are even present, the phrase we would cut to is a guess on
+        // a guess - keep the whole (capped) utterance clip, which at least plays the right moment,
+        // rather than a confident cut to the wrong second (a clip that played "Okay." for a real
+        // to-do). Perfect sub-utterance cuts need real per-word ASR timestamps; see the note below.
+        if ((double)hit.Count / want.Count < 0.5) return null;
+        return (words[first].Start, words[last].End);
+    }
+
+    // TODO (owner-gated, the proper fix): store the recogniser's per-WORD timestamps. Parakeet/sherpa
+    // already emit them (Transcriber groups tokens WITH times into segments and then discards the
+    // per-word grain). With word times a clip is cut at true word boundaries and every point gets an
+    // exact moment; proportional interpolation above is the honest best we can do until then.
 
     // WAV durations cached per path: Available runs during note render, and a WAV never grows after
     // the meeting ends, so the cache cannot go stale in the direction that matters.

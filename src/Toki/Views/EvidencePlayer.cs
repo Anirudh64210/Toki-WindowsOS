@@ -24,30 +24,36 @@ public sealed class EvidencePlayer : Button
 
     readonly MeetingRecord _meeting;
     readonly IReadOnlyList<TranscriptSegment> _range;
+    readonly string? _pointText;
     DispatcherTimer? _progress;
 
     /// <summary>
     /// Null unless playing is GUARANTEED to work: a deleted recording, an out-of-range moment,
     /// a range crossing streams, or a fragment below the minimum length all render nothing.
+    /// <paramref name="pointText"/> is the note line this clip belongs to; when given, the clip
+    /// narrows to just the phrase in the utterance that carries it (see EvidenceAudio.Window).
     /// </summary>
-    public static EvidencePlayer? For(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> range, double fontSize) =>
-        EvidenceAudio.Available(meeting, range, meeting.Transcript) ? new EvidencePlayer(meeting, range, fontSize) : null;
+    public static EvidencePlayer? For(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> range,
+        double fontSize, string? pointText = null) =>
+        EvidenceAudio.Available(meeting, range, meeting.Transcript, pointText)
+            ? new EvidencePlayer(meeting, range, fontSize, pointText) : null;
 
     public static EvidencePlayer? For(MeetingRecord meeting, TranscriptSegment segment, double fontSize) =>
         For(meeting, new[] { segment }, fontSize);
 
-    EvidencePlayer(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> range, double fontSize)
+    EvidencePlayer(MeetingRecord meeting, IReadOnlyList<TranscriptSegment> range, double fontSize, string? pointText = null)
     {
         _meeting = meeting;
         _range = range;
+        _pointText = pointText;
 
         // The glyph is a PATH, never a font character: fallback-font metrics (size, bearings,
-        // vertical position) are outside our control.
-        Content = PillParts.PlayGlyph("TextDim");
-        Style = (Style)Application.Current.Resources["EvidenceChip"];
+        // vertical position) are outside our control. Bare and quiet (no disc), see EvidencePlay.
+        Content = PillParts.PlayGlyph("TextMid");
+        Style = (Style)Application.Current.Resources["EvidencePlay"];
         ToolTip = "Hear this moment";
         VerticalAlignment = VerticalAlignment.Center;
-        Margin = new Thickness(5, 0, 0, 0);
+        Margin = new Thickness(7, 0, 0, 0);
 
         Click += (_, _) => Toggle();
         MouseRightButtonUp += (_, e) => { e.Handled = true; ShowMenu(); };
@@ -59,7 +65,7 @@ public sealed class EvidencePlayer : Button
         if (ReferenceEquals(_playing, this)) { StopAll(); return; }
         StopAll();
 
-        var (start, end) = EvidenceAudio.Window(_range, _meeting.Transcript);
+        var (start, end) = EvidenceAudio.Window(_range, _meeting.Transcript, _pointText);
         if (EvidenceAudio.WavFor(_meeting, _range[0].Speaker) is not { } wav) return;
         if (EvidenceAudio.Clip(wav, start, end) is not { } bytes) return;
 
@@ -104,7 +110,7 @@ public sealed class EvidencePlayer : Button
     {
         _progress?.Stop();
         _progress = null;
-        Content = PillParts.PlayGlyph("TextDim");
+        Content = PillParts.PlayGlyph("TextMid");
         ToolTip = "Hear this moment";
     }
 
@@ -119,7 +125,7 @@ public sealed class EvidencePlayer : Button
     {
         if (!ConsentToExport()) return;
 
-        var (start, end) = EvidenceAudio.Window(_range, _meeting.Transcript);
+        var (start, end) = EvidenceAudio.Window(_range, _meeting.Transcript, _pointText);
         if (EvidenceAudio.WavFor(_meeting, _range[0].Speaker) is not { } wav) return;
         if (EvidenceAudio.Clip(wav, start, end) is not { } bytes) return;
 

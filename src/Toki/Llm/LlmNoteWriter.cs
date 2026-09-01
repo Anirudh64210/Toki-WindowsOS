@@ -43,9 +43,14 @@ public sealed class LlmNoteWriter
         // meeting). Many windows → MAP each to a digest first, so the final pass fits in context.
         string source;
         bool sourceIsDigests;
+        // Digest text paired with the transcript range it came from. Stays empty when the meeting
+        // was written in one pass (nothing to attribute against) or when the digests had to be
+        // mapped again, where the ranges stop being trustworthy and are dropped rather than guessed.
+        var provenance = new List<Window>();
+
         if (chunks.Count == 1)
         {
-            source = chunks[0];
+            source = chunks[0].Text;
             sourceIsDigests = false;
         }
         else
@@ -58,9 +63,13 @@ public sealed class LlmNoteWriter
             var failed = 0;
             for (var i = 0; i < chunks.Count; i++)
             {
-                var d = await MapChunk(chunks[i], i + 1, chunks.Count, ct);
+                var d = await MapChunk(chunks[i].Text, i + 1, chunks.Count, ct);
                 if (d is null) { failed++; continue; }
-                if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d)) digests.Add(d);
+                if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d))
+                {
+                    digests.Add(d);
+                    provenance.Add(new Window(d, chunks[i].First, chunks[i].Last));
+                }
             }
             if (digests.Count == 0)
                 return failed > 0 ? heuristic          // could not read the meeting → the floor
@@ -83,6 +92,10 @@ public sealed class LlmNoteWriter
                 }
                 if (redigests.Count == 0) break;   // keep the level that worked
                 source = string.Join("\n", redigests);
+                // A digest of digests can no longer be traced to a line range without guessing,
+                // and a guessed provenance is worse than none: it points the reader confidently at
+                // the wrong moment. Drop it; those bullets fall back to text matching.
+                provenance.Clear();
             }
         }
 
@@ -124,16 +137,19 @@ public sealed class LlmNoteWriter
         // transcript opening) keeps the title on the subject; with no summary, title from the sections.
         result.Title = !string.IsNullOrWhiteSpace(note.Title) ? note.Title
             : await TitlePass(summary.Length > 0 ? summary : SectionDigest(result), ct);
-        return result;
+        // The prompt ASKS for short lines; this ENFORCES them. A model at temperature writes
+        // reported speech and hedges however firmly it is told not to, and the same pass runs on
+        // the heuristic floor, so both paths produce the same shape of bullet.
+        return Brevity.Tighten(result);
     }
 
     /// <summary>A second, narrower ask for just the summary, used when the combined pass skipped it.</summary>
     async Task<string?> SummaryPass(string content, bool contentIsDigests, CancellationToken ct)
     {
         var raw = await TextPass(
-            "In 2 to 4 dense, plain-English sentences, say what this meeting was about and what came of "
-            + "it. Capture real content from informal or wandering talk, but cut ALL filler, greetings "
-            + "and logistics. Reply with the sentences only - no heading, no bullets, no preamble.\n\n"
+            "In 1 to 2 short, plain-English sentences, say what this meeting was about and what came of "
+            + "it. Lead with the outcome. Capture real content from informal or wandering talk, but cut ALL filler, "
+            + "greetings and logistics. Reply with the sentences only - no heading, no bullets, no preamble.\n\n"
             + (contentIsDigests ? "Notes:\n" : "Transcript:\n") + content, 200, ct);
         return raw is null || IsNothing(raw) ? null : raw.Trim();
     }
@@ -194,8 +210,10 @@ public sealed class LlmNoteWriter
         var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
 
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
-            $"{s.ToUpperInvariant()}\n- up to 5 tight bullets for \"{s}\". Every bullet must carry information a busy "
-            + "person needs - drop anything vague, obvious, or logistical. Include this section ONLY if real content for it exists. "
+            $"{s.ToUpperInvariant()}\n- up to 5 SHORT bullets for \"{s}\", aim for 6 to 12 words each, one idea per bullet. "
+            + "Every bullet must carry information a busy person needs - drop anything vague, obvious, or logistical. "
+            + "Write it as a note, not a sentence of reported speech (no \"the team discussed\", no \"X said that\"). "
+            + "Include this section ONLY if real content for it exists. "
             + "If filling it would need you to infer, justify, or fill a gap, LEAVE THE WHOLE SECTION OUT - an "
             + "absent section is correct, an invented one is not."));
 
@@ -203,8 +221,9 @@ public sealed class LlmNoteWriter
             $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
             + "TITLE\n3 to 6 words, specific and concise, like a calendar event - no quotes, no \"Meeting\" prefix.\n\n"
-            + "SUMMARY\n2 to 4 dense, plain-English sentences: what the meeting was about and what came of it. Capture "
-            + "real content from informal or wandering talk, but cut ALL filler.\n\n"
+            + "SUMMARY\n1 to 2 short, plain-English sentences: what the meeting was about and what came of it. Lead with "
+            + "the outcome. Capture real content from informal or wandering talk, but cut ALL filler. No preamble like "
+            + "\"This meeting was about\".\n\n"
             + sectionSpec + "\n\n"
             + "ACTION ITEMS\n"
             + "- concrete follow-up tasks only, one per line as: task | owner: name | due: date\n"
@@ -373,26 +392,35 @@ public sealed class LlmNoteWriter
         return chunks;
     }
 
-    /// <summary>Group whole segments into windows under <paramref name="maxChars"/> each.</summary>
-    static List<string> Chunk(IReadOnlyList<TranscriptSegment> transcript, int maxChars)
+    /// <summary>One window of transcript handed to the model, WITH the line range it covers. The
+    /// range is the provenance: knowing which lines the model was reading when it wrote a bullet is
+    /// strictly better than recovering it afterwards by matching words.</summary>
+    internal sealed record Window(string Text, int First, int Last);
+
+    /// <summary>Group whole segments into windows under <paramref name="maxChars"/> each, keeping
+    /// the transcript line range each window covers.</summary>
+    static List<Window> Chunk(IReadOnlyList<TranscriptSegment> transcript, int maxChars)
     {
-        var chunks = new List<string>();
+        var chunks = new List<Window>();
         var sb = new StringBuilder();
-        foreach (var seg in transcript)
+        var first = 0;
+        for (var idx = 0; idx < transcript.Count; idx++)
         {
+            var seg = transcript[idx];
             // Label, not the raw stream: once the speakers have been told apart the writer sees real
             // names, which is what lets it attribute a to-do instead of guessing. On a fresh meeting
             // diarisation has not run yet, so this is still "You"/"Them" - the names arrive on a rewrite.
             var line = $"{seg.Label}: {seg.Text}";
             if (sb.Length > 0 && sb.Length + line.Length + 1 > maxChars)
             {
-                chunks.Add(sb.ToString());
+                chunks.Add(new Window(sb.ToString(), first, idx - 1));
                 sb.Clear();
+                first = idx;
             }
             if (sb.Length > 0) sb.Append('\n');
             sb.Append(line);
         }
-        if (sb.Length > 0) chunks.Add(sb.ToString());
+        if (sb.Length > 0) chunks.Add(new Window(sb.ToString(), first, transcript.Count - 1));
         return chunks;
     }
 

@@ -45,17 +45,13 @@ public partial class TokiBlob : UserControl
     }
 
     /// <summary>
-    /// Toki is drawn for a DARK notch; the near-white feet, crown wash and pale gold sparkles vanish
-    /// on a light bubble, so the colours that touch white get a light-theme value. The saturated
-    /// middle never changes - the character keeps its edges, not a new identity.
+    /// The body is ONE blue in both themes (see the XAML): a near-white foot and a pale crown wash
+    /// lost their edges against any light surface, so the character darkens rather than fades. Only
+    /// the sparkles still need a light value - pale gold on white is invisible.
     /// </summary>
     void ApplyThemeColours()
     {
         var light = Theme.ThemeManager.Current == Theme.AppTheme.Light;
-        BodyFoot.Color = C(light ? "#4FC0FF" : "#F0FAF9");
-        Crown0.Color = C(light ? "#59C7F0FC" : "#DBC7F0FC");
-        Crown1.Color = C(light ? "#3DC7F0FC" : "#B0C7F0FC");
-        Crown2.Color = C(light ? "#14C7F0FC" : "#33C7F0FC");
         // The sparkle brush lives in a resource dictionary (x:Name gives no field - reach it by
         // key); it is never frozen, so its stops can be recoloured.
         if (Sparkles.Resources["Gold"] is LinearGradientBrush gold && gold.GradientStops.Count >= 2)

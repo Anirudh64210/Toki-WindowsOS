@@ -3301,3 +3301,491 @@ enough to step smoothly or small enough in area to hide the steps.
 that existed only to rescale grain opacity, and now the glow layer too, so the control is three
 static layers with no lifetime. `Grad.Sweep` and the `CardGlow` token are removed rather than left
 unused. `GlassCard`'s `grain:` parameter is renamed `material:`.
+
+
+## Brevity is enforced, not requested (2026-08-23)
+
+**Decision: a deterministic tightening pass runs over every written note, on BOTH paths.**
+`Llm/Brevity.cs`, applied at the end of `LlmNoteWriter` and at the end of `NoteExtractor`.
+
+The owner's report was that the to-dos and deliverables read long and full of filler next to other
+notetakers. The prompt has asked for concision since the note writer was built, and it does not
+hold: a 4B model at sampling temperature writes reported speech ("Craig mentioned that the pilot
+runs four weeks") and hedges ("basically", "I think", "in order to") however firmly it is told not
+to. This is the same shape as the em-dash rule, where a prompt line was not enough and a scrubbing
+funnel was.
+
+What the research says, and why the fix is shaped this way. The meeting-summarization literature is
+clear that transcripts have low information density and that disfluency is what makes extracted
+utterances unreadable, so removing disfluency and fusing content is the standard remedy, not a
+stylistic preference. And the products the owner compares us against are short for a structural
+reason rather than a prompting one: a bullet is one line on a card, the owner's name lives in its
+own capsule beside the text, and the supporting detail lives behind a link to the transcript. The
+line does not have to carry any of it.
+
+So the pass: strip the reported-speech frame, strip hedges, drop the owner's name from an action
+whose row already prints it, then cap length. Three rules keep it honest.
+
+- **It only ever removes words.** No paraphrase, so it cannot invent.
+- **It refuses to mangle.** The cap keeps whole sentences while they fit, then cuts at a clause
+  boundary, and a line offering no clean cut is returned WHOLE. A readable long bullet beats a
+  bullet clipped mid-thought.
+- **A name that is not the owner is content, not a frame.** "Craig will review the contract" on an
+  item owned by Priya keeps Craig, because stripping him would attribute the work to the wrong
+  person.
+
+Caps: 14 words for an action, 22 for a bullet. Guarded by a probe verified failing without the pass.
+
+## The carry-forward matched on one word (2026-08-23)
+
+**Decision: "Open from previous meetings" requires distinctive overlap, not any overlap.**
+
+The matcher took the current meeting's title, split it into words of three letters or more, and
+accepted any earlier meeting within 45 days sharing ONE of them. The age cap had been added for
+exactly this reason, and the file's own comment warned that "a stale record hands its to-dos to
+every later meeting whose title shares one word with it", but the overlap rule itself was never
+tightened. In a real library where titles are "Pricing sync", "Design sync", "Weekly sync", that
+rule connects almost everything.
+
+Now: generic title words (sync, review, weekly, standup, call, catch-up, update, team, and the rest
+of that family) are removed before comparing, and a single shared word only carries a match when
+one side has nothing else to offer - a one-word project title like "PixelFlow" is a strong signal
+on its own, while one word in common between two three-word titles is a coincidence.
+
+The asymmetry is the same one the name corrector is tuned to: a missed carry-forward is a note that
+says nothing, a wrong one attributes somebody else's unfinished work to this meeting. Title text
+alone cannot be made reliable, so the other half of the answer is making CORRECTION cheap, which is
+the dismiss control the owner asked for (still to build).
+
+
+## How to know whether a matching change is an improvement (2026-08-23)
+
+**Decision: an evidence-linking change ships on a paired measurement, never on an argument.**
+`--linktest` is the instrument; `Evidence.WeightByRarity` is the first thing it judged, and it said no.
+
+The problem is that you cannot eyeball a retrieval change. Whatever the matcher returns looks
+plausible, because it returns the line that shares the most words with the bullet, and shared words
+are exactly what makes a line look relevant. There is no independent answer to compare against.
+
+Information retrieval's answer is a ground truth set plus precision@1, and where nobody has
+hand-labelled anything, SYNTHETIC queries whose correct answer is known by construction. So:
+take a real transcript line, keep some fraction of its content words, add words borrowed from
+elsewhere in the same meeting (a summary generalises and borrows vocabulary, and the borrowed words
+are the distractors), and the line it came from is the answer. Deterministic seed, because a
+benchmark that resamples between runs cannot separate an improvement from a different sample.
+
+Three design decisions that make it honest:
+
+- **TWO conditions, both reported, chosen before looking at either.** The first attempt used one
+  easy condition and both scorers hit 94%, a ceiling where nothing can be learned. The hard
+  condition (keep a third of the words, three distractors) is the case that matters, because a real
+  bullet is abstractive. Reporting only the flattering condition, or only the one that agrees with
+  you, is how a measurement becomes an argument.
+- **Paired, on identical cases, judged by McNemar.** Only the cases where the two scorers DISAGREE
+  carry information; the ones they both get right or both get wrong say nothing about which is
+  better. Continuity-corrected chi-square, 3.84 for p<0.05.
+- **The absolute number is not a quality claim.** A synthetic bullet is built from its source line's
+  own words, which is the friendliest possible case for word overlap. Only the paired delta is a
+  claim.
+
+**The result, which contradicted the reasoning.** Rarity weighting (inverse document frequency over
+the meeting's own lines) is intuitively right: "PixelFlow" said three times should identify a moment
+better than "deck" said twenty. Measured over 400 cases per condition: easy, identical with zero
+disagreements; hard, flat 82.9% versus weighted 81.9%, nine disagreements, chi-square 1.78. Noise,
+trending slightly the wrong way. It stays off.
+
+**The remaining gap, stated rather than papered over.** Synthetic queries are bags of words with no
+syntax; real bullets are sentences that may share almost nothing with their source. The true gold
+standard is a hand-labelled set of REAL bullets, which is the next step if link quality matters
+enough to spend the owner's attention on. And the deeper fix is architectural rather than
+algorithmic: record provenance AT GENERATION (which transcript chunk a bullet came from) instead of
+recovering it afterwards by text similarity, which is what the attribution literature recommends and
+what Otter does by keeping word timings rather than matching summary text.
+
+
+## Provenance beats recovery (2026-08-23)
+
+**Decision: a written line records the transcript range the model was READING when it wrote it, and
+the evidence link searches that range instead of the whole meeting.**
+
+Recovering provenance after the fact is a search for the line that shares the most words with a
+bullet, and shared words are exactly what makes a wrong line look right. A meeting that says
+"send the pricing deck" twice has two equally good answers and no way to choose. The attribution
+literature says the same thing about citations in generated text, and it is what Otter does by
+keeping word timings rather than matching summary text back to audio.
+
+The note writer already had the answer and threw it away. It reads a long meeting in windows, maps
+each to a digest, then writes the note from the digests, so every digest has a known line range.
+Now: `Chunk` returns a `Window(Text, First, Last)`; the digests keep their range; after the final
+note is parsed, each bullet and to-do is matched against the DIGESTS (two short texts in the same
+vocabulary, a far easier match than a summary against raw speech) and inherits that digest's range.
+`Evidence.BestRange` takes it as a hint and searches only those lines, with one line of slack either
+side because a chunk boundary can fall mid-thought.
+
+Three refusals keep it honest:
+
+- **A digest match under a third of the bullet's words records nothing.** A confident wrong range is
+  worse than no range, and no range simply falls back to the old search.
+- **A second reduce round drops provenance entirely.** A digest of digests cannot be traced to a
+  line range without guessing.
+- **A nonsense stored range falls back** rather than returning nothing, so a hand-edited note or a
+  future schema change cannot silently remove every link.
+
+**Measured, paired, on identical cases** (`--linktest`, 400 synthetic bullets per condition):
+
+| Condition | Whole transcript | With provenance | McNemar |
+|---|---|---|---|
+| easy (half the words kept) | 95.9% | 97.7% | +7, chi 5.14, p<0.05 |
+| hard (a third kept, 3 distractors) | 82.9% | 87.5% | +16, chi 14.06, p<0.01 |
+
+Zero cases got worse in either condition, which is the property that matters: it is a smaller
+haystack, not a different guess. Compare with rarity weighting, measured the same way on the same
+day, which was noise and stayed off.
+
+Storage: `action_items` gained nullable `src_first`/`src_last`; `NoteSection` gained an
+index-aligned `Sources` list inside the existing `sections_json`. Both are null on every note
+written before this, which reads as "no record" and costs nothing.
+
+## One way to move the caret (2026-08-23)
+
+**Decision.** `NoteEditor.SetCaret(TextPointer)` is the only place in the editor that assigns
+`Editor.CaretPosition`. Nothing else may.
+
+**Why.** WPF's `TextEditor` keeps a `_suggestedX`, the horizontal position a vertical arrow key
+aims to preserve, and it is only reset when the user moves the caret, never when code does
+(dotnet/wpf#3757). Every programmatic caret move therefore left a stale column behind, and the next
+Up or Down jumped to it. Measured at 67.3px in, Down landed at 5.0px.
+
+Scattering the reset across the eight call sites would have worked once and rotted the first time
+somebody added a ninth. Making it impossible to move the caret without the reset is the version that
+survives, and it is the same rule as `TryMarker`: one definition, no second way to do it.
+
+**Cost.** The field is internal, so `ClearSuggestedX` finds it by reflection, probing both the
+`TextEditor` property and the `_textEditor` field, and caches the lookup. It is wrapped in a
+try/catch that degrades to plain WPF behaviour: a future .NET that renames the field costs the
+column, not the note.
+
+**Guard.** `--notetest` measures the caret's x before and after a real `MoveDownByLine`, with a
+floor on the starting x so it cannot pass at zero. Reverting `SetCaret` to a bare assignment fails
+it.
+
+**Researched, open, and deliberately not decided here** (see the README entry): Tab's meaning inside
+a note, Enter and Backspace over a multi-block selection, and skipping the derived repair pass while
+an IME composition is active.
+
+
+## The marker's box is a clip, not a hint (2026-08-24)
+
+A note's bullet, number and tick box are `InlineUIContainer`s carried in the paragraph's inlines, so
+they can never be read back as part of the line's text. Their host `Border` used to be given an
+explicit `Height` of the body text's cap height, on the reasoning that a marker should occupy the
+same optical band as the capitals beside it.
+
+**The finding: an `InlineUIContainer` CLIPS its child to the host's layout box.** The Border does not
+draw a clip and `ClipToBounds` is false; the clip comes from the text line's hosting of the element.
+So the Height was not a hint about where to sit, it was a knife. At a 16px body the host was 11px and
+the tick box is 24px: thirteen pixels of every box were cut away, and the top of every digit with
+them. Removing the Height alone proved it in one render.
+
+**The rule this leaves behind: never give a marker's host a Height.** Sizing a container to less than
+its child, anywhere inside a FlowDocument, deletes ink rather than compressing it.
+
+**How the marker lands on the band instead.** The host sizes to its child, `BaselineAlignment.Baseline`
+puts the host's bottom on the text baseline, and a `TranslateTransform` on the host sinks it by half
+the difference between the host and the cap height. A transform moves INK without moving the layout
+box, which is the only correction that does not re-create the clip. The number is the exception: a
+dot and a tick box are shapes whose ink is centred in their box, but digits stand on a baseline with
+the font's descent as empty space below them, so the number rides back up against that sink and is
+aligned by baseline.
+
+**And the row height comes from the paragraph, not the marker.** A marked line is pinned with
+`LineStackingStrategy.BlockLineHeight` to the body text's natural line height, so a marker taller than
+the line overflows it (the line does not clip; only the host ever did) instead of stretching it. Before
+this, a numbered or to-do row measured 28px against a bullet's 21.3px and a mixed list came out ragged.
+
+**Superseded, dated:** the comment on `MakeMarker` claiming the host "is then given exactly the cap
+height, so the marker occupies the same optical band" described a mechanism that had never worked as a
+picture. Kept here because the INTENT was right and is preserved; only the mechanism changed.
+
+**A second finding, not acted on.** `LineStackingStrategy.MaxHeight` is a FlowDocument's default and it
+ignores `LineHeight` entirely, sizing each line to its own content. `Editor.Document.LineHeight` has
+therefore been inert since it was written: the note's documented 1.5em leading has never been in force
+and the real leading is the typeface's own (~1.33em at every size). Marked lines are pinned to the real
+one, so nothing on screen moved. Raising the whole document to a true 1.5em is a visible change to every
+note ever written and is left as the owner's decision.
+
+## What a test measures, and what it does not (2026-08-24)
+
+`--notetest` asserted that each marker's centre sat on the text's cap band, to a tolerance of 0.6px, and
+reported 0.10px for months while two thirds of every tick box was being clipped away. The assertion was
+true. It was also the wrong question, and the mutation probe that guarded it (reverting the alignment)
+could not fail in the new way because centring and clipping are independent.
+
+The check added beside it asks the second question: measure the marker with NOTHING constraining it
+(`Measure` at infinity, then put the layout back) and compare to the box it was given. Reading
+`DesiredSize` as it stands is useless here, because the constraint has already clamped it - the first
+version of this check did exactly that and passed against the unfixed code.
+
+**The shape to look for:** when a check reports a property of an element (position, size, count), ask
+what it would still report if the element were invisible, clipped, or off screen. If the answer is "the
+same", the check is measuring a model of the product.
+
+The same gap existed in the pictures. The render harness photographed the note page only in a narrow
+three-column window, where a centred measure and a left-aligned one look identical, and it had no
+picture of a template at all. Both are now shot: `hub-manual-note-wide.png`, `hub-manual-note-blank.png`
+and `NoteEditor-template.png`. A page only tests as wide as you photograph it.
+
+**Harness gotcha found doing it:** after changing a window's Width, `RenderTargetBitmap` photographs an
+empty panel even though the content has arranged correctly (measured at 600x775 inside a 1184px pane).
+It draws what has been RENDERED, not what has been arranged. Pumping the dispatcher to
+`DispatcherPriority.Render` before the shot is what puts the text on the visual.
+
+## One commit path, or the mouse ships a different product (2026-08-24)
+
+The slash menu's typed text ("/todo", "/standup template") was taken back out of the document by the
+Return case in `NoteEditor.OnKey`. The row's own Click handler closed the menu and ran the command. Two
+ways to choose a command, one cleanup, so every command picked with a pointer left its "/" in the
+writing - and picking a template with the mouse is exactly how a person picks a template.
+
+`SlashMenu.Run` is now the single path both go through, and the cleanup is a callback the menu owns
+rather than something a caller has to remember. The self-test drives a real row Click, because a test
+that only ever presses Enter cannot see a bug that only the mouse reaches.
+
+## The canvas measured against the references (2026-08-24, second pass)
+
+The owner's follow-up was that the canvas still did not feel like Apple Notes, Notion, Notability or
+Notepad, and asked why. Audited against the numbers already measured from Notion's production CSS in
+`.claude/skills/block-editor/SKILL.md` §12. Four deltas, all now closed.
+
+**1. The markers did not share a left edge.** `MakeMarker` right-aligned every marker inside the
+gutter, on the reasoning that a constant gap to the text is what makes a list even. MEASURED: a
+bullet's ink started at 24.0px, a number's at 19.6px and a tick box's at 8.0px - a 16px spread down
+the left of any mixed list, against headings and paragraphs that all start at 0. Right-alignment is
+the correct rule for NUMBERS ALONE (so "9." and "10." end flush), and the skill said so; it was
+applied to all three. Now every marker is left-aligned on the text margin, which is one left edge for
+the whole canvas. The text still starts at a fixed column, so nothing after the marker moved.
+Guarded by "every marker starts on the same left edge"; reverting to Right fails it.
+
+**2. The marker column was 1.75em.** Notion's measured column is 24px at a 16px body. `MarkerRatio`
+is 1.5 now, which is that number as a ratio.
+
+**3. The leading was the typeface's, not the document's.** Recorded in the entry above: a
+FlowDocument's default `MaxHeight` stacking ignores `LineHeight`, so the note's stated 1.5em had
+never applied and the real leading was ~1.33em. Every kind now sets `BlockLineHeight` explicitly:
+body and list items at 1.5em, headings at 1.3 of their own size (a heading wants tighter leading or a
+two-line title reads unstitched). This DOES re-space every existing note, deliberately, and it is the
+single largest reason a page of text reads as calm.
+
+**4. A heading owned space below it as well as above.** Notion's rule, measured, is that the heading
+owns the space ABOVE it and nothing owns the space below. Toki had 1.75em above and 0.62em below, so
+a heading followed by an empty line - which is exactly what a template is - opened a gap of nearly
+seventy pixels that read as a hole in the page. Below is 0 now.
+
+**SUPERSEDED, dated 2026-08-24: "a blank line is a beat, not a full empty row."** A `Blank` was drawn
+at 9/13 of a line. The intent was that pressing Enter twice should give a small breath rather than a
+canyon. In use it was neither predictable nor clickable, and it is not what any editor a person has
+already learned does - Notepad, Apple Notes, Notion and Word all give a full empty line. The owner
+asked for a notepad. A blank line is a full line now. The original reasoning is kept here because it
+is why the smaller value existed, and if a future pass wants a tighter beat it should come from the
+paragraph gap, not from a line that the caret has to live on.
+
+
+## Ask reaches hand-written notes (2026-08-24)
+
+The owner asked whether manual notes could be queried, or at least retrieved. They now can, and the
+line drawn is deliberate.
+
+**Retrieval is open; enumeration is not.**
+
+- `SearchRelevant` (FTS content search) and `TitleMatchIds` no longer filter on `kind`. A note is
+  found by what it SAYS and what it is CALLED, which is how a person looks for something they wrote.
+- `MeetingTimes` - which backs `LatestMeetingIds`, `OldestMeetingIds` and `MeetingIdsInRange`, and
+  through them "my last meeting", "how many meetings did I have" and "meetings last week" - is STILL
+  `kind='Meeting'`, on purpose. A hand-written note is not a meeting, and counting one would make an
+  answer the user can check against their own calendar wrong. A miss is recoverable; a confidently
+  wrong count is not.
+
+**The bug this closes is worse than "cannot find".** The router's evidence probe used the same two
+filtered queries, so a question whose only answer was in a hand-written note was classified as a
+GENERAL turn and answered from the model's parametric knowledge with no citation. Not an empty
+result: a confident answer about something else. Opening the two content queries fixes the probe as a
+side effect, because it is the same call.
+
+**`BuildContext` had to change too, and this was the trap.** It renders Tldr, sections and actions -
+none of which a manual note has, all of it being in `Body`. Letting notes through retrieval WITHOUT
+this would have retrieved a note and then cited it as empty, which is the "wrong evidence is worse
+than none" failure in its purest form. A manual note now renders its body, labelled "(your own
+note)", so the assistant can say "in your note" instead of implying somebody said it out loud.
+
+**`VisibleMeeting` also required `Kind: MeetingKind.Meeting`**, so opening your own note in the
+Library and asking "summarise this" grounded on nothing at all. It accepts any viewed record now.
+
+**Sticky notes remain excluded** and that stays deliberate: they live in their own tables, are absent
+from the `FtsSelect` definition, and are the one surface Toki never reads.
+
+**Guard:** `--dbtest` asserts a hand-written note is reachable by text and by title AND is absent
+from `LatestMeetingIds` and `MeetingIdsInRange`. Putting either `kind` filter back fails it.
+
+## Acting on the taste audit (2026-08-24)
+
+Applied from `docs/design-audit-2026-08-24.md`. What was NOT applied is listed after, with reasons -
+the audit is a report, and a review that only produces additions was not a review.
+
+**Hierarchy.** The hub Ask greeting dropped from 30px to 19px. It was the largest type in the window
+and the only element carrying no information; the suggestion chips it was shouting over are the reason
+the page exists. Demoted, not replaced - the rule is that emphasis comes from de-emphasising.
+
+**Narration deleted.** `LandingHint` was "Your meeting assistant." - one line telling somebody looking
+at Toki what Toki is. The constant is now empty (the slot still carries voice hints). The "Appearance"
+caption "How Toki looks and what it shows in a share." is gone; its first half restated the heading and
+its second half was real information, which has moved onto the "Show Toki in screen recordings" row as
+a CONSEQUENCE ("Off keeps Toki out of screen shares and recordings"), which is what helper text is for.
+
+**Voice.** The notch greeting lost its exclamation mark - the hub's version ended in a full stop and
+the notch's did not, so one sentence had two voices depending on the surface. "New Chat" became "New
+chat": Title Case On Every Label reads as a template.
+
+**Templates rebuilt as rows.** Each template was a rounded card with 16px of padding, which put every
+template's text 16px right of the page title above it - two left edges in one column of content. The
+cards are gone: space and a hairline separate them, and the page now sits on one gutter. The section
+names are plain text rather than a row of grey pills, because they never change and none of them is
+clickable ("a constant is a label"), and nine identical chip rows flattened the page so nothing could
+rank. The current default now carries a "Default" tag, which is a badge whose value actually changes,
+and the all-caps "DEFAULT SHAPE FOR NEW MEETINGS" became sentence case on the same gutter.
+
+**The loader names its stage.** `App.SummarizeStage` is set to "Transcribing" and then "Writing your
+notes", and `SummarizingView` reads it. The wait was a single unchanging "Tidying up your notes" across
+transcription plus several local-model calls, which on a long meeting is minutes and is
+indistinguishable from a hung app. NO time estimate is shown: one would have to be measured, and a
+fabricated estimate is the same lie as a progress bar that tracks nothing.
+
+### Deliberately not changed
+
+- **The icon-plus-label buttons on notch Home.** The audit flags an icon repeating its own label. Icon
+  plus label on a primary action is a convention users arrive with, the notch is glanceable-first, and
+  the skill explicitly yields to platform convention. Recorded so it stays a decision.
+- **Green Settings toggles and the pink Summarizing sliver.** Both are second meanings for colours the
+  system has already assigned (green=decisions, pink=questions). Green-for-on is also a strong platform
+  convention, so this is a choice between two conventions and it belongs to the owner, not to a pass
+  that was fixing a note editor.
+- **Ragged suggestion chips on hub Ask.** Content-sized pills that wrap are normal; forcing a grid
+  would cost more than it buys.
+- **notch Home's three actions in two treatments.** Real finding, but the fix is a layout redesign of
+  the product's front door, not a refinement, and it needs the owner's eyes on a proposal first.
+
+
+## A size floor is not a size (2026-08-24)
+
+`PillWindow.ContentHeight` returns `Math.Max(SizesHeight, measuredContent + BottomBreath)` for every
+auto-height page. The `Sizes` table height is therefore a FLOOR and never a cap, which is correct and
+is what lets a page grow, but it means a floor set ABOVE a page's real content pads the card out with
+space the page never uses.
+
+Onboarding sat at a floor of 250 while its three steps measure 203, 227 and 152: up to 98px of dead
+card on the last step, and 47 on the first, which is the one the owner reported. The floor is 130 now,
+low enough that the measure always wins and high enough to guard a measure that returns nothing.
+
+**The general shape, and why no test saw it.** Every check around panel sizing asked whether a page was
+CLIPPED - whether the out-of-tree measure under-reported the true arranged height. Nothing asked the
+opposite question. `--measuretest` now walks every auto-height state, compares its `Sizes` floor
+against its real measured content, and names the number of dead pixels. Reverting Onboarding to 250
+prints "DEAD SPACE 47px (needs 203, floor 250)" and fails the run.
+
+This is the same failure shape as the clipped note marker earlier the same day: an assertion that is
+accurate about the thing it measures, and silent about the thing that is wrong. Ask what a check would
+still report if the element were invisible, clipped, off screen, or floating in dead space.
+
+## The heuristic floor must be honest, not just present (2026-08-25)
+
+A recent meeting's summary and to-dos were its opening lines of conversation, verbatim. The diagnosis
+was two failures stacked, and both matter:
+
+- **Trigger:** the on-device model failed to load that session with `The type initializer for
+  'LLama.Native.NativeApi' threw`. That is the llama.cpp/Vulkan NATIVE backend failing to
+  initialize. A .NET type initializer that throws is cached for the life of the process, so once it
+  fires, `LlmService._localFailed` sticks and EVERY meeting that session drops to the floor. This is
+  why the leak "kept coming back": it is intermittent at the GPU/driver level and total once tripped.
+- **Leak:** the floor (`NoteExtractor`) was itself dishonest. Its TL;DR concatenated the first ~140
+  chars of speech, and its to-do rule accepted any sentence that CONTAINED an action word - which
+  the brevity pass then truncated into fragments. The model path had already been taught that raw
+  first lines are not a summary (leave it empty; the renderer drops it); the floor never learned it.
+
+Decisions:
+
+1. **The floor emits no summary** (empty) and only accepts a to-do that is SHAPED like one - a
+   commitment (`I'll`, `will`, `need to`, `action item`, ...) or an imperative opener (`send`, `fix`,
+   `review`, ...). A statement of fact is not a task. This mirrors the model path exactly, so the two
+   can no longer diverge. Guarded by two mutation probes in `NoteExtractorTests`.
+2. **A native poisoning is distinguished from a transient failure** (`LlmService.LocalPoisoned`), and
+   `RetryLocal` / `App.RegenerateNotesAsync` clear the stuck flag and re-attempt. A transient failure
+   (busy GPU) recovers in-process; a poisoning cannot (the exception is cached) and the banner says
+   to restart. There is no way to un-poison a static type initializer without a new process, so the
+   honest floor is the real guarantee - the retry is the upgrade path, not the safety net.
+3. **The fallback is surfaced, never silent** (`NoteRenderer.FallbackBanner`): a floor note that a
+   model could improve shows "Basic notes" + Show transcript + Try again; API-mode-without-a-key
+   shows a privacy-clean on-device nudge (not an error - local notes are good). A note the user
+   deliberately set to Heuristic-only gets neither (CanWrite is false).
+4. **Ghost mode is reachable from the recording bar** (an eye / eye-off puck via `PillParts.Eye`/
+   `EyeOff`), for the case where recording was started before ghost mode was turned on. It calls the
+   same `App.SetGhostMode` the Settings toggle does, which re-asserts WDA_EXCLUDEFROMCAPTURE live.
+
+The recurring shape, worth naming: a fallback that dresses raw input up as finished output is worse
+than one that admits it is a fallback. When the good path is hardened against a mistake, harden the
+degraded path against the SAME mistake - it is the one that runs when things are already going wrong.
+
+## Evidence clips: precision, not non-overlap; and the note page's one gutter (2026-08-25)
+
+Two owner complaints, one about the audio behind a note point and one about the note layout.
+
+**Audio.** The 2026-08-24 `DisjointRanges` (make every point's clip use DIFFERENT transcript lines so
+none overlap) was the wrong model and is removed. It is a greedy assignment: when several points come
+out of one run-on utterance it gives the FIRST point the whole stretch and the rest scraps or nothing
+("the first to-do's clip covers all the to-dos"). The right model is PRECISION - each point resolves
+on its own (`Evidence.BestRange`), and `EvidenceAudio.Window` NARROWS the clip to the phrase inside the
+utterance that carries the point. Overlap is then natural and small (two points that share words), never
+containment. `MaxClipMs` dropped 45s -> 12s: a clip is a moment, not the utterance.
+
+The narrowing distributes word times PROPORTIONALLY across each utterance's duration, because we store
+per-UTTERANCE timestamps, not per-word. That is a guess, so it is gated: narrow only when >= half the
+point's words are actually in the utterance, else keep the whole (capped) utterance clip - a clip that
+plays the right moment beats a confident cut to the wrong second (measured: a to-do that played "Okay.").
+`--evidencetest` re-transcribes each cut and now flags CONTAINMENT (one clip inside another) as the
+defect, not any overlap. HONEST LIMIT: for several to-dos spoken in one breath, sub-second cuts need the
+recogniser's per-WORD timestamps, which Parakeet/sherpa emit and we currently discard when grouping
+tokens into segments. Storing them is the proper fix (schema + transcriber + a migration) - owner-gated
+TODO left in `EvidenceAudio`.
+
+**Play control + jump.** The play button was a 20px filled disc with a rim (a bead in the sentence);
+it is now `EvidencePlay` - a bare triangle, dim at rest, brightening on hover, with the house
+press-compress. The "↳" jump-to-transcript link is removed: one quiet evidence affordance per line, not
+two.
+
+**The note template's one gutter.** The section heading sat at the far left while its rows sat inside a
+3px accent RAIL indented ~28px - two left edges, "two documents stapled together" (symmetry-and-spacing
+skill). The rail is gone; a section is now its coloured header plus its rows at the SAME gutter, grouped
+by space (heading-above 24, heading-below 8, rows 8) - space groups, a line is a last resort. Action
+checkboxes are centre-aligned on the text line (were top-aligned, which read as "the tick is not on the
+same line as the words"). One renderer, so the notch and the Library change together.
+
+## Tight deliverables + delete-only transcript filler (2026-08-25)
+
+**Deliverables are Tight (owner's pick over Balanced / summary-only).** The concise pass (`Brevity`) only
+ever tightened bullets, decisions, questions and actions - it SKIPPED the summary, so `note.Tldr` stayed
+whatever the model wrote (a 3-4 sentence corporate paragraph). Now `Brevity.Tighten` also runs
+`TightenSummary`: strip spoken hedges, keep a 2-sentence outcome-first lead, leave empty-empty for the
+renderer to drop, and (unlike a bullet) NEVER strip a reported-speech frame, since "The team decided ..."
+is the right shape for a summary. Backstop caps dropped: bullet 22->15 words, action 14->11. The writer
+prompt now asks for 6-12 word bullets, outcome-first, no reported-speech frame, and a 1-2 sentence
+summary. The same pass runs on the LLM note and the heuristic floor so the two cannot drift.
+
+**Transcript filler: the safe floor, not a rewrite.** Researched Wispr Flow, Otter, Granola (agents, per
+the standing rule). Verdict: Otter deletes disfluencies at the recognition layer (no verbatim mode);
+Wispr goes further and re-tones, and reviewers catch it "improving" what was said; Granola keeps the
+transcript verbatim as auditable ground truth and cleans only the notes. Toki IS Granola's model - the
+transcript is the ground truth evidence clips are cut from, so a rewrite would desync the clips and break
+the "don't invent" rule. `Readability.cs` therefore extends only DELETE-ONLY cleanup: the er/eh/ah
+interjection family joins um/uh, and comma-parenthetical discourse fillers ("it was, you know, huge" ->
+"it was huge") are dropped. Discourse removal is comma-bounded ONLY - space-bounded "you know" would eat
+"do you know what time"; the literal uses have no comma and are untouched, so the exact wording of
+everything real is preserved and evidence links still match. Genuinely rambling speech and side-talk that
+was actually said stays: faithful, like Granola. Every change ships a mutation probe (14 new tests).

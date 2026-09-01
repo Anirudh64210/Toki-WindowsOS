@@ -29,7 +29,7 @@ public partial class LibraryView : UserControl
         try { items = App.Store.List(string.IsNullOrWhiteSpace(SearchBox.Text) ? null : SearchBox.Text); }
         catch (Exception ex) { App.Log($"library load failed: {ex.Message}"); items = []; }
 
-        CountLabel.Text = items.Count == 0 ? "nothing yet · all on this PC" : $"{items.Count} · all on this PC";
+        CountLabel.Text = items.Count == 0 ? "nothing yet" : items.Count.ToString();
         if (items.Count == 0)
         {
             Cards.Children.Add(new TextBlock

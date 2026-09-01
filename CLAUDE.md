@@ -52,6 +52,20 @@ these rules are how we stay aligned:
   (build log), `ARCHITECTURE.md` (decisions + rationale), `mansplain/` (plain-language story).
 - Never add `Microsoft.ML.OnnxRuntime` (native backend conflict with sherpa-onnx).
 
+## The knowledge base is append-and-refine, never overwrite
+
+`.claude/skills/`, `ARCHITECTURE.md` and the memory files are the record of things already paid for
+in bugs. When research or a new decision touches one:
+
+- ADD the refinement beside the existing rule, and say what changed and why. Never delete a finding
+  to make room for a newer one.
+- If a new finding CONTRADICTS an old one, keep BOTH: mark the old superseded, dated, with the
+  evidence that overturned it. The reason a rule stopped being right is usually the more valuable
+  half.
+- Guardrail: before editing a skill or a lessons file, re-read the section you are about to touch.
+  If the edit REMOVES more than it adds, stop and ask.
+- Research is a licence to refine, never to rewrite.
+
 ## Design - the Figma file is the boss
 
 - **Reference**: Figma file `Udtb5KHB2iTLIVP5FhKaSl`, node `288:4` ("Redesign by SKz") - THE
@@ -63,7 +77,17 @@ these rules are how we stay aligned:
   teal=actions, blue=people, green=decisions, pink=questions, coral=record CTA,
   #FF453A/#FF3B30 (Apple system red)=Stop only.
   Tokens live in `Theme/Theme.xaml` + `Theme/ThemeManager.cs` (Color+brush pairs, theme-swapped).
-- **Motion & feel**: apply `.claude/skills/motion-and-feel/SKILL.md` on EVERY visual change. The
+- **Motion & feel**: apply `.claude/skills/motion-and-feel/SKILL.md` on EVERY visual change - the HOUSE
+  style, wins on conflict. Beside it, `.claude/skills/apple-design-motion/SKILL.md` (added 2026-08-26,
+  MIT, adapted from s1gmamale1/apple-design-motion) is the source-of-NUMBERS layer: the documented Apple
+  duration bands, spring presets, the enter/exit asymmetry, stagger timing, press states, reduce-motion,
+  and the haptic/feedback grammar. Use it to catch a curve that drifted, never to slow Toki's deliberate
+  snappiness ("premium speed"): a 2026-08-26 audit found `Motion.cs` already well-aligned + snappier than
+  Apple's midpoints, by design.
+- **Spacing & symmetry**: `.claude/skills/symmetry-and-spacing/SKILL.md` before laying anything out
+  (one scale, one gutter, heading-below 8 / heading-above 24, optical centring, concentric radii).
+- **Taste**: `.claude/skills/design-taste/SKILL.md` before shipping a screen - the audit that
+  catches generated-looking UI (flat hierarchy, self-narrating captions, decoration with no meaning). The
   short version: animate only transforms/opacity/clip; no Effect inside an animated subtree;
   curves from `Theme/Motion.cs`; every button compresses on press; exits ~70% of enters.
 - **The notch architecture**: the window is BIGGER than the card (mascot gutter left, shadow pads
@@ -84,7 +108,8 @@ these rules are how we stay aligned:
 | "You" audio | WASAPI mic capture via NAudio |
 | Detection | Registry mic-consent-store poll, 2.5s; DENYLIST not allowlist; debounce 2 polls |
 | Final ASR | Parakeet TDT 0.6b v2 (ONNX int8) via sherpa-onnx, whole-file per stream |
-| ASR fallback | whisper.cpp small.en - only on ERROR, never on silence |
+| ASR fallback | whisper.cpp small.en - only on ERROR, never on silence (still a stub) |
+| Ask-by-voice ASR | Whisper base.en (ONNX via sherpa-onnx, no new native lib) - push-to-talk clips ONLY; robust on 1-2 word utterances where Parakeet collapses. Added 2026-08-25 (owner-chosen); Parakeet stays the meeting engine |
 | Name repair | Post-ASR correction (`NameCorrector`, corpus-wide + trusted names), never decode-time hotwords |
 | Diarisation | ASR-guided (one embedding per utterance), AVERAGE linkage, threshold 0.80, attendee-count prior; NO persistent voiceprints (owner decision) |
 | Notes LLM | Qwen3-4B-Instruct Q4_K_M via LLamaSharp, Vulkan, VRAM-auto GPU offload; heuristic extraction always available as the floor |
@@ -121,8 +146,12 @@ these rules are how we stay aligned:
 ```
 "C:\Program Files\dotnet\dotnet.exe" build Toki.sln
 "C:\Program Files\dotnet\dotnet.exe" test Toki.sln
-# publish the owner's test build (close the running Toki first - check for a live recording):
-dotnet publish src/Toki/Toki.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+# publish the owner's test build (close the running Toki first - check for a live recording).
+# IncludeNativeLibrariesForSelfExtract is NOT optional: without it the publish drops eight native
+# DLLs (WPF, sqlite, onnxruntime, sherpa) BESIDE the exe instead of inside it, and the exe on its
+# own dies with DllNotFoundException at SetWindowLongPtrWndProc the moment it makes a window.
+# MEASURED 2026-08-23: 191MB exe + loose DLLs (crashes alone) vs one 375MB exe that runs standalone.
+dotnet publish src/Toki/Toki.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist
 ```
 
 Self-test flags on the built exe (headless, exit pass/fail) - run the relevant ones after every
@@ -134,7 +163,11 @@ window morph - run it before optimising anything visual) · `--themetest` (walks
 BOTH themes and fails on text that doesn't contrast with what's behind it - run it after any colour
 or code-built-view change)
 · `--render <dir>` / `--libshot <dir>` (PNG the views; the transparent overlay can't be
-screenshotted) · `--asrtest <file>` · `--wertest <wav> <ref.txt>` (word error rate + per-name recall
+screenshotted) · `--linktest [n]` (precision@1 of evidence linking against synthetic ground truth, two difficulty
+conditions, paired McNemar comparison of any scoring change - the way to tell a real improvement
+from noise) · `--evidencetest [id]` (cuts every evidence clip in a stored meeting, re-transcribes it, and reports
+whether the audio says the line the link claims - the instrument that found segments with an
+`int.MinValue` end) · `--asrtest <file>` · `--wertest <wav> <ref.txt>` (word error rate + per-name recall
 through the REAL pipeline; script + reference in `docs/wer-eval.md` - run it after ANY audio/ASR change) · `--notestest` · `--llmtest` · `--dbtest` · `--caltest` ·
 `--preptest` · `--diartest` · `--makeicon`. CI can never verify GPU/model/audio paths - those are
 run-on-a-real-PC jobs forever.

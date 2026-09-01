@@ -79,7 +79,6 @@
     <SolidColorBrush x:Key="Shadow1" Color="#0D000000"/>
     <SolidColorBrush x:Key="Shadow2" Color="#12000000"/>
     <SolidColorBrush x:Key="Shadow3" Color="#18000000"/>
-    <SolidColorBrush x:Key="ShimmerTrack" Color="#14FFFFFF"/>   <!-- the loader sliver's track -->
     <SolidColorBrush x:Key="SidebarButton" Color="#3C3837"/>   <!-- a control resting on the sidebar card -->
     <SolidColorBrush x:Key="RowFill" Color="#14FFFFFF"/>        <!-- Library list row, at rest -->
     <SolidColorBrush x:Key="RowFillHover" Color="#1FFFFFFF"/>
@@ -115,6 +114,22 @@
     <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
     <!-- Windows' crisp monochrome icon font (Win11 Fluent, falls back to Win10 MDL2). -->
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+    <!-- Keyboard-focus ring (the "missing focus state" the audit flagged). WPF's FocusVisualStyle shows
+         only on KEYBOARD focus, not a mouse click, so it gives tab users a visible "you are here" without
+         a ring flashing on every click. A rounded blue stroke just outside the control, matching the
+         brand-active blue. Applied to the interactive controls users can tab to (toggles, checkboxes,
+         text inputs). -->
+    <Style x:Key="TokiFocus">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-3" StrokeThickness="2" Stroke="{DynamicResource Blue}"
+                               RadiusX="8" RadiusY="8" SnapsToDevicePixels="True"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
     <Style x:Key="PillButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource Text}"/>
@@ -226,6 +241,13 @@
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
+                        </Trigger>
+                        <!-- DISABLED: a disabled button used to look identical to a live one (the "missing
+                             state" the audit flagged). Dim the whole box and drop the hand cursor so it
+                             reads as unavailable. Covers WhiteButton/CoralButton (they inherit this). -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.38"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -443,6 +465,58 @@
          and out at 90ms, a press that compresses the box) rather than the instant background swap it
          used to do, which was the one control in a note that did not feel like the rest of Toki.
          It is small on purpose: it is an aside beside a sentence, not an action bar. -->
+    <!-- The quiet evidence play control: a bare play triangle, no disc and no rim, resting dim and
+         brightening on hover. Replaces the old 20px filled chip, which read as a bulky bead in the
+         middle of a sentence. -->
+    <Style x:Key="EvidencePlay" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Width" Value="16"/>
+        <Setter Property="Height" Value="16"/>
+        <Setter Property="Opacity" Value="0.5"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.13">
+                                        <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard></BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0.5" Duration="0:0:0.09"/>
+                                </Storyboard></BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX" To="0.82" Duration="0:0:0.09"/>
+                                    <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY" To="0.82" Duration="0:0:0.09"/>
+                                </Storyboard></BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleX" To="1" Duration="0:0:0.12"/>
+                                    <DoubleAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="RenderTransform.ScaleY" To="1" Duration="0:0:0.12"/>
+                                </Storyboard></BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="EvidenceChip" TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource Chip}"/>
         <Setter Property="Width" Value="20"/>
@@ -1040,9 +1114,14 @@
     </Style>
 
     <!-- A section heading WITHIN a page ("Appearance", "AI summaries", a template's name). -->
+    <!-- A section heading on a WINDOW page. The gap to whatever it labels lives HERE, not at each
+         call site: the captions that used to sit between a title and its card were removed, and
+         every title that had leaned on the caption's margin ended up flush against its own card.
+         One definition, one edit. -->
     <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource Body}">
         <Setter Property="FontSize" Value="14.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Margin" Value="0,0,0,12"/>
     </Style>
 
     <!-- The header of a NOTCH page ("Meetings", "Transcript", "Settings"). Smaller than a window page
@@ -1289,7 +1368,10 @@
          green + thumb slides on. ══ -->
     <Style x:Key="TokiSwitch" TargetType="CheckBox">
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Focusable" Value="False"/>
+        <!-- Keyboard-operable in the Library Settings (Space toggles) with a focus ring; the notch never
+             takes focus (ShowActivated=False) so this only helps the real, focusable window. -->
+        <Setter Property="Focusable" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource TokiFocus}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -1338,7 +1420,10 @@
                             </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource Green}"/>
+                            <!-- Brand BLUE for "on", not Green: green is reserved for decisions in note
+                                 content, so a green toggle was a second meaning for the same colour.
+                                 Blue = Toki-active chrome (matches the loader), distinct from content. -->
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource Blue}"/>
                             <Setter TargetName="Thumb" Property="Margin" Value="18,0,0,0"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>

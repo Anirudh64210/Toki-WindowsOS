@@ -47,6 +47,87 @@ public static class NoteRenderer
         if (a.Id > 0) try { App.Store.SetActionDone(a.Id, done); } catch { }
     }
 
+    // Why the current notes are not model-written, if that is worth telling the user.
+    enum NotesFallback { None, ApiNoKey, LocalFailed }
+
+    /// <summary>
+    /// Decide whether to show a fallback banner. LocalFailed = these notes are the heuristic FLOOR
+    /// and a real model COULD do better (the leak scenario: the model failed to load, so the floor
+    /// ran). ApiNoKey = the user picked the API model but saved no key, so notes were written
+    /// on-device - good notes, a gentle privacy-clean nudge, not an error. A note the user
+    /// deliberately asked to keep heuristic (Heuristic-only mode) gets NEITHER: CanWrite is false.
+    /// </summary>
+    static NotesFallback FallbackState(MeetingRecord m)
+    {
+        if (m.Transcript is null || m.Transcript.Count == 0) return NotesFallback.None;
+        var svc = Llm.LlmService.Instance;
+        var s = Llm.AppSettings.Current;
+
+        // A floor note has no template and is not the model's canned low-substance verdict. (Model
+        // notes carry a template name; the low-substance note carries the canned summary string.)
+        var isFloor = m.Notes is { } n
+            && string.IsNullOrEmpty(n.Template)
+            && n.Tldr != Llm.LlmNoteWriter.LowSubstanceTldr;
+
+        if (isFloor && svc.CanWrite()) return NotesFallback.LocalFailed;
+        if (s.NotesMode == Llm.NotesMode.ApiKey && string.IsNullOrWhiteSpace(s.ApiKey))
+            return NotesFallback.ApiNoKey;
+        return NotesFallback.None;
+    }
+
+    static FrameworkElement FallbackBanner(NotesFallback kind, MeetingRecord m, Action showTranscript, Action? refreshNotes)
+    {
+        var svc = Llm.LlmService.Instance;
+        var accentKey = kind == NotesFallback.LocalFailed ? "AccentAmber" : "TextMid";
+        var lead = kind == NotesFallback.LocalFailed ? "Basic notes" : "Private, on this device";
+        var body = kind == NotesFallback.LocalFailed
+            ? (svc.LocalPoisoned
+                ? "AI note-writing stopped working this session, so these are basic on-device notes. Restart Toki to re-enable it, then try again. Check these against the transcript."
+                : "The AI writer was not available, so Toki fell back to basic on-device extraction. These are lifted from what was said, so check them against the transcript.")
+            : "You selected the \"My API key\" option, but no key is saved, so your notes were written on-device by the local model. Nothing left your computer. Add a key in Settings to use your API model.";
+
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = 12, Foreground = B("TextMid"), LineHeight = 17 };
+        text.Inlines.Add(new Run(lead + "   ") { FontWeight = FontWeights.SemiBold, Foreground = B(accentKey) });
+        text.Inlines.Add(new Run(body));
+
+        var stack = new StackPanel();
+        stack.Children.Add(text);
+
+        var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        if (m.Transcript.Count > 0)
+        {
+            var showBtn = new Button { Style = (Style)Res("ChipButton"), Content = "Show transcript" };
+            showBtn.Click += (_, _) => showTranscript();
+            btns.Children.Add(showBtn);
+        }
+        if (kind == NotesFallback.LocalFailed && refreshNotes is not null && svc.CanWrite())
+        {
+            var tryBtn = new Button { Style = (Style)Res("ChipButton"), Content = "Try again with the on-device model", Margin = new Thickness(8, 0, 0, 0) };
+            tryBtn.Click += async (_, _) =>
+            {
+                tryBtn.IsEnabled = false; tryBtn.Content = "Working";
+                var res = await App.RegenerateNotesAsync(m.Id);
+                if (res == App.RegenNotesResult.Rewritten) { refreshNotes(); return; }   // rebuild swaps in the model notes
+                tryBtn.IsEnabled = true; tryBtn.Content = "Try again";
+                text.Inlines.Clear();
+                text.Inlines.Add(new Run("Still basic notes   ") { FontWeight = FontWeights.SemiBold, Foreground = B("AccentAmber") });
+                text.Inlines.Add(new Run(res == App.RegenNotesResult.NeedsRestart
+                    ? "AI note-writing cannot recover without a restart. Close and reopen Toki, then try again."
+                    : "Could not run the on-device model this time. Check the transcript, or try once more."));
+                if (res == App.RegenNotesResult.NeedsRestart) tryBtn.Visibility = Visibility.Collapsed;
+            };
+            btns.Children.Add(tryBtn);
+        }
+        if (btns.Children.Count > 0) stack.Children.Add(btns);
+
+        return new Border
+        {
+            Background = B("Chip"), BorderBrush = B("Hairline"), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 12, 14, 12),
+            Child = stack,
+        };
+    }
+
     // The WHOLE note is ONE FlowDocument, so a single drag-select spans summary to transcript.
     // Separate TextBoxes only let you select within one. Checkboxes stay clickable in the read-only document.
     /// <param name="sticky">The meeting's sticky note. Its button goes at the top; the note itself
@@ -58,9 +139,14 @@ public static class NoteRenderer
     /// two parts about to gain names, so they change visibly rather than silently.</param>
     /// <param name="scrollHost">The caller's own page ScrollViewer. When given, the box is EMBEDDED:
     /// no title/meta block, no padding, no scrollbar of its own; the host scrolls it.</param>
+    /// <param name="dismissSection">Called with a section heading the user wants gone. Offered on
+    /// the carried-forward section only; null omits the control. Storage is the caller's job.</param>
+    /// <param name="refreshNotes">Rebuild the note view. The fallback banner's "try again" calls it
+    /// after a successful regeneration so the floor notes are replaced by the model's; null omits the
+    /// retry button (Show transcript still works).</param>
     public static FrameworkElement MeetingDocument(MeetingRecord m, bool spacious, FrameworkElement? topBar = null,
         MeetingStickyView? sticky = null, Action<string, string>? renameSpeaker = null, bool resolving = false,
-        ScrollViewer? scrollHost = null)
+        ScrollViewer? scrollHost = null, Action<string>? dismissSection = null, Action? refreshNotes = null)
     {
         var embedded = scrollHost is not null;
         var fs = spacious ? 13.5 : 12.5;
@@ -138,71 +224,87 @@ public static class NoteRenderer
             else expandTranscript(Go);
         }
 
-        // The "↳" that jumps to the line this came from - or null when nothing matches well enough to
-        // point at honestly. ONE builder, so a bullet and a to-do can never drift apart.
-        Hyperlink? Link(string text)
+        // ── fallback banner ──
+        // When these notes are the heuristic FLOOR (the AI writer was unavailable), say so honestly
+        // at the very top and offer the transcript + a retry - never pass chopped-up conversation off
+        // as an AI summary. Inserted before everything else so it is the first thing read.
+        if (FallbackState(m) is var _fb && _fb != NotesFallback.None)
         {
-            if (Evidence.BestSegment(text, m.Transcript) is not { } idx) return null;
-            var link = new Hyperlink(new Run(" ↳") { FontSize = fs - 1.5 })
-            {
-                Foreground = B("TextDim"), TextDecorations = null, Cursor = Cursors.Hand,
-                ToolTip = "Show where this came from in the transcript",
-            };
-            link.Click += (_, _) => JumpTo(idx);
-            return link;
+            var banner = new BlockUIContainer(FallbackBanner(_fb, m, () => JumpTo(0), refreshNotes))
+            { Margin = new Thickness(0, 0, 0, embedded ? 14 : 16) };
+            if (doc.Blocks.FirstBlock is { } _first) doc.Blocks.InsertBefore(_first, banner);
+            else doc.Blocks.Add(banner);
         }
 
-        // The play button beside the jump (right-click saves the clip). Absent entirely when the
-        // audio is gone: show nothing rather than something that fails when pressed.
-        EvidencePlayer? Player(string text)
+        // The one quiet play control beside a note line (right-click saves the clip). Each point is
+        // resolved on its OWN - no cross-line disjoint pass - and the point's TEXT is handed to the
+        // player so the clip narrows to just the phrase that carries it (EvidenceAudio.Window). Two
+        // points that genuinely share words may overlap a little; none swallows the others. Absent
+        // entirely when the audio is gone: show nothing rather than a control that fails when pressed.
+        EvidencePlayer? Player(string text, SourceSpan? source = null)
         {
-            // The RANGE, not just the first line (see Evidence.BestRange).
-            if (Evidence.BestRange(text, m.Transcript) is not { } r) return null;
-            if (r.First < 0 || r.Last >= m.Transcript.Count) return null;
+            if (Evidence.BestRange(text, m.Transcript, source) is not { } rr) return null;
+            if (rr.First < 0 || rr.Last >= m.Transcript.Count) return null;
             var range = new List<TranscriptSegment>();
-            for (var i = r.First; i <= r.Last; i++) range.Add(m.Transcript[i]);
-            return EvidencePlayer.For(m, range, fs);
+            for (var i = rr.First; i <= rr.Last; i++) range.Add(m.Transcript[i]);
+            return EvidencePlayer.For(m, range, fs, text);
         }
 
-        Paragraph WithEvidence(string text, double lineHeight, Thickness margin)
+        // A bullet, as a HANGING-INDENT paragraph (not a WPF List, whose marker floats off the text
+        // line): a real drawn disc sits in a fixed marker column, the text starts at that column, and
+        // wrapped lines align under the text - never under the dot. The disc is a drawn Ellipse, not a
+        // font "•", which is oversized and vertically wrong (that was the "bullet not on the text
+        // line" bug). Selection still runs across bullets: they are all paragraphs of one document.
+        Paragraph WithEvidence(string text, double lineHeight, Thickness margin, SourceSpan? source = null)
         {
-            var p = new Paragraph(new Run(text)) { LineHeight = lineHeight, Margin = margin };
-            if (Link(text) is { } link) p.Inlines.Add(link);
-            if (Player(text) is { } play)
+            const double col = 20;   // marker column = text indent
+            var p = new Paragraph
+            {
+                LineHeight = lineHeight, TextIndent = -col,
+                Margin = new Thickness(margin.Left + col, margin.Top, margin.Right, margin.Bottom),
+            };
+            p.Inlines.Add(new InlineUIContainer(BulletDisc(col)) { BaselineAlignment = BaselineAlignment.Center });
+            p.Inlines.Add(new Run(text) { Foreground = B("Text") });
+            if (Player(text, source) is { } play)
                 p.Inlines.Add(new InlineUIContainer(play) { BaselineAlignment = BaselineAlignment.Center });
             return p;
         }
 
+        // ONE GUTTER, no decorative rail. A section is its coloured header (icon + accent title) and
+        // its rows, both starting at the same left edge, grouped by SPACE (heading-above 24,
+        // heading-below 8, rows 8) rather than a bar down the side. Space groups; a line is a last
+        // resort (see the symmetry-and-spacing and design-taste skills).
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
         {
-            doc.Blocks.Add(DocHeader("SUMMARY", first: true));
-            var summaryRail = RailFor("SUMMARY");
-            summaryRail.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr)) { Foreground = B("TextSoft"), LineHeight = fs + 9, TextAlignment = TextAlignment.Left, Margin = new Thickness(0, 0, 0, 2) });
-            doc.Blocks.Add(summaryRail);
+            doc.Blocks.Add(DocHeader("Summary", fs, first: true));
+            doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr))
+            { Foreground = B("TextSoft"), LineHeight = fs + 7, TextAlignment = TextAlignment.Left, Margin = new Thickness(0, 0, 0, 0) });
         }
         foreach (var sec in m.Notes.EffectiveSections())
         {
             if (sec.Bullets.Count == 0) continue;
-            var heading = sec.Heading.ToUpperInvariant();
-            doc.Blocks.Add(DocHeader(heading));
-            var list = new List { MarkerStyle = TextMarkerStyle.Disc, Padding = new Thickness(15, 0, 0, 0), Margin = new Thickness(0, 0, 0, 2) };
-            foreach (var b in sec.Bullets)
-                list.ListItems.Add(new ListItem(WithEvidence(b, fs + 7, new Thickness(0, 0, 0, 7))));
-            var secRail = RailFor(heading);
-            secRail.Blocks.Add(list);
-            doc.Blocks.Add(secRail);
+            var dismiss = dismissSection is not null
+                          && string.Equals(sec.Heading, Toki.Llm.OpenFromLastTime.Heading, StringComparison.OrdinalIgnoreCase)
+                ? DismissButton(() => dismissSection(sec.Heading)) : null;
+            doc.Blocks.Add(DocHeader(sec.Heading, fs, trailing: dismiss));
+            // Round-dot bullets, hanging indent, tight (6) within the list. Last bullet carries no
+            // bottom margin - the next heading's top margin owns that gap (no double-owned space).
+            for (var i = 0; i < sec.Bullets.Count; i++)
+            {
+                var last = i == sec.Bullets.Count - 1;
+                doc.Blocks.Add(WithEvidence(sec.Bullets[i], fs + 7, new Thickness(0, 0, 0, last ? 0 : 6), sec.SourceFor(i)));
+            }
         }
         if (m.Notes.Actions.Count > 0)
         {
-            doc.Blocks.Add(DocHeader("ACTION ITEMS"));
-            var actionRail = RailFor("ACTION ITEMS");
+            doc.Blocks.Add(DocHeader("Action items", fs));
             // Owners arrive a few seconds later when speakers resolve; say so, rather than let a
             // name appear out of nowhere.
             if (resolving)
-                actionRail.Blocks.Add(new BlockUIContainer(new ThinkingDots("working out who owns these"))
-                { Margin = new Thickness(0, 0, 0, 4) });
-            foreach (var a in m.Notes.Actions) actionRail.Blocks.Add(DocAction(a, fs, Link, Player));
-            doc.Blocks.Add(actionRail);
+                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("working out who owns these"))
+                { Margin = new Thickness(0, 0, 0, 6) });
+            for (var i = 0; i < m.Notes.Actions.Count; i++)
+                doc.Blocks.Add(DocAction(m.Notes.Actions[i], fs, Player, last: i == m.Notes.Actions.Count - 1));
         }
 
         // THE SPLIT: never nest the editable sticky inside this read-only document. A RichTextBox's
@@ -223,78 +325,123 @@ public static class NoteRenderer
 
         if (m.Transcript.Count > 0)
         {
-            tdoc.Blocks.Add(DocHeader("TRANSCRIPT"));
-            // The transcript rides the same rail as every other section. Its blocks are inserted and
-            // removed as it expands, so they go through this collection rather than the document's.
-            var transcriptRail = RailFor("TRANSCRIPT");
-            tdoc.Blocks.Add(transcriptRail);
-            var tblocks = transcriptRail.Blocks;
-            if (resolving)
-                tblocks.Add(new BlockUIContainer(new ThinkingDots("telling the speakers apart"))
-                { Margin = new Thickness(0, 0, 0, 4) });
-            // Who Toki thinks was in the room, each one a click away from being corrected. Absent
-            // entirely when the speakers were never told apart, so a plain two-party call is unchanged.
-            if (renameSpeaker is not null && SpeakerChips.Build(m.Transcript, renameSpeaker) is { } chips)
-                tblocks.Add(new BlockUIContainer(chips) { Margin = new Thickness(0, 0, 0, 6) });
-            var preview = Math.Min(3, m.Transcript.Count);
-            for (var i = 0; i < preview; i++)
+            // THE TRANSCRIPT IS A DISCLOSURE, not a section that is always open. It is the longest
+            // thing on the page and the least often read, and a note the reader has to scroll past
+            // to reach anything is not glanceable. Collapsed, the row still answers "what is in
+            // here?" - the count, and the chevron - which is the whole test of a good collapsed
+            // state. Evidence links still open it on their way to a line.
+            var expanded = false;
+            var chev = new TextBlock
             {
-                var p = DocTranscript(m.Transcript[i], fs, m.Corrections);
-                transcriptParas[i] = p;     // so an evidence link can find and highlight it
-                tblocks.Add(p);
-            }
-            if (m.Transcript.Count > preview)
+                Text = "", FontFamily = (FontFamily)Res("IconFont"), FontSize = 10,
+                Foreground = B("TextDim"), VerticalAlignment = VerticalAlignment.Center,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+            };
+            var countLabel = new TextBlock
             {
-                var more = m.Transcript.Count - preview;
-                var btn = new Button
-                {
-                    Content = $"Show full transcript  ·  {more} more line{(more == 1 ? "" : "s")}", Style = (Style)Res("PillButton"),
-                    Background = B("Chip"), Foreground = B("TextDim"), Padding = new Thickness(13, 7, 13, 7), FontSize = 11,
-                    HorizontalAlignment = HorizontalAlignment.Left, Cursor = Cursors.Hand,
-                };
-                var holder = new BlockUIContainer(btn) { Margin = new Thickness(0, 3, 0, 0) };
-                tblocks.Add(holder);
+                Text = $"{m.Transcript.Count} line{(m.Transcript.Count == 1 ? "" : "s")}",
+                FontFamily = (FontFamily)Res("UiFont"), FontSize = 11, Foreground = B("TextDim"),
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+            };
 
-                var expanding = false;
-                // Shared by the button and by any evidence link that points past the preview - a link
-                // has to be able to fill the transcript in before it can scroll to its line.
-                void Expand(Action? done)
+            var accent = B("AccentAmber");
+            var icon = new Border
+            {
+                Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
+                Background = Transparent(accent, 0x2E), Margin = new Thickness(0, 0, 7, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
                 {
-                    if (expanding) return;
-                    expanding = true;
+                    Text = "", FontFamily = (FontFamily)Res("IconFont"), FontSize = 9.5, Foreground = accent,
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            var head = new Grid();
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            head.Children.Add(icon);
+            var title = new TextBlock
+            {
+                Text = "TRANSCRIPT", FontFamily = (FontFamily)Res("UiFont"), FontWeight = FontWeights.Bold,
+                FontSize = 10, Foreground = accent, VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(title, 1); head.Children.Add(title);
+            Grid.SetColumn(countLabel, 2); head.Children.Add(countLabel);
+            Grid.SetColumn(chev, 3); head.Children.Add(chev);
 
-                    // CHUNKED expansion: a long meeting is thousands of paragraphs, and inserting them
-                    // synchronously freezes the UI. Insert in slices, yielding to the dispatcher between them.
-                    btn.IsEnabled = false;
-                    const int slice = 150;
-                    var i = preview;
-                    Block after = holder;
-                    void InsertSlice()
+            // A real Button spanning the row: the whole strip is the control, so the hit target,
+            // the hover box and the visible box are one rectangle.
+            var toggle = new Button
+            {
+                Content = head, Style = (Style)Res("RowButton"),
+                Padding = new Thickness(10, 9, 10, 9), Cursor = Cursors.Hand,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                ToolTip = "Show or hide what was said",
+            };
+            tdoc.Blocks.Add(new BlockUIContainer(toggle) { Margin = new Thickness(0, 22, 0, 0) });
+
+            // NO RAIL on the transcript. The 3px accent bar tells you which heading a bullet belongs
+            // to when several sections sit in one column; the transcript is a disclosure with its own
+            // button above it, so the bar just draws a line down the side of the speech.
+            var transcriptBody = new Section { Padding = new Thickness(2, 4, 0, 0), Margin = new Thickness(9, 0, 0, 0) };
+            tdoc.Blocks.Add(transcriptBody);
+            var tblocks = transcriptBody.Blocks;
+
+            var filling = false;
+            void Fill(Action? done)
+            {
+                if (filling) return;
+                filling = true;
+                if (resolving)
+                    tblocks.Add(new BlockUIContainer(new ThinkingDots("telling the speakers apart"))
+                    { Margin = new Thickness(0, 0, 0, 4) });
+                // Who Toki thinks was in the room, each one a click away from being corrected.
+                if (renameSpeaker is not null && SpeakerChips.Build(m.Transcript, renameSpeaker) is { } chips)
+                    tblocks.Add(new BlockUIContainer(chips) { Margin = new Thickness(0, 6, 0, 6) });
+
+                // CHUNKED: a long meeting is thousands of paragraphs, and inserting them
+                // synchronously freezes the window. Insert in slices, yielding between them.
+                const int slice = 150;
+                var i = 0;
+                void InsertSlice()
+                {
+                    var end = Math.Min(i + slice, m.Transcript.Count);
+                    for (; i < end; i++)
                     {
-                        var end = Math.Min(i + slice, m.Transcript.Count);
-                        for (; i < end; i++)
-                        {
-                            var p = DocTranscript(m.Transcript[i], fs, m.Corrections);
-                            transcriptParas[i] = p;
-                            tblocks.InsertAfter(after, p);
-                            after = p;
-                        }
-                        if (i < m.Transcript.Count)
-                            btn.Dispatcher.BeginInvoke(InsertSlice, System.Windows.Threading.DispatcherPriority.Background);
-                        else
-                        {
-                            tblocks.Remove(holder);
-                            // Let the layout settle before anyone measures a paragraph's position.
-                            if (done is not null)
-                                btn.Dispatcher.BeginInvoke(done, System.Windows.Threading.DispatcherPriority.Loaded);
-                        }
+                        var p = DocTranscript(m.Transcript[i], fs, m.Corrections);
+                        transcriptParas[i] = p;
+                        tblocks.Add(p);
                     }
-                    InsertSlice();
+                    if (i < m.Transcript.Count)
+                        toggle.Dispatcher.BeginInvoke(InsertSlice, System.Windows.Threading.DispatcherPriority.Background);
+                    else if (done is not null)
+                        toggle.Dispatcher.BeginInvoke(done, System.Windows.Threading.DispatcherPriority.Loaded);
                 }
-
-                expandTranscript = Expand;
-                btn.Click += (_, _) => Expand(null);
+                InsertSlice();
             }
+
+            void Open(Action? done)
+            {
+                if (expanded) { done?.Invoke(); return; }
+                expanded = true;
+                chev.RenderTransform = new RotateTransform(180);
+                countLabel.Text = "Hide";
+                Fill(done);
+            }
+
+            void Close()
+            {
+                expanded = false; filling = false;
+                chev.RenderTransform = null;
+                countLabel.Text = $"{m.Transcript.Count} line{(m.Transcript.Count == 1 ? "" : "s")}";
+                tblocks.Clear();
+                transcriptParas.Clear();
+            }
+
+            expandTranscript = Open;
+            toggle.Click += (_, _) => { if (expanded) Close(); else Open(null); };
         }
 
         // A READ-ONLY RichTextBox, not a FlowDocumentScrollViewer: it is the one WPF control with
@@ -320,7 +467,9 @@ public static class NoteRenderer
         {
             var rtb = MakeReadOnlyBox(doc,
                 embedded ? new Thickness(0) : new Thickness(28, 20, 16, 18),
-                embedded ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto);
+                // Standalone (Library) scrolls itself: reserve the slim bar ALWAYS (Visible, not Auto)
+                // so expanding the transcript never narrows the column and reflows the summary.
+                embedded ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Visible);
             host = rtb;          // evidence links scroll this box...
             outerScroll = scrollHost;   // ...through the host page's scroller when embedded
             return rtb;
@@ -340,7 +489,9 @@ public static class NoteRenderer
 
         var sv = new ScrollViewer
         {
-            Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            // Visible, not Auto: reserve the slim bar always so the column width is stable (see the
+            // standalone box above). Only the Library uses this sticky path, so there is no nested scroll.
+            Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Visible,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Padding = new Thickness(28, 20, 16, 18),
         };
@@ -373,64 +524,68 @@ public static class NoteRenderer
     /// <summary>Duration · full date/time · app - the note's meta line, sitting under the title.</summary>
     static string MeetingMeta(MeetingRecord m) => TimeText.FullMeta(m);
 
-    /// <summary>
-    /// A section header: a small round icon chip in the section's colour with the label beside it.
-    /// One meaning, one colour, one icon (colour from HeaderColorKey).
-    /// </summary>
-    static Paragraph DocHeader(string title, bool first = false)
+    // A section header, Granola/Apple style: NO icon, NO colour, sentence case, differentiated from
+    // the body by WEIGHT (semibold) and a touch of size, separated by whitespace (24 above, 8 below).
+    // Research 2026-08-25 (Granola + Apple Notes/Bear/Craft): headers are body-ish size, semibold,
+    // sentence case, full ink, no rule and no icon; the icon chips were the "cheap emoji" look.
+    static Paragraph DocHeader(string title, double fs, bool first = false, UIElement? trailing = null)
     {
-        var key = HeaderColorKey(title);
-        var accent = B(key == "TextDim" ? "TextMid" : key);
-        var glyph = SectionGlyph(title);
-
-        var icon = new Border
+        // Heading-above 24 (between sections), heading-below 8 (to its own content): the 3:1 the
+        // reader sees as "this heading owns what follows".
+        var p = new Paragraph { Margin = new Thickness(0, first ? 0 : 24, 0, 8) };
+        p.Inlines.Add(new Run(SentenceCase(title))
         {
-            Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
-            Background = Transparent(accent, 0x2E), Margin = new Thickness(0, 0, 7, 0),
-            Child = new TextBlock
-            {
-                Text = glyph, FontFamily = (FontFamily)Res("IconFont"), FontSize = 9.5, Foreground = accent,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            },
-        };
-
-        var p = new Paragraph { Margin = new Thickness(0, first ? 0 : 22, 0, 8) };
-        p.Inlines.Add(new InlineUIContainer(icon) { BaselineAlignment = BaselineAlignment.Center });
-        p.Inlines.Add(new Run(title)
-        {
-            FontWeight = FontWeights.Bold, Foreground = accent, FontSize = 10,
-            BaselineAlignment = BaselineAlignment.Center,
+            FontWeight = FontWeights.SemiBold, Foreground = B("Text"), FontSize = fs + 1,
         });
+        if (trailing is not null)
+            p.Inlines.Add(new InlineUIContainer(trailing) { BaselineAlignment = BaselineAlignment.Center });
         return p;
     }
 
-    /// <summary>
-    /// The section RAIL: everything under a heading sits in ONE Section with a 3px accent bar down
-    /// its left. One Section, never a border per block: per-block borders gap at every paragraph
-    /// margin and the rail comes out dotted instead of continuous.
-    /// </summary>
-    static Section RailFor(string title)
+    /// <summary>First letter up, the rest lower: "ACTION ITEMS" / "Action Items" -> "Action items".
+    /// Keeps a heading from reading as a shouting all-caps label or forced Title Case.</summary>
+    static string SentenceCase(string s)
     {
-        var key = HeaderColorKey(title);
-        var accent = B(key == "TextDim" ? "TextMid" : key);
-        return new Section
-        {
-            BorderThickness = new Thickness(3, 0, 0, 0),
-            BorderBrush = Transparent(accent, 0x1F),
-            Padding = new Thickness(16, 2, 0, 0),
-            Margin = new Thickness(9, 0, 0, 0),
-        };
+        var t = (s ?? "").Trim();
+        return t.Length == 0 ? t : char.ToUpperInvariant(t[0]) + t[1..].ToLowerInvariant();
     }
 
-    /// <summary>The icon per section meaning (Fluent glyphs).</summary>
-    static string SectionGlyph(string title)
+    /// <summary>The bullet marker: a small drawn disc in a fixed-width column, so text hangs at the
+    /// column edge. A drawn Ellipse, never the font "•" (oversized and vertically wrong).</summary>
+    static FrameworkElement BulletDisc(double column)
     {
-        var t = (title ?? "").ToUpperInvariant();
-        if (t.Contains("DECISION")) return "";                                   // check
-        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO")) return "";  // checklist
-        if (t.Contains("QUESTION") || t.Contains("OPEN")) return "";             // question
-        if (t.Contains("TRANSCRIPT")) return "";                                  // speech
-        return "";                                                                // list
+        var disc = new System.Windows.Shapes.Ellipse
+        {
+            Width = 4.5, Height = 4.5, Fill = B("TextDim"),
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        // The disc sits ~7px into the gutter; the holder fills the column so the text starts at `column`.
+        return new Border { Width = column, Child = disc, Padding = new Thickness(7, 0, 0, 0) };
+    }
+
+    /// <summary>
+    /// The "not relevant" control on a carried-forward section. Title text alone can never decide
+    /// reliably whether two meetings are the same recurring one, so the other half of the answer is
+    /// making the correction cheap: one click removes the section from this note for good.
+    /// A real Button, per the standing rule - and it sits inside a read-only RichTextBox, where a
+    /// container with a mouse handler would have its mouse-up eaten by the selection machinery.
+    /// </summary>
+    static Button DismissButton(Action onDismiss)
+    {
+        var b = new Button
+        {
+            Style = (Style)Res("BareButton"),
+            Content = new TextBlock
+            {
+                Text = "Not relevant", FontSize = 9.5, FontWeight = FontWeights.SemiBold,
+                Foreground = B("TextLow"), FontFamily = (FontFamily)Res("UiFont"),
+            },
+            Margin = new Thickness(10, 0, 0, 0), Padding = new Thickness(6, 2, 6, 2),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "Remove this section from this meeting's note",
+        };
+        b.Click += (_, _) => onDismiss();
+        return b;
     }
 
     /// <summary>An outlined status capsule for the meta row ("2 open" / "3 people"):
@@ -462,7 +617,7 @@ public static class NoteRenderer
         // DiscLabel, not a bare TextBlock: the transcript Paragraph's LineHeight is inherited INTO
         // this Border and would shove the letter to the top of the disc, clipping its cap.
         var letter = PillParts.DiscLabel(initial, 8.5, FontWeights.Bold);
-        letter.Foreground = accent;
+        letter.Fill = accent;
         return new Border
         {
             Width = 16, Height = 16, CornerRadius = new CornerRadius(8),
@@ -499,47 +654,77 @@ public static class NoteRenderer
         return accent;
     }
 
-    static Paragraph DocAction(ActionItem a, double fs, Func<string, Hyperlink?>? link = null,
-        Func<string, EvidencePlayer?>? player = null)
+    static Paragraph DocAction(ActionItem a, double fs, Func<string, SourceSpan?, EvidencePlayer?>? player = null,
+        bool last = false)
     {
-        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 11), LineHeight = fs + 8 };
-        // Circular tick + real strikethrough on done items (a FlowDocument Run can strike through).
-        var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("CircleCheck"), Margin = new Thickness(0, 0, 9, 0) };
+        // The CircleCheck is a 24px hit target with an 18px ring centred in it (3px of built-in
+        // padding each side), so the column IS 24 and the text hangs there: ring left edge near the
+        // gutter, ~3px of the tick's own padding as the gap to the text. Wrapped lines align under the
+        // text, not the tick.
+        const double col = 24;
+        var p = new Paragraph
+        {
+            LineHeight = fs + 7, TextIndent = -col,
+            Margin = new Thickness(col, 0, 0, last ? 0 : 8),
+        };
+        var check = new CheckBox { IsChecked = a.Done, Style = (Style)Res("CircleCheck") };
         check.Checked += (_, _) => Toggle(a, true);
         check.Unchecked += (_, _) => Toggle(a, false);
-        p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.TextTop });
+        p.Inlines.Add(new InlineUIContainer(check) { BaselineAlignment = BaselineAlignment.Center });
         var text = new Run(a.Text) { Foreground = a.Done ? B("TextDim") : B("Text") };
         if (a.Done) text.TextDecorations = TextDecorations.Strikethrough;
         p.Inlines.Add(text);
-        // Search the transcript for the task TEXT alone: the owner/due chips are Toki's formatting,
-        // not words anybody said, and feeding them in dilutes the match.
-        if (link?.Invoke(a.Text) is { } jump) p.Inlines.Add(jump);
-        if (player?.Invoke(a.Text) is { } play)
+        // Owner / due as INLINE MUTED TEXT, not chips (Granola/Apple: dates live in the prose, no
+        // pills, no colour). "  Priya  ·  Fri" trailing the task, dimmed. The Copy button still
+        // captures them: its text comes from NotesText, not from this rendering.
+        var meta = ActionMeta(a);
+        if (meta.Length > 0)
+            p.Inlines.Add(new Run(meta) { Foreground = B("TextDim"), FontSize = fs - 1.5 });
+        // The one quiet play control. Search the transcript for the task TEXT alone.
+        if (player?.Invoke(a.Text, a.Source) is { } play)
             p.Inlines.Add(new InlineUIContainer(play) { BaselineAlignment = BaselineAlignment.Center });
-        // Owner / due ride below the item as capsule chips (person = blue, due = amber). The Copy
-        // button still captures them: its text comes from NotesText, not from this rendering.
-        if (Meaningful(a.Owner) || Meaningful(a.Due))
-        {
-            p.Inlines.Add(new LineBreak());
-            // Indented past the check + its gap so the chips sit under the TEXT.
-            var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(33, 2, 0, 0) };
-            if (Meaningful(a.Owner)) { chips.Children.Add(MetaChip(a.Owner!, "Blue")); chips.Children.Add(new Border { Width = 6 }); }
-            if (Meaningful(a.Due)) chips.Children.Add(MetaChip(a.Due!, "Amber"));
-            p.Inlines.Add(new InlineUIContainer(chips) { BaselineAlignment = BaselineAlignment.Center });
-        }
         return p;
     }
+
+    /// <summary>The owner/due tail for a to-do, as plain muted prose: "   Priya  ·  Fri".</summary>
+    static string ActionMeta(ActionItem a)
+    {
+        var parts = new List<string>();
+        // "You" is the implicit owner in the user's own meeting - showing it on every task is noise.
+        if (Meaningful(a.Owner) && !a.Owner!.Trim().Equals("You", StringComparison.OrdinalIgnoreCase))
+            parts.Add(a.Owner!.Trim());
+        if (Meaningful(a.Due)) parts.Add(a.Due!.Trim());
+        return parts.Count == 0 ? "" : " " + string.Join("  ·  ", parts);
+    }
+
+    /// <summary>
+    /// What to print against a line. The local stream is the ONE speaker Toki already knows by name,
+    /// because the user typed it in Settings, so it prints that instead of the stream word "You".
+    /// A tag the user set for this meeting still wins - their edit beats the default.
+    /// </summary>
+    internal static string SpeakerName(TranscriptSegment seg)
+    {
+        if (seg.Speaker != Speaker.You) return seg.Label;
+        if (!string.IsNullOrWhiteSpace(seg.Tag) && !IsStreamWord(seg.Tag!)) return seg.Tag!;
+        var mine = Llm.AppSettings.Current.DisplayName;
+        return string.IsNullOrWhiteSpace(mine) ? "You" : mine;
+    }
+
+    /// <summary>A label that is a stream, not a person: it carries no name the user chose.</summary>
+    internal static bool IsStreamWord(string s) =>
+        s.Equals("You", StringComparison.OrdinalIgnoreCase) || s.Equals("Them", StringComparison.OrdinalIgnoreCase);
 
     static Paragraph DocTranscript(TranscriptSegment seg, double fs,
         IReadOnlyList<TextFix>? corrections = null)
     {
         var you = seg.Speaker == Speaker.You;
         var fg = B(you ? "Text" : "TextDim");
+        var name = SpeakerName(seg);
         var p = new Paragraph { Margin = new Thickness(0, 0, 0, 9), LineHeight = fs + 7 };
         // Avatar circle, then the words. The NAME run stays too: a letter alone is ambiguous when
         // two people share an initial, and drag-select/Ctrl+C should still capture who spoke.
-        p.Inlines.Add(new InlineUIContainer(Avatar(seg.Label, you)) { BaselineAlignment = BaselineAlignment.Center });
-        p.Inlines.Add(new Run($"{seg.Label}:  ") { FontWeight = FontWeights.SemiBold, Foreground = fg });
+        p.Inlines.Add(new InlineUIContainer(Avatar(name, you)) { BaselineAlignment = BaselineAlignment.Center });
+        p.Inlines.Add(new Run($"{name}:  ") { FontWeight = FontWeights.SemiBold, Foreground = fg });
         foreach (var run in MarkCorrections(seg.Text, fg, corrections)) p.Inlines.Add(run);
         return p;
     }

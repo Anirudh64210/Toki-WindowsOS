@@ -28,7 +28,7 @@ public static class Persona
         // ── capabilities / how it works (beyond the Help command, which owns the exact "what can you
         //    do") - includes "what do you do", "what can you do for me", "what are you for" ──
         (Whole(@"how\s+do\s+(you|u)\s+work|how\s+smart\s+(are|r)\s+(you|u)|what\s+else\s+can\s+(you|u)\s+do|what\s+(do|can)\s+(you|u)\s+(know|remember)|how\s+do\s+(you|u)\s+know\s+(all\s+)?(this|that|things)|what\s+do\s+(you|u)\s+(actually\s+)?do|what\s+can\s+(you|u)\s+do\s+for\s+me|what\s+(are|r)\s+(you|u)\s+(for|good\s+for)|what('s|\s+is)\s+toki\s+for"),
-            "I take the notes in the meetings you okay, and answer questions from them - all on this PC. Ask about any meeting, task, or decision, or just chat."),
+            "I take the notes in the meetings you okay, and answer questions from them. Ask about any meeting, task, or decision, or just chat."),
 
         // ── privacy / data handling - MUST be complete and accurate (a soft or wrong answer here is a
         //    trust breach). Broad on purpose: any question about where data goes, cloud/upload, storage,

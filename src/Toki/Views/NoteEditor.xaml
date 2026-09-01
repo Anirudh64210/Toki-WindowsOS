@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.NoteEditor"
+﻿<UserControl x:Class="Toki.Views.NoteEditor"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -8,11 +8,21 @@
 
          The toolbar WRAPS, because this same control has to work at 356px inside the notch and at
          full width in the Library window. -->
-    <DockPanel>
-        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Hairline}" BorderThickness="0,0,0,1"
-                Padding="0,0,0,7" Margin="0,0,0,9">
-            <WrapPanel x:Name="Toolbar" Orientation="Horizontal"/>
-        </Border>
+    <!-- NO PERMANENT TOOLBAR (2026-08-23). It sat above every note, cost a row of a 356px panel,
+         and named things badly ("Steps", "Style", "Aa 10"). Commands now live behind "/" at the
+         caret, and a blank note carries one faint hint saying so. The writing surface is the whole
+         control, which is what makes it read as a page rather than as a form. -->
+    <Grid>
+        <!-- The hint sits UNDER the editor, not inside the document: text in the document would be
+             text the user has to delete, and would land in the saved Markdown. -->
+        <!-- The left inset is SET IN CODE (PlaceHint), from where the document actually draws its
+             first character. It was pinned here at 1px while the editor's own content starts at 5, so
+             the placeholder sat to the LEFT of the cursor and the caret landed inside the W of
+             "Write". Measured, not guessed, because the origin moves with the text size. -->
+        <TextBlock x:Name="Hint" IsHitTestVisible="False"
+                   Text="Write, or press / for commands"
+                   Foreground="{DynamicResource TextLow}" FontFamily="{StaticResource UiFont}"
+                   FontSize="13" Margin="4,0,0,0" VerticalAlignment="Top"/>
 
         <RichTextBox x:Name="Editor"
                      Background="Transparent" BorderThickness="0" Padding="0"
@@ -23,5 +33,5 @@
                      VerticalScrollBarVisibility="Auto"
                      controls:SmoothScroll.Enabled="True"
                      SpellCheck.IsEnabled="True"/>
-    </DockPanel>
+    </Grid>
 </UserControl>

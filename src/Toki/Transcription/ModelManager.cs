@@ -21,6 +21,41 @@ public sealed class ModelManager
         RequiredFiles: ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]);
 
     /// <summary>
+    /// Whisper base.en (OpenAI, MIT) as ONNX, run through the SAME sherpa-onnx runtime already here -
+    /// no second native library, no Microsoft.ML.OnnxRuntime conflict. It is the ASK-BY-VOICE decoder
+    /// ONLY: whisper pads every clip to its 30s mel window, so it is robust on the 1-2 word push-to-talk
+    /// clips where Parakeet (great on whole meetings) collapses "Hi Toki" to "Yeah". Parakeet stays the
+    /// meeting engine. int8 weights (~160MB on disk); the archive also carries fp32 we don't load.
+    /// </summary>
+    public static readonly ModelSpec Whisper = new(
+        Id: "whisper-base.en",
+        Url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.en.tar.bz2",
+        Folder: "sherpa-onnx-whisper-base.en",
+        RequiredFiles: ["base.en-encoder.int8.onnx", "base.en-decoder.int8.onnx", "base.en-tokens.txt"]);
+
+    public static bool WhisperInstalled => IsInstalled(Whisper);
+    public static Task EnsureWhisperAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureAsync(Whisper, progress, ct);
+
+    /// <summary>
+    /// Streaming zipformer-transducer (20M, English, k2-fsa, Apache-2.0) as ONNX - the LIVE-PREVIEW
+    /// decoder. It emits words as they are spoken (~1s latency) so the recording view fills instantly,
+    /// instead of the ~15-21s that the offline Parakeet WINDOW takes. It is PREVIEW ONLY and disposable:
+    /// the SAVED transcript is still the accurate whole-file/Parakeet pass. Tiny (int8 encoder ~43MB),
+    /// cheap enough to run beside Parakeet during a recording; same sherpa-onnx runtime, no new native lib.
+    /// </summary>
+    public static readonly ModelSpec StreamingAsr = new(
+        Id: "streaming-zipformer-en-20M",
+        Url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17.tar.bz2",
+        Folder: "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
+        RequiredFiles: ["encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.int8.onnx",
+                        "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt"]);
+
+    public static bool StreamingAsrInstalled => IsInstalled(StreamingAsr);
+    public static Task EnsureStreamingAsrAsync(IProgress<double>? progress = null, CancellationToken ct = default) =>
+        EnsureAsync(StreamingAsr, progress, ct);
+
+    /// <summary>
     /// Speaker segmentation (pyannote 3.0, MIT, (c) 2022 CNRS): WHO is talking WHEN. The exact
     /// filename is pinned here and nowhere else: the same GitHub release also carries
     /// sherpa-onnx-reverb-diarization-v1/v2 under Rev's NON-PRODUCTION licence - cannot ship.

@@ -147,12 +147,14 @@ public partial class AskView : UserControl
 
     public void Token(string t) { if (_curAnswer is not null) { _curAnswer.AppendText(t); Follow(); } }
 
+    // Streaming update: mutate the text IN PLACE and scroll, but do NOT resize the notch. Growing the
+    // window on every ~70ms patch was the flicker (research: hold the window, stream into a scrolling
+    // viewport; animate size only on state changes). The caller grows on a coarse throttle + at Final.
     public void SetAnswerText(string full)
     {
         if (_curAnswer is null) return;
         _curAnswer.Text = full ?? "";
         Follow();
-        App.GrowNotch();
     }
 
     public void Final(string text, bool tooLong = false, string? question = null)
@@ -183,16 +185,41 @@ public partial class AskView : UserControl
         => TokiSay("Ask about your meetings - decisions, tasks, who said what. Or say “schedule a call with Ana "
             + "tomorrow at 3”, “take me to the library”, “open settings”, “new note”, or “go home”.");
 
+    string? _lastSayText;
+    FrameworkElement? _lastSayRow;
+
     // A standalone Toki line (no preceding user turn): commands, errors, help.
     void TokiSay(string message, bool dim = false)
     {
         StatusText.Text = "";
         HideStrip();
+        // DEDUPE a repeated identical line. A run of empty captures used to stack three, four, five
+        // copies of "I didn't catch that" into a wall; now the same line, if it is still the newest
+        // row, just PULSES so the user sees it re-fire without the clutter.
+        if (_lastSayText == message && _lastSayRow is not null
+            && Thread.Children.Count > 0 && ReferenceEquals(Thread.Children[^1], _lastSayRow))
+        {
+            Pulse(_lastSayRow);
+            PinToEnd();
+            return;
+        }
         var (row, answer, _) = AnswerRow(dim);
         answer.Text = message;
         Thread.Children.Add(row); Arrive(row);
+        _lastSayText = message; _lastSayRow = row;
         PinToEnd();   // a fresh Toki line (command / help / error) → jump to it
         App.GrowNotch();
+    }
+
+    // A quick attention blink for a line that repeated - lighter than a full arrive, no layout move.
+    static void Pulse(FrameworkElement el)
+    {
+        if (App.Headless) return;
+        el.BeginAnimation(OpacityProperty, null);
+        var blink = new DoubleAnimationUsingKeyFrames { FillBehavior = FillBehavior.Stop };
+        blink.KeyFrames.Add(new LinearDoubleKeyFrame(0.35, KeyTime.FromPercent(0)));
+        blink.KeyFrames.Add(new LinearDoubleKeyFrame(1.0, KeyTime.FromTimeSpan(Theme.Motion.Dur(Theme.Motion.Micro).TimeSpan)));
+        el.BeginAnimation(OpacityProperty, blink);
     }
 
     void HideStrip()

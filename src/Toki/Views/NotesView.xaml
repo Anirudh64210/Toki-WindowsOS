@@ -41,7 +41,10 @@
                     ToolTip="Keep this meeting in your Library" Click="OnSaveToLibrary"/>
         </Grid>
 
-        <ScrollViewer x:Name="Scroll" VerticalScrollBarVisibility="Auto" Margin="0,10,0,0" controls:SmoothScroll.Enabled="True">
+        <!-- Scrollbar ALWAYS reserved (Visible, not Auto): the 10px slim bar keeps its width whether or
+             not the content overflows, so expanding the transcript does not narrow the column and
+             reflow the summary. Its track is transparent, so a not-needed bar is invisible. -->
+        <ScrollViewer x:Name="Scroll" VerticalScrollBarVisibility="Visible" Margin="0,10,0,0" controls:SmoothScroll.Enabled="True">
             <StackPanel x:Name="Body"/>
         </ScrollViewer>
     </DockPanel>

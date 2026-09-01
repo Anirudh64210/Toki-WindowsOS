@@ -55,6 +55,51 @@ public sealed class OpenFromLastTimeTests : IDisposable
         Assert.Contains("Devi", only);          // who still owes it is half the point
     }
 
+    // Shares only "review", which half of all meeting titles carry. Guards the generic-word filter.
+    [Fact]
+    public void One_generic_word_in_common_is_not_the_same_meeting()
+    {
+        Save("Design review", DateTimeOffset.Now.AddDays(-6), Todo("ship the icon set", "Devi"));
+
+        var today = Save("Budget review", DateTimeOffset.Now);
+
+        Assert.Null(OpenFromLastTime.Build(today, _store));
+    }
+
+    // MUTATION PROBE for the "one coincidence is not a match" rule: both titles carry several
+    // distinctive words and share exactly ONE. The old any-one-word rule carried the tasks over.
+    [Fact]
+    public void One_shared_word_between_two_rich_titles_is_a_coincidence()
+    {
+        Save("Pricing page copy", DateTimeOffset.Now.AddDays(-6), Todo("ship the icon set", "Devi"));
+
+        var today = Save("Pricing rollout plan", DateTimeOffset.Now);
+
+        Assert.Null(OpenFromLastTime.Build(today, _store));
+    }
+
+    [Fact]
+    public void One_DISTINCTIVE_word_still_matches_when_it_is_all_a_title_has()
+    {
+        Save("PixelFlow", DateTimeOffset.Now.AddDays(-7), Todo("send the revised spec", "Ana"));
+
+        var today = Save("PixelFlow kickoff", DateTimeOffset.Now);
+
+        var section = OpenFromLastTime.Build(today, _store);
+        Assert.NotNull(section);
+        Assert.Contains("send the revised spec", Assert.Single(section!.Bullets));
+    }
+
+    [Fact]
+    public void Two_shared_distinctive_words_match()
+    {
+        Save("Pricing page copy", DateTimeOffset.Now.AddDays(-7), Todo("rewrite the opener", "Devi"));
+
+        var today = Save("Pricing copy review", DateTimeOffset.Now);
+
+        Assert.NotNull(OpenFromLastTime.Build(today, _store));
+    }
+
     [Fact]
     public void A_first_ever_meeting_carries_nothing()
     {

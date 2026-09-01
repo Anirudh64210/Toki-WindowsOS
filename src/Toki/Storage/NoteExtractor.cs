@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using Toki.Transcription;
 
@@ -16,11 +15,25 @@ public static partial class NoteExtractor
          "going with", "go with", "final decision", "the decision", "moving to", "move to",
          "sign off", "signed off", "we should just", "plan is"];
 
-    static readonly string[] ActionCues =
-        ["will ", "i'll", "you'll", "he'll", "she'll", "they'll", "need to", "needs to",
-         "have to", "has to", "action item", "to-do", "todo", "follow up", "followup",
-         "send ", "wire ", "confirm", "set up", "create ", "add ", "fix ", "review ",
-         "schedule", "ping ", "reach out", "make sure"];
+    // A floor to-do has to be SHAPED like a task, not merely CONTAIN a task word. The old rule
+    // accepted any sentence with an action word anywhere in it, so a rambling declarative
+    // ("I optimized the rendering so typing feels smoother and ...") became a to-do and the brevity
+    // pass then truncated it into a meaningless fragment. A statement of fact is not a task: a floor
+    // to-do must be a first/second/third-person commitment, an explicit task marker, or an
+    // imperative opener.
+    static readonly Regex CommitmentShape = new(
+        @"\b(?:i'?ll|we'?ll|you'?ll|he'?ll|she'?ll|they'?ll|will|need(?:s)?\s+to" +
+        @"|have\s+to|has\s+to|going\s+to|make\s+sure|follow(?:[-\s])?up|action\s+item|to-?do)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    static readonly Regex ImperativeOpener = new(
+        @"^\s*(?:send|add|fix|review|create|schedule|confirm|set\s+up|ping|wire|reach\s+out|update" +
+        @"|prepare|collect|check|draft|share|email|call|book|finalis[ez]e|write|build|test|deploy" +
+        @"|assign|investigate|remove|migrate|document)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    static bool LooksLikeAction(string sentence)
+        => CommitmentShape.IsMatch(sentence) || ImperativeOpener.IsMatch(sentence);
 
     static readonly string[] DueCues =
         ["today", "tomorrow", "tonight", "this week", "next week", "this morning",
@@ -45,7 +58,7 @@ public static partial class NoteExtractor
                 // decision that happens to mention an action verb isn't misfiled.
                 Add(notes.Decisions, s);
             }
-            else if (ActionCues.Any(lower.Contains))
+            else if (LooksLikeAction(s))
             {
                 notes.Actions.Add(new ActionItem { Text = s, Owner = Owner(s, speaker), Due = Due(lower) });
             }
@@ -66,8 +79,16 @@ public static partial class NoteExtractor
             notes.Actions.RemoveAll(a => !keep.Contains(a));
         }
 
-        notes.Tldr = Tldr(sentences);
-        return notes;
+        // NO raw-transcript summary. The floor used to concatenate the opening sentences into a
+        // "TL;DR", which is just the conversation's first ~140 characters pasted in as if it were a
+        // written summary - the leak the owner kept seeing whenever the model was unavailable. Empty
+        // is honest: the renderer drops an empty summary, exactly as the model path already does when
+        // it has no real summary to give. The floor's value is the extracted decisions/actions/
+        // questions, which are checkable against the transcript; a fabricated summary is not.
+        notes.Tldr = "";
+        // The floor lifts its lines straight out of speech, so it needs the tightening pass even
+        // more than the model does. One pass, both paths - see Llm/Brevity.cs.
+        return Toki.Llm.Brevity.Tighten(notes);
     }
 
     const int MaxQuestions = 10, MaxDecisions = 10, MaxActions = 12;
@@ -115,19 +136,6 @@ public static partial class NoteExtractor
                 if (s.Length >= 3) result.Add((seg.Speaker, s));
             }
         return result;
-    }
-
-    static string Tldr(List<(Speaker Speaker, string Sentence)> sentences)
-    {
-        var sb = new StringBuilder();
-        foreach (var (_, s) in sentences)
-        {
-            if (sb.Length + s.Length > 240) break;
-            if (sb.Length > 0) sb.Append(' ');
-            sb.Append(s);
-            if (sb.Length > 140) break;
-        }
-        return sb.ToString();
     }
 
     /// <summary>Capitalised sentence-openers that are grammar, not a person ("This will take a

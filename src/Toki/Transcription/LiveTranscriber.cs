@@ -32,10 +32,43 @@ public sealed class LiveTranscriber
     volatile bool _stop;
     bool _started;
 
-    /// <summary>Raised (on the worker thread) each time a window finalizes into segments - for live preview.</summary>
+    /// <summary>Raised (on the worker thread) each time a Parakeet WINDOW finalizes into segments - this
+    /// is the accurate record path. Used for the live preview ONLY when the fast streaming model is not
+    /// installed yet.</summary>
     public event Action<TranscriptSegment>? SegmentFinalized;
 
+    // ── fast live preview (streaming zipformer) ──
+    // A separate, disposable preview that emits words as they are spoken (~1s) so the recording view
+    // fills instantly instead of waiting for the ~15-21s Parakeet window. The saved transcript is still
+    // the Parakeet path above. Null when the streaming model has not downloaded yet (preview falls back
+    // to SegmentFinalized).
+    StreamingTranscriber? _streaming;
+    int _previewMs;   // a monotonic counter just to order preview segments; not real timing
+
+    /// <summary>The growing in-progress line for a speaker (streaming preview), raised on the worker thread.</summary>
+    public event Action<Speaker, string>? PreviewPartial;
+    /// <summary>A finalized streaming preview line (an utterance ended), raised on the worker thread.</summary>
+    public event Action<TranscriptSegment>? PreviewFinalized;
+
+    public bool StreamingPreview => _streaming is not null;
+
     public LiveTranscriber(TranscriptionService service) => _service = service;
+
+    void FeedStreaming(Speaker speaker, float[] buf, int n)
+    {
+        if (_streaming is null) return;
+        try
+        {
+            var (partial, final) = _streaming.Accept(speaker, buf, n);
+            if (final is not null)
+            {
+                _previewMs += 1;
+                PreviewFinalized?.Invoke(new TranscriptSegment(speaker, _previewMs, _previewMs, final));
+            }
+            else if (partial.Length > 0) PreviewPartial?.Invoke(speaker, partial);
+        }
+        catch (Exception ex) { App.Log($"streaming preview {speaker} failed (dropping to Parakeet preview): {ex.Message}"); _streaming = null; }
+    }
 
     /// <summary>Register a stream to transcribe live, in its native capture format. Copy-on-add so a
     /// capture thread already inside <see cref="Feed"/> never sees a list mutating under it.</summary>
@@ -57,6 +90,17 @@ public sealed class LiveTranscriber
     {
         if (_started || _pipes.Length == 0) return;
         _started = true;
+        // Fast streaming preview, if the model is present (it downloads in the background at launch).
+        // A failure to build it is non-fatal: the preview simply falls back to the Parakeet window.
+        if (ModelManager.StreamingAsrInstalled)
+        {
+            try
+            {
+                _streaming = new StreamingTranscriber();
+                foreach (var p in _pipes) p.Tap = (buf, n) => FeedStreaming(p.Speaker, buf, n);
+            }
+            catch (Exception ex) { App.Log($"streaming preview init failed (Parakeet preview instead): {ex.Message}"); _streaming = null; }
+        }
         _worker = new Thread(Work) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "toki-live-asr" };
         _worker.Start();
     }
@@ -87,6 +131,15 @@ public sealed class LiveTranscriber
                 }
             }
             catch (Exception ex) { App.Log($"live final flush {pipe.Speaker} failed: {ex.Message}"); }
+        }
+        // Flush + dispose the streaming preview (disposable; the record above is what's returned).
+        if (_streaming is not null)
+        {
+            foreach (var pipe in _pipes)
+                try { if (_streaming.Flush(pipe.Speaker) is { } tail) { _previewMs++; PreviewFinalized?.Invoke(new TranscriptSegment(pipe.Speaker, _previewMs, _previewMs, tail)); } }
+                catch { }
+            try { _streaming.Dispose(); } catch { }
+            _streaming = null;
         }
         lock (_lock)
         {
@@ -175,6 +228,9 @@ public sealed class LiveTranscriber
         public readonly Speaker Speaker;
         public readonly List<float> Accum = new();
         public double DecodedSec;
+        // Fed the SAME resampled 16k samples as Accum, for the fast streaming preview (set by Start
+        // when the streaming model is present). Never throws into Drain.
+        public Action<float[], int>? Tap;
 
         readonly BufferedWaveProvider _buffer;
         readonly ISampleProvider _out;
@@ -214,6 +270,7 @@ public sealed class LiveTranscriber
             while ((read = _out.Read(_pull, 0, _pull.Length)) > 0)
             {
                 for (var i = 0; i < read; i++) Accum.Add(_pull[i]);
+                Tap?.Invoke(_pull, read);   // feed the streaming preview the same samples
                 if (read < _pull.Length) break;   // nothing more available right now
             }
         }

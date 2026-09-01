@@ -84,8 +84,6 @@ public static class ThemeManager
         ("Shadow1",            "#0D000000", "#09000000"),
         ("Shadow2",            "#12000000", "#0C000000"),
         ("Shadow3",            "#18000000", "#11000000"),
-        // The loader sliver's progress track.
-        ("ShimmerTrack",       "#14FFFFFF", "#14000000"),
         ("TextHi",             "#E6FFFFFF", "#E6000000"),
         // Secondary and tertiary text, raised above the design frame's 50%/25% to clear contrast bars.
         ("TextMid",            "#A6FFFFFF", "#A6000000"),
@@ -146,8 +144,10 @@ public static class ThemeManager
         // Toki's bubble at disc scale: a plate lit from above, rim brightest at the crown.
         ("MascotPlate",     Grad.Down,      "#E6403B39 #E6322E2D", "#F2FFFFFF #F2F1ECEA"),
         ("MascotRim",       Grad.Down,      "#4DFFFFFF #2EFFFFFF #1AFFFFFF", "#A6FFFFFF #1F000000 #2E000000"),
-        // The loader sliver's travelling highlight; the light value is deepened to read on a pale track.
-        ("Shimmer",         Grad.Pulse,     "#F48AAE", "#B03A63"),
+        // The loader sliver's travelling highlight - brand BLUE now (was pink, which read as "questions",
+        // a reserved content colour). Blue = Toki-active chrome (matches the on-toggle). Dark = bright
+        // blue on the dark card; light value deepened to read on a pale track.
+        ("Shimmer",         Grad.Pulse,     "#68B0F9", "#1C579B"),
         // The Ask page's atmosphere (figma 348:5438): a teal-blue bloom rising from the bottom.
         // The light value is the same hue as a TINT, faint enough that labels still clear 4.5:1.
         ("AskBloom",        Grad.Up,        "#3D103C46 #1E10333E #00000000", "#1F7FB4C4 #0F7FB4C4 #00FFFFFF"),

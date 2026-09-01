@@ -60,7 +60,18 @@ public partial class NotesView : UserControl
     void RenderNotes(MeetingRecord m)
     {
         var box = NoteRenderer.MeetingDocument(m, spacious: false,
-            resolving: m.Id > 0 && App.IsResolvingSpeakers(m.Id), scrollHost: Scroll);
+            resolving: m.Id > 0 && App.IsResolvingSpeakers(m.Id), scrollHost: Scroll,
+            dismissSection: m.Id > 0 ? heading =>
+            {
+                if (!App.DismissNoteSection(m.Id, heading)) return;
+                if (App.Store.Get(m.Id) is { } fresh) { Body.Children.Clear(); RenderNotes(fresh); }
+            } : null,
+            // "Try again" regenerated the notes with the model: re-read and rebuild so the floor
+            // notes (and the banner) are replaced by the model's.
+            refreshNotes: m.Id > 0 ? () =>
+            {
+                if (App.Store.Get(m.Id) is { } fresh) { App.CurrentMeeting = fresh; Body.Children.Clear(); RenderNotes(fresh); }
+            } : null);
         // A scroll-disabled RichTextBox still eats the wheel; hand it to the page's scroller.
         box.PreviewMouseWheel += (_, e) => { e.Handled = true; Toki.Controls.SmoothScroll.Nudge(Scroll, e.Delta); };
         Body.Children.Add(box);

@@ -76,8 +76,8 @@ public partial class MeetingPromptView : UserControl, IWidthAware
         // is what makes the prompt trustworthy.
         var name = string.IsNullOrWhiteSpace(rawAppName) ? null : Detection.AppNames.Friendly(rawAppName);
         record.ToolTip = string.IsNullOrWhiteSpace(name)
-            ? "Transcribe this call and write the notes, all on this PC"
-            : $"{name} is in a call - transcribe it and write the notes, all on this PC";
+            ? "Transcribe this call and write the notes"
+            : $"{name} is in a call - transcribe it and write the notes";
         record.Click += OnRecord;
         Pills.Children.Add(record);
     }

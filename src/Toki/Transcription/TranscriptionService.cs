@@ -16,8 +16,14 @@ public sealed class TranscriptionService
 
     readonly object _gate = new();
     Transcriber? _transcriber;
+    WhisperTranscriber? _whisper;
 
     public static bool ModelReady => ModelManager.IsInstalled(ModelManager.Parakeet);
+
+    /// <summary>Whisper is the ASK-BY-VOICE decoder, downloaded after Parakeet. When present, short
+    /// push-to-talk clips go through it (robust on 1-2 word clips); when absent, they fall back to
+    /// Parakeet, so the feature still works, just less reliably on the shortest utterances.</summary>
+    public static bool WhisperReady => ModelManager.WhisperInstalled;
 
     TranscriptionService() { }
 
@@ -151,20 +157,54 @@ public sealed class TranscriptionService
     /// </summary>
     public string? TranscribeFile(string wavPath)
     {
-        if (!ModelReady) { App.Log("voice transcribe skipped: Parakeet not installed"); return null; }
+        // Whisper is the preferred Ask decoder; Parakeet is the fallback when it isn't downloaded yet.
+        if (!WhisperReady && !ModelReady) { App.Log("voice transcribe skipped: no ASR model installed"); return null; }
         if (App.LowMemoryMode) Toki.Llm.LlmService.Instance.Release();
         lock (_gate)
         {
-            try { _transcriber ??= new Transcriber(); }
-            catch (Exception ex) { App.Log($"transcriber init failed: {ex.Message}"); return null; }
             try
             {
                 var samples = AudioLoader.To16kMono(wavPath);
                 if (IsSilent(samples)) return "";
-                var segs = _transcriber!.Transcribe(samples, Speaker.You);
+                // Parakeet TDT returns an EMPTY decode when fed trailing silence (NVIDIA-NeMo #15757),
+                // and a push-to-talk clip always ends in silence (the user releases the key a beat after
+                // speaking). Trim the quiet tail - Ask path ONLY, never the shared meeting Transcribe -
+                // keeping a small pad so no coda consonant is clipped.
+                samples = TrimSilenceEnds(samples);
+
+                // WHISPER first: it pads to its 30s window, so a 1-2 word clip decodes cleanly where
+                // Parakeet collapses "Hi Toki" to "Yeah". Fall back to Parakeet only if whisper is not
+                // installed yet (it downloads in the background after onboarding).
+                if (WhisperReady)
+                {
+                    try
+                    {
+                        _whisper ??= new WhisperTranscriber();
+                        return Readability.Clean(_whisper.Transcribe(samples)).Text;
+                    }
+                    catch (Exception ex)
+                    {
+                        // A whisper failure must not kill the feature - drop to Parakeet below.
+                        App.Log($"whisper voice transcribe failed, falling back to Parakeet: {ex.Message}");
+                    }
+                }
+                if (!ModelReady) return null;
+                _transcriber ??= new Transcriber();
+                var segs = _transcriber.Transcribe(samples, Speaker.You);
                 return string.Join(" ", segs.Select(s => s.Text)).Trim();
             }
             catch (Exception ex) { App.Log($"voice transcribe failed: {ex.Message}"); return null; }
+        }
+    }
+
+    /// <summary>Load the whisper recognizer ahead of the first Ask, off the meeting path.</summary>
+    public void WarmWhisper()
+    {
+        if (!WhisperReady) return;
+        lock (_gate)
+        {
+            try { _whisper ??= new WhisperTranscriber(); }
+            catch (Exception ex) { App.Log($"whisper warm failed: {ex.Message}"); }
         }
     }
 
@@ -200,6 +240,29 @@ public sealed class TranscriptionService
         foreach (var s in samples)
             if (s > SilenceFloor || s < -SilenceFloor) return false;
         return true;
+    }
+
+    /// <summary>Trim only the quiet TAIL of a push-to-talk clip, keeping a ~125ms pad so no coda
+    /// consonant is clipped. TRAILING only, by design: the Parakeet empty-decode bug (NeMo #15757) is
+    /// specifically about trailing silence, and trimming the HEAD risks eating the first word (a soft
+    /// "Hi" before a louder "Toki") - leading silence is harmless to the recogniser, so it stays. The
+    /// gate is PEAK-RELATIVE (a quiet mic still trims) with an absolute floor (room noise can't 'find'
+    /// speech). Returns the input unchanged when there is nothing clear to trim. Ask path only.</summary>
+    internal static float[] TrimSilenceEnds(float[] s)
+    {
+        if (s.Length == 0) return s;
+        float peak = 0f;
+        foreach (var x in s) { var a = x < 0 ? -x : x; if (a > peak) peak = a; }
+        var thresh = Math.Max(0.01f, peak * 0.08f);
+        int last = s.Length - 1;
+        while (last >= 0 && (s[last] < thresh && s[last] > -thresh)) last--;
+        if (last < 0) return s;   // all quiet - leave it to the gate/decoder
+        const int pad = AudioLoader.TargetRate / 8;   // 125ms at 16k
+        last = Math.Min(s.Length - 1, last + pad);
+        if (last == s.Length - 1) return s;   // no trailing silence past the pad
+        var outp = new float[last + 1];
+        Array.Copy(s, 0, outp, 0, outp.Length);   // keep the head intact - protect the first word
+        return outp;
     }
 
     /// <summary>Load the recognizer ahead of the first meeting (lesson 2: warm at launch).</summary>

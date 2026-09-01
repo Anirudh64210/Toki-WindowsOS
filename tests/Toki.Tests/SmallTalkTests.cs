@@ -23,6 +23,20 @@ public sealed class SmallTalkTests
     [InlineData("bye")]
     [InlineData("see you later")]
     [InlineData("toki")]
+    // MUTATION PROBE (2026-08-25): bare backchannels/affirmations were falling through to retrieval,
+    // so a MIS-HEARD short clip ("Hi Toki" heard as "Yeah") got a confident answer grounded on the
+    // on-screen note instead of a light canned reply. These must intercept now.
+    [InlineData("yeah")]
+    [InlineData("Yeah.")]
+    [InlineData("yep")]
+    [InlineData("yup")]
+    [InlineData("mm-hmm")]
+    [InlineData("uh-huh")]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("nope")]
+    [InlineData("nah")]
+    [InlineData("yeah cool thanks")]
     public void Intercepts_small_talk(string input)
         => Assert.NotNull(SmallTalk.TryReply(input));
 

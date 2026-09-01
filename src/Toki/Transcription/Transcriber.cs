@@ -211,6 +211,8 @@ public sealed class Transcriber : IDisposable
         var r = stream.Result;
         if (string.IsNullOrWhiteSpace(r.Text) || r.Tokens is null || r.Tokens.Length == 0)
             return [];
+        if (Environment.GetEnvironmentVariable("TOKI_ASR_DUMPTIMES") == "1")
+            App.Log($"asr arrays: tokens={r.Tokens.Length} times={r.Timestamps?.Length ?? -1} durations={r.Durations?.Length ?? -1}");
         return GroupIntoSegments(r.Tokens, r.Timestamps, r.Durations, offsetSec, speaker);
     }
 
@@ -289,15 +291,34 @@ public sealed class Transcriber : IDisposable
         {
             var text = Detokenize(sb.ToString());
             if (text.Length > 0)
-                segments.Add(new TranscriptSegment(speaker, (int)((segStart + offsetSec) * 1000), (int)((end + offsetSec) * 1000), text));
+            {
+                // NEVER cast an unchecked double to int. A NaN or an infinity from the recogniser
+                // becomes int.MinValue silently, and that is exactly what shipped: stored lines
+                // whose EndMs was int.MinValue, so the evidence clip collapsed to its 500ms floor
+                // and played a fragment of the sentence it claimed. Measured with --evidencetest on
+                // meeting 108. An end can also never precede its own start.
+                var startMs = Ms(segStart + offsetSec);
+                var endMs = Math.Max(startMs, Ms(end + offsetSec));
+                segments.Add(new TranscriptSegment(speaker, startMs, endMs, text));
+            }
             sb.Clear();
             words = 0;
         }
 
+        static int Ms(double seconds) =>
+            double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0
+                ? 0
+                : (int)Math.Min(seconds * 1000, int.MaxValue);
+
         for (var i = 0; i < tokens.Length; i++)
         {
-            var start = i < times.Length ? times[i] : prevEnd;
-            var end = start + (i < durations.Length ? durations[i] : 0);
+            // A token time that is not a real number carries the whole line away with it, so treat
+            // it as "no new information" and keep the clock where it was.
+            var t = i < times.Length ? times[i] : prevEnd;
+            var start = double.IsNaN(t) || double.IsInfinity(t) || t < 0 ? prevEnd : t;
+            var d = i < durations.Length ? durations[i] : 0;
+            if (double.IsNaN(d) || double.IsInfinity(d) || d < 0) d = 0;
+            var end = start + d;
             // Break ONLY at a word boundary (this Parakeet build marks word starts with a leading
             // space; ▁ handled for other SentencePiece builds) - a time-gap split alone cuts
             // mid-word on pausey speech. At a boundary: sentence end always breaks; a real pause

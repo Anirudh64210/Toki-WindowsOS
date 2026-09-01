@@ -16,10 +16,17 @@ public static class SmallTalk
             new[] { "Hey! What do you want to know from your meetings?", "Hi there - ask me anything about your meetings.", "Hey! Ask away." }),
         (Whole(@"thanks?(\s+(a\s+lot|so\s+much|very\s+much|a\s+ton|man|toki))?|thank\s+you(\s+(so\s+much|very\s+much|a\s+lot|a\s+ton))?|thx|ty|appreciate\s+(it|that|you)|cheers|nice|cool|great|awesome|perfect|good\s+job|well\s+done|got\s+it"),
             new[] { "Anytime.", "You got it.", "Happy to help." }),
-        // Acknowledgements ("okay", "ok cool", "sounds good"). Whole-utterance only; otherwise
-        // they fall through to retrieval and dig up an unrelated meeting.
-        (Whole(@"(ok(ay)?|alright(y)?|k+|cool|nice|sweet|great|awesome|perfect|gotcha|right|sure|word|fair\s+enough|sounds\s+good|makes\s+sense|no\s+worries)(?:[\s,]+(ok(ay)?|cool|nice|sweet|great|awesome|perfect|thanks?|thank\s+you|then|man|got\s+it|makes\s+sense|no\s+worries|sounds\s+good|for\s+now))*"),
+        // Acknowledgements + bare backchannels ("okay", "ok cool", "sounds good", "yeah", "yep",
+        // "mm-hmm"). Whole-utterance only; otherwise they fall through to retrieval and dig up an
+        // unrelated meeting. The bare affirmations/negations matter DOUBLY here: a mis-heard short
+        // utterance (Parakeet loves to emit "yeah"/"okay" on a garbled 1-word clip) must get a light
+        // canned reply, NEVER a confident answer grounded on whatever note is on screen.
+        (Whole(@"(yeah|yep|yup|yea|ya|mm+-?hmm+|uh-?huh|mhm+|ok(ay)?|alright(y)?|k+|cool|nice|sweet|great|awesome|perfect|gotcha|right|sure|word|fair\s+enough|sounds\s+good|makes\s+sense|no\s+worries)(?:[\s,]+(yeah|yep|ok(ay)?|cool|nice|sweet|great|awesome|perfect|thanks?|thank\s+you|then|man|got\s+it|makes\s+sense|no\s+worries|sounds\s+good|for\s+now))*"),
             new[] { "Cool.", "Sounds good.", "Anytime.", "You got it." }),
+        // Bare yes/no/nah/nope on their own (outside a pending calendar confirm, which is handled
+        // upstream): not a question, so acknowledge lightly rather than answering from the notes.
+        (Whole(@"yes|no|nah|nope|not\s+really|never\s*mind"),
+            new[] { "Okay!", "No worries.", "Got it." }),
         // A dismissal that clarifies a prior throwaway ("no I just meant ok cool thanks") - ONLY when the
         // tail is pure acknowledgement, never a meeting reference ("I meant the pricing meeting" is Q&A).
         (Whole(@"(no,?\s+)?i\s+(just\s+)?(meant|mean|said)\s+(that\s+|to\s+say\s+)?(?:(ok(ay)?|cool|nice|sweet|great|thanks?|thank\s+you|good|nothing|no\s+worries|then|man)[\s,]*)+"),

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -47,6 +47,13 @@ static class RenderHarness
         catch { /* no store yet - Notes renders its fallback */ }
         foreach (var (state, w, cap) in Shots)
             Shot(dir, $"{state}", Build(state), w, cap, PillWindow.IsCapsuleState(state));
+
+        // The tucked LOADER sliver exactly as runtime shows it - the SummarizingView laid out at its
+        // full ~50 height but the plate CLIPPED to the top 13px squircle capsule (Root sits at the
+        // bubble floor, the sliver is a clip not a resize). The flat Summarizing.png only ever pictures
+        // the open pill; this is the surface where the shimmer used to poke past the rounded ends, and
+        // the "union" variant reproduces the tuck-morph width that caused it. Guards the capped track.
+        SliverShot(dir);
 
         // The meeting prompt with REAL raw app identities - proves the friendly-name mapping and
         // that a long/wrapping prompt is fully visible at its measured height.
@@ -128,6 +135,14 @@ static class RenderHarness
             "2. review with the team";
         Shot(dir, "NoteEditor", editor, 520, 560);
 
+        // A NOTE THE MOMENT A TEMPLATE IS PICKED. The owner photographed this and it was a stack of
+        // headings with squashed slivers between them and a sliced tick box - nothing to write on and
+        // nothing whole on screen. The harness had no picture of a template, so nothing here could
+        // have shown it.
+        var templated = new NoteEditor { MinHeight = 380 };
+        templated.InsertTemplate(Llm.NoteTemplates.All[0]);
+        Shot(dir, "NoteEditor-template", templated, 520, 560);
+
         // First-run onboarding, all three steps. These are the only screens a user sees exactly once,
         // so they're the hardest to capture by hand - and the first thing a design review wants.
         string[] steps = ["1-name", "2-privacy", "3-allset"];
@@ -136,6 +151,65 @@ static class RenderHarness
             var ob = new OnboardingView();
             ob.DebugShowStep(i);
             Shot(dir, $"Onboarding-{steps[i]}", ob, 330, 400);
+        }
+    }
+
+    /// <summary>The tucked loader sliver - full-height SummarizingView, plate clipped to a 13px squircle
+    /// capsule (radius clamps to 6.5), rim on the same 13px box. Mirrors the runtime tuck so the
+    /// shimmer's containment inside the rounded ends is visible. Rendered twice: "flat" (content =
+    /// card) and "union" (content wider than the card, as the tuck morph pins it) - the width that let
+    /// the bar escape the rounded ends before the track was capped.</summary>
+    static void SliverShot(string dir)
+    {
+        const double card = 220, full = 50, sliver = 13;
+        // contentW WIDER than the card reproduces the tuck-morph condition (PillWindow pins the content
+        // at a union width while the card clip animates). The card plate stays 220, CENTRED. Before the
+        // fix the shimmer track stretched to contentW and the bar reached past the card's rounded end.
+        foreach (var contentW in new[] { card, 264.0 })
+        {
+            var view = new SummarizingView { Width = contentW, Height = full };
+            var box = new Rect((contentW - card) / 2, 0, card, sliver);   // 220 capsule, centred in content
+
+            var pill = new Border { Width = contentW, Height = full };
+            pill.SetResourceReference(Border.BackgroundProperty, "CardPlate");
+            pill.Clip = Theme.Squircle.Build(box, 24);   // clip the plate to the 13px capsule
+            var layered = new Grid();
+            // Match PillWindow.ApplyCornerGeometry: the material's edge-light rings must use the plate's
+            // CLAMPED radius (6.5 on a 13px sliver) minus the rim, or their full-card corner arcs cut
+            // two crescent "edges" across the sliver.
+            var plateR = System.Math.Min(24.0, System.Math.Min(card, sliver) / 2);
+            layered.Children.Add(new Theme.CardMaterial { Radius = System.Math.Max(0, plateR - 1) });
+            layered.Children.Add(view);
+            pill.Child = layered;
+
+            var lifted = new Grid { Width = contentW, Height = full };
+            lifted.Children.Add(pill);
+            var rim = new System.Windows.Shapes.Path
+            {
+                Data = Theme.Squircle.Outline(box, 24, 1), StrokeThickness = 1, IsHitTestVisible = false,
+            };
+            rim.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "CardRim");
+            lifted.Children.Add(rim);
+
+            var canvas = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+                Padding = new Thickness(24), Child = lifted,
+            };
+            double tw = contentW + 48, th = full + 48;
+            canvas.Measure(new Size(tw, th));
+            canvas.Arrange(new Rect(0, 0, tw, th));
+            canvas.UpdateLayout();
+
+            // Stamp the shimmer across its travel so mid-sweep containment is visible, not just at rest.
+            var kind = contentW > card ? "union" : "flat";
+            var move = view.FindName("ShimmerMove") as TranslateTransform;
+            foreach (var (tag, x) in new[] { ("rest", -90.0), ("mid", 60.0), ("right", 180.0), ("far", 240.0) })
+            {
+                if (move is not null) move.X = x;
+                canvas.UpdateLayout();
+                Save(canvas, tw, th, Path.Combine(dir, $"Summarizing_sliver_{kind}_{tag}.png"));
+            }
         }
     }
 

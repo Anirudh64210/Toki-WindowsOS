@@ -92,9 +92,21 @@ public static class Readability
     static readonly Regex SpokenYear = new(
         $@"\b(?<c>nineteen|twenty) (?<t>{Tens})(?:[ -](?<u>{Units}))?\b(?![-\w])", Opts);
 
-    // Hesitation fillers. NOT "hmm"/"mm-hmm" (answers), NOT "like"/"you know" (too often literal).
+    // Hesitation fillers. NOT "hmm"/"mm-hmm" (answers). EXTENDED 2026-08-25 with the er/eh/ah
+    // interjection family (Otter and Wispr both strip these; delete-only, they carry no content).
+    // Discourse markers ("you know", "I mean", "like") are handled SEPARATELY and only when
+    // comma-parenthetical - space-bounded they are too often literal ("do you know what time").
     static readonly Regex Filler = new(
-        @"(?<lead>^|[.!?] |, | )(?:uh|um|uhh|umm|uhm|erm)(?:,? +|(?<tail>[.!?,])|$)", Opts);
+        @"(?<lead>^|[.!?] |, | )(?:uh|um|uhh|umm|uhm|erm|er|eh|ah|ahh)(?:,? +|(?<tail>[.!?,])|$)", Opts);
+
+    // Parenthetical discourse fillers: ONLY when set off by commas or sitting at a sentence edge,
+    // where they are unambiguously filler and carry nothing. The literal uses ("you know the answer",
+    // "what I mean is", "a tool like this") have no comma and are never touched. Deletion only - the
+    // exact wording of everything real is preserved, so evidence clips still match the transcript.
+    const string Discourse = @"you know|i mean|like|sort of|kind of";
+    static readonly Regex DiscourseMid = new($@",\s*(?:{Discourse})\s*,", Opts);          // ", you know," -> ","
+    static readonly Regex DiscourseHead = new($@"(?<lead>^|[.!?]\s+)(?:{Discourse}),\s+", Opts); // "You know, x" -> "x"
+    static readonly Regex DiscourseTail = new($@",\s*(?:{Discourse})(?<end>[.!?])", Opts);  // ", you know." -> "."
 
     // Stuttered doubles of words that are never legitimately doubled in English.
     static readonly Regex Stutter = new(
@@ -194,7 +206,13 @@ public static class Readability
             var tail = m.Groups["tail"].Success ? m.Groups["tail"].Value : "";
             return lead + tail;
         });
-        if (capNeeded)
+        // Parenthetical discourse fillers, after the interjections. Head-position removal hands the
+        // capital to the next word, same as the interjection pass. All three forms are deletion only.
+        t = DiscourseMid.Replace(t, " ");   // both commas go with the filler; seam cleanup fixes doubles
+        t = DiscourseTail.Replace(t, m => m.Groups["end"].Value);
+        var headHit = false;
+        t = DiscourseHead.Replace(t, m => { headHit = true; return m.Groups["lead"].Value; });
+        if (capNeeded || headHit)
             t = Regex.Replace(t, @"(^|[.!?] )(?<c>[a-z])", m => m.Groups[1].Value + char.ToUpperInvariant(m.Groups["c"].Value[0]));
 
         // Stutters, twice so "the the the" fully collapses.

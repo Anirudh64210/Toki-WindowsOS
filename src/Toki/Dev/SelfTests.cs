@@ -1,8 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using Toki.Audio;
 using Toki.Detection;
 using Toki.Llm;
+using Toki.State;
 using Toki.Storage;
 using Toki.Transcription;
 
@@ -38,8 +39,12 @@ static class SelfTests
                 "--detecttest" => DetectTest(Seconds(args, 30)),
                 "--recordtest" => RecordTest(args, Seconds(args, 6)),
                 "--asrtest" => AsrTest(args),
+                "--evidencetest" => EvidenceTest.Run(args),
+                "--linktest" => LinkTest.Run(args),
                 "--wertest" => WerTest.Run(args),
                 "--voicetest" => VoiceTest(args),
+                "--streamtest" => StreamTest(args),
+                "--embedconflicttest" => EmbedConflictTest(args),
                 "--transcribetest" => TranscribeTest(args),
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
@@ -99,6 +104,71 @@ static class SelfTests
         if (text.Length == 0) { Console.WriteLine("[--voicetest] empty - PASS only if the clip was silent."); return 0; }
         Console.WriteLine("[--voicetest] PASS - non-empty transcription returned.");
         return 0;
+    }
+
+    // Verifies the LIVE-preview streaming decoder: feed a WAV in ~1s chunks, print the growing partial
+    // and each finalized line - proving words appear incrementally (not after a 15-21s window).
+    static int StreamTest(string[] args)
+    {
+        var i = Array.IndexOf(args, "--streamtest");
+        if (i < 0 || i + 1 >= args.Length) return Fail("usage: --streamtest <path-to-wav>");
+        var file = args[i + 1];
+        if (!File.Exists(file)) return Fail($"file not found: {file}");
+        if (!Toki.Transcription.ModelManager.StreamingAsrInstalled)
+            return Fail("streaming model not installed (sherpa-onnx-streaming-zipformer-en-20M).");
+        var samples = Toki.Transcription.AudioLoader.To16kMono(file);
+        Console.WriteLine($"[--streamtest] {Path.GetFileName(file)}: {samples.Length / 16000.0:F1}s, feeding in 1s chunks...");
+        using var st = new Toki.Transcription.StreamingTranscriber();
+        var finals = new List<string>();
+        const int chunk = 16000;   // 1s
+        for (var pos = 0; pos < samples.Length; pos += chunk)
+        {
+            var n = Math.Min(chunk, samples.Length - pos);
+            var slice = new float[n];
+            Array.Copy(samples, pos, slice, 0, n);
+            var (partial, final) = st.Accept(Toki.Transcription.Speaker.You, slice, n);
+            if (final is not null) { finals.Add(final); Console.WriteLine($"  [final] {final}"); }
+            else if (partial.Length > 0) Console.WriteLine($"  ...{partial}");
+        }
+        var tail = st.Flush(Toki.Transcription.Speaker.You);
+        if (tail is not null) { finals.Add(tail); Console.WriteLine($"  [final] {tail}"); }
+        if (finals.Count == 0) { Console.WriteLine("[--streamtest] no text decoded - FAIL (or the clip was silent)."); return 1; }
+        Console.WriteLine($"[--streamtest] PASS - {finals.Count} finalized line(s), incremental partials shown above.");
+        return 0;
+    }
+
+    // Settles the "in-process embedder conflicts with sherpa" claim EMPIRICALLY: loads exactly
+    // production's model mix in one process - sherpa (Parakeet/whisper) + Qwen (llama.cpp) + the bge
+    // embedder (llama.cpp) - and exercises each. If it returns PASS, hybrid retrieval is safe to wire.
+    static int EmbedConflictTest(string[] args)
+    {
+        try
+        {
+            Console.WriteLine("[--embedconflicttest] 1/4 warming sherpa recognizer...");
+            TranscriptionService.Instance.Warm();
+            if (!TranscriptionService.ModelReady) return Fail("Parakeet not installed - run --asrtest once.");
+
+            Console.WriteLine("[--embedconflicttest] 2/4 loading Qwen (llama.cpp)...");
+            LlmService.Instance.WarmBlocking();
+
+            Console.WriteLine("[--embedconflicttest] 3/4 loading the bge embedder (llama.cpp) alongside them...");
+            if (!EmbeddingService.Instance.Ready) return Fail("embedder not ready (bge-small model missing?).");
+            var vec = EmbeddingService.Instance.EmbedAsync("a quick sentence about the pricing decision").GetAwaiter().GetResult();
+            if (vec is null || vec.Length == 0) return Fail("embed returned null with the other models loaded.");
+            Console.WriteLine($"[--embedconflicttest]   embedder OK ({vec.Length}-dim) with sherpa + Qwen resident.");
+
+            var wav = args.Skip(1).FirstOrDefault(a => a.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && File.Exists(a));
+            if (wav is not null)
+            {
+                Console.WriteLine("[--embedconflicttest] 4/4 decoding through sherpa AFTER the embedder loaded...");
+                var text = TranscriptionService.Instance.TranscribeFile(wav);
+                if (text is null) return Fail("sherpa decode returned null after the embedder loaded (a real load-order conflict).");
+                Console.WriteLine($"[--embedconflicttest]   decode OK: \"{(text.Length > 60 ? text[..60] + "..." : text)}\"");
+            }
+            Console.WriteLine("[--embedconflicttest] PASS - sherpa + Qwen + bge embedder coexist in one process. Hybrid retrieval is safe.");
+            return 0;
+        }
+        catch (Exception ex) { Console.WriteLine(ex.StackTrace); return Fail($"CONFLICT / crash: {ex.Message}"); }
     }
 
     static int MicTest(string outDir, int seconds)
@@ -423,6 +493,26 @@ static class SelfTests
             var noteId = store.CreateManualNote("My prep note", "- ask about pricing\n- confirm scope");
             if (store.List().Count != 2) return Fail("manual note not saved");
             Console.WriteLine($"  manual note id={noteId} saved");
+
+            // CAN THE ASSISTANT REACH A HAND-WRITTEN NOTE? Until 2026-08-24 it could not: the note's
+            // text was in the FTS index and three queries filtered it out on read, so Ask answered
+            // from the model's own knowledge with no citation instead of saying it could not find it.
+            // MUTATION PROBE: put `AND m.kind = 'Meeting'` back in SearchRelevant and the first of
+            // these fails; put `WHERE kind='Meeting'` back in TitleMatchIds and the second fails.
+            if (!store.SearchRelevant("pricing", 5).Contains(noteId))
+                return Fail("Ask cannot find a hand-written note by its TEXT");
+            if (!store.TitleMatchIds(["prep note"]).Contains(noteId))
+                return Fail("Ask cannot find a hand-written note by its TITLE");
+            Console.WriteLine("  retrieval: a hand-written note is reachable by text and by title");
+
+            // And it must NOT have become a meeting. These back "my last meeting", "how many meetings
+            // did I have" and "meetings last week", and an answer the user can check against their own
+            // calendar has to stay right.
+            if (store.LatestMeetingIds(10).Contains(noteId))
+                return Fail("a hand-written note is being counted as a meeting");
+            if (store.MeetingIdsInRange(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1)).Contains(noteId))
+                return Fail("a hand-written note appears in a meeting date range");
+            Console.WriteLine("  and it is still not counted as a meeting");
 
             store.Delete(id);
             store.Delete(noteId);
@@ -784,9 +874,47 @@ static class SelfTests
                 win2.Close();
             }
         }
+        // ── DEAD SPACE: the other direction, and the one nobody was checking ──
+        //
+        // PillWindow.ContentHeight returns Math.Max(SizesHeight, measured + BottomBreath), so the Sizes
+        // height is a FLOOR and never a cap. A floor set above a page's real content therefore pads the
+        // card out with space the page never uses, silently, and no test noticed: the checks above only
+        // ever asked whether a page was CLIPPED. Onboarding sat at a floor of 250 while its three steps
+        // measure ~188/212/137; its floor is now 130 (below all three), so each step sizes to itself.
+        //
+        // MUTATION PROBE: put Onboarding's Sizes height back to 250 and this fails with dead space on
+        // the shorter steps.
+        var anyPadded = false;
+        foreach (var (name, w, build) in cases)
+        {
+            var state = name.StartsWith("Onboarding", StringComparison.Ordinal) ? PillState.Onboarding
+                      : name.StartsWith("Home", StringComparison.Ordinal) ? PillState.Home
+                      : name.StartsWith("MeetingPrompt", StringComparison.Ordinal) ? PillState.MeetingPrompt
+                      : name == "RecordingOpen" ? PillState.RecordingOpen
+                      : name == "Ask" ? PillState.Ask
+                      : name == "NoSpeech" ? PillState.NoSpeech
+                      : name == "PrepCard" ? PillState.PrepCard
+                      : PillState.Home;
+            if (!PillWindow.DebugIsAutoHeight(state)) continue;
+
+            var v = build();
+            v.Measure(new System.Windows.Size(w - 2, double.PositiveInfinity));
+            var needs = Math.Ceiling(v.DesiredSize.Height) + PillWindow.DebugBottomBreath;
+            var floor = PillWindow.DebugSizeFloor(state);
+            var padded = floor - needs;
+            if (padded > 8)
+            {
+                anyPadded = true;
+                Console.WriteLine($"{name,-24} DEAD SPACE {padded,5:F0}px  (needs {needs:F0}, floor {floor:F0})");
+            }
+        }
+        if (!anyPadded) Console.WriteLine("no auto-height page is padded past its own content");
+
         Console.WriteLine(anyShort
             ? "RESULT: at least one page's out-of-tree measure under-reports the true height → reveal clips."
-            : "RESULT: out-of-tree measure matches the true arranged height for every page.");
+            : anyPadded
+            ? "RESULT: a page's size floor is above its real content → the card keeps space it never uses."
+            : "RESULT: out-of-tree measure matches the true arranged height for every page, with no dead space.");
         return 0;
     }
 
@@ -1221,6 +1349,31 @@ static class SelfTests
             Check("the second summon arms Toki's entrance too",
                   arm2.MascotOpacity < 0.01 && arm2.MascotScale < 0.99,
                   $"opacity {arm2.MascotOpacity:F2}, scale {arm2.MascotScale:F2}");
+
+            // MUTATION PROBE (onboarding sizes each step, and snaps - no visible morph): each setup
+            // page has its OWN height (privacy is taller than name), but the resize is INSTANT, not the
+            // 150ms animation - the next page appears already at its size. Drive the REAL window
+            // name -> privacy: the height must reach the taller target with NO pump for an animation to
+            // run (a snap is done synchronously inside GrowToContent). Take Onboarding out of SnapResize
+            // and the size would still be mid-morph on this immediate read; break the grow and it stays
+            // at name's height. The offscreen --measuretest can't see either.
+            state.ForceForDemo(Toki.State.PillState.Onboarding);
+            pill.UpdateLayout(); Pump(200);
+            if (pill.AuditView(Toki.State.PillState.Onboarding) is Views.OnboardingView ob2)
+            {
+                ob2.DebugShowStep(0);            // step one (name)
+                pill.GrowToContent();
+                pill.UpdateLayout();
+                var hName = pill.ActualHeight;
+                ob2.DebugShowStep(1);            // privacy: a taller page
+                pill.GrowToContent();            // snaps to privacy's height, synchronously
+                pill.UpdateLayout();             // NO Pump: a snap needs no animation frames
+                var hPrivacy = pill.ActualHeight;
+                Check("onboarding snaps each step to its own size (privacy taller than name, no morph)",
+                      hPrivacy > hName + 8, $"name {hName:F0}px, privacy {hPrivacy:F0}px - did not snap to the taller step");
+            }
+            else Check("onboarding snaps each step to its own size (privacy taller than name, no morph)",
+                       false, "could not reach the view");
         }
         catch (Exception ex) { Console.WriteLine($"FAIL  (driving the window)   {ex.Message}"); fails++; }
         finally { try { pill?.Close(); } catch { } }
@@ -1302,10 +1455,158 @@ static class SelfTests
         Check("the sticky editor is NOT nested inside another text editor", !nested,
             nested ? "a RichTextBox ancestor will eat its keystrokes, caret and selection" : "");
 
+        // ── THE SPEAKER RENAME POPUP ──
+        // Same failure class, different control: its field also lives over a read-only document, and
+        // a Popup builds its child and its window only when IsOpen flips, so focusing synchronously
+        // does nothing and every keystroke goes to the document behind. The owner's report was that
+        // the name "cannot be changed", which is what an unfocused field looks like.
+        // HOSTED, not in isolation. The previous version built the chips in a bare window, which is
+        // the exact mistake this file warns about: the control was fine and the HOSTING was the
+        // bug. The chips live inside a read-only RichTextBox, whose text editor re-claims keyboard
+        // focus on mouse-up, so that is where they have to be driven.
+        var renamed = ("", "");
+        var chatty = new MeetingRecord
+        {
+            Id = -1, Kind = MeetingKind.Meeting, Title = "Rename host", App = "Test",
+            StartedAt = DateTimeOffset.Now, DurationMs = 60000,
+            Notes = new NoteSet { Tldr = "A summary above the transcript." },
+            Transcript =
+            [
+                new Toki.Transcription.TranscriptSegment(Toki.Transcription.Speaker.You, 0, 1000, "hello") { Tag = "You" },
+                new Toki.Transcription.TranscriptSegment(Toki.Transcription.Speaker.Them, 1000, 2000, "hi") { Tag = "Devi" },
+            ],
+        };
+        var renameDoc = Views.NoteRenderer.MeetingDocument(chatty, spacious: true,
+            renameSpeaker: (from, to) => renamed = (from, to));
+        {
+            var host = new System.Windows.Window
+            {
+                Width = 720, Height = 700, Left = -4000, Top = -4000,
+                WindowStyle = System.Windows.WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+                Content = renameDoc,
+            };
+            host.Show(); host.UpdateLayout(); Pump();
+
+            // The transcript is a disclosure now: open it, which is what puts the speaker row on
+            // screen at all.
+            var toggle = FindButtonWithLabel(renameDoc, "TRANSCRIPT");
+            Check("the transcript row is a real Button", toggle is not null);
+            toggle?.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            host.UpdateLayout(); Pump();
+
+            var chip = FindButtonWithLabel(renameDoc, "Devi");
+            Check("the speaker chips appear when the transcript opens", chip is not null);
+            if (chip is not null)
+            {
+                chip.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                host.UpdateLayout();
+                Pump();
+
+                var popup = Views.SpeakerChips.DebugLastPopup;
+                Check("clicking a speaker opens the rename field", popup is not null);
+                var field = popup is null ? null : FirstTextBox(popup.Child);
+                Check("the rename field exists", field is not null);
+                if (field is not null)
+                {
+                    Check("the field is EDITABLE, not a label", !field.IsReadOnly);
+                    // Toki knows the user's name, so renaming "You" opens on it rather than on a
+                    // stream label the user then has to clear.
+                    Check("the field opens on the current name", field.Text == "Devi",
+                        $"field says «{field.Text}»");
+                    var caretHere = field.IsKeyboardFocusWithin || field.IsFocused;
+                    Check("focus lands in the rename field", caretHere,
+                        caretHere ? "" : "keystrokes go to the read-only document behind it");
+
+                    // And the thing the owner actually does: type a new name and commit it.
+                    field.Text = "Devika";
+                    field.RaiseEvent(new System.Windows.Input.KeyEventArgs(
+                        System.Windows.Input.Keyboard.PrimaryDevice,
+                        System.Windows.PresentationSource.FromVisual(field) ?? System.Windows.PresentationSource.FromVisual(host)!,
+                        0, System.Windows.Input.Key.Enter)
+                    { RoutedEvent = System.Windows.Input.Keyboard.KeyDownEvent });
+                    Pump();
+                    var committed = renamed == ("Devi", "Devika");
+                    Check("Enter commits the new name", committed,
+                        committed ? "" : $"renamer saw «{renamed.Item1}» -> «{renamed.Item2}»");
+                }
+            }
+
+            // THE INITIAL IN ITS DISC, MEASURED. Three attempts got this wrong in a row (an
+            // inherited line height, then a pinned one, then a Path whose layout box included the
+            // empty space above the glyph), and each looked right in the code. The only honest
+            // check is where the ink lands inside the circle.
+            var disc = FindDisc(renameDoc);
+            Check("the transcript draws initial discs", disc is not null);
+            if (disc is not null && disc.Child is System.Windows.Shapes.Path glyph)
+            {
+                // The GEOMETRY's bounds, never the Path's RenderSize. The bug being guarded here is
+                // precisely a layout box that is bigger than the ink, so measuring the box would
+                // report a perfectly centred box around an off-centre letter. (Written the wrong
+                // way first, and the mutation probe caught it.)
+                var inkInDisc = glyph.TransformToAncestor(disc).TransformBounds(glyph.Data.Bounds);
+                var dx = (inkInDisc.Left + inkInDisc.Right) / 2 - disc.ActualWidth / 2;
+                var dy = (inkInDisc.Top + inkInDisc.Bottom) / 2 - disc.ActualHeight / 2;
+                Check("the initial is centred in its disc",
+                    Math.Abs(dx) <= 0.75 && Math.Abs(dy) <= 0.75,
+                    $"off by x {dx:0.00}, y {dy:0.00} in a {disc.ActualWidth:0}px disc");
+            }
+            host.Close();
+        }
+
         win.Close();
         Console.WriteLine();
         Console.WriteLine($"RESULT: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;
+
+        // Find a Button by the text it shows, anywhere in the tree (including inside a document).
+        static System.Windows.Controls.Button? FindButtonWithLabel(System.Windows.DependencyObject root, string label)
+        {
+            if (root is System.Windows.Controls.Button b && Label(b).Contains(label, StringComparison.OrdinalIgnoreCase))
+                return b;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+                if (FindButtonWithLabel(System.Windows.Media.VisualTreeHelper.GetChild(root, i), label) is { } hit) return hit;
+            return null;
+
+            static string Label(System.Windows.DependencyObject d)
+            {
+                var sb = new System.Text.StringBuilder();
+                if (d is System.Windows.Controls.ContentControl { Content: string s }) sb.Append(s);
+                if (d is System.Windows.Controls.TextBlock t) sb.Append(t.Text);
+                for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(d); i++)
+                    sb.Append(Label(System.Windows.Media.VisualTreeHelper.GetChild(d, i)));
+                return sb.ToString();
+            }
+        }
+
+        // The avatar disc: a small square Border whose only child is the glyph Path.
+        static System.Windows.Controls.Border? FindDisc(System.Windows.DependencyObject root)
+        {
+            if (root is System.Windows.Controls.Border b
+                && b.Child is System.Windows.Shapes.Path
+                && b.ActualWidth > 0 && Math.Abs(b.ActualWidth - b.ActualHeight) < 0.5
+                && b.ActualWidth <= 24)
+                return b;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+                if (FindDisc(System.Windows.Media.VisualTreeHelper.GetChild(root, i)) is { } hit) return hit;
+            return null;
+        }
+
+        static System.Windows.Controls.Button? FirstButton(System.Windows.DependencyObject root)
+        {
+            if (root is System.Windows.Controls.Button b) return b;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+                if (FirstButton(System.Windows.Media.VisualTreeHelper.GetChild(root, i)) is { } hit) return hit;
+            return null;
+        }
+
+        static System.Windows.Controls.TextBox? FirstTextBox(System.Windows.DependencyObject? root)
+        {
+            if (root is null) return null;
+            if (root is System.Windows.Controls.TextBox t) return t;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+                if (FirstTextBox(System.Windows.Media.VisualTreeHelper.GetChild(root, i)) is { } hit) return hit;
+            return null;
+        }
 
         static bool IsWithin(System.Windows.DependencyObject node, System.Windows.DependencyObject root)
         {
@@ -1488,8 +1789,8 @@ static class SelfTests
                 "## Agenda\ntyped on the blank line\nsome body text", ed.Markdown);
 
             var size = ed.DebugFontSize(1);
-            if (Math.Abs(size - 13) < 0.01) { pass++; Console.WriteLine("PASS  and it is body-sized, not mosquito-sized"); }
-            else { fail++; Console.WriteLine($"FAIL  line is {size}px, expected 13"); }
+            if (Math.Abs(size - ed.DebugBodySize) < 0.01) { pass++; Console.WriteLine("PASS  and it is body-sized, not mosquito-sized"); }
+            else { fail++; Console.WriteLine($"FAIL  line is {size}px, expected {ed.DebugBodySize}"); }
         }
 
         // 10c. The same line, emptied again, goes back to being a blank beat rather than staying a
@@ -1497,8 +1798,8 @@ static class SelfTests
         {
             var ed = New("a\n\nb");
             Check("a blank line is still a blank line", "a\n\nb", ed.Markdown);
-            if (Math.Abs(ed.DebugFontSize(1) - 13) < 0.01) { pass++; Console.WriteLine("PASS  a blank line is body-sized (its LINE HEIGHT is what shrinks)"); }
-            else { fail++; Console.WriteLine($"FAIL  blank line font is {ed.DebugFontSize(1)}px, expected 13"); }
+            if (Math.Abs(ed.DebugFontSize(1) - ed.DebugBodySize) < 0.01) { pass++; Console.WriteLine("PASS  a blank line is body-sized (its LINE HEIGHT is what shrinks)"); }
+            else { fail++; Console.WriteLine($"FAIL  blank line font is {ed.DebugFontSize(1)}px, expected {ed.DebugBodySize}"); }
         }
 
         // 11. And a note already damaged by that bug heals when it's opened.
@@ -1530,6 +1831,261 @@ static class SelfTests
             ed.TextSize = 99;
             if (ed.TextSize == Views.NoteEditor.MaxTextSize) { pass++; Console.WriteLine("PASS  an out-of-range size clamps"); }
             else { fail++; Console.WriteLine($"FAIL  size 99 became {ed.TextSize}"); }
+        }
+
+        // ── PASTE ──
+        // A RichTextBox's default paste brings the SOURCE's fonts, sizes and colours into a note
+        // that has no controls to undo them with. Paste is read the way typing is: each line's own
+        // leading marker decides what it becomes, blank runs collapse, and a paste into a line that
+        // already has words is inserted AS words rather than re-typing that line.
+        {
+            var ed = New();
+            ed.InsertPastedText("- one\n- two\n\n\n- three");
+            Check("pasted list lines become real list items",
+                "- one\n- two\n- three", ed.Markdown);
+        }
+
+        {
+            var ed = New("already writing here");
+            ed.DebugCaretToEnd();
+            ed.InsertPastedText(" and this too");
+            Check("pasting into a line with words inserts words, not a new block",
+                "already writing here and this too", ed.Markdown);
+        }
+
+        {
+            var ed = New();
+            ed.InsertPastedText("## Agenda\n- [ ] send the deck\nplain line");
+            Check("paste keeps headings, tick boxes and plain lines apart",
+                "## Agenda\n- [ ] send the deck\nplain line", ed.Markdown);
+        }
+
+        // ── CLICKING INTO THE NOTE ──
+        // The owner's report was "it doesn't even let me click onto the note". The cause was a
+        // page-level click handler that asked whether the click had landed in the editor by walking
+        // the VISUAL tree from e.OriginalSource - which inside a RichTextBox is a Run, a
+        // ContentElement that is not in the visual tree at all. Every click therefore counted as
+        // "outside" and threw the caret to the end of the note. This drives the real editor.
+        {
+            var ed = New("first line\nsecond line\nthird line");
+            ed.UpdateLayout();
+
+            var pt = ed.DebugPointInLine(1);
+            var landed = ed.DebugClickAt(pt);
+            if (landed == 1) { pass++; Console.WriteLine("PASS  clicking a line puts the caret in THAT line"); }
+            else { fail++; Console.WriteLine($"FAIL  clicked line 1, caret landed on line {landed}"); }
+
+            var pt0 = ed.DebugPointInLine(0);
+            var landed0 = ed.DebugClickAt(pt0);
+            if (landed0 == 0) { pass++; Console.WriteLine("PASS  clicking the first line does not jump to the end"); }
+            else { fail++; Console.WriteLine($"FAIL  clicked line 0, caret landed on line {landed0}"); }
+        }
+
+        // ── MARKER ALIGNMENT ──
+        // MEASURED, not eyeballed. The owner's report was that a bullet and its text "are not even
+        // on the same line". A marker is an InlineUIContainer, and WPF aligns those to the LINE BOX
+        // by default, which includes the space a font reserves for descenders - so the marker rode
+        // above the words. The honest check is where the ink lands relative to the text's own cap
+        // band, in the live editor.
+        {
+            var ed = New("- first bullet\n1. first step\n- [ ] first task");
+            ed.UpdateLayout();
+
+            foreach (var (line, what) in new[] { (0, "bullet"), (1, "number"), (2, "tick box") })
+            {
+                var off = ed.DebugMarkerOffset(line);
+                if (double.IsNaN(off))
+                {
+                    fail++; Console.WriteLine($"FAIL  could not measure the {what}");
+                    continue;
+                }
+                // 0.6px of slack. A looser bar was tried first and the mutation probe walked
+                // straight through it: reverting the alignment measured -0.83px and still "passed",
+                // which is a check that would have watched the bug ship.
+                if (Math.Abs(off) <= 0.6)
+                {
+                    pass++; Console.WriteLine($"PASS  the {what} sits on the text's band   (off by {off:0.00}px)");
+                }
+                else
+                {
+                    fail++; Console.WriteLine($"FAIL  the {what} is {off:0.00}px off the text's band");
+                }
+
+                // MUTATION PROBE: put a Height back on the marker's host in NoteEditor.MakeMarker
+                // and this fails while the offset check above still passes at 0.10px. That is the
+                // bug the owner saw in one glance and the suite watched ship - every tick box was
+                // two thirds gone and every digit had its top sliced off, because "centred" was
+                // measured and "whole" never was.
+                var over = ed.DebugMarkerOverflow(line);
+                if (double.IsNaN(over)) { fail++; Console.WriteLine($"FAIL  could not size the {what}'s box"); }
+                else if (over <= 0.5) { pass++; Console.WriteLine($"PASS  the {what} is not clipped by its own box"); }
+                else { fail++; Console.WriteLine($"FAIL  the {what} is clipped: {over:0.0}px of it is outside its box"); }
+            }
+        }
+
+        // ── THE SLASH MENU ──
+        // The permanent toolbar is gone; every command lives behind "/" at the caret. These drive it
+        // the way fingers do, because the failure that matters is not "does SetKind work" (it does,
+        // and always did) but "can a person reach it and does the line come out clean".
+        {
+            var ed = New();
+
+            var opened = ed.DebugSlash();
+            if (opened) { pass++; Console.WriteLine("PASS  \"/\" on an empty line opens the commands"); }
+            else { fail++; Console.WriteLine("FAIL  \"/\" did not open the command menu"); }
+
+            var typed = ed.DebugSlashType("todo");
+            if (typed) { pass++; Console.WriteLine("PASS  typing filters the commands"); }
+            else { fail++; Console.WriteLine("FAIL  typing \"todo\" filtered everything away"); }
+
+            var ran = ed.DebugSlashCommit();
+            var md = ed.Markdown;
+            if (ran) { pass++; Console.WriteLine("PASS  Enter runs the highlighted command"); }
+            else { fail++; Console.WriteLine("FAIL  Enter ran nothing"); }
+
+            // THE ONE THAT MATTERS: the command must not leave its own "/todo" in the note.
+            var clean = !md.Contains('/');
+            if (clean) { pass++; Console.WriteLine("PASS  the typed \"/todo\" is gone from the note"); }
+            else { fail++; Console.WriteLine($"FAIL  the note still says «{md}»"); }
+
+            var isTodo = md.Contains("- [ ]");
+            if (isTodo) { pass++; Console.WriteLine("PASS  the line became a to-do"); }
+            else { fail++; Console.WriteLine($"FAIL  expected a tick box, markdown is «{md}»"); }
+        }
+
+        {
+            // THE SAME COMMAND, CHOSEN WITH THE POINTER. This is how the owner picked a template, and
+            // it was the broken half: only the Enter path took the typing back out, so every command
+            // clicked with the mouse left a "/" (or a whole "/pricing template") sitting in the note.
+            // MUTATION PROBE: move the cleanup back out of SlashMenu.Run into the Return case in
+            // NoteEditor.OnKey and this fails while the Enter test above still passes.
+            var ed = New();
+            ed.DebugSlash();
+            ed.DebugSlashType("bul");
+            var clicked = ed.DebugSlashClick("Bulleted list");
+            var md = ed.Markdown;
+            if (clicked) { pass++; Console.WriteLine("PASS  a command can be picked with the pointer"); }
+            else { fail++; Console.WriteLine("FAIL  clicking a command row did nothing"); }
+
+            if (!md.Contains('/')) { pass++; Console.WriteLine("PASS  clicking a command leaves no \"/\" behind"); }
+            else { fail++; Console.WriteLine($"FAIL  after a click the note still says «{md}»"); }
+
+            if (md.TrimEnd().EndsWith("-", StringComparison.Ordinal) || md.Contains("- "))
+            { pass++; Console.WriteLine("PASS  the clicked command ran"); }
+            else { fail++; Console.WriteLine($"FAIL  expected a bullet, markdown is «{md}»"); }
+        }
+
+        // ── TEMPLATES ──
+        // A template is a shape to FILL IN. What it used to insert was headings separated by blank
+        // lines, and a blank line is drawn at a third of a row: the owner's screenshot was a stack of
+        // titles with unclickable slivers between them and nowhere obvious to write.
+        {
+            var ed = New();
+            ed.InsertTemplate(Llm.NoteTemplates.All[0]);
+            var kinds = ed.DebugLineKinds();
+
+            // Every heading must be followed by a line you can type on - never by a blank.
+            var orphan = -1;
+            for (var i = 0; i < kinds.Count; i++)
+                if (kinds[i] == Storage.NoteBlockKind.Subheading
+                    && (i + 1 >= kinds.Count || kinds[i + 1] is Storage.NoteBlockKind.Blank or Storage.NoteBlockKind.Subheading))
+                { orphan = i; break; }
+
+            if (kinds.Count(k => k == Storage.NoteBlockKind.Subheading) >= 3)
+            { pass++; Console.WriteLine("PASS  a template inserts its sections"); }
+            else { fail++; Console.WriteLine($"FAIL  template inserted «{string.Join(",", kinds)}»"); }
+
+            // MUTATION PROBE: build InsertTemplate through Markdown again (Markdown cannot hold an
+            // empty body line) and this fails on the very first heading.
+            if (orphan < 0) { pass++; Console.WriteLine("PASS  every template heading has a line to write on"); }
+            else { fail++; Console.WriteLine($"FAIL  heading at line {orphan} is followed by nothing writable: «{string.Join(",", kinds)}»"); }
+
+            if (kinds.Contains(Storage.NoteBlockKind.Todo)) { pass++; Console.WriteLine("PASS  the template opens Action items with a tick box"); }
+            else { fail++; Console.WriteLine("FAIL  the template has no to-do to start from"); }
+
+            // And the caret is left ON that first writable line, not at the end of the note.
+            var landed = ed.DebugCaretLine();
+            if (landed >= 0 && landed < kinds.Count && kinds[landed] == Storage.NoteBlockKind.Body)
+            { pass++; Console.WriteLine($"PASS  the caret lands on the template's first writable line ({landed})"); }
+            else { fail++; Console.WriteLine($"FAIL  the caret landed on line {landed} of «{string.Join(",", kinds)}»"); }
+        }
+
+        // ── THE HINT AND THE CARET ──
+        // A blank note draws its hint at the top-left and the caret at x=0. With the hint at x=1 the
+        // W in "Write" was drawn through the cursor and read as a struck-out letter.
+        {
+            var ed = New();
+            ed.DebugFocus();
+            ed.UpdateLayout();
+            var (hint, caret) = ed.DebugHintAndCaret();
+            var clearance = hint - caret;
+            // MUTATION PROBE: put the hint's Margin back to "1,0,0,0" and this fails.
+            if (clearance >= System.Windows.SystemParameters.CaretWidth + 1)
+            { pass++; Console.WriteLine($"PASS  the hint clears the caret by {clearance:0.0}px"); }
+            else { fail++; Console.WriteLine($"FAIL  the hint starts at {hint:0.0}px and the caret at {caret:0.0}px - the cursor is drawn through it"); }
+
+            // And the hint is the size of the writing it stands in for, not a leftover 13px.
+            if (Math.Abs(ed.DebugHintFontSize - ed.DebugBodySize) < 0.01)
+            { pass++; Console.WriteLine($"PASS  the hint is drawn at the body size ({ed.DebugBodySize:0.#}px)"); }
+            else { fail++; Console.WriteLine($"FAIL  hint is {ed.DebugHintFontSize:0.#}px against a {ed.DebugBodySize:0.#}px body"); }
+        }
+
+        // ── ONE RHYTHM, ONE LEFT EDGE ──
+        // What "even spacing" means to a reader is the PITCH from one row to the next, and what makes
+        // a mixed list read as one object is every marker starting on the same left edge.
+        {
+            var ed = New("- a bullet" + (char)10 + "1. a step" + (char)10 + "- [ ] a task" + (char)10 + "- another bullet");
+            ed.UpdateLayout();
+
+            var pitches = Enumerable.Range(0, 3).Select(ed.DebugLinePitch).ToList();
+            if (pitches.Any(double.IsNaN)) { fail++; Console.WriteLine("FAIL  could not measure the row pitch"); }
+            else if (pitches.Max() - pitches.Min() <= 0.6)
+            { pass++; Console.WriteLine($"PASS  bullet, number and to-do rows sit on one pitch ({pitches[0]:0.0}px)"); }
+            else { fail++; Console.WriteLine($"FAIL  rows are ragged: {string.Join(" / ", pitches.Select(h => h.ToString("0.0")))}"); }
+
+            // MUTATION PROBE: right-align the markers in the gutter again (HorizontalAlignment.Right
+            // in MakeMarker) and this fails - a 5px dot and a 24px tick box end up 13px apart.
+            var lefts = Enumerable.Range(0, 3).Select(ed.DebugMarkerLeft).ToList();
+            if (lefts.Any(double.IsNaN)) { fail++; Console.WriteLine("FAIL  could not measure the marker edges"); }
+            else if (lefts.Max() - lefts.Min() <= 1.0)
+            { pass++; Console.WriteLine($"PASS  every marker starts on the same left edge ({lefts[0]:0.0}px)"); }
+            else { fail++; Console.WriteLine($"FAIL  markers start at {string.Join(" / ", lefts.Select(h => h.ToString("0.0")))}"); }
+        }
+
+        {
+            // Mid-sentence a slash is a slash. A menu that opens while somebody types "and/or" is
+            // the interface fighting the writing.
+            var ed = New();
+            ed.DebugType("and");
+            var opened = ed.DebugSlash();
+            if (!opened) { pass++; Console.WriteLine("PASS  a slash mid-sentence stays a slash"); }
+            else { fail++; Console.WriteLine("FAIL  the menu opened in the middle of a word"); }
+        }
+
+        {
+            // A sticky note is a scratchpad: bullets, and nothing that belongs to a document.
+            var ed = New();
+            ed.Jotting = true;
+            var labels = ed.DebugSlashLabels();
+            var lean = !labels.Contains("Heading") && !labels.Contains("template") && labels.Contains("Bulleted list");
+            if (lean) { pass++; Console.WriteLine("PASS  a sticky note offers bullets, not a document's toolbox"); }
+            else { fail++; Console.WriteLine($"FAIL  sticky commands are «{labels}»"); }
+        }
+
+        {
+            // THE GOAL COLUMN. WPF caches the x a vertical arrow key aims for and never clears that
+            // cache when code moves the caret (dotnet/wpf#3757). Toki moves the caret on every Enter,
+            // so the first Down afterwards used to snap to the left edge instead of staying under the
+            // text. The floor on `before` keeps this from passing vacuously at x=0.
+            var ed = New("First line of this note" + (char)10 + "Second line of this note");
+            ed.DebugFocus();
+            ed.DebugCaretToOffset(0, 12);
+            var before = ed.DebugCaretX;
+            ed.DebugMoveDownLine();
+            var after = ed.DebugCaretX;
+            var kept = before > 4 && Math.Abs(after - before) <= 2;
+            if (kept) { pass++; Console.WriteLine($"PASS  Down keeps the caret's column after code moved it ({before:0.0} -> {after:0.0}px)"); }
+            else { fail++; Console.WriteLine($"FAIL  Down lost the caret's column: {before:0.0}px -> {after:0.0}px"); }
         }
 
         foreach (var w in windows) w.Close();

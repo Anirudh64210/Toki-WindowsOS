@@ -59,11 +59,42 @@ public class NoteExtractorTests
     }
 
     [Fact]
-    public void TldrIsNonEmptyAndBounded()
+    public void FloorSummaryIsNeverRawTranscript()
     {
+        // THE LEAK (meetings 118/119, 2026-08-25): when the model can't load, the floor ran, and
+        // its "summary" was the transcript's opening sentences pasted in verbatim - conversation
+        // dressed up as a written summary. The floor now emits NO summary; the renderer drops the
+        // empty section, exactly as the model path does when it has nothing real to say.
+        // MUTATION PROBE: restore `notes.Tldr = Tldr(sentences);` and this fails - the summary
+        // becomes the raw opening ("...analytics platform...") again.
         var n = NoteExtractor.Extract(Planted);
-        Assert.False(string.IsNullOrWhiteSpace(n.Tldr));
-        Assert.True(n.Tldr.Length <= 245);
+        Assert.True(string.IsNullOrEmpty(n.Tldr), $"floor emitted a summary: \"{n.Tldr}\"");
+        var spoken = string.Join(" ", Planted.Select(s => s.Text));
+        foreach (var word in new[] { "analytics platform", "point events", "brand font" })
+            Assert.DoesNotContain(word, n.Tldr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("analytics platform", spoken, StringComparison.OrdinalIgnoreCase);   // it WAS said
+    }
+
+    [Fact]
+    public void RamblingDeclarativeIsNotATodo()
+    {
+        // THE OTHER HALF OF THE LEAK: the floor used to accept any sentence that CONTAINED an
+        // action word, so declaratives ("The latest results confirm ...", "I optimized ...") became
+        // to-dos, then the brevity pass truncated them into fragments. A to-do must be SHAPED like a
+        // task now.
+        var segs = new[]
+        {
+            You(0, "I optimized the rendering so typing feels smoother and reduced the API calls."),
+            Them(2000, "The latest results confirm our earlier throughput numbers."),
+            You(4000, "I'll send the deck to Priya tomorrow."),
+        };
+        var n = NoteExtractor.Extract(segs);
+        // MUTATION PROBE: revert the classifier to `ActionCues.Any(lower.Contains)` and both of
+        // these fail - "confirm" and the truncated "optimized ..." fragment become to-dos again.
+        Assert.DoesNotContain(n.Actions, a => a.Text.Contains("throughput", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(n.Actions, a => a.Text.Contains("optimized", StringComparison.OrdinalIgnoreCase));
+        // The genuine commitment still lands.
+        Assert.Contains(n.Actions, a => a.Text.Contains("deck", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public static class MicrosoftAuth
     //   1. env var TOKI_MS_CLIENT_ID (dev),
     //   2. %APPDATA%\Toki\microsoft_client.json  ->  { "client_id": "..." },
     //   3. the embedded const below (filled at ship time).
-    const string EmbeddedClientId = "";
+    const string EmbeddedClientId = "01ab02ea-f8b0-48e7-a450-2c9654344353";
 
     static string? _clientId;
     static bool _resolved;

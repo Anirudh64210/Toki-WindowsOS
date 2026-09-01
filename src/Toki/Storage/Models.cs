@@ -11,6 +11,17 @@ public sealed class ActionItem
     public string? Owner { get; set; }
     public string? Due { get; set; }
     public bool Done { get; set; }
+    /// <summary>Where this came from: the transcript lines the model was reading when it wrote it.
+    /// Recorded AT GENERATION, not recovered afterwards by matching text. Null on older notes and
+    /// on meetings short enough to be written in one pass, which fall back to text matching.</summary>
+    public SourceSpan? Source { get; set; }
+}
+
+/// <summary>An inclusive range of transcript line indices - the provenance of a written line.</summary>
+public sealed class SourceSpan
+{
+    public int First { get; set; }
+    public int Last { get; set; }
 }
 
 /// <summary>One template section of a note - a heading and its bullets (e.g. "Blockers", "Ideas",
@@ -19,6 +30,15 @@ public sealed class NoteSection
 {
     public string Heading { get; set; } = "";
     public List<string> Bullets { get; set; } = [];
+    /// <summary>Provenance per bullet, index-aligned with <see cref="Bullets"/> when present. A
+    /// null entry (or a null list) means this bullet has no recorded source and evidence falls back
+    /// to matching its words against the transcript.</summary>
+    public List<SourceSpan?>? Sources { get; set; }
+
+    /// <summary>The recorded source of one bullet, or null. Tolerates a Sources list that has
+    /// drifted out of step with Bullets, which a hand-edited note can do.</summary>
+    public SourceSpan? SourceFor(int index) =>
+        Sources is not null && index >= 0 && index < Sources.Count ? Sources[index] : null;
 }
 
 /// <summary>The structured notes for a meeting. Summary + Action items are always the same shape;

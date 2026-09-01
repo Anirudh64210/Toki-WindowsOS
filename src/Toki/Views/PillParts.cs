@@ -144,19 +144,46 @@ public static class PillParts
         }.Themed(Shape.StrokeProperty, strokeKey).SubPixel();
 
     /// <summary>
-    /// The single-letter label for an initial disc. A plain centred TextBlock is not enough:
-    /// Paragraph.LineHeight is INHERITED, so inside a FlowDocument the paragraph's line height
-    /// inflates the label's line box and clips the cap. Pinning LineHeight with BlockLineHeight
-    /// makes it immune; the half-pixel lift centres the cap ink.
+    /// The single-letter label for an initial disc, drawn as GEOMETRY rather than as text.
+    ///
+    /// Two attempts at this with a TextBlock both left the letter visibly low, because centring
+    /// text centres its LINE BOX and the relationship between that box and the cap ink depends on
+    /// the font, the size, and whether a line height was pinned or inherited. A Path's layout box
+    /// IS its ink, so centring the Path centres the letter, at any size, in any font, with nothing
+    /// to keep in sync. Same reason the play triangle and the tick are house geometry.
     /// </summary>
-    public static TextBlock DiscLabel(string text, double fontSize, FontWeight weight) => new TextBlock
+    public static Shape DiscLabel(string text, double fontSize, FontWeight weight)
     {
-        Text = text, FontSize = fontSize, FontWeight = weight,
-        FontFamily = (FontFamily)Application.Current.Resources["UiFont"],
-        LineHeight = fontSize, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        RenderTransform = new TranslateTransform(0, -0.5),
-        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-    }.SubPixel();
+        var family = (FontFamily)Application.Current.Resources["UiFont"];
+        var ft = new FormattedText(
+            string.IsNullOrEmpty(text) ? "?" : text,
+            System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            new Typeface(family, FontStyles.Normal, weight, FontStretches.Normal),
+            fontSize, Brushes.Black, 96);
+
+        var geometry = ft.BuildGeometry(new Point(0, 0));
+
+        // MOVE THE INK TO THE ORIGIN. BuildGeometry lays the outline out relative to the TEXT
+        // origin, so the glyph sits a baseline's distance down from (0,0) with empty space above
+        // it. A Path with Stretch.None measures from the origin to the far edge of the geometry,
+        // which means that empty space is part of its layout box - centring the box then centres
+        // the box, not the letter, and the letter rides low. Translating by the negative bounds
+        // makes the layout box exactly the ink, which is the whole point of drawing it as a shape.
+        var ink = geometry.Bounds;
+        geometry.Transform = new TranslateTransform(-ink.X, -ink.Y);
+        // Freeze: this is painted on every transcript line and never changes after construction.
+        if (geometry.CanFreeze) geometry.Freeze();
+
+        // SubPixel like every other glyph factory: centring a 6px letter in a 16px disc leaves a
+        // fractional offset either side, and inherited layout rounding snaps those apart at 125%.
+        return new Path
+        {
+            Data = geometry,
+            Stretch = Stretch.None,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        }.SubPixel();
+    }
 
     /// <summary>
     /// The tint behind a named speaker's initial. DERIVED from the name, never fetched and never
@@ -222,6 +249,17 @@ public static class PillParts
 
     /// <summary>lucide/x at 9x9 - the close puck's cross.</summary>
     public static Geometry Cross() => G("M1,1 L8,8 M8,1 L1,8");
+
+    /// <summary>lucide/eye at ~15x9 - the recording bar's ghost toggle when Toki IS visible in
+    /// recordings (an open eye: you can be seen). Authored at true pixel size for Outline.</summary>
+    public static Geometry Eye() => G("M0.75,4.5 C4,0.5 11,0.5 14.25,4.5 C11,8.5 4,8.5 0.75,4.5 Z "
+                                    + "M7.5,2.8 A1.7,1.7 0 1 0 7.5,6.2 A1.7,1.7 0 1 0 7.5,2.8 Z");
+
+    /// <summary>lucide/eye-off at ~15x9 - the ghost toggle when Toki is HIDDEN from recordings (the
+    /// eye struck through). Same almond + pupil, with the slash.</summary>
+    public static Geometry EyeOff() => G("M0.75,4.5 C4,0.5 11,0.5 14.25,4.5 C11,8.5 4,8.5 0.75,4.5 Z "
+                                       + "M7.5,2.8 A1.7,1.7 0 1 0 7.5,6.2 A1.7,1.7 0 1 0 7.5,2.8 Z "
+                                       + "M0.5,8.8 L14.5,0.2");
 
     static Geometry G(string data)
     {

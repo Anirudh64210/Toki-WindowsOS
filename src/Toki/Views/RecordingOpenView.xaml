@@ -53,6 +53,10 @@
                         MinHeight="24" Padding="10,0" Margin="0,0,8,0" Visibility="Collapsed"
                         Content="Prep card" Click="OnPrep"
                         ToolTip="Your prep notes for this meeting - jot things down while you talk"/>
+                <!-- Ghost toggle: hide/show Toki in screen recordings without leaving the bar - for
+                     when you started recording and only then realised ghost mode was off. Built in
+                     code so the glass puck (not the glyph) is the hit target. -->
+                <ContentControl x:Name="GhostHost" Margin="0,0,6,0" VerticalAlignment="Center"/>
                 <!-- Stop: the themed StopRed disc with a white rounded square (built in code so the
                      disc, not the glyph, is the hit target). -->
                 <ContentControl x:Name="StopHost" Margin="0,0,4,0" VerticalAlignment="Center"/>
@@ -64,15 +68,36 @@
              The frame fades the oldest line out at the top with a gradient mask; an OpacityMask is
              the composition-only way to do that in WPF (no Effect, so nothing here forces a
              software render). Newest line at the bottom, as the frame stacks them. -->
-        <Grid x:Name="LiveHost" Visibility="Collapsed" Height="111" Margin="16,0,16,16">
-            <Grid.OpacityMask>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop Color="#00000000" Offset="0"/>
-                    <GradientStop Color="#FF000000" Offset="0.22"/>
-                    <GradientStop Color="#FF000000" Offset="1"/>
-                </LinearGradientBrush>
-            </Grid.OpacityMask>
-            <StackPanel x:Name="LiveLines" VerticalAlignment="Bottom"/>
+        <Grid x:Name="LiveHost" Visibility="Collapsed" Margin="16,0,16,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="111"/>
+            </Grid.RowDefinitions>
+
+            <!-- Readiness cue: a soft pulsing dot + "Live" telling the user transcription is running
+                 right now. Hidden until the streaming preview is actually active (LiveReady). -->
+            <StackPanel x:Name="LiveHeader" Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6"
+                        Visibility="Collapsed" VerticalAlignment="Center">
+                <Ellipse x:Name="LiveDot" Width="6" Height="6" Fill="{DynamicResource Coral}"
+                         VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBlock Text="Live" FontSize="9.5" FontWeight="SemiBold" VerticalAlignment="Center"
+                           FontFamily="{StaticResource UiFont}" Foreground="{DynamicResource TextDim}"/>
+            </StackPanel>
+
+            <Grid Grid.Row="1">
+                <!-- ── the expanded form's live transcript ──
+                     The frame fades the oldest line out at the top with a gradient mask; an OpacityMask is
+                     the composition-only way to do that in WPF (no Effect, so nothing here forces a
+                     software render). Newest line at the bottom, as the frame stacks them. -->
+                <Grid.OpacityMask>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#00000000" Offset="0"/>
+                        <GradientStop Color="#FF000000" Offset="0.22"/>
+                        <GradientStop Color="#FF000000" Offset="1"/>
+                    </LinearGradientBrush>
+                </Grid.OpacityMask>
+                <StackPanel x:Name="LiveLines" VerticalAlignment="Bottom"/>
+            </Grid>
         </Grid>
     </StackPanel>
 </UserControl>

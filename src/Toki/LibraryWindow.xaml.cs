@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -39,7 +39,22 @@ public partial class LibraryWindow : Window
     // which is instant (like WisprFlow keeping its window warm). MarkDirty() is called when
     // something external changes the data (a recording saves a meeting, a note is created).
     static bool _dirty = true;
-    public static void MarkDirty() => _dirty = true;
+
+    /// <summary>Data changed underneath the Library. A window that is already OPEN refreshes its
+    /// list in place: the flag alone only helps the next open, which left an edited title stale on
+    /// the card the user was looking at. List only - never the detail pane, which is the editor the
+    /// edit came from.</summary>
+    public static void MarkDirty()
+    {
+        _dirty = true;
+        var w = _open;
+        if (w is null || !w.IsVisible) return;
+        w.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try { w.LoadList(); w.HighlightSelectedCard(); _dirty = false; }
+            catch (Exception ex) { App.Log($"library live refresh: {ex.Message}"); }
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
 
     /// <summary>Open the Library on Settings, scrolled to the CALENDARS block - the Google/Outlook
     /// sign-in rows live here, so "Connect a calendar" must land on them.</summary>
@@ -75,11 +90,23 @@ public partial class LibraryWindow : Window
         // Always POP UP: closed → open with the bloom; minimized → restore; already open → bring to front.
         var wasHidden = !w.IsVisible;
         if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal;
-        if (wasHidden) { w._originRect = fromRect; w.CenterOnWorkArea(); w.Show(); w.PlayOpen(fromRect); }
-        else w.Show();
+
+        // PAGE FIRST, THEN THE ANIMATION. Switching pages builds and lays out a view, and doing it
+        // after PlayOpen spent the opening frames of a 280ms animation on that work - the window
+        // arrived, then hitched. An animation never waits on a layout pass. The window can lay out
+        // while it is still hidden, so this costs nothing.
         // An explicit page (assistant command) wins; a specific note → the Library page showing it;
         // otherwise the Ask landing.
         w.ShowPage(page ?? (focusMeetingId is not null ? "library" : "ask"), animate: false);
+        if (wasHidden)
+        {
+            w._originRect = fromRect;
+            w.CenterOnWorkArea();
+            w.UpdateLayout();   // arrange once BEFORE the first animated frame
+            w.Show();
+            w.PlayOpen(fromRect);
+        }
+        else w.Show();
         w.BringToFront();
     }
 
@@ -178,6 +205,35 @@ public partial class LibraryWindow : Window
         });
         w.UpdateLayout();
         Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-manual-note.png"));
+
+        // THE SAME NOTE WIDE, WITH THE LIST PUT AWAY. This is how the owner actually writes, and it
+        // is the shape the narrow three-column shot above cannot show: a measure that centres itself
+        // looks fine in a 300px pane and leaves the first letter of every line two hundred pixels
+        // adrift from the panel here. A page only tests as wide as you photograph it.
+        w.Width = 1440;
+        w.SetList(open: false);
+        w.UpdateLayout();
+        // A resize leaves the new arrangement UNDRAWN: the note laid out correctly at the new width
+        // (600x775 in a 1184 pane, measured) and photographed as an empty panel, because
+        // RenderTargetBitmap draws what has been rendered, not what has been arranged. Pumping the
+        // dispatcher down to Render is what actually puts the text on the visual.
+        w.Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Render);
+        Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-manual-note-wide.png"));
+
+        // AND A BLANK ONE. The empty note is the state a new note opens in and the one the owner
+        // photographed - it is the only shot that shows where the footer rule ends up when there is
+        // nothing to push it down, which is the "weird block across the middle of the page".
+        w.RenderManual(new MeetingRecord
+        {
+            Id = -2, Kind = MeetingKind.Manual, Title = "Untitled note",
+            StartedAt = DateTimeOffset.Now, Body = "",
+        });
+        w.UpdateLayout();
+        w.Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Render);
+        Dev.RenderHarness.SaveVisual(w.RootGrid, System.IO.Path.Combine(dir, "hub-manual-note-blank.png"));
+
+        w.SetList(open: true);
+        w.Width = 960;
         w._manualFlush = null;   // belt and braces: nothing pending can fire after the shot
 
         // Button-centering calibration: the real buttons on a dark surface, big, so vertical
@@ -255,14 +311,18 @@ public partial class LibraryWindow : Window
     void PlayOpen(Rect? fromRect)
     {
         _closing = false;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var dur = new Duration(TimeSpan.FromMilliseconds(230));
+        // The notch's own curve, not stock CubicEase: this is the same gesture as a notch morph and
+        // it should settle the same way. Scale starts at 0.96, not 0.9 - on a 960px window a 10%
+        // jump is nearly 100px of travel, which reads as a lurch rather than a zoom.
+        var ease = Theme.Motion.ArriveStrong;
+        var dur = new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Morph));
         RootGrid.RenderTransformOrigin = OriginFrom(fromRect);
-        var scale = new ScaleTransform(0.9, 0.9);
+        var scale = new ScaleTransform(0.96, 0.96);
         RootGrid.RenderTransform = scale;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.9, 1, dur) { EasingFunction = ease });
-        var fade = new DoubleAnimation(0.0, 1, new Duration(TimeSpan.FromMilliseconds(190))) { EasingFunction = ease };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
+        // The fade lands before the scale does, so the content is fully present while it settles.
+        var fade = new DoubleAnimation(0.0, 1, new Duration(TimeSpan.FromMilliseconds(150))) { EasingFunction = ease };
         fade.Completed += (_, _) => { RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1; };
         RootGrid.BeginAnimation(OpacityProperty, fade);
     }
@@ -274,13 +334,16 @@ public partial class LibraryWindow : Window
     {
         if (_closing) return;   // ignore a double back/close while the retract is already playing
         _closing = true;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
-        var dur = new Duration(TimeSpan.FromMilliseconds(160));
+        // The exit keeps its own curve and runs at ~70% of the enter, which is the standing rule:
+        // users watch things arrive, not leave. The owner reports this direction already feels
+        // right, so only the numbers move with the enter, not the character.
+        var ease = Theme.Motion.Depart;
+        var dur = new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Morph * 0.7));
         RootGrid.RenderTransformOrigin = OriginFrom(_originRect);
         var scale = RootGrid.RenderTransform as ScaleTransform ?? new ScaleTransform(1, 1);
         RootGrid.RenderTransform = scale;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, 0.9, dur) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, 0.9, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, 0.96, dur) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, 0.96, dur) { EasingFunction = ease });
         var fade = new DoubleAnimation(RootGrid.Opacity, 0, dur) { EasingFunction = ease };
         fade.Completed += (_, _) =>
         {
@@ -922,8 +985,11 @@ public partial class LibraryWindow : Window
 
     // ── Ask landing: hero mascot on a soft glow, a typed greeting, one identity line, chips ──
 
-    // One line that says what Toki IS - shown under the greeting, restored after voice hints.
-    const string LandingHint = "Your meeting assistant - decisions, tasks, who said what. All on this PC.";
+    // DELETED 2026-08-24 (taste audit): this used to be "Your meeting assistant." - one line under the
+    // greeting saying what Toki is, to somebody already looking at Toki. A sentence that describes the
+    // interface is narration, and it is the most reliable AI tell in UI copy. The slot stays because
+    // voice hints use it; it just starts empty.
+    const string LandingHint = "";
 
     static readonly string[] Greetings =
     {
@@ -1007,6 +1073,9 @@ public partial class LibraryWindow : Window
             Content = text, Style = (Style)FindResource("PillButton"),
             FontSize = 11.5, FontWeight = FontWeights.Normal,
             Padding = new Thickness(15, 8, 15, 9), Margin = new Thickness(4, 0, 4, 8),
+            // Equal-width in the uniform grid; text centred so every chip reads the same.
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         b.SetResourceReference(Button.BackgroundProperty, "SurfaceHi");
         b.SetResourceReference(Button.ForegroundProperty, "TextSoft");
@@ -1605,7 +1674,11 @@ public partial class LibraryWindow : Window
 
         // Default shape for NEW meetings: Auto-detect, or force one for every meeting.
         var defRow = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
-        defRow.Children.Add(new TextBlock { Text = "DEFAULT SHAPE FOR NEW MEETINGS", Style = St("SectionHeader"), Margin = new Thickness(2, 0, 0, 5) });
+        // Sentence case, not SHOUTED CAPS (taste audit 2026-08-24). A lone dropdown does need a label -
+        // you cannot tell what "Auto-detect" sets without one - but an all-caps grey band above a single
+        // control is a label compensating for a layout, and Title Case On Every Label reads as a
+        // template. Left margin 0, so it starts on the page's one gutter.
+        defRow.Children.Add(new TextBlock { Text = "Default shape for new meetings", Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 6) });
         var defDrop = new Views.SearchableDropdown { Width = 240, HorizontalAlignment = HorizontalAlignment.Left };
         defDrop.SetItems(new[] { "Auto-detect" }.Concat(Llm.NoteTemplates.All.Select(t => t.Name)),
             Llm.AppSettings.Current.DefaultTemplate ?? "Auto-detect");
@@ -1614,34 +1687,82 @@ public partial class LibraryWindow : Window
             var sel = defDrop.Selected;
             Llm.AppSettings.Current.DefaultTemplate = string.IsNullOrEmpty(sel) || sel == "Auto-detect" ? null : sel;
             Llm.AppSettings.Current.Save();
+            // The "Default" tag below is drawn from this setting, so the page has to be rebuilt or the
+            // tag stays on the old template. Dispatched: this handler is running inside a child of the
+            // panel that is about to be cleared.
+            Dispatcher.BeginInvoke(new Action(BuildTemplatesPage), System.Windows.Threading.DispatcherPriority.Background);
         };
         defRow.Children.Add(defDrop);
         TemplatesList.Children.Add(defRow);
 
-        foreach (var t in Llm.NoteTemplates.All) TemplatesList.Children.Add(TemplateCard(t));
+        var chosen = Llm.AppSettings.Current.DefaultTemplate;
+        var first = true;
+        foreach (var t in Llm.NoteTemplates.All)
+        {
+            TemplatesList.Children.Add(TemplateRow(t, isDefault: t.Name == chosen, first: first));
+            first = false;
+        }
     }
 
-    Border TemplateCard(Llm.NoteTemplate t)
+    /// <summary>
+    /// One template, as a ROW rather than a card.
+    ///
+    /// It used to be a rounded surface with 16px of padding, which put every template's text 16px
+    /// right of the page title above it - two left edges in one column of content, at the exact spot
+    /// the eye scans down. "Before a border, try more space. Before a card, try a divider." Space and
+    /// a hairline separate these perfectly well, and removing the box puts the whole page on one
+    /// gutter.
+    ///
+    /// The sections are plain text now, not a row of pills. They never change, every template has
+    /// "Summary" and "Action items", and none of them is clickable: a badge earns its place when its
+    /// value CHANGES, and a constant is a label. Nine identical chip rows also flattened the page so
+    /// that nothing was rankable - the template NAME is what a person is looking for here.
+    /// </summary>
+    FrameworkElement TemplateRow(Llm.NoteTemplate t, bool isDefault, bool first)
     {
-        var stack = new StackPanel();
-        stack.Children.Add(new TextBlock { Text = t.Name, Style = St("SectionTitle") });
-        stack.Children.Add(new TextBlock { Text = char.ToUpper(t.When[0]) + t.When[1..] + ".", Style = St("Dim"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
-        var secs = new WrapPanel { Margin = new Thickness(0, 9, 0, 0) };
-        foreach (var s in new[] { "Summary" }.Concat(t.Sections).Concat(new[] { "Action items" }))
-            secs.Children.Add(SectionPill(s));
-        stack.Children.Add(secs);
-        var card = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(16, 14, 16, 15), Margin = new Thickness(0, 0, 0, 10), Child = stack };
-        card.SetResourceReference(Border.BackgroundProperty, "SurfaceHi");
-        return card;
-    }
+        var stack = new StackPanel { Margin = new Thickness(0, first ? 0 : 18, 0, 0) };
 
-    Border SectionPill(string text)
-    {
-        var t = new TextBlock { Text = text, FontSize = 10, FontFamily = (FontFamily)FindResource("UiFont") };
-        t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
-        var b = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 3, 8, 4), Margin = new Thickness(0, 0, 6, 6), Child = t };
-        b.SetResourceReference(Border.BackgroundProperty, "Chip");
-        return b;
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        head.Children.Add(new TextBlock { Text = t.Name, Style = St("SectionTitle"), VerticalAlignment = VerticalAlignment.Center });
+        // A tag whose value actually changes, which is the one kind worth drawing.
+        if (isDefault)
+        {
+            var tag = new TextBlock { Text = "Default", FontSize = 10, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
+            tag.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+            var pill = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 2, 7, 3), Margin = new Thickness(9, 1, 0, 0), Child = tag };
+            pill.SetResourceReference(Border.BackgroundProperty, "Chip");
+            head.Children.Add(pill);
+        }
+        stack.Children.Add(head);
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = char.ToUpper(t.When[0]) + t.When[1..] + ".",
+            Style = St("Dim"), FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0),
+        });
+
+        var sections = new TextBlock
+        {
+            Text = string.Join("  ·  ", new[] { "Summary" }.Concat(t.Sections).Concat(new[] { "Action items" })),
+            FontSize = 11, FontFamily = (FontFamily)FindResource("UiFont"),
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 0),
+        };
+        sections.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
+        stack.Children.Add(sections);
+
+        var host = new StackPanel();
+        if (!first)
+        {
+            // AIR ON BOTH SIDES of the rule. With none above it, the hairline landed on the baseline of
+            // the previous row's section list and read as an underline of that text rather than as a
+            // separator between two templates. A divider has to sit IN the gap, not at the end of the
+            // thing above it.
+            var rule = new Border { Height = 1, Margin = new Thickness(0, 18, 0, 0) };
+            rule.SetResourceReference(Border.BackgroundProperty, "Hairline");
+            host.Children.Add(rule);
+        }
+        host.Children.Add(stack);
+        return host;
     }
 
     // ── per-note template picker (manual override → Toki re-writes the note in the chosen shape) ──
@@ -1664,8 +1785,14 @@ public partial class LibraryWindow : Window
         return btn;
     }
 
+    // A rewrite is a full model pass and can run for minutes. One at a time, and the page has to
+    // SAY it is working: a note that silently rewrites itself under the reader is more alarming
+    // than a slow one (same reason the summarizing loader exists).
+    bool _rewriting;
+
     async void ApplyTemplate(MeetingRecord m, string name, TextBlock status)
     {
+        if (_rewriting) return;
         if (string.Equals(name, m.Notes.Template ?? "General", StringComparison.OrdinalIgnoreCase)) return;
         if (!Llm.LlmService.Instance.CanWrite())
         {
@@ -1673,10 +1800,43 @@ public partial class LibraryWindow : Window
             status.Visibility = Visibility.Visible;
             return;
         }
-        status.Text = $"Rewriting as {name}…"; status.Visibility = Visibility.Visible;
-        var ok = await App.RewriteNotesAsync(m.Id, name);
-        if (ok) { var fresh = App.Store.Get(m.Id); if (fresh is not null) RenderMeeting(fresh); }
-        else { status.Text = "Couldn't rewrite - no transcript or model available."; status.Visibility = Visibility.Visible; }
+
+        _rewriting = true;
+        status.Visibility = Visibility.Collapsed;
+        var busy = ShowRewriting(name);
+        try
+        {
+            var ok = await App.RewriteNotesAsync(m.Id, name);
+            if (ok) { var fresh = App.Store.Get(m.Id); if (fresh is not null) RenderMeeting(fresh); return; }
+            status.Text = "Couldn't rewrite - no transcript or model available.";
+            status.Visibility = Visibility.Visible;
+        }
+        finally { _rewriting = false; busy?.Invoke(); }
+    }
+
+    /// <summary>Put the reading pane into a working state for the length of a rewrite, and return
+    /// the undo. The note it replaces is about to be REPLACED, so showing it underneath would be
+    /// showing something that is no longer true.</summary>
+    Action? ShowRewriting(string templateName)
+    {
+        var previous = DetailBody.Content;
+        var panel = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 40),
+        };
+        panel.Children.Add(new Views.ThinkingDots($"rewriting as {templateName}"));
+        DetailBody.Content = panel;
+        return () => { if (ReferenceEquals(DetailBody.Content, panel)) DetailBody.Content = previous; };
+    }
+
+    /// <summary>Is this node inside that subtree? Used to tell a click on the page's empty space
+    /// from a click on something that handles its own input.</summary>
+    static bool IsWithin(DependencyObject node, DependencyObject root)
+    {
+        for (DependencyObject? p = node; p is not null; p = VisualTreeHelper.GetParent(p))
+            if (ReferenceEquals(p, root)) return true;
+        return false;
     }
 
     void LoadList()
@@ -1689,7 +1849,9 @@ public partial class LibraryWindow : Window
         items = SortItems(items);
 
         CountLabel.Text = items.Count.ToString();
-        ScopeLabel.Text = _myNotesOnly ? "my notes" : "all on this PC";
+        // The scope reads only when a filter is ON; unfiltered, the count speaks for itself.
+        ScopeLabel.Text = _myNotesOnly ? "my notes" : "";
+        ScopeLabel.Visibility = CountRule.Visibility = _myNotesOnly ? Visibility.Visible : Visibility.Collapsed;
 
         // Handing the list over is the whole "build": MeetingList calls Card() only for the rows it
         // actually realises. The list is kept in _items because under virtualization the visuals are
@@ -1913,12 +2075,13 @@ public partial class LibraryWindow : Window
     bool _viewedByUser;             // true when the USER chose it (click / focus) - not an auto-select
     static bool _warming;           // true during the off-screen startup pre-warm (nothing is "on screen")
 
-    /// <summary>The meeting note ACTUALLY on the user's screen: the window is visible (not the
-    /// off-screen warm-up), the note is a real meeting, and the user chose it - never the list's
-    /// silent auto-select. Derived, so it can't go stale.</summary>
+    /// <summary>The note ACTUALLY on the user's screen: the window is visible (not the off-screen
+    /// warm-up) and the user chose this note - never the list's own auto-selection. A HAND-WRITTEN
+    /// note counts (2026-08-24): it used to require Kind.Meeting, so opening your own note and asking
+    /// "summarise this" grounded on nothing and the assistant answered about something else.</summary>
     internal static MeetingRecord? VisibleMeeting =>
         _open is { } w && w.IsVisible && !_warming && w._viewedByUser
-        && w._viewedRecord is { Kind: MeetingKind.Meeting } m ? m : null;
+        && w._viewedRecord is { } m ? m : null;
 
     void Select(long id, bool byUser = true)
     {
@@ -2030,29 +2193,36 @@ public partial class LibraryWindow : Window
 
         var body = NoteRenderer.MeetingDocument(m, spacious: true, topBar: toolbar, sticky: _sticky,
             resolving: App.IsResolvingSpeakers(m.Id),
+            dismissSection: heading => { if (App.DismissNoteSection(m.Id, heading)) Select(m.Id, byUser: false); },
             renameSpeaker: (from, to) =>
             {
                 // One rename, every line that voice said. Re-read from the store so what is on
                 // screen is what was actually written.
                 App.Store.RenameSpeaker(m.Id, from, to);
                 if (App.Store.Get(m.Id) is { } fresh) { MarkdownMirror.Write(fresh); RenderMeeting(fresh); }
-            });
+            },
+            // "Try again" regenerated the notes with the model: re-read and rebuild the pane.
+            refreshNotes: () => { if (App.Store.Get(m.Id) is { } fresh) RenderMeeting(fresh); });
         DetailBody.Content = body;
         // Start at the very TOP once laid out (a fresh RichTextBox occasionally came up scrolled down).
         if (body is RichTextBox rtb)
             Dispatcher.BeginInvoke(new Action(() => rtb.ScrollToHome()), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    /// <summary>A hand-written note, laid out as a DOCUMENT rather than a form: a capped, centred
-    /// reading measure, space (not a rule) between title and body, and Delete in a footer well
-    /// clear of the writing.</summary>
+    /// <summary>A hand-written note, laid out as a DOCUMENT rather than a form: a capped reading
+    /// measure starting at the page's own left edge, space (not a rule) between title and body, and
+    /// Delete in a footer below the writing rather than through the middle of it.</summary>
     void RenderManual(MeetingRecord m)
     {
-        // Stretch + MaxWidth is WPF's way of saying "centred, up to this measure".
-        var page = new StackPanel
-        {
-            MaxWidth = MeasureWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
+        // LEFT, not centred. Stretch + MaxWidth is WPF's way of saying "centred up to this measure",
+        // and on a wide window that pushed the first letter of every line a couple of hundred pixels
+        // in from the panel while the panel's own edge stayed put - the writing looked detached from
+        // the page it was on. Every other page in this window (Templates, Settings) already starts at
+        // the same left edge with the same padding; the note was the last one that did not.
+        var page = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // title
+        page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });   // the writing
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // footer
 
         // Same title type as a meeting note. A placeholder sits behind the box rather than seeding
         // it with "Untitled note" - text you have to delete before typing is a small hostile act.
@@ -2076,19 +2246,52 @@ public partial class LibraryWindow : Window
         titleLayer.Children.Add(titleBox);
         page.Children.Add(titleLayer);
 
-        // The quiet facts: under the title, small, dim, never bold.
-        var meta = new TextBlock
-        {
-            Style = St("Dim"), FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
-            Text = m.StartedAt.ToLocalTime().ToString("dddd d MMMM yyyy"),
-        };
-        page.Children.Add(meta);
+        // NO DATE UNDER THE TITLE. The list already says when this note was written, and a serious
+        // writing surface does not label the page you are looking at with facts you did not ask for.
+        // The title, then the writing.
 
         // The real editor: sizes, tickable to-dos, lists, spacing, template insertion. A document
         // breathes between its title and its first line - no rule there.
-        var bodyBox = new Views.NoteEditor { MinHeight = 420, Margin = new Thickness(0, 26, 0, 0) };
+        // THE CANVAS FILLS THE PAGE. It used to be 560px of writing surface followed by a hairline and
+        // a Delete row, so on any window taller than that the note ended in a rule with blank space
+        // under it - a block across the middle of the page that the writing appeared to stop at. In
+        // the star row it takes whatever height is left, and the footer is pushed to the bottom.
+        //
+        // ONE SCROLL, the page's. With its own scrollbar the editor became a second scrolling box
+        // inside a scrolling page, and a long note scrolled whichever one the pointer happened to be
+        // over.
+        var bodyBox = new Views.NoteEditor
+        {
+            Margin = new Thickness(0, 22, 0, 0),
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
+        bodyBox.OwnScrolling = false;
         bodyBox.Markdown = m.Body ?? "";
+        Grid.SetRow(bodyBox, 1);
         page.Children.Add(bodyBox);
+
+        // ONE LEFT EDGE for the title and the writing. A RichTextBox draws its first character a few
+        // pixels in from its own left edge, so a title box with no padding sat that much further left
+        // than every line under it - a small, permanent misalignment at the exact spot the eye starts.
+        // Read from the editor after layout, never assumed, because it moves with the text size.
+        bodyBox.Loaded += (_, _) =>
+        {
+            var origin = bodyBox.TextOrigin;
+            if (origin <= 0) return;
+            titleBox.Padding = new Thickness(origin, 0, 0, 0);
+            placeholder.Margin = new Thickness(origin, 0, 0, 0);
+        };
+
+        // CLICK ANYWHERE TO WRITE. A page of paper has no edge past which a pen stops working.
+        //
+        // BUBBLING, never Preview, and no tree walking. The first version tunnelled on Preview and
+        // asked whether the click had landed inside the editor by walking up the visual tree from
+        // e.OriginalSource. Inside a RichTextBox that source is a Run, which is a ContentElement and
+        // is NOT in the visual tree, so the check said "not the editor" for every click in the text
+        // and the caret was thrown to the end of the note each time. On the bubbling event the
+        // editor handles its own clicks first and this only ever sees the ones it ignored.
+        page.Background = Brushes.Transparent;   // unset is invisible to hit testing
+        page.MouseLeftButtonDown += (_, _) => bodyBox.FocusEditor();
 
         // The footer: save state on the left, the destructive action on the right.
         var status = new TextBlock
@@ -2096,7 +2299,7 @@ public partial class LibraryWindow : Window
             Style = St("Dim"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0, Text = "Saved",
         };
-        var footer = new Grid { Margin = new Thickness(0, 44, 0, 8) };
+        var footer = new Grid { Margin = new Thickness(0, 14, 0, 8) };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var deleteButton = SmallButton("Delete", () => Delete(m.Id), danger: true);
@@ -2106,16 +2309,23 @@ public partial class LibraryWindow : Window
 
         var footerRule = new Border
         {
-            Height = 1, Background = (Brush)FindResource("Hairline"), Margin = new Thickness(0, 40, 0, 0),
+            Height = 1, Background = (Brush)FindResource("Hairline"), VerticalAlignment = VerticalAlignment.Top,
         };
-        page.Children.Add(footerRule);
-        page.Children.Add(footer);
+        var foot = new StackPanel();
+        foot.Children.Add(footerRule);
+        foot.Children.Add(footer);
+        Grid.SetRow(foot, 2);
+        page.Children.Add(foot);
 
-        DetailBody.Content = new ScrollViewer
+        var scroller = new ScrollViewer
         {
             Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Padding = new Thickness(40, 34, 40, 24),
         };
+        // At least as tall as what you can see, so a short note still fills the pane and the footer
+        // sits at the bottom of it instead of halfway up. Growing past that is what scrolls.
+        page.SetBinding(MinHeightProperty, new System.Windows.Data.Binding("ViewportHeight") { Source = scroller });
+        DetailBody.Content = scroller;
 
         _manualFlush = () =>
         {
@@ -2133,9 +2343,16 @@ public partial class LibraryWindow : Window
         bodyBox.Changed += (_, _) => Schedule();   // covers typing AND ticking a box
     }
 
-    /// <summary>The reading measure for a written note, in DIPs (45-75 characters a line lands
-    /// near 700 at Toki's body size).</summary>
-    const double MeasureWidth = 720;
+    // THE MEASURE, and why there is no longer one.
+    //
+    // This used to cap the writing column at 600 DIPs: 66 characters at a 16px humanist sans, which is
+    // Bringhurst's ideal for a single column, with Baymard putting reading fatigue past 75-100. That is
+    // still true as typography. It is not what the owner wants here, and they are the gate on anything
+    // visual: on a wide window the capped column filled about half the pane and read as a page that had
+    // stopped early rather than as a measure. OWNER DECISION 2026-08-24: the note fills the pane.
+    //
+    // If long lines ever become the complaint, the fix is a cap again - the number to come back to is
+    // 600, and the argument for it is above.
 
     // Show a status word, then let it fade out - "saved" should reassure, not linger as chrome.
     static void FlashStatus(UIElement e)
