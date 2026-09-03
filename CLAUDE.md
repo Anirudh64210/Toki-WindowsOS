@@ -165,12 +165,18 @@ or code-built-view change)
 · `--render <dir>` / `--libshot <dir>` (PNG the views; the transparent overlay can't be
 screenshotted) · `--linktest [n]` (precision@1 of evidence linking against synthetic ground truth, two difficulty
 conditions, paired McNemar comparison of any scoring change - the way to tell a real improvement
-from noise) · `--evidencetest [id]` (cuts every evidence clip in a stored meeting, re-transcribes it, and reports
+from noise; procedure + the current reading in `docs/link-eval.md`) · `--evidencetest [id]` (cuts every evidence clip in a stored meeting, re-transcribes it, and reports
 whether the audio says the line the link claims - the instrument that found segments with an
 `int.MinValue` end) · `--asrtest <file>` · `--wertest <wav> <ref.txt>` (word error rate + per-name recall
-through the REAL pipeline; script + reference in `docs/wer-eval.md` - run it after ANY audio/ASR change) · `--notestest` · `--llmtest` · `--dbtest` · `--caltest` ·
-`--preptest` · `--diartest` · `--makeicon`. CI can never verify GPU/model/audio paths - those are
-run-on-a-real-PC jobs forever.
+through the REAL pipeline; script + reference in `docs/wer-eval.md` - run it after ANY audio/ASR change)
+· `--groundtest` (are the note's hard facts - names, numbers, dates, money - actually present in the
+transcript? precision and recall over the stored Library) · `--regentest [n]` (rewrite the n longest
+stored meetings with the CURRENT pipeline and compare grounding scores before and after; SAVES
+NOTHING. Also reports provenance coverage per meeting. Read the COUNTS it prints, never the
+percentages alone: precision and recall both score 1.0 on an empty denominator) · `--renotes <id>`
+(replay one stored meeting through the writer and print the result) · `--notestest` · `--llmtest` ·
+`--dbtest` · `--caltest` · `--preptest` · `--diartest` · `--makeicon`. CI can never verify
+GPU/model/audio paths - those are run-on-a-real-PC jobs forever.
 
 ## Where the truth lives (read these, not this file, for state)
 

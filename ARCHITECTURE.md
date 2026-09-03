@@ -3979,3 +3979,279 @@ compared against the mockup, and where it cannot match, say why rather than quie
 This caught two things in one session that reasoning missed - a waveform spanning under the buttons,
 and note text running 140 characters wide.
 
+
+## Provenance is recorded at generation, never recovered afterwards (2026-09-03)
+
+Two halves of this existed for weeks and were never joined. `ValidateDigest` returned verified,
+narrowed transcript ranges for every map window; `action_items` had carried `src_first`/`src_last`
+columns since 2026-08-23. Nothing assigned them. So every evidence link in the product was recovered
+after the fact by matching bullet text against the WHOLE transcript, and the gain from searching
+inside a recorded window was never actually in the product.
+
+**Re-measured 2026-09-03** with `--linktest 300` over 16 real meetings, because the previously
+documented "+4.6pp" no longer matched the library. What confining the search actually buys:
+
+| Condition | Flat (whole transcript) | Confined to the window | Paired verdict |
+|---|---|---|---|
+| EASY (half the words kept, 1 borrowed) | 96.7% | 98.0% | McNemar 2.25 on 4 disagreements, NOT significant |
+| HARD (a third kept, 3 borrowed) | 85.6% | 88.5% | McNemar 4.17 on 6 disagreements, significant at p<0.05 |
+
+Read it honestly: the gain is real only on the HARD condition, where the bullet shares little
+vocabulary with its source line, and that is exactly the case a real note produces. On easy cases
+flat matching already wins and provenance is noise. Refusals also rise (1 to 4 on hard), which is the
+trade being made on purpose: a confined search that finds nothing stays silent instead of reaching
+across the meeting for a plausible wrong line.
+
+Note also what `--linktest` simulates: a 40-line chunk hint. The shipped implementation records the
+NARROWED range `ValidateDigest` computed, which is tighter, so the real effect should be at least
+this and is not yet measured separately.
+
+**Decision: a written line records where it came from at the moment it is written.**
+
+`LlmNoteWriter.AttachProvenance` matches each finished bullet and action against the DIGEST WINDOW it
+was rewritten from, not against the transcript. That is a much easier problem: a digest is short, it
+is already verified line-by-line against what it cites, and it is in the speaker's own words.
+`Evidence.BestRange` then narrows within the recorded span instead of searching the whole meeting.
+
+Three constraints that are easy to get wrong, each pinned by a test:
+
+**It runs LAST.** `NoteSection.Sources` is index-aligned with `Bullets`, and both the name gate and
+`Brevity.Tighten` can drop a line. Attributing before them leaves every source after the dropped
+bullet pointing one line to the left. That failure is silent and looks entirely plausible, which
+makes it worse than a crash.
+
+**It is silent when unsure.** A bullet must cover at least half its own content words in a window,
+and must beat the runner-up by 0.15, or it keeps a null source and falls back to text matching. Two
+windows that explain a bullet equally well are an ambiguous attribution, and CLAUDE.md's rule stands:
+a wrong evidence link is worse than none, because a reader sent confidently to the wrong minute
+trusts the feature less than one offered no link at all.
+
+**An observed source is never overwritten by an inferred one.** `a.Source ??=`, not `=`.
+
+`ReplaceNotes` now writes the provenance columns that `Save` always wrote. That omission meant
+regenerating a note silently stripped provenance off every action item, so the one path most likely
+to IMPROVE a note was also the one that destroyed its evidence links.
+
+## A metric must print its denominator (2026-09-03)
+
+`--regentest 6` reported "MEAN PRECISION 93.3% -> 100.0%", six meetings out of six at perfect
+precision. That reads like a triumph and is not safe to believe, because of how the two metrics are
+defined in `Grounding.Report`:
+
+```
+Precision => Checked == 0 ? 1.0 : ...
+Recall    => TranscriptEntities == 0 ? 1.0 : ...
+```
+
+Both return **1.0 on an empty denominator**. A note containing no checkable facts scores 100%
+precision. A transcript with no repeated entities scores 100% recall. The conventions are defensible
+on their own (there is nothing invented in a note that claims nothing), but the report printed only
+the percentages, so a perfect score and an empty note are indistinguishable in the output.
+
+This is the same shape as two lessons already paid for: "a gate that always passes is not a gate",
+and the diagnostics that cried wolf on a healthy app. An instrument that cannot report the difference
+between "measured and passed" and "had nothing to measure" will eventually flatter the thing it is
+supposed to audit.
+
+**Decision: every quality number Toki prints carries the count it was computed from.** `--regentest`
+now prints `facts checked N -> M` beside precision and `kept/total` beside recall, and warns
+explicitly when any meeting in the run scored on an empty denominator.
+
+The same run also showed why this matters in the other direction. Mean recall moved 30.4% to 34.4%,
+which looks like a small gain, but the spread was 46% to 12% and 38% to 0% on two meetings against
+15% to 62% and 50% to 100% on two others. A four-point mean over six meetings with that variance is
+not evidence of anything. Meeting 45 returning zero recall is a specific thing to investigate, and it
+is invisible in the mean.
+
+## The context budget overflowed, and the floor caught it silently (2026-09-03)
+
+The single most consequential bug found this session, and it was arithmetic rather than prompting.
+
+`MaxChunkChars` decided how much transcript goes into one map window:
+
+```
+Math.Max(1800, (ctx - 800) * 3)      // the old formula
+```
+
+`LlmRuntime` sets `ContextSize = 3072` on the partial-offload branch, which is what a 3.9GB to 7GB
+card takes, and that is the owner's RTX 3050 at 4.0GB. So a window was **6,816 characters**.
+
+Numbered transcript lines do not tokenise at 3 chars per token. `[147] Craig: ` is punctuation and
+digits, and a mis-heard name splits into pieces; the real rate is nearer 2.6. So the window was
+~2,600 tokens, the instructions ~500, and the answer up to 760. That is over 3,072 before the model
+writes a word.
+
+Every window threw `LLamaDecodeError: llama_decode failed: 'NoKvSlot'`.
+
+**And nothing said so.** `TextPass` had a bare `catch { return null; }`. A null return means "this
+window failed", every window failed, and `WriteAsync` fell back to the heuristic floor, which writes
+raw transcript lines as to-dos. Meeting 28 came back with no title, an empty summary, and twelve
+"action items" reading like "Um, I will ask Pooja to give you access to this uh".
+
+Short meetings fit in a single pass and were written properly. **Long meetings were never written by
+the model at all**, on the owner's own hardware. That is a large part of "the notes are mediocre".
+
+**Three decisions.**
+
+**The reserve names all three costs.** `ReserveTokens = 1600` covers the instructions, the longest
+generation (760, the final pass), and margin; `ChunkCharsPerToken = 2.6` is measured against
+transcript lines, not prose. On a 3072 context a window drops from 6,816 to 4,347 characters. More
+map calls and a slower note: meeting 28 went from 91s to 255s. **A slow correct note beats a fast
+floor note**, and the floor note was worthless.
+
+**A model call that throws is logged.** Both the exception and, separately, the fall to the floor,
+with the two "no note" outcomes told apart: a failed model and a quiet meeting look identical to the
+user and are opposite faults. Before this the only symptom of a total map failure was the ABSENCE of
+the "digest kept" lines a working pass emits, which is not something anyone would notice.
+
+**The budget is asserted, not assumed.** `ContextBudgetTests` checks that a window plus instructions
+plus the longest generation fits, at both context sizes `LlmRuntime` actually sets. It fails at both
+against the old formula. A constant that is only exercised on one machine's hardware path will drift
+again otherwise.
+
+**The general lesson.** A fallback that is good enough to ship is also good enough to hide the
+failure that triggered it. The heuristic floor exists so a broken model never costs the user their
+meeting, and that is right; but a fallback must be LOUD. This is the second time the floor has
+concealed a total model failure (see "the floor leaked the transcript again", 2026-08-25). The first
+time the cause was a native load crash, this time a context overflow, and both were invisible for the
+same reason.
+
+## A union of observed ranges is not a guess (2026-09-03)
+
+When the digests themselves overflow the final pass's context they are mapped again, and that step
+used to call `provenance.Clear()`. The comment gave the reason: a digest of digests cannot be traced
+to a line range without guessing, and a guessed provenance is worse than none because it points the
+reader confidently at the wrong moment.
+
+The first half is correct. The second half assumed guessing was the only alternative, and it is not.
+A re-digest is produced from a KNOWN set of first-round windows. The union of their ranges is a
+statement about where that text came from that was observed, not inferred. It is coarser than a
+first-round range, and it is still true.
+
+This became urgent the moment the window budget shrank to fix the context overflow: smaller windows
+make the re-reduce loop run far more often. Measured on the same six meetings, coverage fell from
+20/30 bullets to 8/44, with three meetings recording nothing at all. The provenance feature had been
+wired and then immediately gutted by an unrelated fix.
+
+**Decision: `GroupWindows` carries the union forward, with one rule that keeps it honest.** A window
+that came back uncited contributes its TEXT to the group but never widens the RANGE. An unverified
+window cannot manufacture a claim about lines nothing checked, so the range only ever covers windows
+that passed citation validation. A group with nothing verified stays unknown and its bullets fall
+back to text matching, exactly as before.
+
+**And read the pooled number, not the mean of percentages.** `--regentest` averaged per-meeting
+precision and recall, which let a meeting with 2 transcript entities count as much as one with 26; a
+single 2/2 becoming 1/2 moved the headline eight points and reversed the apparent verdict. Pooled
+totals are now printed beside the macro mean, and a rate with no denominator prints `n/a (0)` rather
+than 100%.
+
+**The limit of the metric, recorded so nobody tunes against it blindly.** `Grounding` measures
+faithfulness: are the note's hard facts present in the transcript, and how many of the transcript's
+facts survived. A note that copies the transcript verbatim scores near-perfectly. The heuristic
+floor, which is the worst note Toki can produce, therefore scores WELL. That is why the old stored
+notes out-score the fixed pipeline on recall while being worse notes to read. Faithfulness is
+necessary and it is not sufficient, and the final gate stays `--evidencetest` on real meetings plus
+the owner's eyes.
+
+## When the evidence overflows, select from it; never summarise it again (2026-09-03)
+
+The map step exists so the writer reads EVIDENCE rather than a paraphrase. When the digests
+themselves did not fit the final pass, the pipeline mapped them again, up to two extra rounds. That
+reintroduced the very thing the map step prevents: the writer ends up reading a paraphrase of a
+paraphrase, which is the failure recorded in lesson 1 and in the 8-minute context cliff.
+
+**Measured, on two meetings in one run.** Meeting 48 mapped cleanly, keeping 25/26, 19/21, 29/31,
+22/23 and 21/22 lines across seven windows. Its digests came to 6,645 characters, over the budget, so
+one re-reduction ran. The finished note had **zero bullets** and its checkable facts fell from 25 to
+2, recall 46% to 4%. Meeting 28, which did not re-reduce, went from 15% to 62% recall in the same
+run, with 6 of 7 bullets sourced. One variable, opposite outcomes.
+
+**Decision: `TrimToFit` drops the least informative lines instead.** Ranking, in order: lines
+carrying hard entities (names, numbers, dates, money) outrank lines carrying none, because those are
+the facts a reader came for and the ones `Grounding` measures; among equals, a line from a window
+whose citation VERIFIED outranks one from a window that came back uncited; length breaks the rest,
+shortest first, since a very long digest line is usually a run-on rather than a dense one. Reading
+order is restored afterwards, because a writer handed its evidence out of sequence invents
+transitions to explain the jumps.
+
+**Selecting is lossy in a way a reader can reason about. Re-summarising is lossy in a way nobody can
+see.** Every surviving line keeps the speaker's own words and its exact provenance, rather than every
+line becoming a vaguer version of itself.
+
+## The context size is measured, not assumed (2026-09-03)
+
+The partial-offload branch (VRAM 3.9GB to 7GB, which is the owner's RTX 3050) held `ContextSize` at
+3072 defensively. Measured on that machine with 20 layers offloaded and 3,370 MiB reported free:
+
+| | ctx 3072 | ctx 4096 |
+|---|---|---|
+| model buffer | 1401 MiB | 1401 MiB |
+| KV cache | 228 MiB | 304 MiB |
+| compute buffer | 302 MiB | 302 MiB |
+| total VRAM | 1931 MiB | 2007 MiB |
+| headroom | 1439 MiB | 1363 MiB |
+
+**76 MiB buys a 49% larger map window** (4,347 to 6,489 characters), which means fewer windows, fewer
+model calls, and far less trimming. Over 1.3GB of headroom remains, which matters because a video
+call is using the same GPU while Toki records it.
+
+If a machine ever fails to load here, drop this back to 3072 rather than lowering `ReserveTokens` in
+`MaxChunkChars`. The reserve is what stops `NoKvSlot`; the context size is only how much fits.
+
+## The extraction budget belongs to the meeting, not to the chunking (2026-09-03)
+
+The map prompt asked for a flat "5 to 12 lines" however much transcript the window held. That makes
+the extraction budget a property of the CHUNKING, which is an implementation detail nobody outside
+this file should be able to feel, rather than of the MEETING, which is the thing being summarised.
+
+Raising `ContextSize` to 4096 exposed it within one run. Windows grew 49%, meeting 28 went from seven
+windows to four, each still capped at the same line budget, and its measured recall fell from 62% to
+38% while finishing 100 seconds faster. It was extracting less of the meeting and doing it sooner,
+which is the signature of a budget attached to the wrong thing.
+
+**Decision: `DigestLines` scales with the window**, about one point per 450 characters, clamped to
+6 and 20. Below 6 a window stops saying anything useful about its stretch of talk; above 20 the model
+pads, and padding is exactly what the citation gate then throws away, which is work done twice to
+arrive back where we started. The map pass's token cap scales with it and is capped at 700, staying
+under the 760 that `ReserveTokens` is sized against: a map pass that outgrew the reserve would bring
+`NoKvSlot` straight back.
+
+**The pattern across today's three note-quality fixes is worth naming.** Every one was a number that
+described the machinery rather than the work:
+
+- the chunk budget assumed 3 characters per token for text that runs at 2.6
+- the re-reduce loop summarised summaries because the digests did not fit a window size
+- the digest budget counted lines per window instead of per minute of meeting
+
+None of them were prompt problems. That is why repeated rounds of prompt tuning could not move the
+quality, and it is the reason to reach for a measurement before reaching for the prompt: a constant
+that is a proxy for something real will drift away from it the moment anything around it changes.
+
+## The note instrument has a 12-point noise floor (2026-09-03)
+
+Recorded because it invalidated a diagnosis made the same day, and would have invalidated more.
+
+Meeting 28 was run three times through near-identical code and returned **62%, 38% and 46% recall**.
+Qwen is sampled at temperature 0.7 by design (lesson 8: sampler params over prompts, never greedy),
+so a single meeting's grounding score moves about twelve points run to run for nothing.
+
+The 62% to 38% step was read as a regression, attributed to the per-window digest budget, and acted
+on. The resulting change is defensible on its own reasoning and is not measurable as a gain: pooled
+recall was 28.2% before it and 28.2% after, because it lifted one meeting and lowered the other by
+about the same. It is kept and labelled as unmeasured.
+
+**Decision: `--regentest` is a detector of STRUCTURAL faults, not a quality meter.** What it found
+today is exactly what it is good for: a meeting producing zero bullets, notes containing no checkable
+facts at all, and an entire pipeline silently falling to the heuristic floor. Those are visible at
+n=2 because they are categorical. A four-point move in recall is not.
+
+Before treating any pipeline change as an improvement, either run n >= 10 meetings, or run the same
+small set repeatedly and compare distributions rather than single numbers.
+
+`--linktest` gets this right and is the model to copy: a fixed seed so the sample cannot drift, two
+difficulty conditions, and a paired McNemar test over the cases where two scorers actually disagree.
+`--regentest` cannot be made deterministic that way, because every run re-samples the model.
+
+**The general form: know your instrument's resolution before you trust a difference it reports.** A
+measurement that cannot separate the effect you are looking for from its own noise will happily
+confirm whatever you already believe.

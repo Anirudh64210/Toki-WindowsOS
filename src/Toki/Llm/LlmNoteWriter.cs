@@ -60,7 +60,7 @@ public sealed class LlmNoteWriter
             // decode failed says nothing about the meeting; a window the model read and judged
             // empty does. Folding them together turns a mid-map timeout into an invented
             // "nothing was discussed" verdict.
-            var digests = new List<string>();
+            var digests = new List<Window>();
             var failed = 0;
             for (var i = 0; i < chunks.Count; i++)
             {
@@ -80,40 +80,54 @@ public sealed class LlmNoteWriter
                 if (checkedDigest is null)
                 {
                     App.Log($"notes: window {i + 1}/{chunks.Count} came back uncited - keeping it, without provenance");
-                    digests.Add(d);
-                    continue;   // no provenance entry: an unverified range is worse than none
+                    // Range -1 marks "text kept, provenance unknown". It stays in the SAME list, so a
+                    // later re-reduction can still tell which digests it merged; a parallel list would
+                    // drift out of step the moment one window is skipped.
+                    digests.Add(new Window(d, -1, -1));
+                    continue;
                 }
-                digests.Add(checkedDigest.Value.Text);
                 // The NARROWED range the surviving points actually cover, not the whole window - a
                 // tighter provenance is a better evidence link.
-                provenance.Add(new Window(checkedDigest.Value.Text, checkedDigest.Value.First, checkedDigest.Value.Last));
+                digests.Add(new Window(checkedDigest.Value.Text, checkedDigest.Value.First, checkedDigest.Value.Last));
             }
             if (digests.Count == 0)
-                return failed > 0 ? heuristic          // could not read the meeting → the floor
-                                  : LowSubstanceNote(); // read it all and found nothing → honest minimal note
-            source = string.Join("\n", digests);
+            {
+                // SAY WHICH ONE. These two outcomes look identical to the user (a poor note) and are
+                // opposite faults: one is a broken model, the other is a quiet meeting. Without this
+                // line the only symptom of a total map failure is the ABSENCE of other log lines.
+                if (failed > 0)
+                {
+                    App.Log($"notes: ALL {chunks.Count} window(s) failed ({failed} model errors) - falling back to the "
+                          + "heuristic floor. The note will be poor; the cause is above, not in the writer.");
+                    return heuristic;
+                }
+                App.Log($"notes: {chunks.Count} window(s) read, none had substance - writing the honest minimal note.");
+                return LowSubstanceNote();
+            }
+            source = string.Join("\n", digests.Select(w => w.Text));
             sourceIsDigests = true;
 
-            // If even the DIGESTS overflow the final pass's context, map again over the digest
-            // text (up to two extra rounds) - otherwise a very long meeting throws in the final
-            // pass and falls back to raw-first-lines.
-            for (var round = 0; round < 2 && source.Length > MaxChunkChars(); round++)
+            // IF THE DIGESTS OVERFLOW, DROP THE WEAKEST LINES. DO NOT SUMMARISE THEM AGAIN.
+            //
+            // This used to re-map the digests, up to two extra rounds. That reintroduced exactly the
+            // failure the map step exists to prevent: the writer ends up reading a paraphrase of a
+            // paraphrase. MEASURED 2026-09-03 on meeting 48, whose seven windows mapped cleanly
+            // (25/26, 19/21, 29/31, 22/23, 21/22 lines kept) and which then re-reduced once: the note
+            // came back with ZERO bullets and its checkable facts fell from 25 to 2, while meeting 28,
+            // which did not re-reduce, went from 15% to 62% recall in the same run.
+            //
+            // Selecting is lossy in a way a reader can reason about; re-summarising is lossy in a way
+            // nobody can see. Every surviving line keeps the speaker's own words and its exact
+            // provenance, instead of every line becoming a vaguer version of itself.
+            if (source.Length > MaxChunkChars())
             {
-                App.Log($"notes: digests still {source.Length} chars, reducing again (round {round + 1})");
-                var rechunks = ChunkText(source, MaxChunkChars());
-                var redigests = new List<string>();
-                for (var i = 0; i < rechunks.Count; i++)
-                {
-                    var d = await MapChunk(rechunks[i], i + 1, rechunks.Count, ct);
-                    if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d)) redigests.Add(d!);
-                }
-                if (redigests.Count == 0) break;   // keep the level that worked
-                source = string.Join("\n", redigests);
-                // A digest of digests can no longer be traced to a line range without guessing,
-                // and a guessed provenance is worse than none: it points the reader confidently at
-                // the wrong moment. Drop it; those bullets fall back to text matching.
-                provenance.Clear();
+                var before = source.Length;
+                digests = TrimToFit(digests, MaxChunkChars());
+                source = string.Join("\n", digests.Select(w => w.Text));
+                App.Log($"notes: digests were {before} chars, over the {MaxChunkChars()} budget - "
+                      + $"dropped the least informative lines down to {source.Length}. Nothing was re-summarised.");
             }
+            provenance.AddRange(digests.Where(w => w.First >= 0));
         }
 
         // Use the caller's forced template (a human assertion, never second-guessed), else pick the one
@@ -164,7 +178,12 @@ public sealed class LlmNoteWriter
         var pruned = Grounding.PruneUngroundedNames(result, transcript);
         if (pruned > 0) App.Log($"notes: dropped {pruned} line(s) naming someone absent from the transcript");
 
-        return Brevity.Tighten(result);
+        // PROVENANCE, LAST. Attribution runs on the FINAL bullets because NoteSection.Sources is
+        // index-aligned with Bullets, and both the name gate above and Brevity.Tighten can drop or
+        // rewrite a line. Attributing earlier would leave the ranges pointing one bullet to the left.
+        var tightened = Brevity.Tighten(result);
+        AttachProvenance(tightened, provenance);
+        return tightened;
     }
 
     /// <summary>A second, narrower ask for just the summary, used when the combined pass skipped it.</summary>
@@ -206,7 +225,7 @@ public sealed class LlmNoteWriter
         // the shape and its example lead, and the qualifications follow.
         var prompt =
             $"This is part {part} of {total} of a meeting transcript. Every line is numbered.\n\n"
-            + "Write 5 to 12 lines. EVERY line must start with the number of the transcript line it "
+            + $"Write {DigestLines(chunk.Length) / 2} to {DigestLines(chunk.Length)} lines. EVERY line must start with the number of the transcript line it "
             + "came from, in square brackets, like this:\n\n"
             + "[4] Craig found one issue with the invoice table\n"
             + "[9] migration finishes Friday, two days ahead of schedule\n\n"
@@ -225,7 +244,10 @@ public sealed class LlmNoteWriter
             + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk or "
             + "connection checks with no real topic at all.\n\n"
             + $"Transcript part:\n{chunk}";
-        return await TextPass(prompt, 420, ct);
+        // Room for the lines actually asked for. ~30 tokens a line covers a cited point comfortably,
+        // and the ceiling stays under the 760 the final pass uses, which is what ReserveTokens is
+        // sized against - a map pass that outgrew the reserve would bring back NoKvSlot.
+        return await TextPass(prompt, Math.Min(700, DigestLines(chunk.Length) * 30 + 100), ct);
     }
 
     // ── template classification: which note shape fits this meeting ──
@@ -460,11 +482,123 @@ public sealed class LlmNoteWriter
     // ── chunking (split at segment boundaries, never mid-utterance) ──
 
     /// <summary>Context budget for a chunk, in characters, sized from the model's context window.</summary>
-    static int MaxChunkChars()
+    static int MaxChunkChars() => MaxChunkChars((int)LlmRuntime.ContextSize);
+
+    /// <summary>Tokens a window must leave free: the system prompt and instructions (~500), the
+    /// generated answer (420 on the map pass, 760 on the final), and margin. </summary>
+    internal const int ReserveTokens = 1600;
+
+    /// <summary>Characters per token for NUMBERED TRANSCRIPT LINES, which tokenise far worse than
+    /// prose: "[147] Craig: " is punctuation and digits, and a mis-heard name splits into pieces.</summary>
+    internal const double ChunkCharsPerToken = 2.6;
+
+    /// <summary>
+    /// HOW MUCH TRANSCRIPT FITS IN ONE WINDOW.
+    ///
+    /// This was `(ctx - 800) * 3` and it OVERFLOWED. On the owner's machine a 4.0GB card takes the
+    /// partial-offload branch, which sets ContextSize to 3072, so the old formula handed the model
+    /// 6816 characters. At 2.6 chars per token that is ~2600 tokens of transcript, plus ~500 for the
+    /// instructions, plus 420 generated: over 3072. Every window threw
+    /// `LLamaDecodeError: llama_decode failed: 'NoKvSlot'`, every map call returned null, and the
+    /// meeting silently fell to the heuristic floor - which writes raw transcript lines as to-dos.
+    ///
+    /// That is almost certainly a large part of "the notes are mediocre": on a 4GB card, LONG
+    /// meetings were never being written by the model at all. Short ones fit and looked fine.
+    ///
+    /// The reserve is now honest about all three costs and the ratio is conservative. Smaller
+    /// windows mean more map calls and a slower note; a slow correct note beats a fast floor note.
+    /// </summary>
+    internal static int MaxChunkChars(int ctx) =>
+        Math.Max(1200, (int)((ctx - ReserveTokens) * ChunkCharsPerToken));
+
+    /// <summary>
+    /// Fit the digests inside the budget by DROPPING the least informative lines, keeping the rest
+    /// verbatim with their provenance intact.
+    ///
+    /// Ranking, in order: a line carrying hard entities (names, numbers, dates, money) outranks one
+    /// that carries none, because those are the facts a reader came for and the ones
+    /// <see cref="Grounding"/> measures. Among equals, a line from a window whose citation VERIFIED
+    /// outranks one from a window that came back uncited. Length breaks the remaining ties, shortest
+    /// first, on the reasoning that a very long digest line is usually a run-on rather than a dense
+    /// one.
+    ///
+    /// Original ORDER is restored after selection: the note reads the meeting in sequence, and a
+    /// writer handed its evidence out of order invents transitions to explain the jumps.
+    /// </summary>
+    internal static List<Window> TrimToFit(IReadOnlyList<Window> digests, int maxChars)
     {
-        var ctx = (int)LlmRuntime.ContextSize;
-        // Reserve ~800 tokens for the prompt scaffolding + generated digest; ~3 chars/token (conservative).
-        return Math.Max(1800, (ctx - 800) * 3);
+        // Flatten to lines, remembering which window each came from, so provenance stays exact.
+        var lines = new List<(string Text, int Idx, int Order, int Score)>();
+        var order = 0;
+        for (var w = 0; w < digests.Count; w++)
+            foreach (var raw in digests[w].Text.Split('\n'))
+            {
+                var line = raw.TrimEnd();
+                if (line.Trim().Length == 0) continue;
+                var score = Grounding.Extract(line).Count * 10
+                          + (digests[w].First >= 0 ? 3 : 0)
+                          - Math.Min(2, line.Length / 200);
+                lines.Add((line, w, order++, score));
+            }
+
+        var budget = 0;
+        var keep = new List<(string Text, int Idx, int Order)>();
+        foreach (var l in lines.OrderByDescending(l => l.Score).ThenBy(l => l.Order))
+        {
+            if (budget + l.Text.Length + 1 > maxChars) continue;   // skip it, but keep looking:
+            budget += l.Text.Length + 1;                            // a shorter later line may fit
+            keep.Add((l.Text, l.Idx, l.Order));
+        }
+
+        // Rebuild in reading order, one Window per original digest so each keeps its own range.
+        var rebuilt = new List<Window>();
+        foreach (var g in keep.OrderBy(k => k.Order).GroupBy(k => k.Idx).OrderBy(g => g.Key))
+        {
+            var text = string.Join("\n", g.OrderBy(k => k.Order).Select(k => k.Text));
+            rebuilt.Add(new Window(text, digests[g.Key].First, digests[g.Key].Last));
+        }
+        return rebuilt;
+    }
+
+    /// <summary>
+    /// Group already-made digests into re-reduction windows, carrying their transcript ranges.
+    ///
+    /// The point is the RANGE. A group's range is the union of the ranges of the digests it merges,
+    /// which is something that was observed rather than guessed: those windows really are where this
+    /// text came from. It is coarser than a first-round range and it is still a true statement, which
+    /// is the line the provenance rules draw. Digests whose own range is unknown (a window that came
+    /// back uncited, marked -1) contribute their TEXT to the group but nothing to the range, so an
+    /// unverified window can never widen a range it did not earn.
+    ///
+    /// A group with no known range at all stays -1 and its bullets fall back to text matching.
+    /// </summary>
+    internal static List<Window> GroupWindows(IReadOnlyList<Window> parts, int maxChars)
+    {
+        var groups = new List<Window>();
+        var sb = new StringBuilder();
+        int lo = -1, hi = -1;
+
+        void Flush()
+        {
+            if (sb.Length == 0) return;
+            groups.Add(new Window(sb.ToString(), lo, hi));
+            sb.Clear();
+            lo = hi = -1;
+        }
+
+        foreach (var w in parts)
+        {
+            if (sb.Length > 0 && sb.Length + w.Text.Length + 1 > maxChars) Flush();
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(w.Text);
+            if (w.First >= 0)
+            {
+                lo = lo < 0 ? w.First : Math.Min(lo, w.First);
+                hi = hi < 0 ? w.Last : Math.Max(hi, w.Last);
+            }
+        }
+        Flush();
+        return groups;
     }
 
     /// <summary>Split plain TEXT (already-made digests) into windows at line boundaries, for the
@@ -492,7 +626,100 @@ public sealed class LlmNoteWriter
     /// strictly better than recovering it afterwards by matching words.</summary>
     internal sealed record Window(string Text, int First, int Last);
 
+    /// <summary>How much of a written line's vocabulary must appear in a digest window before that
+    /// window is accepted as its source. The final pass REWROTE the digest point, so it may compress
+    /// and re-order, but it cannot introduce content words that were never in the window it read.</summary>
+    const double ProvenanceOverlap = 0.5;
+
+    /// <summary>How far ahead of the runner-up the winning window must score. Two windows that both
+    /// plausibly explain a bullet are an ambiguous attribution, and CLAUDE.md's rule is that a wrong
+    /// evidence link is worse than none: a reader sent confidently to the wrong minute of a meeting
+    /// trusts the feature less than one offered no link at all.</summary>
+    const double ProvenanceMargin = 0.15;
+
+    /// <summary>
+    /// RECORD WHERE EACH WRITTEN LINE CAME FROM.
+    ///
+    /// The map step already verified every digest point against the transcript line it cited, and
+    /// ValidateDigest narrowed each window to the range its surviving points actually cover. Those
+    /// ranges were computed and then thrown away: nothing assigned them, so every evidence link in
+    /// the product was recovered afterwards by matching bullet text against the WHOLE transcript.
+    ///
+    /// This closes that gap. Matching a bullet against the digest it was rewritten from is a far
+    /// easier problem than matching it against the whole meeting, because the digest is short, it is
+    /// in the speaker's own words, and its line range is already verified. Evidence.BestRange then
+    /// narrows within the recorded span instead of searching everything.
+    ///
+    /// Silent when unsure, by design. A bullet too generic to attribute, or one that two windows
+    /// explain equally well, keeps a null source and falls back to text matching exactly as before.
+    /// </summary>
+    internal static void AttachProvenance(NoteSet note, IReadOnlyList<Window> windows)
+    {
+        if (note is null || windows.Count == 0) return;
+        var windowWords = windows.Select(w => Evidence.ContentWords(w.Text)).ToList();
+
+        foreach (var s in note.Sections)
+        {
+            var sources = new List<SourceSpan?>(s.Bullets.Count);
+            var any = false;
+            foreach (var b in s.Bullets)
+            {
+                var span = BestWindow(b, windows, windowWords);
+                sources.Add(span);
+                any |= span is not null;
+            }
+            // A list of nothing but nulls is noise in the stored JSON and says the same as no list.
+            if (any) s.Sources = sources;
+        }
+
+        // Never overwrite a span the caller already recorded - a source set upstream was observed,
+        // and this one is inferred.
+        foreach (var a in note.Actions)
+            a.Source ??= BestWindow(a.Text, windows, windowWords);
+    }
+
+    /// <summary>The one digest window that best explains a written line, or null when no window
+    /// clears the overlap floor or two of them tie within the margin.</summary>
+    internal static SourceSpan? BestWindow(string? line, IReadOnlyList<Window> windows,
+        IReadOnlyList<HashSet<string>> windowWords)
+    {
+        var want = Evidence.ContentWords(line);
+        // One shared word is a coincidence, not an attribution. Same floor the evidence matcher uses.
+        if (want.Count < 2) return null;
+
+        double best = 0, second = 0;
+        var bestIdx = -1;
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var shared = want.Count(w => windowWords[i].Contains(w));
+            var coverage = (double)shared / want.Count;
+            if (coverage > best) { second = best; best = coverage; bestIdx = i; }
+            else if (coverage > second) second = coverage;
+        }
+
+        if (bestIdx < 0 || best < ProvenanceOverlap) return null;
+        if (best - second < ProvenanceMargin) return null;
+        return new SourceSpan { First = windows[bestIdx].First, Last = windows[bestIdx].Last };
+    }
+
     static readonly Regex CitedLineRx = new(@"^\s*[-*]?\s*\[(\d+)\]\s*(.+?)\s*$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// How many digest lines to ask for, SCALED TO THE WINDOW.
+    ///
+    /// This was a flat "5 to 12 lines" regardless of how much transcript the window held, which
+    /// means the extraction budget was per-WINDOW when the thing being extracted is per-MINUTE.
+    /// Raising ContextSize to 4096 made windows 49% bigger and immediately exposed it: meeting 28
+    /// went from seven windows to four, kept the same line budget each, and its measured recall fell
+    /// from 62% to 38% while running 100 seconds faster. Fewer, bigger windows were extracting less
+    /// of the meeting.
+    ///
+    /// One line per ~450 characters of transcript, which is roughly one point per speaking turn at
+    /// the rate these transcripts run. Clamped: below 6 a short window stops reporting anything
+    /// useful, above 20 the model starts padding, and padding is what the citation gate then has to
+    /// throw away.
+    /// </summary>
+    internal static int DigestLines(int chunkChars) => Math.Clamp(chunkChars / 450, 6, 20);
 
     /// <summary>How much of a digest line's own vocabulary must appear in the transcript line it
     /// cites. Not 1.0: the map step is allowed to trim and tidy, only not to invent. Half the content
@@ -830,7 +1057,17 @@ public sealed class LlmNoteWriter
             string outp;
             try { outp = (await _llm.CompleteAsync(System, user, maxTokens, ct)).Trim(); }
             catch (OperationCanceledException) { return null; }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                // NEVER SWALLOW THIS SILENTLY. A throw here returns null, the caller counts the
+                // window as failed, and if every window fails the whole meeting drops to the
+                // heuristic floor - which writes raw transcript lines as to-dos. That is the worst
+                // note Toki can produce, and until 2026-09-03 it happened with NOTHING in the log to
+                // say why. Measured on meeting 28: a 20-minute meeting fell to the floor and the only
+                // clue was the absence of the "digest kept" lines that a working map pass emits.
+                App.Log($"notes: model call FAILED ({maxTokens} tok, attempt {attempt + 1}): {ex.GetType().Name}: {ex.Message}");
+                return null;
+            }
             // Every line of every written note funnels through here - the one place that turns the
             // model's em dashes into plain hyphens (the prompt alone is not enough; a 4B model
             // still slips one in). IsEmptyMarker still recognises a bare "-".

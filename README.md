@@ -25,7 +25,169 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## The morph had four causes, and film was the only way to find them (2026-09-03, latest)
+## Where the notes were dying, in two places (2026-09-03, latest)
+
+Follows directly from the entry below, and both fixes came out of measurements rather than hunches.
+
+**Re-reduction was gutting long meetings.** When the digests themselves did not fit the final pass,
+the pipeline mapped them AGAIN, up to two extra rounds. That reintroduced exactly what the map step
+exists to prevent: the writer reading a paraphrase of a paraphrase.
+
+One run, two meetings, one variable:
+
+| meeting | re-reduced? | recall | facts claimed | bullets |
+|---|---|---|---|---|
+| 28 | no | 15% to **62%** | 4 to 5 | 7 |
+| 48 | **yes** | 46% to **4%** | 25 to **2** | **0** |
+
+Meeting 48's map step was near-perfect: 25/26, 19/21, 29/31, 22/23, 21/22 lines kept across seven
+windows. Then its 6,645 characters of digest went one round through re-summarising and the note came
+out empty.
+
+**`TrimToFit` selects instead.** Lines carrying hard entities outrank lines carrying none; a verified
+window outranks an uncited one; length breaks ties. Reading order is restored afterwards, because a
+writer handed its evidence out of sequence invents transitions to explain the jumps. **Selecting is
+lossy in a way a reader can reason about; re-summarising is lossy in a way nobody can see.** Every
+surviving line keeps the speaker's own words and its exact provenance.
+
+**And the context size was set defensively rather than measured.** The partial-offload branch held
+3072. Measured on the RTX 3050 with 20 layers and 3,370 MiB free:
+
+| | ctx 3072 | ctx 4096 |
+|---|---|---|
+| KV cache | 228 MiB | 304 MiB |
+| model + compute | 1703 MiB | 1703 MiB |
+| headroom left | 1439 MiB | **1363 MiB** |
+
+**76 MiB buys a 49% larger map window**, 4,347 to 6,489 characters. Raised to 4096. Note that this
+alone would NOT have saved meeting 48, whose digests were 6,645 chars against a 6,489 budget: the
+context raise makes trimming rarer, the trim is what makes overflow survivable.
+
+Twelve new tests across `TrimToFitTests` and `ReReduceProvenanceTests`, both mutation-probed.
+
+## The notes were never written by the model at all (2026-09-03)
+
+The most consequential thing found this session, and it was arithmetic rather than prompting.
+
+`MaxChunkChars` was `(ctx - 800) * 3`. `LlmRuntime` sets `ContextSize = 3072` on the partial-offload
+branch, which is what a 3.9GB to 7GB card takes, and that is the dev machine's RTX 3050 at 4.0GB. So
+one map window was **6,816 characters**. Numbered transcript lines do not tokenise at 3 chars per
+token: `[147] Craig: ` is digits and punctuation, and the real rate is nearer 2.6. So the window was
+~2,600 tokens, the instructions ~500, the answer up to 760, against a 3,072 context.
+
+Every window threw `LLamaDecodeError: llama_decode failed: 'NoKvSlot'`. `TextPass` swallowed it in a
+bare `catch { return null; }`, every window counted as failed, and the meeting fell to the heuristic
+floor, which writes raw transcript lines as to-dos.
+
+**Short meetings fit in one pass and were written properly. Long meetings were never written by the
+model at all.** That asymmetry is why it survived: it looked like "the AI is bad at long meetings".
+
+Meeting 28, a 20-minute call, before and after the fix. Before:
+
+> TITLE: (none). SUMMARY: (empty).
+> ACTION ITEMS: "Um, I will ask Pooja to give you access to this uh" · "That's what you have to do."
+
+After:
+
+> **Weekend Attendance & Makeup Days Process**
+> Updated attendance rules for weekend meetings: mark M for Saturday-Sunday events. Two makeup days
+> assigned per absence.
+> - Two makeup days given per day of absence
+> - Sivasai Ganesha attended July 25-26 with M marked
+> - ACTION: Mark attendance for July 26th as M (due July 26th)
+
+**The fixes.** `ReserveTokens = 1600` names all three costs (instructions, the 760-token final
+generation, margin) and `ChunkCharsPerToken = 2.6` is measured against transcript lines rather than
+prose; a window drops to 4,347 characters. Model call failures are LOGGED, and the fall to the floor
+is logged separately from "the meeting was quiet", because those look identical to the user and are
+opposite faults. `ContextBudgetTests` asserts the budget fits at both context sizes `LlmRuntime`
+actually sets, and fails at both against the old formula.
+
+Cost: meeting 28 went from 91s to 255s. A slow correct note beats a fast floor note.
+
+**The fix caused a regression, which the instrument then caught.** Smaller windows mean the digests
+more often exceed the budget, which triggers the re-reduce loop, and that loop called
+`provenance.Clear()`. Coverage collapsed from 20/30 bullets to 8/44. The original reasoning was that
+a digest of digests cannot be traced without guessing; that was right about guessing and wrong about
+the alternative, because a re-digest covers a KNOWN set of first-round windows and the UNION of their
+ranges is observed, not inferred. `GroupWindows` now carries that union forward, with one rule: a
+window that came back uncited contributes its TEXT but never widens the RANGE, so an unverified
+window cannot manufacture a claim about lines nothing checked.
+
+**Read the pooled number, not the mean of percentages.** Averaging per-meeting rates let a meeting
+with 2 transcript entities count as much as one with 26, and a single 2/2 becoming 1/2 moved the
+headline eight points and reversed the apparent verdict. Pooled, against the broken pipeline: facts
+claimed 12 to 18, recall 11.7% to 21.7%, and notes with zero checkable facts 3 of 6 down to 1 of 6.
+
+**The limit of the metric, so nobody tunes against it blindly.** Grounding measures FAITHFULNESS, so
+a note that copies the transcript scores near-perfectly, and the heuristic floor therefore scores
+WELL. That is why the old stored notes out-score the fixed pipeline on recall while being worse notes
+to read. Faithfulness is necessary, not sufficient.
+
+**And the instruments were lying.** `--regentest` reported "MEAN PRECISION 93.3% to 100.0%" while
+three of six notes contained ZERO checkable facts: `Grounding.Report` scores 1.0 precision when there
+is nothing to check, and 1.0 recall when the transcript has no repeated entities. Perfect and empty
+were indistinguishable in the output. Every number it prints now carries its count, and the run warns
+when it scored on an empty denominator. With that visible, "facts checked" was collapsing 25 to 4 on
+one meeting and 12 to 3 on another, and mean recall was going DOWN. The tool's own warning, "precision
+alone is gamed by writing less", was describing what was happening.
+
+## Provenance was built at both ends and dead in the middle (2026-09-03)
+
+Every note bullet is supposed to remember which transcript lines it came from, so the evidence link
+opens the right moment of the meeting instead of searching the whole thing. All the parts for that
+existed and were individually correct:
+
+- `ValidateDigest` returned verified, narrowed line ranges for every map window
+- `SourceSpan` / `NoteSection.Sources` / `ActionItem.Source` existed, with doc comments
+- `action_items.src_first` / `src_last` had been migrated in since 2026-08-23
+- `MeetingStore.Save` wrote both columns
+- `NoteRenderer` already read `SourceFor(i)` and passed it to `Evidence.BestRange`, which already
+  narrows its search to a supplied span
+
+**And nothing ever assigned them.** `LlmNoteWriter` built the list of verified ranges and then never
+read the variable. No test failed, because nothing was wrong: the feature simply was not connected.
+
+**The two joins, now closed.** `AttachProvenance` attributes each finished bullet and action to the
+digest window it was rewritten from, and `ReplaceNotes` writes the provenance columns `Save` always
+wrote. That second one mattered more than it looks: regenerating a note used to strip provenance off
+every action item, so the operation most likely to IMPROVE a note was also the one that destroyed its
+evidence links.
+
+Three things the tests pin, each of which was easy to get wrong:
+
+- **Attribution runs LAST.** `Sources` is index-aligned with `Bullets`, and both the name gate and
+  `Brevity.Tighten` can drop a line, so attributing earlier leaves every later source pointing one
+  bullet to the left. Silent, plausible-looking, and worse than a crash.
+- **Match against the DIGEST, not the transcript.** The digest is short, already verified against the
+  lines it cites, and in the speaker's own words.
+- **Silent when unsure.** Under 50% coverage, or two windows within 0.15 of each other, the bullet
+  keeps a null source and falls back to text matching.
+
+**Re-measured, and the old claim was wrong.** The backlog cited +4.6pp precision-at-1 for confining
+the search. `--linktest 300` over 16 real meetings says otherwise:
+
+| Condition | Flat | Confined to the window | Paired verdict |
+|---|---|---|---|
+| EASY | 96.7% | 98.0% | McNemar 2.25, NOT significant |
+| HARD | 85.6% | 88.5% | McNemar 4.17, significant at p<0.05 |
+
+The gain is real only where a bullet shares little vocabulary with its source line, which is what a
+real note looks like; on easy cases flat matching already wins. Refusals rise from 1 to 4, which is
+the trade taken on purpose. All three documents now carry the measured numbers.
+
+13 tests in `ProvenanceWiringTests`, 5 verified to FAIL against the unfixed code, including one that
+drives the real `WriteAsync` end to end with a scripted model so deleting the call site cannot pass.
+
+Also this session: the repo root was cleaned. The 46,687-line Figma CSS dump moved to
+`docs/design/figma-layer-css.txt` with a `README.md` explaining what it is, what it must never be
+used for (it is a VALUE reference, never a port source), and what was extracted from it. It confirms
+the constitution on the material (`rgba(33, 30, 30, 0.5)`, 72 uses), the radius ladder and the text
+opacity ladder, and it turned up four accents that have drifted from the design file - logged as an
+owner call, not changed. `.gitignore` now covers screenshots, recordings and render output anywhere
+in the tree rather than only at the root.
+
+## The morph had four causes, and film was the only way to find them (2026-09-03)
 
 The owner reported the notch "glitch resizing" through four rounds. Each round I fixed a real cause,
 each time they said it was still there, and each time they were right - another was live underneath.
