@@ -4255,3 +4255,60 @@ difficulty conditions, and a paired McNemar test over the cases where two scorer
 **The general form: know your instrument's resolution before you trust a difference it reports.** A
 measurement that cannot separate the effect you are looking for from its own noise will happily
 confirm whatever you already believe.
+
+## A line is not a unit of meaning; a few seconds of speech is (2026-09-03)
+
+`ValidateDigest` accepted the cited transcript line plus one either side. That measures the
+neighbourhood in LINES, and a line is not a fixed quantity: it is however much speech landed between
+two pauses, which varies by a factor of three between meetings.
+
+Measured on two stored meetings, same pipeline, same day:
+
+| meeting | segments | minutes | seconds per line | what +/-1 covers | lines kept |
+|---|---|---|---|---|---|
+| 48 | 468 | 26 | 3.3s | ~10s | 25/26, 29/31, 22/23, 21/22 |
+| 28 | 1140 | 20 | **1.05s** | ~3s | **4/10, 15/30, 12/25, 3/9** |
+
+A spoken sentence runs five to eight seconds. On meeting 48 the neighbourhood covered a whole
+sentence; on meeting 28 it covered a third of one. So a point drawn faithfully from a sentence, and
+citing its middle, failed a check that only looked at three seconds of it.
+
+The evidence that this is the gate deleting TRUE content rather than catching invention: on meeting
+28 essentially every loss was `unsupported`, not `uncited` or `out-of-range`. The model was citing a
+real line, inside the window, in the right format. The words were simply spread across more lines
+than the check read.
+
+**Decision: `NeighbourLines` scales the neighbourhood to cover a comparable amount of SPEECH**, about
+six seconds either side, derived from the transcript's own duration and segment count. A transcript
+without usable timing keeps the old single-line behaviour.
+
+**The cap matters as much as the scaling.** This widens a safety gate, and a wide enough haystack
+lets a genuinely invented point find its words somewhere nearby. Five lines either side is the
+ceiling, whatever the arithmetic says.
+
+**And the thing NOT to do, written down because it is the tempting one:** never fix a poor keep rate
+by lowering `CitationOverlap`. That lowers the bar for every meeting including the clean ones, and
+this gate is the only thing standing between a digest and invention. Fix the unit, not the threshold.
+
+**What it actually measured, and a correction.** The keep rate is a better instrument than recall
+here, because it is a direct count over dozens of digest lines rather than a sampled quality
+judgement. Aggregated across whole runs:
+
+| configuration | lines kept |
+|---|---|
+| context fix only (windows 4,347 chars) | 250/355 = 70.4% |
+| plus ctx 4096, TrimToFit, scaled digest budget | 138/158 = 87.3% |
+| plus the time-based neighbourhood | 101/110 = 91.8% |
+
+**The neighbourhood change on its own is 87.3% to 91.8%, about +4.5 points.** An earlier reading of
+the very first window (26/27) was reported as a far larger swing; that window was one of the good
+ones and the claim was wrong. At n=110 lines the standard error is near 3 points, so +4.5 is roughly
+1.5 SE: directionally right, mechanistically well motivated by the density numbers, and NOT
+conclusively outside noise on this sample.
+
+Kept because the unit was genuinely wrong and the mechanism is understood, not because the number
+proves it. The honest summary is "the gate now measures the right thing", not "the gate improved by
+X%".
+
+The wider lesson stands: pick the measurement that can see the effect you are claiming, then do not
+read a single sample of it as the result.

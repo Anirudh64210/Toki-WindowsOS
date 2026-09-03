@@ -30,7 +30,7 @@ machine over a long meeting was measuring the FLOOR, not the pipeline. The 96.2%
 recall baseline, and the prompt tuning done against it, need re-reading in that light. Re-measuring
 is the next task.
 
-## 🔎 OPEN, MEASURED, NOT YET DIAGNOSED: a third of extracted points fail their own citation
+## ✅ DIAGNOSED AND FIXED 2026-09-03: the citation gate was measured in the wrong unit
 
 Observed across every run today, and it predates all of this session's changes, so it is not caused
 by them. Per-window keep rates from the map step, same pipeline, same day:
@@ -53,9 +53,41 @@ and short fragments. Two hypotheses, both cheap to test and NOT yet tested:
    (lines per minute), not to loosen `CitationOverlap`, which would let real invention through.
 2. **The model genuinely paraphrases harder on fragmented input**, having less coherent text to quote.
 
-Test 1 first: it is a two-line change and `--linktest` plus a re-run of meeting 28 will show it. Do
-NOT lower `CitationOverlap` to make the number look better; the gate is the only thing standing
-between a digest and invention, and this is the failure mode it exists to catch.
+**Hypothesis 1 was right, and the density numbers are decisive.** Meeting 28 runs 1,140 segments over
+20 minutes (1.05s a line); meeting 48 runs 468 over 26 minutes (3.3s a line). Meeting 28 is 3.2x more
+fragmented, and a spoken sentence takes five to eight seconds. So on meeting 48 the +/-1 neighbourhood
+covered a whole sentence and on meeting 28 it covered a third of one. A faithful point citing the
+middle of a sentence failed a check that only read three seconds of it.
+
+**Fixed: `NeighbourLines` scales the neighbourhood to cover about six seconds of speech either side**,
+derived from the transcript's own duration and segment count, capped at five lines. A transcript with
+no usable timing keeps the old single-line behaviour. Five tests, mutation-probed against a constant.
+
+**The cap matters as much as the scaling**: this widens a safety gate, and a wide enough haystack
+lets an invented point find its words somewhere nearby.
+
+**And the thing NOT to do, since it is the tempting one:** never fix a poor keep rate by lowering
+`CitationOverlap`. That lowers the bar for every meeting including the clean ones. Fix the unit, not
+the threshold.
+
+**Measured, with a correction.** The keep rate is the right instrument here (a direct count over
+dozens of lines, not a sampled quality score). Aggregated per run:
+
+| configuration | lines kept |
+|---|---|
+| context fix only | 250/355 = 70.4% |
+| + ctx 4096, TrimToFit, scaled budget | 138/158 = 87.3% |
+| + time-based neighbourhood | 101/110 = 91.8% |
+
+**The neighbourhood change alone is +4.5 points, not the large swing first reported** from a single
+window (26/27, which happened to be one of the good ones). At n=110 the standard error is near 3
+points, so this is ~1.5 SE: directionally right and well motivated by the density mechanism, NOT
+conclusively outside noise. Kept because the unit was wrong, not because the number proves it.
+
+Provenance in the same run reached its best yet: **10/11 bullets and 7/7 actions**.
+
+Lesson: pick the measurement that can see the effect, then do not read one sample of it as the
+result. That is the same mistake as the digest-budget diagnosis, made with a better instrument.
 
 ## ⚠️ STOP TUNING AGAINST n=2: the instrument's noise floor is about 12 points
 
