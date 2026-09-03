@@ -582,13 +582,19 @@ public sealed partial class MeetingStore
         {
             var a = notes.Actions[i];
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT INTO action_items (meeting_id, text, owner, due, done, ord) VALUES ($m,$t,$o,$d,$done,$ord)";
+            // src_first/src_last must be written here too. Save() has always written them; this path
+            // did not, so REGENERATING a note silently stripped the provenance off every action item
+            // and sent its evidence link back to searching the whole transcript.
+            cmd.CommandText = "INSERT INTO action_items (meeting_id, text, owner, due, done, ord, src_first, src_last) " +
+                              "VALUES ($m,$t,$o,$d,$done,$ord,$sf,$sl)";
             cmd.Parameters.AddWithValue("$m", meetingId);
             cmd.Parameters.AddWithValue("$t", a.Text);
             cmd.Parameters.AddWithValue("$o", (object?)a.Owner ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$d", (object?)a.Due ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$done", a.Done ? 1 : 0);
             cmd.Parameters.AddWithValue("$ord", i);
+            cmd.Parameters.AddWithValue("$sf", (object?)a.Source?.First ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sl", (object?)a.Source?.Last ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
         ReindexFts(c, meetingId);

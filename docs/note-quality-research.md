@@ -484,6 +484,9 @@ to UNSUPPORTED is invention or a threshold set too high, and those need opposite
    ranges and `provenance` carries them, but `NoteSection.Sources` and `ActionItem.Source` are still
    never assigned, and `MeetingStore.ReplaceNotes` does not persist `src_first`/`src_last`. The
    documented +4.6pp precision-at-1 gain is still not in the product.
+   **DONE 2026-09-03.** Both joins closed, and the gain re-measured because +4.6pp no longer matched
+   the library: 85.6% to 88.5% on the HARD condition (McNemar 4.17, p<0.05) and noise on the EASY
+   one. See the ARCHITECTURE entry "Provenance is recorded at generation".
 3. **Evidence-gated sections.** The model returns line ids per section type and CODE decides the
    section exists above a threshold. Needs one cheap grammar-constrained call per type, so it lands
    after the note format is settled.

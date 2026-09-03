@@ -359,6 +359,11 @@ static class SelfTests
     ///
     /// Slow by nature: every meeting is a full map-reduce over a local 4B model, so it defaults to a
     /// handful and takes a number.</summary>
+    /// <summary>A pooled ratio, printed WITH its counts. "n/a" when there is no denominator, never
+    /// 100%: a rate computed from nothing is not a perfect score, it is an absent measurement.</summary>
+    static string Pct(int part, int whole) =>
+        whole == 0 ? "n/a (0)" : $"{part / (double)whole:P1} ({part}/{whole})";
+
     static int RegenTest(string[] args)
     {
         var n = int.TryParse(ArgValue(args, "--regentest"), out var want) ? want : 6;
@@ -382,6 +387,16 @@ static class SelfTests
         W("");
         double oldSum = 0, newSum = 0, oldRec = 0, newRec = 0;
         int better = 0, worse = 0, same = 0, done = 0;
+        // PROVENANCE COVERAGE. Wiring the attribution says nothing about how often it FIRES: a
+        // window the map step returned uncited carries no range at all, and a bullet two windows
+        // explain equally keeps a null source on purpose. Without this number the feature's real
+        // reach is unknown, and "it is wired" gets mistaken for "it works".
+        int srcBullets = 0, allBullets = 0, srcActions = 0, allActions = 0;
+        // How many of the means are resting on an empty denominator (see the per-meeting note below).
+        int emptyPrecision = 0, emptyRecall = 0;
+        int singlePass = 0;
+        int oldChecked = 0, newChecked = 0, oldOk = 0, newOk = 0;
+        int oldKept = 0, newKept = 0, oldEnt = 0, newEnt = 0;
 
         foreach (var m in pool)
         {
@@ -393,23 +408,80 @@ static class SelfTests
             var after = Grounding.Score(fresh, m.Transcript, m.Id, m.Title ?? "");
 
             done++;
+            int mb = 0, mbSrc = 0, ma = 0, maSrc = 0;
+            foreach (var sec in fresh.Sections)
+                for (var bi = 0; bi < sec.Bullets.Count; bi++)
+                {
+                    mb++;
+                    if (sec.SourceFor(bi) is not null) mbSrc++;
+                }
+            foreach (var act in fresh.Actions)
+            {
+                ma++;
+                if (act.Source is not null) maSrc++;
+            }
+            allBullets += mb; srcBullets += mbSrc; allActions += ma; srcActions += maSrc;
+            // A meeting short enough to be written in ONE pass has no windows to attribute against,
+            // so zero coverage there is structural, not a fault. Pooling those with map-reduced
+            // meetings makes the overall percentage unreadable, which is the same mistake as
+            // printing a percentage without its denominator.
+            if (mbSrc + maSrc == 0) singlePass++;
             oldSum += before.Precision; newSum += after.Precision;
             oldRec += before.Recall;    newRec += after.Recall;
+            oldChecked += before.Checked; newChecked += after.Checked;
+            oldOk += before.Checked - before.Unsupported.Count;
+            newOk += after.Checked - after.Unsupported.Count;
+            oldKept += before.Recalled;  newKept += after.Recalled;
+            oldEnt += before.TranscriptEntities; newEnt += after.TranscriptEntities;
             if (after.Precision > before.Precision + 0.001) better++;
             else if (after.Precision < before.Precision - 0.001) worse++;
             else same++;
 
+            // DENOMINATORS, ALWAYS. Both metrics return 1.0 on an empty denominator: a note with no
+            // checkable facts scores 100% precision, and a transcript with no repeated entities
+            // scores 100% recall. A percentage printed without the count it came from cannot be
+            // read, and reporting "100% precision" for a note with nothing in it is how an
+            // instrument starts flattering the thing it is supposed to measure.
+            if (after.Checked == 0) emptyPrecision++;
+            if (after.TranscriptEntities == 0) emptyRecall++;
             W($"  [{m.Id}] {m.Title}");
-            W($"      precision {before.Precision:P0} -> {after.Precision:P0}    " +
-              $"recall {before.Recall:P0} -> {after.Recall:P0}    ({sw.ElapsedMilliseconds / 1000}s)");
+            W($"      precision {before.Precision:P0} -> {after.Precision:P0}   " +
+              $"(facts checked {before.Checked} -> {after.Checked})");
+            W($"      recall    {before.Recall:P0} -> {after.Recall:P0}   " +
+              $"({before.Recalled}/{before.TranscriptEntities} -> {after.Recalled}/{after.TranscriptEntities})" +
+              $"   ({sw.ElapsedMilliseconds / 1000}s)");
+            W($"      provenance {mbSrc}/{mb} bullets, {maSrc}/{ma} actions" +
+              (mbSrc + maSrc == 0 ? "   (NO recorded source: single-pass, or the digests were re-reduced)" : ""));
             foreach (var e in after.Unsupported.Take(4)) W($"        still unsupported  {e.Kind}: {e.Text}");
         }
 
         if (done == 0) return Fail("nothing was regenerated (model unavailable?).");
         W("");
-        W($"  MEAN PRECISION  {oldSum / done:P1} -> {newSum / done:P1}");
-        W($"  MEAN RECALL     {oldRec / done:P1} -> {newRec / done:P1}");
+        // POOLED, NOT AVERAGED. A mean of per-meeting percentages lets a meeting with 2 entities
+        // count as much as one with 26, and swings 8 points when a 1/2 becomes a 2/2. The pooled
+        // ratio is the number that answers "across everything, how much did the notes keep".
+        W($"  MEAN OF % (macro)   precision {oldSum / done:P1} -> {newSum / done:P1}    " +
+          $"recall {oldRec / done:P1} -> {newRec / done:P1}");
+        W($"  POOLED    (micro)   precision {Pct(oldOk, oldChecked)} -> {Pct(newOk, newChecked)}    " +
+          $"recall {Pct(oldKept, oldEnt)} -> {Pct(newKept, newEnt)}");
+        W($"  FACTS THE NOTES CLAIM AT ALL   {oldChecked} -> {newChecked}   " +
+          "(a note that claims nothing cannot be wrong; see the caution below)");
         W($"  better {better}   worse {worse}   unchanged {same}   (n={done})");
+        W("");
+        W($"  PROVENANCE      {srcBullets}/{allBullets} bullets and {srcActions}/{allActions} actions carry a recorded source" +
+          (allBullets > 0 ? $"  ({srcBullets / (double)allBullets:P0} of bullets)" : ""));
+        W($"  {singlePass} of {done} meetings recorded NO source at all, which for a short meeting is structural:");
+        W("  written in one pass, there are no windows to attribute against. Read the PER-MEETING lines");
+        W("  above; the pooled percentage mixes meetings that cannot have provenance with ones that can.");
+        W("  It IS the number to watch when changing the map prompt or the overlap floors.");
+        W("");
+        if (emptyPrecision > 0 || emptyRecall > 0)
+        {
+            W("");
+            W($"  CAUTION: {emptyPrecision} of {done} notes had NO checkable facts (precision scores 1.0 by");
+            W($"  convention), and {emptyRecall} transcripts had no repeated entities (recall scores 1.0).");
+            W("  Those meetings inflate the means without measuring anything. Read the counts, not the %.");
+        }
         W("");
         W("  Read BOTH numbers. Precision alone is gamed by writing less, so a precision gain paid for");
         W("  with a recall drop is the model getting terser, not better.");

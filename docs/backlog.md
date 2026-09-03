@@ -1,5 +1,210 @@
 # Toki - backlog & "what's next" (living doc)
 
+## 🚨 ROOT CAUSE FOUND AND FIXED: long meetings were never written by the model (2026-09-03)
+
+**This is very likely the bulk of "the note quality is mediocre at best".** It was arithmetic.
+
+`MaxChunkChars` was `(ctx - 800) * 3`. `LlmRuntime` sets `ContextSize = 3072` on the partial-offload
+branch (VRAM 3.9GB to 7GB), which is the owner's RTX 3050 at 4.0GB, so a map window was 6,816
+characters. Numbered transcript lines tokenise at nearer 2.6 chars/token, not 3, so that window was
+~2,600 tokens against a 3,072 context that also had to hold ~500 tokens of instructions and up to
+760 of generated answer.
+
+Every window threw `LLamaDecodeError: llama_decode failed: 'NoKvSlot'`. `TextPass` swallowed it with
+a bare `catch { return null; }`. Every window counted as failed. The meeting fell to the heuristic
+floor, which writes raw transcript lines as to-dos.
+
+**Short meetings fit in one pass and were fine. Long ones were never written by the model at all.**
+
+Meeting 28 (20 minutes), before: no title, no summary, and to-dos reading "Um, I will ask Pooja to
+give you access to this uh". After: a real title, a real summary, and bullets carrying names, dates
+and numbers, with task-shaped actions and a due date.
+
+**Fixed:** `ReserveTokens = 1600` and `ChunkCharsPerToken = 2.6` (window 6,816 to 4,347 chars);
+model-call exceptions logged; the fall to the floor logged distinctly from "the meeting was quiet";
+`ContextBudgetTests` asserts the budget fits at both context sizes and fails at both against the old
+formula. Cost: meeting 28 went 91s to 255s, which is the right trade.
+
+**What this means for everything measured before today.** Every note-quality number taken on this
+machine over a long meeting was measuring the FLOOR, not the pipeline. The 96.2% precision / 66.1%
+recall baseline, and the prompt tuning done against it, need re-reading in that light. Re-measuring
+is the next task.
+
+## 🔎 OPEN, MEASURED, NOT YET DIAGNOSED: a third of extracted points fail their own citation
+
+Observed across every run today, and it predates all of this session's changes, so it is not caused
+by them. Per-window keep rates from the map step, same pipeline, same day:
+
+- **clean meeting (48):** 25/26, 29/31, 22/23, 21/22, 19/21. Almost nothing dropped.
+- **noisy meeting (28):** 4/10, 15/30, 12/25, 7/13, 3/9. **A third to two thirds dropped**, and
+  essentially all of it as `unsupported` rather than `uncited` or `out-of-range`.
+
+`unsupported` means the model cited a real line inside the window, but fewer than half that line's
+content words (plus its two neighbours) appear in the point it wrote. So the FORMAT is fine and the
+model is pointing somewhere real; the words are not where it says they are.
+
+Meeting 28 is a 20-minute call in 1,140 segments, so about one second per segment: heavy turn-merging
+and short fragments. Two hypotheses, both cheap to test and NOT yet tested:
+
+1. **The neighbour window is too narrow for fragmented speech.** `ValidateDigest` accepts the cited
+   line plus one either side. On a transcript averaging a second per line, a single spoken sentence
+   can span five or six lines, so a faithful point drawn from that sentence cites the middle and
+   fails against a 3-line window. If so the fix is to scale the neighbourhood by SEGMENT DENSITY
+   (lines per minute), not to loosen `CitationOverlap`, which would let real invention through.
+2. **The model genuinely paraphrases harder on fragmented input**, having less coherent text to quote.
+
+Test 1 first: it is a two-line change and `--linktest` plus a re-run of meeting 28 will show it. Do
+NOT lower `CitationOverlap` to make the number look better; the gate is the only thing standing
+between a digest and invention, and this is the failure mode it exists to catch.
+
+## ⚠️ STOP TUNING AGAINST n=2: the instrument's noise floor is about 12 points
+
+Measured 2026-09-03, and it invalidates a diagnosis I made earlier the same day. Meeting 28, run
+three times through near-identical code, returned **62%, 38% and 46% recall**. Qwen is sampled at
+temperature 0.7, so a single meeting's score moves about 12 points run to run for free.
+
+I read the 62% to 38% step as a real regression, attributed it to the per-window digest budget, and
+changed the code. The change is defensible on its own reasoning and it is **NOT measured as an
+improvement**: pooled recall was 28.2% before it and 28.2% after (it lifted meeting 28 and lowered
+meeting 48 by about the same). Kept, honestly labelled, not claimed as a win.
+
+**The rule this buys:** `--regentest 2` cannot resolve a difference smaller than roughly 15 points.
+Before treating a change as an improvement, either run n >= 10 meetings, or run the same small set
+several times and compare distributions rather than single numbers. A pipeline change validated on
+one meeting's score is a coin flip with extra steps.
+
+`--linktest` does this correctly already, with a fixed seed and a paired McNemar test on
+disagreements. `--regentest` cannot, because every run re-samples the model. Treat it as a detector
+of STRUCTURAL faults (zero bullets, notes with no facts, a meeting falling to the floor), which is
+what it actually found today, and never as a fine-grained quality meter.
+
+**DONE 2026-09-03: the extraction budget was per-window, not per-meeting (kept on reasoning, not measured).**
+
+Exposed by the context raise above. The map prompt asked for a flat "5 to 12 lines" however much
+transcript the window held, so the budget belonged to the CHUNKING rather than to the meeting.
+Windows grew 49%, meeting 28 went from seven windows to four, kept the same budget each, and its
+recall fell 62% to 38% while running 100 seconds faster: extracting less, sooner.
+
+`DigestLines` now scales at about one point per 450 characters, clamped 6 to 20 (below 6 a window
+says nothing useful, above 20 the model pads and the citation gate discards the padding). The map
+token cap scales with it, capped at 700 to stay under the 760 `ReserveTokens` is sized against.
+
+**HONEST LABEL: this one is not measured as an improvement.** Pooled recall was 28.2% before it and
+28.2% after. The 62% to 38% drop that prompted it turned out to be inside the run-to-run noise (see
+the section above). The reasoning stands on its own - an extraction budget should describe the
+meeting, not the chunking - so it is kept, but nobody should cite it as a measured gain.
+
+**The shape of all three note-quality fixes today, worth remembering:** each was a constant that
+described the MACHINERY rather than the WORK. Chars-per-token assumed 3 for text that runs at 2.6;
+the re-reduce loop summarised summaries because digests did not fit a window size; the digest budget
+counted lines per window instead of per minute. **None were prompt problems**, which is why round
+after round of prompt tuning never moved the quality.
+
+**DONE 2026-09-03. Re-reduction was where notes died; it no longer exists.**
+
+Verified 2026-09-03 on the two longest meetings, after both fixes above. Provenance recovered to 6/7
+bullets and 6/7 actions, and meeting 48 kept 3/3 action sources THROUGH a re-reduction, which is the
+union fix working. But:
+
+| meeting | re-reduced? | recall | facts claimed | bullets |
+|---|---|---|---|---|
+| 28 | no | 15% to **62%** | 4 to 5 | 7 |
+| 48 | **yes** | 46% to **4%** | 25 to **2** | **0** |
+
+Meeting 48's map step went perfectly: 25/26, 19/21, 29/31, 22/23, 21/22 lines kept across seven
+windows. Then `notes: digests still 6645 chars, reducing again (round 1)` fired, the digests were
+summarised again, and the final note came out with **no bullets at all**.
+
+**Re-reduction summarises summaries, which is the exact failure this pipeline was built to avoid.**
+The map step exists so the writer reads evidence rather than a paraphrase; the re-reduce loop
+reintroduces the paraphrase-of-a-paraphrase for any meeting whose digests overflow. And the NoKvSlot
+fix, by shrinking the window, made this loop fire MORE often, so one failure was partly traded for a
+milder one.
+
+**Candidates 1 and 2 are both DONE. Candidate 3 is not needed for now.**
+
+1. **`ContextSize` raised 3072 to 4096 on the partial-offload branch, MEASURED first.** On the
+   owner's RTX 3050 with 20 layers and 3,370 MiB free: KV cache 228 to 304 MiB, everything else
+   unchanged, total VRAM 1,931 to 2,007 MiB, leaving 1,363 MiB headroom. **76 MiB buys a 49% bigger
+   map window** (4,347 to 6,489 chars). If a machine ever fails to load, drop this back rather than
+   lowering `ReserveTokens`: the reserve is what stops NoKvSlot, the context is only how much fits.
+2. **Re-summarising replaced by selection (`TrimToFit`).** Lines carrying hard entities outrank lines
+   carrying none; a verified window outranks an uncited one; length breaks ties. Reading order is
+   restored afterwards, because a writer handed evidence out of sequence invents transitions to
+   explain the jumps. Six tests, mutation-probed by scoring every line equally.
+3. Batching the final pass over digest groups is unnecessary while 1 and 2 hold. Revisit only if a
+   very long meeting still trims away most of its evidence.
+
+Note that 4096 alone would NOT have fixed meeting 48: its digests were 6,645 chars against a 6,489
+budget, so it would still have overflowed, barely. The context raise reduces how often trimming
+happens; the trim is what makes overflowing survivable.
+
+Do NOT tune the final prompt against this. The prompt was never the problem; the input it received
+was a summary of a summary.
+
+**REGRESSION THE FIX CAUSED, then fixed: provenance coverage collapsed 67% to 18%.**
+
+Smaller windows mean the joined digests more often exceed the budget, which triggers the re-reduce
+loop, and that loop called `provenance.Clear()`. Three of six meetings came back with no recorded
+source at all. The original reasoning was that a digest of digests cannot be traced without guessing.
+Right about guessing, WRONG about the alternative: a re-digest covers a KNOWN set of first-round
+windows, so the UNION of their ranges is observed, not inferred. Coarser and still true.
+
+`GroupWindows` now carries that union through re-reduction. One rule keeps it honest: a window that
+came back uncited contributes its TEXT to the group but never widens the RANGE, so an unverified
+window cannot manufacture a claim about lines nothing checked. Five tests in
+`ReReduceProvenanceTests`, mutation-probed by letting unverified windows widen the range.
+
+The diagnostic ALSO lied about this: it printed "likely a single-pass meeting" for the empty
+coverage, when the real cause was re-reduction. Message corrected. A diagnostic that names the wrong
+cause is worse than one that says nothing.
+
+**MEASUREMENT NOTE: read the POOLED numbers, not the mean of percentages.** The macro mean let a
+meeting with 2 entities count as much as one with 26, and a single 2/2 becoming 1/2 swung it eight
+points. Pooled, the context fix is a clear gain over the broken pipeline:
+
+| | old stored notes | pre-fix pipeline | post-fix |
+|---|---|---|---|
+| facts the note claims | 54 | 12 | 18 |
+| pooled precision | 90.7% | 91.7% | 88.9% |
+| pooled recall | 33.3% | 11.7% | 21.7% |
+
+Notes with ZERO checkable facts fell from 3 of 6 to 1 of 6. `--regentest` now prints pooled ratios
+beside the macro mean, and `n/a (0)` instead of 100% for an empty denominator.
+
+**THE LIMIT OF THIS METRIC, and it matters:** the old stored notes still score higher on recall than
+the fixed pipeline. That is not evidence they are better notes. Grounding measures FAITHFULNESS, and
+a note that copies the transcript verbatim scores near-perfectly on it while being useless. The
+heuristic floor, which is the worst note Toki can produce, scores WELL here by construction. Do not
+tune the writer against this number alone; the gate is `--evidencetest` on real meetings and the
+owner reading them.
+
+**FOUND WHILE FIXING THE ABOVE, not yet changed: the bullet budget measures the wrong thing.**
+
+```
+var bulletBudget = content.Length > 9000 ? 9 : content.Length > 4000 ? 7 : 5;
+```
+
+Its own comment says "a cap that does not scale claims a 90-minute meeting holds no more than a
+3-minute one". But `content` is the DIGEST text the final pass sees, and the re-reduce loop caps that
+at `MaxChunkChars` - 4,347 chars on a 3072 context, 6,489 on 4096. So the `> 9000` branch is
+effectively unreachable and **the real maximum is 7 bullets**, and a 90-minute meeting and a
+20-minute meeting both arrive at the final pass with a context-capped digest and earn the same room.
+The scaling the code intends is defeated by the context cap.
+
+The fix is to budget from the TRANSCRIPT (length or duration), which is the actual size of the
+meeting, rather than from the digest. That restores the stated intent rather than changing it.
+
+**Deliberately NOT done in the same change as the context fix.** One variable at a time: the
+regentest running now measures the context fix alone. If the budget is changed at the same time,
+neither result can be attributed. Do it next, and gate it on the numbers: facts-checked should RISE
+without precision falling. If precision falls, the extra room is being filled with invention and the
+change reverts.
+
+**Still open, and now more attractive:** the owner has a 4GB card, so `ContextSize` is 3072 and
+windows are small. A larger context would mean fewer map rounds and better notes. Worth checking
+whether 3072 is actually forced by VRAM at 20 layers, or whether it was set defensively.
+
 ## 🎨 OWNER CALL OPEN: accent drift between the Figma file and Theme.xaml (2026-09-03)
 
 Found while cleaning the repo, not while looking for it. The root file `css code for all
@@ -108,33 +313,45 @@ springs in at the panel's gutter. Different positions, same frames.
 - Consider not drawing a mascot inside peek CONTENT at all, and instead moving the one bubble. One
   element that travels cannot flicker; two that hand over always can.
 
-## 🧊 MOTION + GLASS (2026-09-03) - shipped and open
+## 🧊 MOTION + GLASS - shipped and open (corrected 2026-09-03)
+
+**Corrected 2026-09-03.** This section previously claimed real DWM acrylic on the Library and grain on
+the notch card as SHIPPED. Both were reverted the same day and the claim was left standing. Verified
+against the code before rewriting: `WindowBackdrop` is never called, and `CardMaterial` carries no
+grain.
 
 **Shipped:** one animated path for every notch transition (the allowlist is gone; `SnapResize` is the
-only opt-out); `GlideTopGap`; reduce-motion (`Motion.Reduced/Ms/Rise/Stagger`); the Library's shadow
-casters hidden during its open/close; the recording flip at 240/220; `WarmFirstOpen` before the first
-summon; the mascot spring deferred to Render priority; `BottomBreath` 14 to 6; the settings toggle on
-a transform; `NotesView.Cascade`; **real DWM acrylic on the Library window**; grain + eased falloff on
-the notch card.
+only opt-out); the cross-fade snapshot, with mascot-only peeks excluded; the clip re-origined inside
+the resize; the settle moved onto the animation's own `Completed`; `GlideTopGap`; reduce-motion
+(`Motion.Reduced/Ms/Rise/Stagger`); the Library's shadow casters hidden during open/close; the
+recording flip at 240/220; `WarmFirstOpen` before the first summon; the mascot spring armed
+synchronously and started at Render priority; `BottomBreath` 14 to 6; the settings toggle on a
+transform; `NotesView.Cascade`; the three-stage loading bar with an elapsed readout after 20s.
+
+**Reverted, with the reason, do not retry blind:**
+- **Real DWM acrylic on the Library.** It worked. It was reverted because translucency lets the
+  desktop tint the page, and on a LIGHT theme a white page over a dark desktop reads as grey. The
+  owner caught it immediately. No scrim opacity makes a reading surface both glassy and stable.
+  `Theme/WindowBackdrop.cs` is kept, uncalled, for the notch case where it may still be right.
+- **Grain on the notch card**, now removed TWICE. `CardPlateOpaque` does the anti-banding work grain
+  was reintroduced for. The earlier finding stands: it reads as texture.
+- **An eased gradient-stop distribution.** Aimed at the notch plate, it silently changed `CardRim`
+  too, because it edited a SHARED builder. Enumerate the callers before editing one.
 
 **OPEN, in order:**
 
-1. **Interruptibility.** The largest remaining motion gap. Every animation is a fixed-duration
-   `DoubleAnimation` that restarts from zero, so a state change mid-morph jumps. Apple's core rule is
-   that motion starts from the CURRENT on-screen value and carries velocity. Real work, not a patch.
-2. **The loading state.** Between Stop and notes-ready the user sees one 3px shimmer in a 13px sliver
-   for what can be minutes. No progress, no step count. `App.SummarizeStage` already raises the stage
-   name and it is only visible if you click the sliver.
-3. **The recording bar's visual redesign.** Owner named it in the first message of the 2026-09-01
-   session; only its measurements were changed, never its design.
-4. **A captured blurred backdrop for the notch** (Part H6 of the research). Only if the recipe proves
-   insufficient beside the Library's real glass - judge them side by side first.
-5. **Grain: watch it.** Grain was removed once before for "reading as texture" and has been
-   reintroduced differently (128px, 3%, absolute viewport, paired with the eased falloff that
-   addresses the banding complaint at source). **If the owner reports texture again, the earlier
-   finding wins and it comes out.**
-6. No reduce-motion equivalent yet for `prefers-reduced-transparency`; Windows exposes a transparency
-   setting that should probably drop the acrylic and grain together.
+1. **The recording bar's visual redesign.** Now the top motion item: it has an owner-approved design
+   and is the only one of these the owner has actually asked for twice. See the recording-bar section
+   at the top of this file.
+2. **Interruptibility, the rest of it.** The morph now starts its zoom from the live on-screen scale
+   (`inFlight`/`liveScale` in `PinContentForMorph`, guarded by `InterruptibleMorphTests`), which was
+   the visible half. The window-size and clip animations still restart from a fixed duration rather
+   than carrying velocity. Smaller than it was, no longer the largest gap.
+3. **A captured blurred backdrop for the notch** (Part H6 of the research): GDI `BitBlt` behind the
+   window, downscale, blur, `ImageBrush`. This is now the ONLY route to real glass, since the DWM one
+   is closed on reading surfaces. Judge it against the painted recipe before committing.
+4. **`prefers-reduced-transparency`.** Moot while there is neither acrylic nor grain to drop. Revisit
+   only if item 3 lands.
 
 ## 🔬 NOTE QUALITY (2026-09-02) - the current front
 
@@ -147,10 +364,53 @@ citing map step. **Baseline to beat: 96.2% precision, 66.1% recall over 77 store
 1. **Regenerate the Library and re-measure.** Every number above describes notes written by the OLD
    pipeline; nothing shipped retroactively improves them. Needs a persisting rewrite path -
    `--renotes` prints and discards today.
-2. **Wire provenance through to the note.** `ValidateDigest` now returns verified, narrowed line
-   ranges, but `NoteSection.Sources` / `ActionItem.Source` are still never assigned and
-   `MeetingStore.ReplaceNotes` does not persist `src_first`/`src_last`. The documented +4.6pp
-   precision-at-1 gain is STILL not in the product.
+
+   **MEASURED 2026-09-03** with `--regentest 6` over the six longest stored meetings (read-only,
+   nothing was written to the Library):
+
+   | | old notes | current pipeline |
+   |---|---|---|
+   | mean precision | 93.3% | **100.0%** |
+   | mean recall | 30.4% | 34.4% |
+
+   better 3, worse 0, unchanged 3 on precision.
+
+   **Read this carefully; it is not a clean win.** Precision reaching 100% on all six is a real
+   result and consistent with the citation gate plus the name gate doing their job: every hard fact
+   in the new notes was actually said. But **recall is noisy and two meetings got materially worse**:
+   meeting 48 fell 46% to 12% and meeting 45 fell 38% to 0%, while 28 rose 15% to 62% and 27 rose 50%
+   to 100%. A mean of +4pp across six meetings with that spread is not evidence of a recall
+   improvement.
+
+   Part of the drop is intended: the brevity pass was tightened (bullet cap 22 to 15) and a terser
+   note has lower entity recall by construction. Part may not be. **Meeting 45 returning 0% recall is
+   the thing to look at next** - a note that carries none of the meeting's hard entities is a
+   different failure from a short one.
+
+   Still open: the actual persisting rewrite. Regenerating the owner's real Library rewrites their
+   notes and is an OWNER DECISION, not something to run unilaterally. `--regentest` deliberately
+   saves nothing.
+2. **Wire provenance through to the note. DONE 2026-09-03.** Both joins were missing and both are
+   now closed. `LlmNoteWriter.AttachProvenance` attributes each finished bullet and action to the
+   digest window it was rewritten from, and `MeetingStore.ReplaceNotes` now writes
+   `src_first`/`src_last` the way `Save` always did (regenerating a note used to strip provenance
+   off every action item silently).
+
+   Three details worth keeping:
+   - **Attribution runs LAST**, after the name gate and `Brevity.Tighten`. `NoteSection.Sources` is
+     index-aligned with `Bullets`, and both of those steps can drop a line; attributing earlier
+     leaves every source pointing one bullet to the left, which is a silent and plausible-looking
+     fault. `Sources_stay_index_aligned_with_bullets` pins it.
+   - **Matching is against the DIGEST, not the transcript.** The digest is short, already verified
+     against the lines it cites, and in the speaker's own words, so it is a far easier match than
+     the whole meeting. `Evidence.BestRange` then narrows WITHIN the recorded span.
+   - **Silent when unsure.** A bullet under 50% overlap, or one two windows explain within 0.15 of
+     each other, keeps a null source and falls back to text matching. A wrong evidence link is
+     worse than none.
+
+   13 tests in `ProvenanceWiringTests`, 5 of which were verified to FAIL against the unfixed code,
+   including one that drives the real `WriteAsync` end to end with a scripted model so deleting the
+   call site cannot pass.
 3. **Evidence-gated sections.** Model returns line ids per section type; CODE decides a section exists
    above a threshold, so an absent section is an absence of evidence rather than a judgement. Lands
    after the format is settled.
@@ -158,8 +418,18 @@ citing map step. **Baseline to beat: 96.2% precision, 66.1% recall over 77 store
    topic-derived headings, "For you" above the body, "Risks / open questions", decisions and questions
    as earned inline marks rather than standing sections. Ban "discussed" as a lint rule shaped like
    `NoEmDashTests`. **Owner call on the shape before building.**
-5. **Grammar-constrain the classification passes only**, never the prose pass. The map citation format
-   is the first candidate now that its compliance is measurable.
+5. **Grammar-constrain the classification passes only**, never the prose pass.
+   **MEASURED 2026-09-03: the map citation format is NOT worth constraining.** Compliance is already
+   effectively perfect. Across a live `--regentest` run over the six longest stored meetings, the log
+   line "window N came back uncited" fired **zero** times, so no window ever failed the format badly
+   enough to lose its provenance. Per-window keep rates were 26/29, 18/22, 19/20, 19/23, 20/21,
+   18/20, and the drops are almost entirely `unsupported`, meaning the cited line does not actually
+   contain those words. **A grammar cannot fix that**: it constrains the SHAPE of the output, not its
+   truth. Out-of-range citations were 0 to 1 per meeting.
+
+   The remaining candidates are the passes that pick from a fixed set: template classification, and
+   any future section-type labelling. The prose pass stays unconstrained, as originally decided. Do
+   not spend the work on the map format.
 6. **Microphone health check at meeting start.** Toki has measured this failure (mic 38dB below the
    meeting stream, half the transcript invented) and has better instruments than the products shipping
    the check.
