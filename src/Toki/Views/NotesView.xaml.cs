@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Toki.State;
 using Toki.Storage;
 using Toki.Transcription;
@@ -25,6 +26,46 @@ public partial class NotesView : UserControl
         });
     }
 
+    /// <summary>
+    /// Bring a group of children in as a CASCADE rather than a block.
+    ///
+    /// Everything in the notch appeared on one frame: the note body, the no-speech card, the
+    /// transcript fallback. A block that materialises reads as a screen being drawn; a cascade reads
+    /// as content arriving, and it also gives the eye an order to follow, which is most of why it
+    /// feels considered rather than dumped.
+    ///
+    /// 45ms per item, capped at 300ms total: above about 80ms apart items stop looking related, and a
+    /// stagger that outlasts the reading of the first item is just latency. Never blocks input - it is
+    /// decoration, and the note is fully interactive from the first frame.
+    /// </summary>
+    static void Cascade(System.Windows.Controls.Panel host)
+    {
+        for (var i = 0; i < host.Children.Count; i++)
+        {
+            if (host.Children[i] is not FrameworkElement el) continue;
+            var delay = Theme.Motion.Stagger(i);
+            var rise = Theme.Motion.Rise;
+
+            el.Opacity = 0;
+            el.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Ms(Theme.Motion.Enter)))
+                {
+                    BeginTime = TimeSpan.FromMilliseconds(delay),
+                    EasingFunction = Theme.Motion.ArriveStrong,
+                });
+
+            if (rise <= 0) continue;   // reduced motion: the fade carries it, nothing travels
+            var shift = new TranslateTransform(0, rise);
+            el.RenderTransform = shift;
+            shift.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(rise, 0, Theme.Motion.Dur(Theme.Motion.Enter))
+                {
+                    BeginTime = TimeSpan.FromMilliseconds(delay),
+                    EasingFunction = Theme.Motion.ArriveStrong,
+                });
+        }
+    }
+
     void Populate()
     {
         Body.Children.Clear();
@@ -38,6 +79,7 @@ public partial class NotesView : UserControl
             Title.Text = meeting.Title;
             Subtitle.Text = Meta(meeting);
             RenderNotes(meeting);
+            Cascade(Body);
             return;
         }
 
@@ -53,6 +95,7 @@ public partial class NotesView : UserControl
         }
         Subtitle.Text = $"{transcript.Count} lines";
         foreach (var seg in transcript) Body.Children.Add(TranscriptRow(seg));
+        Cascade(Body);
     }
 
     // ONE FlowDocument in a read-only RichTextBox so a drag-select spans the whole note;

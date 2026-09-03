@@ -49,6 +49,8 @@ static class SelfTests
                 "--dbtest" => DbTest(),
                 "--notestest" => NotesTest(),
                 "--renotes" => ReNotes(args),
+                "--groundtest" => GroundTest(args),
+                "--regentest" => RegenTest(args),
                 "--livetest" => LiveTest(args),
                 "--seed" => Seed(),
                 "--llmtest" => LlmTest(),
@@ -273,8 +275,18 @@ static class SelfTests
         Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms ({(LlmService.Instance.LocalLoaded ? "local Qwen" : "?")})");
         Console.WriteLine($"  TITLE: {notes.Title ?? "(none)"}");
         Console.WriteLine($"  SUMMARY: {notes.Tldr}");
-        Console.WriteLine($"  KEY POINTS ({notes.Decisions.Count}):");
-        foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        // Sections, not Decisions: the model path fills Sections and leaves Decisions empty, so
+        // this printed "KEY POINTS (0)" on every model-written note and the body was invisible.
+        foreach (var sec in notes.Sections)
+        {
+            Console.WriteLine($"  {sec.Heading.ToUpperInvariant()} ({sec.Bullets.Count}):");
+            foreach (var b in sec.Bullets) Console.WriteLine($"    - {b}");
+        }
+        if (notes.Decisions.Count > 0)
+        {
+            Console.WriteLine($"  DECISIONS ({notes.Decisions.Count}):");
+            foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        }
         Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
 
@@ -284,6 +296,129 @@ static class SelfTests
         Console.WriteLine("[--llmtest] PASS - notes generated, English, no degeneration. Read them: do they match the transcript?");
         return 0;
     }
+
+    /// <summary>How much of the STORED notes is actually in the transcript? Prints hard-entity
+    /// precision (names, numbers, dates, money the note claims but nobody said) and recall (what the
+    /// meeting repeated and the note dropped) across the real Library, or one meeting with an id.
+    ///
+    /// The point of it: before this, a prompt change could only be judged by reading. Precision alone
+    /// is gameable by writing less, so recall is printed beside it - a "better" score that moved both
+    /// down is the model getting terser, not better.</summary>
+    static int GroundTest(string[] args)
+    {
+        var idArg = ArgValue(args, "--groundtest");
+        var store = new MeetingStore();
+        var meetings = idArg is not null && long.TryParse(idArg, out var one)
+            ? [store.Get(one)]
+            : store.List().Select(r => store.Get(r.Id)).ToList();
+
+        var reports = new List<Grounding.Report>();
+        foreach (var m in meetings)
+        {
+            if (m is null || m.Transcript.Count == 0 || m.Notes is null) continue;
+            reports.Add(Grounding.Score(m.Notes, m.Transcript, m.Id, m.Title ?? ""));
+        }
+        if (reports.Count == 0) return Fail("no stored meetings with both a transcript and notes.");
+
+        var worst = reports.OrderBy(r => r.Precision).ThenByDescending(r => r.Unsupported.Count).Take(8);
+        var report = new System.Text.StringBuilder();
+        void W(string s) { Console.WriteLine(s); report.AppendLine(s); }
+
+        W($"[--groundtest] {reports.Count} notes scored against their own transcripts");
+        W($"  mean precision {reports.Average(r => r.Precision):P1}   mean recall {reports.Average(r => r.Recall):P1}");
+        W($"  notes with at least one unsupported entity: {reports.Count(r => r.Unsupported.Count > 0)}");
+        W("");
+        W("  WORST (an entity here is a name/number/date the note states and the transcript does not):");
+        foreach (var r in worst)
+        {
+            if (r.Unsupported.Count == 0) continue;
+            W($"    [{r.MeetingId}] {r.Precision:P0} \"{r.Title}\"");
+            foreach (var e in r.Unsupported.Take(6))
+                W($"        {e.Kind}: {e.Text}");
+        }
+        W("");
+        W("[--groundtest] done - this is a MEASUREMENT, not a pass/fail. Compare runs.");
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "toki-groundtest.txt");
+        System.IO.File.WriteAllText(path, report.ToString());
+        Console.WriteLine("  report written to " + path);
+        return 0;
+    }
+
+
+    /// <summary>THE ONLY HONEST ANSWER TO "did the change help?".
+    ///
+    /// --groundtest scores notes ALREADY IN THE LIBRARY, every one of which was written by whatever
+    /// pipeline existed the day it was recorded. It is a baseline, not a verdict on today's work.
+    /// This re-runs the CURRENT writer over stored transcripts and scores the result against the same
+    /// transcript, so old and new are measured on identical input - a paired comparison, not two
+    /// numbers from two populations.
+    ///
+    /// IT NEVER WRITES. CLAUDE.md: harnesses and tests must never touch the real note store. The
+    /// regenerated notes live in memory, are scored, and are thrown away. Regenerating the Library for
+    /// real is a separate, owner-approved operation.
+    ///
+    /// Slow by nature: every meeting is a full map-reduce over a local 4B model, so it defaults to a
+    /// handful and takes a number.</summary>
+    static int RegenTest(string[] args)
+    {
+        var n = int.TryParse(ArgValue(args, "--regentest"), out var want) ? want : 6;
+        var store = new MeetingStore();
+        var pool = store.List()
+            .Select(r => store.Get(r.Id))
+            // NOT FromModel: that flag is a runtime verdict and is never persisted, so it reads false
+            // for every stored meeting and this filter silently matched nothing. A stored note that
+            // has a summary or sections is one the writer actually produced, which is the real test.
+            .Where(m => m is not null && m.Transcript.Count > 0
+                     && (m.Notes.Sections.Count > 0 || !string.IsNullOrWhiteSpace(m.Notes.Tldr)))
+            .OrderByDescending(m => m!.Transcript.Count)
+            .Take(n)
+            .ToList();
+        if (pool.Count == 0) return Fail("no stored meetings with a transcript and model-written notes.");
+
+        var report = new System.Text.StringBuilder();
+        void W(string s) { Console.WriteLine(s); report.AppendLine(s); }
+
+        W($"[--regentest] re-writing {pool.Count} stored meetings with the CURRENT pipeline (nothing is saved)");
+        W("");
+        double oldSum = 0, newSum = 0, oldRec = 0, newRec = 0;
+        int better = 0, worse = 0, same = 0, done = 0;
+
+        foreach (var m in pool)
+        {
+            var before = Grounding.Score(m!.Notes, m.Transcript, m.Id, m.Title ?? "");
+            var sw = Stopwatch.StartNew();
+            var fresh = Task.Run(() => LlmService.Instance.WriteNotesAsync(m.Transcript)).GetAwaiter().GetResult();
+            sw.Stop();
+            if (fresh is null) { W($"  [{m.Id}] LLM returned nothing, skipped"); continue; }
+            var after = Grounding.Score(fresh, m.Transcript, m.Id, m.Title ?? "");
+
+            done++;
+            oldSum += before.Precision; newSum += after.Precision;
+            oldRec += before.Recall;    newRec += after.Recall;
+            if (after.Precision > before.Precision + 0.001) better++;
+            else if (after.Precision < before.Precision - 0.001) worse++;
+            else same++;
+
+            W($"  [{m.Id}] {m.Title}");
+            W($"      precision {before.Precision:P0} -> {after.Precision:P0}    " +
+              $"recall {before.Recall:P0} -> {after.Recall:P0}    ({sw.ElapsedMilliseconds / 1000}s)");
+            foreach (var e in after.Unsupported.Take(4)) W($"        still unsupported  {e.Kind}: {e.Text}");
+        }
+
+        if (done == 0) return Fail("nothing was regenerated (model unavailable?).");
+        W("");
+        W($"  MEAN PRECISION  {oldSum / done:P1} -> {newSum / done:P1}");
+        W($"  MEAN RECALL     {oldRec / done:P1} -> {newRec / done:P1}");
+        W($"  better {better}   worse {worse}   unchanged {same}   (n={done})");
+        W("");
+        W("  Read BOTH numbers. Precision alone is gamed by writing less, so a precision gain paid for");
+        W("  with a recall drop is the model getting terser, not better.");
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "toki-regentest.txt");
+        System.IO.File.WriteAllText(path, report.ToString());
+        Console.WriteLine("  report written to " + path);
+        return 0;
+    }
+
 
     /// <summary>Re-run the LLM note writer on a STORED meeting's real transcript and print the
     /// result - verifies the notes engine against actual meetings without recording again.</summary>
@@ -308,8 +443,18 @@ static class SelfTests
         Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms");
         Console.WriteLine($"  TITLE  : {notes.Title ?? "(none → falls back to app + date)"}");
         Console.WriteLine($"  SUMMARY: {notes.Tldr}");
-        Console.WriteLine($"  KEY POINTS ({notes.Decisions.Count}):");
-        foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        // Sections, not Decisions: the model path fills Sections and leaves Decisions empty, so
+        // this printed "KEY POINTS (0)" on every model-written note and the body was invisible.
+        foreach (var sec in notes.Sections)
+        {
+            Console.WriteLine($"  {sec.Heading.ToUpperInvariant()} ({sec.Bullets.Count}):");
+            foreach (var b in sec.Bullets) Console.WriteLine($"    - {b}");
+        }
+        if (notes.Decisions.Count > 0)
+        {
+            Console.WriteLine($"  DECISIONS ({notes.Decisions.Count}):");
+            foreach (var d in notes.Decisions) Console.WriteLine($"    - {d}");
+        }
         Console.WriteLine($"  ACTION ITEMS ({notes.Actions.Count}):");
         foreach (var a in notes.Actions) Console.WriteLine($"    - {a.Text}  [owner: {a.Owner ?? "-"}, due: {a.Due ?? "-"}]");
         Console.WriteLine("[--renotes] done - read the notes: do they reflect the WHOLE meeting, honestly (no filler)?");
@@ -403,7 +548,13 @@ static class SelfTests
 
     static int Seed()
     {
-        var store = new MeetingStore();
+        // A TEMP db, never the real one. This used to be `new MeetingStore()`, which is the real
+        // %APPDATA%\Toki	oki.db, so running --seed once wrote two hand-written demo notes into
+        // the owner's Library permanently - and they read better than real output, which makes
+        // every quality judgement made by browsing the Library wrong. --dbtest already did this.
+        var seedDb = Path.Combine(Path.GetTempPath(), $"toki-seed-{Guid.NewGuid():N}.db");
+        Console.WriteLine($"[--seed] writing to a TEMP store, not the real Library: {seedDb}");
+        var store = new MeetingStore(seedDb);
         var m1 = new MeetingRecord
         {
             Title = "Ship on Thursday; email capture optional", App = "chrome.exe",

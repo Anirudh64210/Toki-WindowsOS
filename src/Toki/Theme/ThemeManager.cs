@@ -31,6 +31,10 @@ public static class ThemeManager
         ("TextSoft",         "#D8D8DC", "#3A3A3C"),  // body/summary text (a touch softer than primary)
         ("TextDim",          "#ADADB1", "#56565A"),  // secondary/dim text; both ends re-derived for 4.5:1
         ("Ink",              "#161618", "#FBFBFD"),  // Library reading pane (soft, not glaring white)
+        // Ink with the alpha DWM acrylic shows through. Not a lighter colour: the material has to
+        // read as depth behind the page, while body text keeps a stable ground to sit on. Only used
+        // when real acrylic was actually applied - otherwise the window stays fully opaque Ink.
+        ("InkScrim",          "#D9161618", "#D9FBFBFD"),
         // The notch is a tinted mirror: semi-transparent so the desktop bleeds through slightly,
         // but kept fairly opaque so text stays readable and it never washes out to grey.
         ("Notch",            "#D9000000", "#E0FCFCFE"),  // ~85% black / ~88% white - desktop shows faintly through
@@ -201,7 +205,14 @@ public static class ThemeManager
         }
         else
             for (var i = 0; i < cols.Length; i++)
-                g.GradientStops.Add(new GradientStop(cols[i], cols.Length == 1 ? 0 : (double)i / (cols.Length - 1)));
+            {
+                // Evenly spaced. An eased distribution (t^1.6) was tried on 2026-09-03 to make the
+                // plate read as a lit surface rather than a ramp, and REVERTED the same day: it
+                // applied to every Down/Up gradient with more than two stops, which silently
+                // included CardRim, and the owner reported the light theme turning grey.
+                var t = cols.Length == 1 ? 0 : (double)i / (cols.Length - 1);
+                g.GradientStops.Add(new GradientStop(cols[i], t));
+            }
         g.Freeze();   // frozen: painted every frame of a morph, never mutated
         return g;
     }

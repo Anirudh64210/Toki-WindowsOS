@@ -349,7 +349,7 @@ public partial class App : Application
         // Headless self-tests: attach a console, run, exit. This list and the switch in SelfTests.Run
         // are TWO registrations of the same flag set - add every new flag in BOTH places, or the app
         // exits 0 with no output, which looks exactly like a passing test.
-        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--evidencetest" or "--linktest" or "--wertest" or "--voicetest" or "--streamtest" or "--embedconflicttest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--uitest" or "--diartest" or "--speakertest" or "--hittest" or "--revealtest" or "--wavetest" or "--fpstest" or "--stickytest" or "--hovershot" or "--makeicon");
+        var testFlag = e.Args.FirstOrDefault(a => a is "--mictest" or "--loopbacktest" or "--playtone" or "--detecttest" or "--recordtest" or "--asrtest" or "--evidencetest" or "--linktest" or "--wertest" or "--voicetest" or "--streamtest" or "--embedconflicttest" or "--transcribetest" or "--dbtest" or "--notestest" or "--renotes" or "--groundtest" or "--regentest" or "--livetest" or "--seed" or "--llmtest" or "--themetest" or "--copytest" or "--asktest" or "--querytest" or "--followuptest" or "--embedtest" or "--caltest" or "--preptest" or "--voicecreatetest" or "--measuretest" or "--notetest" or "--dumpnote" or "--uitest" or "--diartest" or "--speakertest" or "--hittest" or "--revealtest" or "--wavetest" or "--fpstest" or "--stickytest" or "--hovershot" or "--makeicon");
         if (testFlag != null)
         {
             Dev.ConsoleHelper.Attach();
@@ -458,6 +458,13 @@ public partial class App : Application
         }
         else
         {
+            // WARM BEFORE THE FIRST SUMMON, not after it. This used to run at ApplicationIdle, which
+            // is AFTER this line - so the very first drop-down the user ever sees, the one that sets
+            // their impression of the whole app, was the only cold one: CollapsedView and TokiBlob
+            // were constructed inside the transition, and a cold layout pass can outlast the 90ms
+            // BeginTime on Toki's entrance spring. The subsequent WarmFirstOpen call is now a no-op
+            // for these views and still catches the panels.
+            _pill?.WarmFirstOpen();
             // Normal launch: Toki peeks from the top edge; click it to open Home.
             State.TryGo(PillState.Collapsed);
         }
@@ -835,6 +842,31 @@ public partial class App : Application
 
     /// <summary>Attribute to-do OWNERS from the (now speaker-tagged) transcript. Runs AFTER the notes,
     /// since it needs the written action items - no second model pass, just the existing evidence links.</summary>
+
+    /// <summary>The meeting's own facts, for the note writer. Toki already knows the date, the
+    /// length, who was invited and what the event was called; none of it used to reach the model,
+    /// so a 4-minute catch-up and a 90-minute review were written identically. Facts only - each
+    /// line is something Toki OBSERVED, never a guess and never an instruction.</summary>
+    internal static string MeetingFacts(Storage.MeetingRecord m, Calendar.PrepContent? prep)
+    {
+        var lines = new System.Collections.Generic.List<string>();
+        lines.Add("Date: " + m.StartedAt.ToLocalTime().ToString("dddd, MMMM d yyyy, h:mm tt"));
+        var mins = (int)Math.Round(m.DurationMs / 60000.0);
+        lines.Add("Length: " + (mins < 1 ? "under a minute" : mins + (mins == 1 ? " minute" : " minutes")));
+        if (!string.IsNullOrWhiteSpace(m.App)) lines.Add("Held in: " + m.App);
+        var title = prep?.Event.Summary;
+        if (!string.IsNullOrWhiteSpace(title)) lines.Add("Calendar event: " + title);
+        var names = prep?.Event.Attendees
+            .Where(a => !string.IsNullOrWhiteSpace(a.DisplayName))
+            .Select(a => a.DisplayName!).Take(12).ToList();
+        if (names is { Count: > 0 }) lines.Add("Invited: " + string.Join(", ", names));
+        // The speakers diarisation actually FOUND, which is the honest attendee list.
+        var heard = m.Transcript.Select(t => t.Tag).Where(t => !string.IsNullOrWhiteSpace(t))
+                     .Distinct().Take(12).ToList();
+        if (heard.Count > 0) lines.Add("Voices heard: " + string.Join(", ", heard));
+        return string.Join(Environment.NewLine, lines);
+    }
+
     static void InferOwners(MeetingRecord meeting)
     {
         try
@@ -858,6 +890,8 @@ public partial class App : Application
         // The sticky note open during this meeting, if any. Captured HERE, before anything can
         // clear CurrentPrep; attached to the saved meeting further down.
         var stickyId = CurrentPrep is { } endedPrep ? Store.StickyForEvent(endedPrep.Event.Id) : null;
+        // Held for the note writer's facts block, for the same reason: CurrentPrep gets cleared.
+        var prepForNotes = CurrentPrep;
 
         // Attendee names are human-typed, so they outrank corpus counts when repairing a mis-heard
         // name. Grabbed before anything can clear CurrentPrep.
@@ -996,6 +1030,24 @@ public partial class App : Application
                 SummarizeStage = "Writing your notes";
                 try
                 {
+                    // THE THIN-INPUT GATE. Some meetings are real enough to keep but too thin to
+                    // write a structured note about, and handing the writer a shape it cannot fill
+                    // is how a single sentence became three Options considered and a Decision.
+                    // Deciding this arithmetically, before the model is consulted, is the whole
+                    // point: a model asked to judge whether it has enough to say answers yes.
+                    // See LlmNoteWriter.ThinInputWords for the calibration against the real Library.
+                    var substantive = Llm.LlmNoteWriter.SubstantiveWords(meeting.Transcript);
+                    if (substantive < Llm.LlmNoteWriter.ThinInputWords)
+                    {
+                        Log($"notes: thin input ({substantive} substantive words, floor is " +
+                            $"{Llm.LlmNoteWriter.ThinInputWords}) - honest minimal note, model not consulted");
+                        meeting.Notes = Llm.LlmNoteWriter.LowSubstanceNote();
+                        Store.ReplaceNotes(meeting.Id, meeting.Notes);
+                        Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
+                        Storage.MarkdownMirror.Write(meeting);
+                        return;
+                    }
+
                     // Map-reduce makes several short LLM calls for a long meeting; give it room,
                     // but stay bounded so a stuck generation can never hang the pill.
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
@@ -1004,7 +1056,7 @@ public partial class App : Application
                     // meeting.Transcript, not the local `transcript`: TagSpeakers tagged the former in
                     // place, so the writer sees the real names.
                     var llmNotes = LlmService.Instance
-                        .WriteNotesAsync(meeting.Transcript, cts.Token)
+                        .WriteNotesAsync(meeting.Transcript, cts.Token, null, MeetingFacts(meeting, prepForNotes))
                         .GetAwaiter().GetResult();
                     // Only a note the MODEL wrote may replace the saved one - the heuristic
                     // fallback is already in the row.

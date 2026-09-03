@@ -27,12 +27,13 @@ public sealed class LlmNoteWriter
     public LlmNoteWriter(ILlm llm) => _llm = llm;
 
     /// <remarks>
-    /// The transcript is the ONLY input. The user's sticky note is deliberately never fed in:
+    /// The transcript plus the meeting's own facts (date, length, who was there, what it was
+    /// scheduled to be) are the input. The user's sticky note is deliberately never fed in:
     /// a summary that reshapes itself around private jottings can no longer be checked against
     /// what was actually said. The sticky note sits BESIDE the summary, untouched and untouching.
     /// </remarks>
     public async Task<NoteSet> WriteAsync(IReadOnlyList<TranscriptSegment> transcript,
-        CancellationToken ct = default, NoteTemplate? force = null)
+        CancellationToken ct = default, NoteTemplate? force = null, string? about = null)
     {
         var heuristic = NoteExtractor.Extract(transcript);
         if (!_llm.Ready || transcript.Count == 0) return heuristic;
@@ -65,11 +66,27 @@ public sealed class LlmNoteWriter
             {
                 var d = await MapChunk(chunks[i].Text, i + 1, chunks.Count, ct);
                 if (d is null) { failed++; continue; }
-                if (!string.IsNullOrWhiteSpace(d) && !IsNothing(d))
+                if (string.IsNullOrWhiteSpace(d) || IsNothing(d)) continue;
+
+                // Every point in the digest cites a transcript line; anything whose citation does not
+                // hold up is dropped here rather than carried into the note as a fact.
+                // A VERIFICATION STEP MUST NEVER DELETE MORE THAN IT VERIFIES. When the model ignores
+                // the citation format the window comes back entirely uncited, and dropping it threw
+                // away a quarter of a 26-minute meeting - measured, on meeting 48, where two of four
+                // windows vanished. Losing the content is far worse than losing the provenance, and
+                // an uncited digest is exactly what this pipeline used before, so falling back to it
+                // is a return to the old behaviour rather than a new failure.
+                var checkedDigest = ValidateDigest(d, transcript, chunks[i].First, chunks[i].Last);
+                if (checkedDigest is null)
                 {
+                    App.Log($"notes: window {i + 1}/{chunks.Count} came back uncited - keeping it, without provenance");
                     digests.Add(d);
-                    provenance.Add(new Window(d, chunks[i].First, chunks[i].Last));
+                    continue;   // no provenance entry: an unverified range is worse than none
                 }
+                digests.Add(checkedDigest.Value.Text);
+                // The NARROWED range the surviving points actually cover, not the whole window - a
+                // tighter provenance is a better evidence link.
+                provenance.Add(new Window(checkedDigest.Value.Text, checkedDigest.Value.First, checkedDigest.Value.Last));
             }
             if (digests.Count == 0)
                 return failed > 0 ? heuristic          // could not read the meeting → the floor
@@ -111,7 +128,7 @@ public sealed class LlmNoteWriter
         var spoken = string.Join("\n", transcript.Select(s => s.Text));
 
         // REDUCE / FINAL: the adaptive, honest note in the chosen template.
-        var note = await FinalNote(source, sourceIsDigests, template, spoken, ct);
+        var note = await FinalNote(source, sourceIsDigests, template, spoken, about, ct);
         if (note is null) return heuristic;                  // total LLM failure → heuristic floor
         if (IsNothing(note.Summary) && note.Sections.Count == 0 && note.Actions.Count == 0)
             return LowSubstanceNote();                       // model judged it low-substance
@@ -140,6 +157,13 @@ public sealed class LlmNoteWriter
         // The prompt ASKS for short lines; this ENFORCES them. A model at temperature writes
         // reported speech and hedges however firmly it is told not to, and the same pass runs on
         // the heuristic floor, so both paths produce the same shape of bullet.
+        // THE NAME GATE. Everything above this line is the model's account of the meeting; this is
+        // the one check that holds it against what was actually said. It runs LAST, on the assembled
+        // note, because a name can arrive from the map digest, the final pass or the retry, and
+        // gating each of those separately would leave a hole in whichever one got added next.
+        var pruned = Grounding.PruneUngroundedNames(result, transcript);
+        if (pruned > 0) App.Log($"notes: dropped {pruned} line(s) naming someone absent from the transcript");
+
         return Brevity.Tighten(result);
     }
 
@@ -166,18 +190,42 @@ public sealed class LlmNoteWriter
     // ── MAP: one window → a compact factual digest (or NOTHING) ──
     async Task<string?> MapChunk(string chunk, int part, int total, CancellationToken ct)
     {
+        // EXTRACT, DO NOT ABSTRACT. This step used to emit paraphrased dash bullets, and that was the
+        // point where invention entered: by the time the writer ran, the transcript was gone and it
+        // had nothing left to check itself against. A note for a 40-minute meeting was written from a
+        // paraphrase of a paraphrase, so a name the map step misheard became a fact.
+        //
+        // Now each line must CITE the transcript line it came from and stay in the speaker's own
+        // words. That turns the final pass from a recall task into a rewriting task over evidence,
+        // and it makes the digest checkable - see ValidateDigest, which drops any line whose citation
+        // does not hold up. The faithfulness literature is consistent that inserting an extraction
+        // step before generation is the single highest-leverage change available here.
+        // FORMAT FIRST. The rules used to come before the shape, and the model answered with 31
+        // ordinary dash bullets and no citations at all - measured on meeting 48. A small model
+        // follows the last simple pattern it was shown far better than a paragraph of conditions, so
+        // the shape and its example lead, and the qualifications follow.
         var prompt =
-            $"This is part {part} of {total} of a meeting transcript. In 2 to 5 short dash bullets, list ONLY the "
-            + "concrete things in THIS part: topics discussed, any decisions (with the stated reason, if one was given), "
-            + "any tasks/follow-ups (keeping the exact NAME of whoever the task was given to, and the due date, when "
-            + "stated), and important facts. The text is auto-transcribed speech - read past obvious mis-recognitions "
-            + "using context, but never invent or \"correct\" a name: keep names exactly as transcribed. Capture "
-            + "real content even if the talk is informal, rambling, or in fragments. Cut filler, greetings, and "
-            + "logistics. Do not editorialise.\n"
-            + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk, or "
-            + "connection/audio checks with no real topic at all.\n\n"
+            $"This is part {part} of {total} of a meeting transcript. Every line is numbered.\n\n"
+            + "Write 5 to 12 lines. EVERY line must start with the number of the transcript line it "
+            + "came from, in square brackets, like this:\n\n"
+            + "[4] Craig found one issue with the invoice table\n"
+            + "[9] migration finishes Friday, two days ahead of schedule\n\n"
+            + "A line without [n] at the front is useless and will be thrown away.\n\n"
+            + "Pull out the lines that carry real content: topics, decisions (with the stated reason, if one was "
+            + "given), tasks and follow-ups (keeping the exact NAME of whoever it was given to and the due date, "
+            + "when stated), and important facts. Skip greetings, filler, logistics and audio checks.\n\n"
+            + "Rules:\n"
+            + "- Use the WORDS THAT WERE SAID. Trim and tidy, but do not rewrite, and do not summarise "
+            + "several lines into one - cite the single line the point is in.\n"
+            + "- Keep every NAME, NUMBER, DATE and QUANTITY exactly as it appears. This is all the note "
+            + "writer will ever see of this part, so anything you drop is lost for good.\n"
+            + "- The text is auto-transcribed speech: read past obvious mis-recognitions using context, but never "
+            + "invent or \"correct\" a name.\n"
+            + "- Do not editorialise and do not add anything that is not in the numbered lines.\n"
+            + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk or "
+            + "connection checks with no real topic at all.\n\n"
             + $"Transcript part:\n{chunk}";
-        return await TextPass(prompt, 220, ct);
+        return await TextPass(prompt, 420, ct);
     }
 
     // ── template classification: which note shape fits this meeting ──
@@ -205,19 +253,32 @@ public sealed class LlmNoteWriter
 
     // ── REDUCE / FINAL: adaptive, honest note in the chosen template ──
     async Task<FinalNoteResult?> FinalNote(string content, bool contentIsDigests, NoteTemplate template,
-        string spoken, CancellationToken ct)
+        string spoken, string? about, CancellationToken ct)
     {
         var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
 
+        // A cap that does not scale claims a 90-minute meeting holds no more than a 3-minute one.
+        // Short meetings keep the tight 5; longer ones earn room.
+        var bulletBudget = content.Length > 9000 ? 9 : content.Length > 4000 ? 7 : 5;
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
-            $"{s.ToUpperInvariant()}\n- up to 5 SHORT bullets for \"{s}\", aim for 6 to 12 words each, one idea per bullet. "
+            $"{s.ToUpperInvariant()}\n- up to {bulletBudget} SHORT bullets for \"{s}\", aim for 6 to 12 words each, one idea per bullet. "
             + "Every bullet must carry information a busy person needs - drop anything vague, obvious, or logistical. "
             + "Write it as a note, not a sentence of reported speech (no \"the team discussed\", no \"X said that\"). "
             + "Include this section ONLY if real content for it exists. "
             + "If filling it would need you to infer, justify, or fill a gap, LEAVE THE WHOLE SECTION OUT - an "
-            + "absent section is correct, an invented one is not."));
+            + "absent section is correct, an invented one is not. "
+            + "A bullet that is a TASK someone has to do belongs in ACTION ITEMS and nowhere else - never write the same thing twice under two headings."));
+
+        // WHAT THE MEETING WAS. The writer used to get the transcript and nothing else - no date,
+        // no duration, no attendees, no calendar title - all of which Toki already knows. A model
+        // that cannot tell a 4-minute catch-up from a 90-minute review writes both the same way.
+        // Facts only, never a hint to go find something: a hint is a claim, and a claim the
+        // transcript cannot confirm is how a section fills with invention.
+        var facts = string.IsNullOrWhiteSpace(about) ? ""         : "What you know about this meeting:" + Environment.NewLine + about!.Trim() + Environment.NewLine + Environment.NewLine;
 
         var prompt =
+            facts
+            +
             $"Write the notes for {what}, in the \"{template.Name}\" format. First judge how much REAL substance the meeting had.\n\n"
             + "Output ONLY the sections that genuinely apply, each header on its own line:\n\n"
             + "TITLE\n3 to 6 words, specific and concise, like a calendar event - no quotes, no \"Meeting\" prefix.\n\n"
@@ -248,7 +309,7 @@ public sealed class LlmNoteWriter
                 + "\n\nIMPORTANT: use the EXACT section headers named above (TITLE, SUMMARY, "
                 + string.Join(", ", template.Sections.Select(s => s.ToUpperInvariant()))
                 + ", ACTION ITEMS), each alone on its own line, never as a bullet.";
-            var raw = await TextPass(ask, 480, ct);
+            var raw = await TextPass(ask, 760, ct);
             if (raw is null) return null;
             if (IsNothing(raw)) return new FinalNoteResult { Summary = NothingMarker };
 
@@ -341,7 +402,41 @@ public sealed class LlmNoteWriter
     internal const string LowSubstanceTldr =
         "A brief exchange, mostly greetings and logistics. Nothing substantive was discussed, so there's little to note.";
 
-    static NoteSet LowSubstanceNote() => new()
+    /// <summary>THE THIN-INPUT GATE. Below this many substantive words a meeting cannot support a
+    /// structured note, and asking for one only buys invention.
+    ///
+    /// The worst note this engine ever wrote came from a transcript of one 90-word utterance in which
+    /// somebody said "I propose we do a sort of two-month rotation". It asserted three Options
+    /// considered, a firm Decision, and a three-bullet Rationale: roughly 80% invention. That is not
+    /// really a hallucination, it is a MISSING NULL CASE - the format had no legal way to say "there
+    /// was not enough here", so the model filled the shape it was handed. The fix is arithmetic,
+    /// because a model asked to judge its own sufficiency says yes almost regardless.
+    ///
+    /// MEASURED against the real 112-note Library (2026-09-02): median meeting 210 substantive words,
+    /// the rotation failure 56, the obvious junk ("Mm-hmm", "Hello hello hello") 1 to 14. 70 clears
+    /// the known failure with margin and sits far below anything real.
+    ///
+    /// It lives at the CALL SITE, not in WriteAsync: the writer's job is to write notes from what it
+    /// is handed, and deciding a meeting is too thin to write about is the caller's judgement.</summary>
+    internal const int ThinInputWords = 70;
+
+    /// <summary>Words that carry meeting content. Greetings, backchannels and audio checks are the
+    /// bulk of a thin transcript and none of them are something to write a note about.</summary>
+    static readonly HashSet<string> Chatter = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "hi", "hello", "hey", "yeah", "yep", "yes", "no", "ok", "okay", "right", "sure", "thanks",
+        "thank", "you", "bye", "goodbye", "sorry", "please", "mm", "mhm", "hmm", "uh", "um", "so",
+        "well", "just", "like", "and", "the", "a", "an", "is", "are", "was", "were", "i", "we",
+        "it", "that", "this", "to", "of", "in", "on", "for", "can", "hear", "me", "there", "here",
+    };
+
+    internal static int SubstantiveWords(IReadOnlyList<TranscriptSegment> transcript) =>
+        transcript
+            .SelectMany(s => s.Text.Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries))
+            .Select(w => w.Trim('.', ',', '?', '!', ';', ':', '"'))
+            .Count(w => w.Length > 1 && !Chatter.Contains(w));
+
+    internal static NoteSet LowSubstanceNote() => new()
     {
         FromModel = true,   // this IS the model's verdict, not a failure
         Tldr = LowSubstanceTldr,
@@ -397,6 +492,76 @@ public sealed class LlmNoteWriter
     /// strictly better than recovering it afterwards by matching words.</summary>
     internal sealed record Window(string Text, int First, int Last);
 
+    static readonly Regex CitedLineRx = new(@"^\s*[-*]?\s*\[(\d+)\]\s*(.+?)\s*$", RegexOptions.Compiled);
+
+    /// <summary>How much of a digest line's own vocabulary must appear in the transcript line it
+    /// cites. Not 1.0: the map step is allowed to trim and tidy, only not to invent. Half the content
+    /// words is enough to tell "tidied" from "made up".</summary>
+    const double CitationOverlap = 0.5;
+
+    /// <summary>
+    /// CHECK THE DIGEST AGAINST THE TRANSCRIPT IT CLAIMS TO COME FROM.
+    ///
+    /// The map step now cites a line number for every point. That citation is only worth having if
+    /// something verifies it, so this drops any line that cites a number outside the window, cites
+    /// nothing at all, or whose words do not actually appear where it says they do. It is the one
+    /// place in the pipeline where the model's output is measured against the transcript BEFORE it
+    /// becomes the only thing the writer can see.
+    ///
+    /// Neighbours count, because a point genuinely can straddle two lines after turn-merging, and
+    /// being strict there would throw away good content to enforce a formatting preference.
+    ///
+    /// Returns the cleaned digest with the citations stripped (the writer does not need them) and the
+    /// narrowed line range the surviving points actually cover, which is the provenance a later
+    /// evidence link can use instead of guessing.
+    /// </summary>
+    internal static (string Text, int First, int Last)? ValidateDigest(
+        string digest, IReadOnlyList<TranscriptSegment> transcript, int windowFirst, int windowLast)
+    {
+        var kept = new List<string>();
+        int lo = int.MaxValue, hi = int.MinValue;
+        int seen = 0, uncited = 0, outOfRange = 0, unsupported = 0;
+
+        foreach (var raw in digest.Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            seen++;
+            var m = CitedLineRx.Match(raw);
+            if (!m.Success) { uncited++; continue; }                     // unverifiable, so dropped
+            if (!int.TryParse(m.Groups[1].Value, out var id)) { uncited++; continue; }
+            if (id < windowFirst || id > windowLast || id >= transcript.Count) { outOfRange++; continue; }
+
+            var text = m.Groups[2].Value.Trim();
+            if (text.Length == 0) { uncited++; continue; }
+
+            // The cited line plus one either side - turn-merging can split a single point in two.
+            var near = string.Join(" ",
+                Enumerable.Range(Math.Max(windowFirst, id - 1), 3)
+                    .Where(i => i <= windowLast && i < transcript.Count)
+                    .Select(i => transcript[i].Text));
+
+            var claimed = Storage.Evidence.ContentWords(text);
+            if (claimed.Count == 0) { unsupported++; continue; }   // nothing but stop words to check
+            var supported = Storage.Evidence.ContentWords(near);
+            var hits = claimed.Count(w => supported.Contains(w));
+            if (hits / (double)claimed.Count < CitationOverlap) { unsupported++; continue; }
+
+            kept.Add(text);
+            lo = Math.Min(lo, id);
+            hi = Math.Max(hi, id);
+        }
+
+        // Named counts, not a bare verdict: a window that lost everything to UNCITED lines is the
+        // model ignoring the format, which is a prompt problem, while one that lost everything to
+        // UNSUPPORTED is either real invention or an overlap threshold set too high. Those need
+        // opposite fixes, and "dropped" alone cannot tell them apart.
+        if (kept.Count < seen)
+            App.Log($"notes: digest kept {kept.Count}/{seen} (uncited {uncited}, out-of-range {outOfRange}, unsupported {unsupported})");
+
+        if (kept.Count == 0) return null;
+        return (string.Join("\n", kept.Select(k => "- " + k)), lo, hi);
+    }
+
     /// <summary>Group whole segments into windows under <paramref name="maxChars"/> each, keeping
     /// the transcript line range each window covers.</summary>
     static List<Window> Chunk(IReadOnlyList<TranscriptSegment> transcript, int maxChars)
@@ -410,7 +575,10 @@ public sealed class LlmNoteWriter
             // Label, not the raw stream: once the speakers have been told apart the writer sees real
             // names, which is what lets it attribute a to-do instead of guessing. On a fresh meeting
             // diarisation has not run yet, so this is still "You"/"Them" - the names arrive on a rewrite.
-            var line = $"{seg.Label}: {seg.Text}";
+            // NUMBERED. The map step is asked to CITE the line it took each point from, which is what
+            // lets the digest be checked against the transcript instead of trusted. Without an id
+            // there is nothing to check against and the digest is just the model's word for it.
+            var line = $"[{idx}] {seg.Label}: {seg.Text}";
             if (sb.Length > 0 && sb.Length + line.Length + 1 > maxChars)
             {
                 chunks.Add(new Window(sb.ToString(), first, idx - 1));

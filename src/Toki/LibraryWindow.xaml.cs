@@ -314,17 +314,62 @@ public partial class LibraryWindow : Window
         // The notch's own curve, not stock CubicEase: this is the same gesture as a notch morph and
         // it should settle the same way. Scale starts at 0.96, not 0.9 - on a 960px window a 10%
         // jump is nearly 100px of travel, which reads as a lurch rather than a zoom.
+        // THE TWO SHADOW CASTERS LEAVE FOR THE RIDE. They are the only Effects in this window and they
+        // sit INSIDE RootGrid, which this method scales and fades - so every frame of the open was
+        // re-rendering a 22px blur over the whole sidebar in software. The notch has always done this
+        // correctly (PillWindow.AnimateSize); the Library never did. Restored on settle.
+        HideLift();
+
+        // Reduced motion: no scale, no travel, just a short dissolve. The window still ANNOUNCES
+        // itself rather than teleporting, which is the point of reducing motion instead of removing it.
+        if (Theme.Motion.Reduced)
+        {
+            RootGrid.RenderTransform = null;
+            var soft = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Ms(180))));
+            soft.Completed += (_, _) => { RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1; ShowLift(); };
+            RootGrid.BeginAnimation(OpacityProperty, soft);
+            return;
+        }
+
         var ease = Theme.Motion.ArriveStrong;
         var dur = new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Morph));
         RootGrid.RenderTransformOrigin = OriginFrom(fromRect);
         var scale = new ScaleTransform(0.96, 0.96);
         RootGrid.RenderTransform = scale;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
+        var grow = new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease };
+        // The lift comes back when the MOTION ends, not when the fade does (the fade is the shorter
+        // of the two) - otherwise the blur is live again for the last stretch of the zoom.
+        grow.Completed += (_, _) => ShowLift();
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, 1, dur) { EasingFunction = ease });
         // The fade lands before the scale does, so the content is fully present while it settles.
         var fade = new DoubleAnimation(0.0, 1, new Duration(TimeSpan.FromMilliseconds(150))) { EasingFunction = ease };
         fade.Completed += (_, _) => { RootGrid.BeginAnimation(OpacityProperty, null); RootGrid.Opacity = 1; };
+        // The scale is the longer of the two, so the lift comes back when the MOTION ends, not when
+        // the fade does - otherwise the blur is live again for the last 130ms of the zoom.
         RootGrid.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>The sidebar's two shadow casters carry this window's only Effects. An Effect renders
+    /// its whole subtree in SOFTWARE and re-renders on every change, so anything animating above one
+    /// is paying a full CPU repaint per frame. They are hidden for the duration of a transition and
+    /// faded back on settle - the same discipline PillWindow.AnimateSize has always used.</summary>
+    void HideLift()
+    {
+        SidebarKeyShadow.Visibility = Visibility.Hidden;
+        SidebarAmbientShadow.Visibility = Visibility.Hidden;
+    }
+
+    void ShowLift()
+    {
+        if (SidebarKeyShadow.Visibility == Visibility.Visible) return;
+        SidebarKeyShadow.Visibility = SidebarAmbientShadow.Visibility = Visibility.Visible;
+        // Fading the CASTER back in, not the effect: the shadow arrives with the card rather than
+        // snapping on a frame after it lands.
+        foreach (var b in new[] { SidebarKeyShadow, SidebarAmbientShadow })
+            b.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Ms(Theme.Motion.Micro)))
+                { EasingFunction = Theme.Motion.EaseOut });
     }
 
     /// <summary>Shrink the window back toward the notch (mirror of <see cref="PlayOpen"/>) with a fade,
@@ -337,8 +382,9 @@ public partial class LibraryWindow : Window
         // The exit keeps its own curve and runs at ~70% of the enter, which is the standing rule:
         // users watch things arrive, not leave. The owner reports this direction already feels
         // right, so only the numbers move with the enter, not the character.
+        HideLift();   // as in PlayOpen: no live Effect inside a subtree that is being animated
         var ease = Theme.Motion.Depart;
-        var dur = new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Morph * 0.7));
+        var dur = new Duration(TimeSpan.FromMilliseconds(Theme.Motion.Ms((int)(Theme.Motion.Morph * 0.7))));
         RootGrid.RenderTransformOrigin = OriginFrom(_originRect);
         var scale = RootGrid.RenderTransform as ScaleTransform ?? new ScaleTransform(1, 1);
         RootGrid.RenderTransform = scale;
@@ -354,6 +400,7 @@ public partial class LibraryWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
             scale.ScaleX = scale.ScaleY = 1;
             _closing = false;
+            ShowLift();   // ready for the next open
         };
         RootGrid.BeginAnimation(OpacityProperty, fade);
     }
@@ -452,7 +499,16 @@ public partial class LibraryWindow : Window
             ShowChatJumpPill(!_chatStick && ChatScroll.ScrollableHeight > 12);
         };
         try { _chats = _chatStore.Load(); } catch { _chats = new(); }   // past Ask conversations
-        SourceInitialized += (_, _) => StyleChrome();
+        SourceInitialized += (_, _) =>
+        {
+            StyleChrome();
+            // REAL DWM acrylic works on this window and was shipped 2026-09-03; the research and the
+            // exact API live in Theme/WindowBackdrop.cs. It is OFF because the owner rejected the
+            // result on sight: a translucent window lets the desktop tint the page, and in the LIGHT
+            // theme that read as the whole window turning grey. A reading surface has to hold its own
+            // colour - that is not a tuning problem, it is what translucency does to a light theme.
+            // Re-enable only on an explicit owner decision, and only with a near-opaque scrim.
+        };
         // Soften the maximise/restore snap: ease the content into the new size instead of a hard pop.
         StateChanged += (_, _) => PlayStateSettle();
         // Code-built UI (list cards, note detail, nav, templates) captures brushes → rebuild on a theme swap.

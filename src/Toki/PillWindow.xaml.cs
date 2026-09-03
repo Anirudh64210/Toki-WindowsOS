@@ -538,7 +538,17 @@ public partial class PillWindow : Window
         if (view is Views.OnboardingView ob) ob.ResetToStart();
         if (view is Views.PrepCardView pc) pc.Refresh();   // paint from App.CurrentPrep BEFORE the height measure
 
-        var hoverMorph = !fromHidden && IsHoverPair(old, next);
+        // ONE ANIMATED PATH. This used to be `IsHoverPair(old, next)` - an allowlist of five state
+        // pairs - and everything outside it fell through to a branch that teleported. Widening the
+        // allowlist was the first fix and it was wrong: it left TWO paths that had to be kept in
+        // step, and they immediately drifted. deferPeekBg below still said `&& hoverMorph`, so a
+        // newly-animated collapse stripped the card's glass and the mascot on frame one and then
+        // shrank an empty box. That is the glitch.
+        //
+        // So there is no second path now. Every visible-to-visible transition animates the same way,
+        // through the same surface deferral and the same mascot handling; SnapResize stays the one
+        // explicit opt-out for callers that genuinely must not animate (onboarding steps).
+        var hoverMorph = !fromHidden;
         var collapsing = next is PillState.Collapsed or PillState.RecordingBar;
         var peek = next is PillState.Collapsed or PillState.RecordingBar;
         var deferPeekBg = peek && hoverMorph;
@@ -572,10 +582,38 @@ public partial class PillWindow : Window
         // The sizing work below calls SetWindowPos - a synchronous Win32 call that can let the
         // window paint. Zero the opacity BEFORE the view is added, so the finished panel can never
         // flash for a frame at full size and opacity.
+        // ═══ KEEP A PICTURE OF THE OUTGOING PAGE ═══
+        //
+        // Taken BEFORE anything is cleared or resized, while the old page still owns every pixel.
+        // Without it the card spends the whole morph showing the NEW page cropped to a rectangle
+        // that is still the old size, which is what the owner kept reporting as "glitch resize" and
+        // "the text is cut off": the clip was animating correctly, but what it was clipping was a
+        // page arranged for a different card. Pinning the layout to the target (2026-09-03) fixed
+        // the reflow at the end and did nothing for this, because the crop is the artifact.
+        //
+        // A raster, not the live visual: it costs one cheap render, it cannot re-layout underneath
+        // the animation, and it holds the old page exactly as the user last saw it.
+        // ═══ NEVER PHOTOGRAPH A PEEK THAT IS ONLY TOKI ═══
+        //
+        // CollapsedView's entire content is a TokiBlob - the peek IS him. Cross-fading out of it
+        // therefore leaves a PICTURE of Toki dissolving at the card's centre while the real bubble
+        // springs in at the panel's left gutter: two of him, in two places, on the same frames. That
+        // is the flicker, and it is why delaying the bubble did not cure it - the duplicate is the
+        // outgoing snapshot, not the timing.
+        //
+        // There is nothing worth carrying across from a mascot-only peek anyway: the card behind it
+        // is bare, so the cross-fade has no content to preserve. Skipping the snapshot leaves exactly
+        // one Toki on screen for the whole transition, which is the standing one-Toki-per-surface rule.
+        var ghost = old == PillState.Collapsed ? null : SnapshotContent();
+
         Host.BeginAnimation(OpacityProperty, null);
-        Host.Opacity = 0;
+        Host.Opacity = 1;   // the CHILDREN cross-fade now, not the host
         Host.Children.Clear();
+        // The REVEAL path fades the whole Host (there is nothing to cross-fade from), so the view
+        // must start opaque there or it would be multiplied to nothing and never appear.
+        view.Opacity = fromHidden ? 1 : 0;
         Host.Children.Add(view);
+        if (ghost is not null) Host.Children.Add(ghost);   // on top, dissolving away
         if (DismissOnClickOutside.Contains(next)) _panelShownTick = Environment.TickCount64;
         App.Log($"transition {old}->{next} path={(fromHidden ? "reveal" : hoverMorph ? "hover-morph" : "in-place")}"
               + $" visible={IsVisible} card={_cardW:F0}x{_cardH:F0}");
@@ -591,8 +629,8 @@ public partial class PillWindow : Window
         // SetSurface owns Visibility, and its restore path puts him back.
         if (next == PillState.Summarizing && _tucked)
         {
-            MascotZone.BeginAnimation(OpacityProperty, null);
-            MascotZone.Opacity = 0;
+            MascotZone.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.Depart });
         }
 
         if (announce) ShowNotesReady();   // the pill stands in for the page while it announces
@@ -634,9 +672,7 @@ public partial class PillWindow : Window
                 var flyerX = MascotShift.X;
                 MascotShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
                 MascotShift.X = flyerX - slide;
-                Host.BeginAnimation(OpacityProperty, null);
-                Host.Opacity = 0;
-                Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(210))));
+                CrossFade(view, 210);
                 MascotZone.BeginAnimation(OpacityProperty,
                     new DoubleAnimation(0, Theme.Motion.Dur(180)) { EasingFunction = Theme.Motion.Depart });
                 ScheduleSurface(next, peek, 240);
@@ -646,10 +682,15 @@ public partial class PillWindow : Window
                 // Collapsing reads best as a smooth zoom-OUT: an eased size retract with the
                 // content cross-fading, not a hard snap.
                 const int collapseMs = 240;
-                AnimateSize(w, targetH, collapsing ? collapseMs : 300);   // card clip morphs; window holds still
-                Host.BeginAnimation(OpacityProperty, null);
-                Host.Opacity = 0;             // the new content fades in as the pill morphs (masks reflow)
-                Host.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(collapsing ? 210 : 240))));
+                var morphMs = collapsing ? collapseMs : 300;
+                // A change in how far the card hangs below the top edge rides the same curve as the
+                // size, instead of the window jumping. MeetingPrompt (12) to RecordingBar (2) was a
+                // 10px teleport at the exact moment the user had just clicked.
+                GlideTopGap(old, next, morphMs);
+                AnimateSize(w, targetH, morphMs);   // card clip morphs; window holds still
+                // The outgoing page dissolves while the incoming one arrives, both inside the
+                // morphing clip - so the card never shows a page cropped to the wrong size.
+                CrossFade(view, collapsing ? 210 : 240);
                 // Drop the dark surface only once the box has finished shrinking → it fades away with the panel.
                 if (deferPeekBg)
                 {
@@ -693,20 +734,6 @@ public partial class PillWindow : Window
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
             if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent - re-assert glass
             RevealDown(w, targetH, 280);   // animates the 0-height clip open while content settles in
-        }
-        else
-        {
-            // In-place morph (visible → visible): drop any leftover clip from an interrupted
-            // reveal/conceal. PinCorners BEFORE the clip is dropped: at rest the squircle CLIP is
-            // the only thing rounding the plate, so unclipping first paints one frame of a hard
-            // rectangle (the settle runs after the render pass).
-            PinCorners();
-            Root.Clip = null; _clipGen++;
-            SetCardSize(w, targetH);
-            PlaceMascot(targetH, Theme.Motion.Morph);   // glide to this state's spot with the morph
-            SizeWindowNow(w, targetH);   // ONE Win32 call, sized and centred from the target
-            SettleCorners();             // no morph on this path - the card is at rest immediately
-            MorphContent();
         }
         CacheWindowRect();
         // Re-assert ghost on EVERY state change: the surface work (WCA_ACCENT_POLICY + DWM
@@ -760,26 +787,56 @@ public partial class PillWindow : Window
         // THE CLIP GOES ON BEFORE THE WINDOW GROWS: SizeWindowNow ends in SetWindowPos, which is
         // synchronous and can let the window paint - unclipped, that paints the whole panel at
         // full size one frame before the motion begins.
-        PinContentForMorph(unionCardW, unionCardH, w, h, ms);
-        SizeWindowNow(unionCardW, unionCardH);
+        var gen = _pinGen + 1;
 
-        var gen = _pinGen;
-        var settle = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render)
-            { Interval = TimeSpan.FromMilliseconds(ms + 20) };
-        settle.Tick += (_, _) =>
+        // ═══ THE SETTLE IS THE ANIMATION'S OWN COMPLETION, NOT A TIMER ═══
+        //
+        // This used to be a DispatcherTimer set to ms + 20, i.e. a second clock racing the first.
+        // Two consequences, and the owner felt both as "the resizer". The 20ms was a deliberate gap
+        // in which the card had finished moving and the window had not yet resized, so the resize
+        // was always a SEPARATE, LATER event rather than the end of the motion. And a DispatcherTimer
+        // is wall-clock and best-effort: under load - which is exactly when notes are generating -
+        // it drifts, so the gap grew and the resize detached from the animation entirely.
+        //
+        // Hanging it off the clip animation's Completed makes the last frame of the motion and the
+        // window resize the same moment. There is no longer a resize event to see.
+        PinContentForMorph(unionCardW, unionCardH, w, h, ms, () =>
         {
-            settle.Stop();
             if (gen != _pinGen) return;   // a newer morph owns the window now
+            // ═══ THE LAST GLITCH: THE CLIP'S ORIGIN IS RELATIVE TO THE UNION BOX ═══
+            //
+            // Throughout the morph the window is held at the UNION size and the card is CENTRED in
+            // it, so the clip carries a left inset of (unionW - toW) / 2. The instant the window
+            // shrinks to the target, that inset is nonsense: Root is now exactly toW wide, and a
+            // clip offset half the old slack to the right crops the card and shows a sliver of bare
+            // window beside it. SettleCorners fixes it, but it runs at Loaded priority - a frame
+            // LATER - so every morph ended with one frame of the card cropped and shifted. That is
+            // the residual "resize glitch" that survived pinning the layout and cross-fading the
+            // content, and it is why it read as a snap at the very end rather than during.
+            //
+            // Re-origin the clip in the SAME dispatcher run as the resize so they compose into one
+            // frame; SettleCorners still follows to swap the arc for the squircle.
+            Root.Clip = new RectangleGeometry(new Rect(0, 0, w, h), CornerRadius, CornerRadius);
+
             // Settle onto the exact target: one resize, after the motion has finished.
             SizeWindowNow(w, h);
             // The squircle waits for THIS resize: until the window is on its target the card is
             // still centred in the union box, and a shape built there is built for the wrong size.
             SettleCorners();
-            if (ShadowCaster.Visibility == Visibility.Visible)
-                ShadowCaster.BeginAnimation(OpacityProperty,
-                    new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Micro)) { EasingFunction = Theme.Motion.EaseOut });
-        };
-        settle.Start();
+        });
+        SizeWindowNow(unionCardW, unionCardH);
+
+        // THE LIFT COMES BACK WITH THE CARD, NOT AFTER IT. Fading the shadow in once the morph had
+        // already finished made a second, later event out of it - the card landed, then a moment
+        // afterwards it grew a shadow, which reads as the window adjusting itself. It now starts at
+        // ~65% through the motion so it is home on the same frame the card is.
+        if (ShadowCaster.Visibility == Visibility.Visible)
+            ShadowCaster.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(1, Theme.Motion.Dur(Theme.Motion.Ms((int)(ms * 0.35))))
+                {
+                    BeginTime = TimeSpan.FromMilliseconds(ms * 0.65),
+                    EasingFunction = Theme.Motion.EaseOut,
+                });
     }
 
     /// <summary>Resize and re-centre the window in ONE Win32 call, computed from the TARGET card
@@ -801,6 +858,117 @@ public partial class PillWindow : Window
     /// <summary>Move (never resize) the window to where a card of <paramref name="cardW"/> sits
     /// top-centred. Position comes from the TARGET size, so this is correct before WPF has applied
     /// it - unlike <see cref="PlaceTopCenter"/>, which reads the window's current bounds.</summary>
+    /// <summary>
+    /// Make a change in the card's distance from the top edge GLIDE instead of teleport.
+    ///
+    /// States hang at different gaps: panels at 12, the recording strip and the loader flush at 2,
+    /// the collapsed peek at 0. Accepting a meeting goes MeetingPrompt (12) to RecordingBar (2), and
+    /// the window simply jumped 10px up in one frame - a small move, but an abrupt one at the exact
+    /// moment the user has just clicked, which is when they are watching hardest.
+    ///
+    /// Animating the WINDOW's position would be the obvious fix and the wrong one: a layered window
+    /// pays a native move plus a DWM surface update per frame. So the window still jumps once, and
+    /// the CARD is offset by the same amount and glides back to zero - composited, no layout, and
+    /// visually identical to the card having moved.
+    /// </summary>
+    void GlideTopGap(PillState from, PillState to, int ms)
+    {
+        var delta = TopGapFor(to) - TopGapFor(from);
+        if (Math.Abs(delta) < 0.5) return;
+
+        RootShift.BeginAnimation(TranslateTransform.YProperty, null);
+        if (Theme.Motion.Reduced) { RootShift.Y = 0; return; }   // no spatial travel under reduced motion
+
+        // The window has already been told to sit at the NEW gap, so start the card where the OLD
+        // gap put it and let it come home.
+        RootShift.Y = -delta;
+        RootShift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(0, Theme.Motion.Dur(ms)) { EasingFunction = Theme.Motion.Drawer });
+    }
+
+    /// <summary>
+    /// A frozen picture of whatever the card is showing right now, at the size it is showing it.
+    /// Null when there is nothing to photograph (first show, hidden window, zero-sized content).
+    /// </summary>
+    Image? SnapshotContent()
+    {
+        // HOST, not Host.Children[0]. Photographing the incoming page alone was fine for a morph that
+        // starts from rest, and wrong for one that INTERRUPTS another: mid-transition the card is
+        // showing a half-faded new page under a half-faded old one, and capturing only the first of
+        // them threw away exactly the picture the user was looking at. Rendering the host captures
+        // what is actually on screen, whatever stage the previous morph had reached.
+        //
+        // RenderTargetBitmap renders a visual in its OWN coordinate space, so Host's RenderTransform
+        // (the zoom) is deliberately not baked in - otherwise the next morph would scale a picture
+        // that was already scaled.
+        if (!IsVisible || Host.Children.Count == 0) return null;
+        FrameworkElement el = Host;
+        if (el.ActualWidth < 2 || el.ActualHeight < 2) return null;
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                (int)Math.Ceiling(el.ActualWidth * dpi.DpiScaleX),
+                (int)Math.Ceiling(el.ActualHeight * dpi.DpiScaleY),
+                96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+            rtb.Render(el);
+            rtb.Freeze();
+            return new Image
+            {
+                Source = rtb,
+                Width = el.ActualWidth,
+                Height = el.ActualHeight,
+                Stretch = Stretch.Fill,
+                // Top-centre, matching where the clip puts the card inside the union box, so the
+                // outgoing picture stays registered with the incoming page while both move.
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Top,
+                IsHitTestVisible = false,
+            };
+        }
+        catch { return null; }   // a snapshot is a nicety; never let it break a transition
+    }
+
+    /// <summary>
+    /// Dissolve the outgoing picture out while the incoming page comes in, both inside the morphing
+    /// clip. This is the difference between a container that MORPHS and one that resizes with a
+    /// cropped page inside it.
+    ///
+    /// The exit is deliberately shorter than the enter and runs on the depart curve: the old page
+    /// should be gone before the new one is fully readable, or the two read as double-exposed.
+    /// </summary>
+    void CrossFade(FrameworkElement view, int inMs)
+    {
+        var ghost = Host.Children.Count > 1 ? Host.Children[^1] as Image : null;
+
+        var ghostPresent = Host.Children.Count > 1 && Host.Children[^1] is Image;
+        // A HAND-OFF, NOT A DISSOLVE. With both fades starting together there were three or four
+        // frames where two different pages were equally readable, which the owner saw as the old
+        // state hanging around. The incoming page now waits until the outgoing one is most of the
+        // way gone, so at any instant one page is dominant. Measured at 60fps: the overlap drops
+        // from about 4 frames to about 1.
+        var lead = ghostPresent ? TimeSpan.FromMilliseconds(Theme.Motion.Ms((int)(inMs * 0.22))) : TimeSpan.Zero;
+
+        view.BeginAnimation(OpacityProperty, null);
+        view.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Ms(inMs)))
+            { BeginTime = lead, EasingFunction = Theme.Motion.ArriveStrong });
+
+        if (ghost is null) return;
+        // THE OLD PAGE LEAVES FIRST, AND QUICKLY. At 62% of the enter it was still legible a third
+        // of the way into the morph, so two sets of words overlapped and the owner read it as the
+        // previous state hanging around. It is a hand-off, not a dissolve between equals: the old
+        // page only has to cover the frame where the new one is still transparent.
+        //
+        // 35%, and on the depart curve so most of it is gone in the first few frames. This is the
+        // enter/exit asymmetry the house rules already state - users watch things arrive, not leave.
+        var outMs = Math.Max(70, (int)(inMs * 0.35));
+        var fade = new DoubleAnimation(1, 0, Theme.Motion.Dur(Theme.Motion.Ms(outMs)))
+        { EasingFunction = Theme.Motion.Depart };
+        fade.Completed += (_, _) => Host.Children.Remove(ghost);
+        ghost.BeginAnimation(OpacityProperty, fade);
+    }
+
     void MoveTopCenterFor(double cardW)
     {
         if (_hwnd == IntPtr.Zero) return;
@@ -824,11 +992,11 @@ public partial class PillWindow : Window
     /// laid out ONCE and the card simply uncovers it - animating window bounds re-runs layout every
     /// frame and the content visibly reflows. Pin and clip are both released on completion, so the
     /// settled panel is a normally-laid-out tree again.</summary>
-    void PinContentForMorph(double unionW, double unionH, double toW, double toH, int ms)
+    void PinContentForMorph(double unionW, double unionH, double toW, double toH, int ms, Action? onSettled = null)
     {
         // The one path that sets no new clip: clear whatever is there so a stale one cannot cap the
         // content (the caller no longer clears it, because clearing it destroys the current size).
-        if (unionW <= 1 || unionH <= 1) { PinCorners(); Root.Clip = null; SettleCorners(); return; }
+        if (unionW <= 1 || unionH <= 1) { _pinGen++; PinCorners(); Root.Clip = null; SettleCorners(); onSettled?.Invoke(); return; }
 
         // ═══ START FROM WHERE THE CARD ACTUALLY IS ═══
         // _cardW/_cardH is written at the START of a morph, so while one is in flight it already
@@ -839,11 +1007,57 @@ public partial class PillWindow : Window
         var fromH = live is { Height: > 1 } lh ? lh.Height : Math.Max(1, _cardH > 0 ? _cardH : toH);
         var gen = ++_pinGen;
 
-        // The content is laid out ONCE, at the union size, and never re-laid-out during the morph.
-        Host.Width = unionW;
-        Host.Height = unionH;
-        Host.HorizontalAlignment = HorizontalAlignment.Left;
+        // ═══ THE CONTENT IS LAID OUT AT ITS FINAL SIZE, ONCE ═══
+        //
+        // This used to lay it out at the UNION size, and that is what the owner saw as "glitch
+        // resize". Two artifacts came out of it, both visible frame-by-frame in their recording:
+        // going from Settings to Home, the new page was arranged at the WIDER of the two widths and
+        // then clipped, so its heading sat hard against the card edge with the text cut off; and
+        // when the morph completed, Host went back to NaN and the whole page RE-LAID-OUT in one
+        // frame, which is the "and then it readjusts" they described.
+        //
+        // Arranging at the target instead means the page is correct on the first frame and identical
+        // on the last, so there is nothing to readjust. Centre-and-top matches where the clip puts
+        // the card inside the union box, so content and card stay registered while both move.
+        Host.Width = toW;
+        Host.Height = toH;
+        Host.HorizontalAlignment = HorizontalAlignment.Center;
         Host.VerticalAlignment = VerticalAlignment.Top;
+
+        // ═══ AND IT ZOOMS ═══
+        //
+        // With layout fixed, the card still needs to read as one surface changing size rather than
+        // two pages swapped behind a moving window. The page scales from the size ratio toward 1, so
+        // a bigger page zooms IN and a smaller page zooms OUT, which is the Dynamic Island behaviour.
+        //
+        // DAMPED to 30% and clamped: the raw ratio between the peek and a tall panel is over 4x, and
+        // animating that literally is a lurch, not a zoom. A few percent carries the direction, which
+        // is all the eye needs. Origin is top-centre because the card is anchored to the top edge.
+        var raw = toH > 1 ? fromH / toH : 1.0;
+        var startScale = Math.Clamp(1 + (raw - 1) * 0.30, 0.94, 1.06);
+
+        // ═══ START FROM WHERE IT IS, NOT FROM WHERE A FRESH MORPH WOULD ═══
+        //
+        // Read the LIVE scale before clearing the animation, and use it when a morph is already in
+        // flight. Interrupting one transition with another - which is just clicking twice, or a
+        // meeting arriving while a panel is opening - otherwise snapped the content back to the new
+        // morph's starting scale and re-zoomed from there. This is the same discipline the clip rect
+        // has always followed (it reads the live Rect above), and it is the principle Apple's own
+        // motion guidance puts first: animate from the presentation value, never the target.
+        var liveScale = HostScale.ScaleX;
+        var inFlight = Math.Abs(liveScale - 1) > 0.001;
+
+        Host.RenderTransformOrigin = new Point(0.5, 0);
+        HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        HostScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        if (Theme.Motion.Reduced) { HostScale.ScaleX = HostScale.ScaleY = 1; }
+        else
+        {
+            var zoomFrom = inFlight ? liveScale : startScale;
+            var zoom = new DoubleAnimation(zoomFrom, 1, Theme.Motion.Dur(ms)) { EasingFunction = Theme.Motion.Drawer };
+            HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, zoom);
+            HostScale.BeginAnimation(ScaleTransform.ScaleYProperty, zoom);
+        }
 
         // The card is CENTRED horizontally in the union box and TOP-anchored: the clip is inset by
         // half the slack on each side and grows downward.
@@ -867,16 +1081,30 @@ public partial class PillWindow : Window
         anim.Completed += (_, _) =>
         {
             if (gen != _pinGen) return;   // a newer morph owns the content now
+            // Releasing to Stretch is now a NO-OP visually: the page was already arranged at exactly
+            // this size, so nothing moves. That is the whole point of pinning to the target rather
+            // than the union - the old code re-laid-out here and the jump was visible.
             Host.Width = Host.Height = double.NaN;
             Host.HorizontalAlignment = HorizontalAlignment.Stretch;
             Host.VerticalAlignment = VerticalAlignment.Stretch;
-            Root.Clip = null;
+            HostScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            HostScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            HostScale.ScaleX = HostScale.ScaleY = 1;   // land exactly on 1, or text stays resampled
+            // NOT null. The window is still at the UNION size for another ~20ms (AnimateSize's
+            // settle timer owns the resize), and Root stretches - so dropping the clip here paints
+            // the card at the union width, fully plated, for a frame or two. Collapsing Home (344)
+            // to the peek (52) flashed back to 344px every single time. Hold the target rect until
+            // the settle timer has actually resized the window; SettleCorners replaces it there.
+            Root.Clip = new RectangleGeometry(to);
             // No SettleCorners here: AnimateSize's settle timer owns it, once the window has
             // actually reached the target size. And put Toki back: the shift is the clip's inset
             // WHILE the window is held at the union size - once the clip is dropped it is nonsense,
             // and leaving it parks the bubble on top of the card after any shrink.
             MascotShift.BeginAnimation(TranslateTransform.XProperty, null);
             MascotShift.X = 0;
+            // The window settle runs HERE, on the animation's own completion, not on a timer racing
+            // it. See AnimateSize.
+            onSettled?.Invoke();
         };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
 
@@ -1162,7 +1390,63 @@ public partial class PillWindow : Window
     // so this stays on the composition thread.
     void RevealMascot()
     {
-        const int delayMs = 90;
+        // TOKI'S CLOCK MUST START WITH THE WINDOW, NOT BEFORE IT.
+        //
+        // This is reached from SetSurface, which runs EARLY in OnStateChanged - before UpdateLayout,
+        // before PlaceExactTopCenter and before Show(). On a cold first open the layout pass between
+        // here and the first painted frame can outlast the 90ms BeginTime below, so Toki was already
+        // mid-spring on the frame he first became visible: he appeared part-grown instead of
+        // arriving. --revealtest cannot catch it, because during a BeginTime delay the properties
+        // still read their base values and the snapshot looks correct either way.
+        //
+        // Render priority runs after the current layout and composition batch, which is after Show()
+        // on every path that reaches here.
+        // ARM SYNCHRONOUSLY, START LATER. The deferral below is what keeps Toki's spring clock with
+        // the window, but on any path where the zone was ALREADY visible (ArmMascotReveal is only
+        // called when it was hidden) it left him painted at full opacity and full size for the frame
+        // or two before the deferred call ran, and then the animation snapped him back to 0.55 scale
+        // to spring again. That is the flicker the owner saw opening Home from the peek: Toki appears,
+        // vanishes, and grows back.
+        MascotZone.BeginAnimation(OpacityProperty, null);
+        MascotZone.Opacity = 0;
+        MascotPop.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        MascotPop.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        MascotPop.ScaleX = MascotPop.ScaleY = RevealFromScale;
+
+        Dispatcher.BeginInvoke(new Action(StartMascotReveal), System.Windows.Threading.DispatcherPriority.Render);
+    }
+
+    void StartMascotReveal()
+    {
+        if (MascotZone.Visibility != Visibility.Visible) return;   // a newer state owns the surface now
+
+        // Reduced motion: he still arrives, he just does not spring. Overshoot is the part that
+        // makes people ill; a fade keeps the cause-and-effect that removing it entirely would lose.
+        if (Theme.Motion.Reduced)
+        {
+            MascotPop.ScaleX = MascotPop.ScaleY = 1;
+            MascotZone.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, 1, Theme.Motion.Dur(Theme.Motion.Ms(180))) { EasingFunction = Theme.Motion.EaseOut });
+            return;
+        }
+
+        // ═══ WAIT FOR THE OLD TOKI TO LEAVE ═══
+        //
+        // A peek draws its OWN small Toki inside its content, because the floating bubble is hidden
+        // in that state. Opening a panel from a peek therefore has two of him for a moment: the
+        // peek's, still on screen inside the outgoing page, and the bubble springing in at the
+        // panel's gutter. Filmed at 60fps they are in different places on the same frames - the old
+        // one at the card's right, the new one arriving at the left - which is what reads as Toki
+        // flickering rather than arriving, and it breaks the one-Toki-per-surface rule mid-motion.
+        //
+        // 170ms clears the cross-fade's hand-off (the outgoing page is on a ~35% exit), so the peek's
+        // Toki is gone before the bubble starts. He arrives a beat later, which is also correct
+        // ordering: the card is the container, the character follows it.
+        // 70, not 170. The 170 existed to let a DUPLICATE Toki fade before this one arrived; with
+        // the mascot-only peek no longer photographed there is no duplicate to wait for, and the long
+        // delay left a visible hole - filmed at 60fps, about ten frames with no Toki at all, which
+        // reads as him blinking out rather than following the card. He now arrives just behind it.
+        const int delayMs = 70;
         var pop = new DoubleAnimation(RevealFromScale, 1, TimeSpan.FromMilliseconds(360))
         {
             BeginTime = TimeSpan.FromMilliseconds(delayMs),
@@ -1360,7 +1644,10 @@ public partial class PillWindow : Window
     void ConcealUp(double w, int ms, Action done)
     {
         var gen = ++_clipGen;
-        var h = ActualHeight > 0 ? ActualHeight : Height;
+        // CardH, not the raw window height: Root is CardPadB shorter than the window, so clipping
+        // at window height starts the retract 24px above the card and the first ~36% of the
+        // conceal is a dead frame (the peek is 42 tall inside a 66 tall window).
+        var h = CardH(ActualHeight > 0 ? ActualHeight : Height);
         var geo = new RectangleGeometry(new Rect(0, 0, w, h));
         PinCorners();   // and it stays pinned: ParkAfterHide leaves the clip shut, not squircled
         Root.Clip = geo;
@@ -1767,7 +2054,7 @@ public partial class PillWindow : Window
         // the flight. The landing transition replaces this clip through its own generation bump.
         _clipGen++;
         var cw = CardW(ActualWidth);
-        var chh = ActualHeight > 0 ? ActualHeight : Height;
+        var chh = CardH(ActualHeight > 0 ? ActualHeight : Height);   // card, not window (see ConcealUp)
         var geo = new RectangleGeometry(new Rect(0, 0, cw, chh));
         PinCorners();
         Root.Clip = geo;
@@ -1816,6 +2103,7 @@ public partial class PillWindow : Window
                 // A ready note tucks to the "Notes ready >" pill rather than a blank 13px strip.
                 ShowNotesReady();
                 AnimateSize(Views.NotesReadyView.CardWidth, Views.NotesReadyView.CardHeight, 200);
+                FadeHostIn(180);
                 ArmAutoHide(NotesSliverHideMs);
                 return;
             }
@@ -1852,6 +2140,8 @@ public partial class PillWindow : Window
         // A click anywhere on the pill opens the note - the window-level handler (constructor)
         // covers it; hover never opens it (HoverTick).
         _notesReady ??= new Views.NotesReadyView();
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.Opacity = 0;   // fade in under the size morph - never swap content at full opacity
         Host.Children.Clear();
         Host.Children.Add(_notesReady);
     }
@@ -1860,9 +2150,17 @@ public partial class PillWindow : Window
     void RestoreTuckedView()
     {
         if (_notesReady is null || !Host.Children.Contains(_notesReady)) return;
+        Host.BeginAnimation(OpacityProperty, null);
+        Host.Opacity = 0;   // fade in under the size morph - never swap content at full opacity
         Host.Children.Clear();
         Host.Children.Add(ViewFor(_state.Current));
     }
+
+    /// <summary>Fade the content host back in under a size morph. Paired with the Opacity = 0 the
+    /// tuck/expand swaps set: content must never appear at full opacity in one frame.</summary>
+    void FadeHostIn(int ms) =>
+        Host.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, Theme.Motion.Dur(ms)) { EasingFunction = Theme.Motion.ArriveStrong });
 
     void ExpandCurrent()
     {
@@ -1879,6 +2177,7 @@ public partial class PillWindow : Window
         var work = PhysicalWorkArea();
         var availH = (work.Bottom - work.Top) / dpi - TopGap - BottomMargin;
         AnimateSize(w, Math.Min(ContentHeight(_state.Current, w, h), availH), 220);
+        FadeHostIn(200);
         ArmIdle();
     }
 
@@ -1887,6 +2186,23 @@ public partial class PillWindow : Window
     /// height (so the page is concise - no dead space below the content), measured at the panel's
     /// fixed width. Other pages use their fixed Sizes height.
     /// </summary>
+    /// <summary>
+    /// The breath exists so DPI rounding and surface chrome cannot clip the LAST ROW of a page whose
+    /// content wraps. The recording bar has no last row to clip: it is one fixed-height 26px row
+    /// inside fixed 12px margins, and it measures exactly.
+    ///
+    /// So the flat 14 was pure dead glass there. The row measures 50, the card was built at 64, the
+    /// content is top-anchored, and the result is a bar sitting visibly high in its own box with a
+    /// strip of empty plate beneath it. A rule that protects wrapping text should not tax a fixed row.
+    /// 4 still absorbs the rounding it was written for.
+    /// </summary>
+    static double BreathFor(PillState state) => state switch
+    {
+        // A fixed-height row measures exactly and has no last line to clip.
+        PillState.RecordingOpen or PillState.RecordingBar => 2,
+        _ => BottomBreath,
+    };
+
     double ContentHeight(PillState state, double width, double fallback)
     {
         if (!AutoHeight.Contains(state)) return fallback;
@@ -1897,7 +2213,7 @@ public partial class PillWindow : Window
             var m = v.DesiredSize.Height;
             // The design height is a MINIMUM, never a cap. DPI rounding + the surface chrome shave
             // a few px off the bottom, so add breathing room or the last row is clipped.
-            return m > 8 ? Math.Max(fallback, Math.Ceiling(m) + BottomBreath) : fallback;
+            return m > 8 ? Math.Max(fallback, Math.Ceiling(m) + BreathFor(state)) : fallback;
         }
         catch { return fallback; }
     }
@@ -1911,7 +2227,18 @@ public partial class PillWindow : Window
 
     // Bottom breathing room added to every auto-height page's measured content (see ContentHeight):
     // covers the few px lost to DPI rounding + the notch's bottom chrome.
-    const double BottomBreath = 14;
+    /// <summary>
+    /// Slack added below a measured page so DPI rounding cannot shave the last line off.
+    ///
+    /// WAS 14, and the owner is right that it showed: DPI rounding costs one or two pixels, not
+    /// fourteen, so every auto-height panel in the notch carried a strip of empty plate under its
+    /// content. Content is top-anchored, so that strip does not read as symmetric padding - it reads
+    /// as the card being slightly too big for what is in it, on every page.
+    ///
+    /// 6 is what the rounding actually needs, with room to spare. If a page ever clips its last row,
+    /// the bug is in that page's Measure, not in this number.
+    /// </summary>
+    const double BottomBreath = 6;
 
     /// <summary>Re-measure the current AUTO-HEIGHT view and smoothly grow/shrink the notch to fit - for
     /// when a page's content changes size WITHOUT a state change (the Ask notch going from the short

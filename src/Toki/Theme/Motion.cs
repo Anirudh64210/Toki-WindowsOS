@@ -23,26 +23,60 @@ public static class Motion
 
     // ── easings (new per call - WPF easing functions are cheap and immutable in use) ──
     /// <summary>Arriving / expanding motion - decelerates to a gentle stop.</summary>
-    public static IEasingFunction EaseOut => new CubicEase { EasingMode = EasingMode.EaseOut };
+    public static IEasingFunction EaseOut { get; } = Frozen(new CubicEase { EasingMode = EasingMode.EaseOut });
     /// <summary>Leaving / collapsing motion - accelerates away.</summary>
-    public static IEasingFunction EaseIn => new CubicEase { EasingMode = EasingMode.EaseIn };
+    public static IEasingFunction EaseIn { get; } = Frozen(new CubicEase { EasingMode = EasingMode.EaseIn });
     /// <summary>Only for an element transforming in place (rare); prefer EaseOut for reveals.</summary>
-    public static IEasingFunction EaseInOut => new CubicEase { EasingMode = EasingMode.EaseInOut };
+    public static IEasingFunction EaseInOut { get; } = Frozen(new CubicEase { EasingMode = EasingMode.EaseInOut });
 
     // Strong bezier curves (WPF's stock CubicEase is too weak for overlay-class motion).
     // Drawer is the iOS sheet / Dynamic Island settle - the curve the notch morph rides.
     /// <summary>Strong ease-out for entering elements - fast start, soft landing.</summary>
-    public static IEasingFunction ArriveStrong => new BezierEase(0.23, 1.00, 0.32, 1.00);
+    public static IEasingFunction ArriveStrong { get; } = Frozen(new BezierEase(0.23, 1.00, 0.32, 1.00));
     /// <summary>Accelerating exit - things leave without ceremony.</summary>
-    public static IEasingFunction Depart => new BezierEase(0.30, 0.00, 0.80, 0.15);
+    public static IEasingFunction Depart { get; } = Frozen(new BezierEase(0.30, 0.00, 0.80, 0.15));
     /// <summary>The sheet/notch settle curve (Dynamic Island's) - use for the window size morph.</summary>
-    public static IEasingFunction Drawer => new BezierEase(0.32, 0.72, 0.00, 1.00);
+    public static IEasingFunction Drawer { get; } = Frozen(new BezierEase(0.32, 0.72, 0.00, 1.00));
     /// <summary>Something already on screen transforming IN PLACE (a glyph turning over, a row
     /// sliding across) - eased at both ends, because it neither arrives nor leaves.</summary>
-    public static IEasingFunction Move => new BezierEase(0.77, 0.00, 0.175, 1.00);
+    public static IEasingFunction Move { get; } = Frozen(new BezierEase(0.77, 0.00, 0.175, 1.00));
+
+    /// <summary>Cached and FROZEN. These used to be expression-bodied, so every read allocated a
+    /// fresh unfrozen easing - dozens per transition, each one a thread-affine Freezable the
+    /// animation system had to guard. Frozen instances are shareable and read lock-free.</summary>
+    static IEasingFunction Frozen(Freezable f) { f.Freeze(); return (IEasingFunction)f; }
 
     /// <summary>The standard "arrive" translate distance for entering content (opacity 0→1 + rise).</summary>
     public const double EnterRise = 10;
+
+    /// <summary>
+    /// Has the user asked Windows to stop animating things?
+    ///
+    /// "Show animations in Windows" (Settings, Accessibility, Visual effects) surfaces as
+    /// <c>SystemParameters.ClientAreaAnimation</c>. Toki honoured none of it, which is not a polish
+    /// gap: spatial motion can make people ill, and an overlay that drops out of the top of the
+    /// screen on its own initiative is exactly the class that does it.
+    ///
+    /// REDUCED MOTION IS NOT NO MOTION. Killing transitions outright is its own accessibility bug -
+    /// things then teleport, and a user who cannot see what moved where has lost the thread. The rule
+    /// is: keep opacity and colour, which carry meaning; drop translation, scale and overshoot, which
+    /// carry only spatial drama. Read live rather than cached, because the setting can change while
+    /// the app is running.
+    /// </summary>
+    public static bool Reduced => !SystemParameters.ClientAreaAnimation;
+
+    /// <summary>A duration honouring reduced motion: spatial moves collapse to a short cross-fade
+    /// rather than vanishing, so cause and effect stay legible.</summary>
+    public static int Ms(int ms) => Reduced ? Math.Min(ms, 120) : ms;
+
+    /// <summary>The distance an entering element travels. Zero under reduced motion, so the element
+    /// still fades in where it belongs instead of sliding into place.</summary>
+    public static double Rise => Reduced ? 0 : EnterRise;
+
+    /// <summary>Stagger between siblings in a list reveal. 30-80ms is the researched band; above it
+    /// items read as unrelated, below ~15ms it is imperceptible. Zero under reduced motion.</summary>
+    public static int Stagger(int index, int perItem = 45, int cap = 300) =>
+        Reduced ? 0 : Math.Min(index * perItem, cap);
 }
 
 /// <summary>A cubic-bezier easing (CSS semantics: fixed endpoints 0,0 and 1,1, two control points) so

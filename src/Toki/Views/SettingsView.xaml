@@ -12,8 +12,8 @@
     <!-- The notch Settings is UI/visibility ONLY (owner: "the notch should only have the visibility,
          UI settings"). Everything else - AI summaries, calendar, name, about - lives on the Library's
          Settings page; the row at the bottom takes you there. -->
-    <DockPanel Margin="16,12,16,12">
-        <Grid DockPanel.Dock="Top">
+    <DockPanel Margin="4,12,4,12">
+        <Grid DockPanel.Dock="Top" Margin="12,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -31,7 +31,7 @@
             </StackPanel>
         </Grid>
 
-        <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True" Padding="0">
             <StackPanel>
                 <!-- No "Appearance" heading: there is one setting on this page and a link to the rest,
                      so a category label above a single row is a word that earns nothing (owner,
@@ -43,19 +43,25 @@
                      notch and the all other settings button differ in their starting point ...
                      alignment and symmetry is missing").
 
-                     ONE GUTTER (2026-08-23): every piece of TEXT on this page starts at the same x.
-                     The page pads 16 and both rows sit at 0 inside it, so both labels land on 16.
-                     The row BUTTON drops its horizontal padding to reach that, which is safe ONLY
-                     because it spans the full width: its hit area is the whole row either way. A
-                     button sized to its label must never lose its padding.
-                     Bleeding the box outward with a negative margin was tried first and the
-                     hit-target harness failed it: the scroll area clips what hangs past its
-                     content, so the row went dead at both edges.
+                     ONE GUTTER (2026-08-23, mechanism REPLACED 2026-09-03): every piece of TEXT on
+                     this page starts at the same x, and it still does. What changed is HOW.
+                     Previously the page padded 16, both rows sat at 0 inside it, and the row button
+                     dropped its horizontal padding to 0 to reach the gutter. That aligned the text
+                     and cost the hover its breathing room: the highlight began exactly where the
+                     label did, which the owner reported from a screenshot - "too close to the text,
+                     it needs to be overlapping with the actual field".
+                     Now the PAGE pads 4 and every row carries the remaining 12 itself: the header
+                     and the toggle row as a margin, the button as padding. Text still lands on 16
+                     everywhere, and the button box is 12px wider than its label on each side, so the
+                     fill reads as a row rather than as a box drawn round the words.
+                     Bleeding the box outward with a negative margin was tried twice and the
+                     hit-target harness failed it both times: the scroll area clips what hangs past
+                     its content, so the row goes dead at both edges. Do not try it a third time.
 
                      No caption under either title: a settings page that explains each of its own
                      rows reads as generated copy, not as a product (owner, 2026-08-20). A row whose
                      label does not carry it should be renamed, not annotated. -->
-                <Grid Margin="0,10,0,10">
+                <Grid Margin="12,10,12,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
@@ -66,14 +72,22 @@
                 </Grid>
 
                 <!-- Everything else → the Library's Settings page. -->
-                <Border Height="1" Background="{DynamicResource Hairline}" Margin="0"/>
+                <Border Height="1" Background="{DynamicResource Hairline}" Margin="12,0"/>
                 <!-- ONE rounded button, not a row with an arrow beside it. It used to hang past both
                      edges on negative margins, so its hover box read as a full-width rectangle rather
                      than a button, and the chevron on the right looked like the thing you were meant to
                      click (owner, 2026-08-06). Now: a real Button, a proper rounded box that sits INSIDE
                      the card, and the chevron is decoration inside it - not hit-testable, so it can
                      never look like a separate control. -->
-                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings" Padding="0,10">
+                <!-- The hover fill has to cover the FIELD, not hug the words. With Padding="0,10" the
+                     label sat hard against the button's own edge, so the highlight appeared to start
+                     exactly where the text did (owner, 2026-09-03, screenshot). The row now bleeds 12px
+                     past the content column on each side and pays that back as padding, so the label
+                     stays aligned with "Glassy notch" above it while the highlight reads as a row.
+                     This is NOT the 2026-08-06 regression the comment above warns about: that one hung
+                     past the CARD's edges and lost its rounded box; this stops at the card's inner pad
+                     and keeps radius 12. -->
+                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings" Padding="12,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

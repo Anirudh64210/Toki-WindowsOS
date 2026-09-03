@@ -153,7 +153,10 @@ public sealed class DetailsRound3Tests
         // Toki's bubble is a SIBLING of the card, outside its clip - a tucked loader that leaves
         // him (and his say-bubble) standing is not "just the top line" (owner's words).
         var pill = CodeOnly(Src("src", "Toki", "PillWindow.xaml.cs"));
-        Assert.Matches(@"next == PillState\.Summarizing && _tucked\)\s*\{\s*MascotZone\.BeginAnimation\(OpacityProperty, null\);\s*MascotZone\.Opacity = 0;", pill);
+        // He must END at 0, but he may not JUMP there: a 58px bubble vanishing in one frame at
+        // the exact moment Stop is pressed is its own tell. Fading out on the depart curve
+        // satisfies the rule this test exists for (2026-09-02).
+        Assert.Matches(@"next == PillState\.Summarizing && _tucked\)\s*\{\s*MascotZone\.BeginAnimation\(\s*OpacityProperty,\s*new DoubleAnimation\(0,", pill);
         // And he comes back when the loader opens.
         var expand = Regex.Match(pill, @"void ExpandCurrent\(\).*?ArmIdle\(\);", RegexOptions.Singleline);
         Assert.True(expand.Success, "ExpandCurrent not found");
@@ -190,9 +193,7 @@ public sealed class DetailsRound3Tests
         // element centres the letter with no metric to keep in sync. The inheritance finding still
         // holds and is why a bare TextBlock must never come back here.
         var parts = CodeOnly(Src("src", "Toki", "Views", "PillParts.cs"));
-        var disc = Regex.Match(parts, @"public static Shape DiscLabel\(.*?
-    \}", RegexOptions.Singleline);
-        Assert.True(disc.Success, "DiscLabel is no longer a Shape factory");
+        var disc = Regex.Match(parts, @"public static Shape DiscLabel\(.*?\r?\n    \}", RegexOptions.Singleline);
         Assert.Contains("BuildGeometry", disc.Value);
         Assert.Contains("Stretch.None", disc.Value);
         Assert.DoesNotContain("new TextBlock", disc.Value);

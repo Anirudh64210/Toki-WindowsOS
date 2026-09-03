@@ -25,7 +25,302 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## UI polish: rename, colour collisions, and the never-audited states (Fix 5) (2026-08-26, latest)
+## The morph had four causes, and film was the only way to find them (2026-09-03, latest)
+
+The owner reported the notch "glitch resizing" through four rounds. Each round I fixed a real cause,
+each time they said it was still there, and each time they were right - another was live underneath.
+Recorded in order, because the sequence is the lesson:
+
+1. **The page was laid out at the UNION width.** `PinContentForMorph` arranged the incoming page at
+   the wider of the two sizes and clipped it, so its heading sat hard against the card edge with the
+   text cut off; then `Completed` released to `NaN` and the whole page RE-LAID-OUT in one frame. Now
+   it is arranged at the target, so it is correct on the first frame and identical on the last.
+2. **The old page was destroyed instantly.** `Host.Children.Clear()` meant the card spent the morph
+   showing the NEW page cropped to a rectangle that was still the old size. Fixing the layout could
+   not help, because the CROP was the artifact. There is now a frozen raster of the outgoing page,
+   taken before anything changes, dissolving over the incoming one - a real cross-fade.
+3. **The clip's origin was relative to the union box.** While morphing, the card is centred in the
+   union window, so the clip carries a left inset of half the slack. The instant the window shrank to
+   target that inset was nonsense and cropped the card - and `SettleCorners` corrected it a frame
+   LATER. Every morph ended with one frame shifted. The clip is re-origined in the same dispatcher run
+   as the resize now.
+4. **The settle was a second clock.** A `DispatcherTimer` at `ms + 20`: a deliberate gap that made the
+   window resize a separate, later event, and being wall-clock it drifted under load - exactly when
+   notes are generating. It hangs off the clip animation's `Completed` now, so the last frame of the
+   motion and the resize are the same moment. The shadow also stopped fading in afterwards; it starts
+   at 65% through so it is home when the card lands.
+
+Plus the cross-fade became a HAND-OFF rather than a dissolve between equals - the outgoing page exits
+at 35% on the depart curve and the incoming one waits 22% before starting, because with both fading
+together there were 3-4 frames at 60fps where two pages were equally readable.
+
+**MASCOT FLICKER, fixed.** `CollapsedView` is literally just a `TokiBlob` - the peek IS Toki - so the
+cross-fade was photographing him and dissolving that picture at the card's centre while the real
+bubble sprang in at the panel's gutter. The duplicate was the outgoing SNAPSHOT, not the timing, which
+is why three rounds of delaying the bubble never touched it. A mascot-only peek is never snapshotted.
+
+**INTERRUPTIBILITY.** Every animation now starts from the presentation value. The clip always did; the
+zoom did not (unconditional `From`, so interrupting snapped back and re-zoomed) and the outgoing
+snapshot captured only `Host.Children[0]`, throwing away the half-faded old page an interrupt was
+looking at. Five mutation probes in `InterruptibleMorphTests`, including one asserting nothing
+disables hit-testing during a morph - a transition that swallows clicks is not interruptible however
+its values are computed.
+
+**REVERTED: the glass work from earlier today.** The owner reported the light theme turning grey and
+was right on all three counts. Library DWM acrylic is OFF - a translucent window lets the desktop tint
+the page, and a reading surface has to hold its own colour. `CardPlateOpaque` is back to its two
+original stops. And the eased `t^1.6` stop distribution is gone entirely: it applied to every Down/Up
+gradient with more than two stops, which silently included `CardRim` - a wider change than intended.
+Grain is out too, for the second time in this codebase's history; `CardMaterial` now says so.
+
+**LOADER.** The sliver is a stage bar: it fills a third at a time through transcribing, identifying
+speakers and writing, so it answers "is this getting anywhere?" without being opened - which matters,
+because tucked is how it is actually seen. The shimmer stays on top as the within-stage heartbeat.
+Elapsed time appears after 20s; before that a timer is noise, after it a wait with no number reads as
+a hang.
+
+**SETTINGS ROW.** The hover fill began exactly where the label did, because the row dropped its
+padding to 0 to satisfy the ONE GUTTER rule. Fixed by moving the inset down a level: the page pads 4
+and every row carries the remaining 12 itself. Text still lands on the same gutter; the button box is
+now 12px wider than its label on each side. A negative margin was tried and `--hittest` failed it, as
+it had in August - the scroll area clips what hangs past its content. That warning is blunter now.
+
+**RECORDING BAR.** Tabular figures on the clock (proportional digits changed its width every second
+and nudged the waveform for the whole meeting) and even optical insets. A full revamp is designed and
+owner-approved but NOT built: `docs/backlog.md`, and the artifact linked there.
+
+**METHOD.** ffmpeg is installed and `--noghost` makes the notch visible to a screen recorder (ghost
+mode hides it from every capture, which cost a round to discover). Filming a transition at 60fps and
+tiling the frames found all four morph causes and the mascot duplicate, and immediately caught two
+faults the fixes themselves introduced. Reasoning about WPF animation did not.
+
+2144/2144 green; six harnesses pass; `--notetest` and `--llmtest` pass on the packaged dist.
+
+## One animated path, real glass on the Library, and the ghost-mode claim overturned (2026-09-03)
+
+**THE REGRESSION, AND THE RULE IT BOUGHT.** The 2026-09-02 fix below widened `IsHoverPair` so every
+transition animated. That was the wrong shape: it left TWO paths doing one job, and they drifted
+within a day. `deferPeekBg` still read `peek && hoverMorph`, so a newly-animated collapse called
+`SetSurface(peek)` on frame one - stripping the card's glass and the mascot instantly - and then
+shrank an empty box for 240ms. The owner saw it as "glitch changes", and it was worse than the snap
+it replaced.
+
+The fix was not to correct the second path. It was to delete it: `hoverMorph` is now simply
+`!fromHidden`, one branch handles every visible-to-visible transition, and `SnapResize` is the single
+explicit opt-out. **Two code paths that must agree will eventually disagree.** `GlideTopGap` moved
+into it, so the 10px `TopGapFor` change on MeetingPrompt to RecordingBar rides the morph curve.
+
+**DEAD GLASS, PROPERLY.** `BottomBreath` was 14 and applied to EVERY auto-height panel, not just the
+recording bar. DPI rounding costs one or two pixels; content is top-anchored, so fourteen read as the
+card being slightly too big for its contents on every page. Now 6, and 2 for the fixed-height
+recording row.
+
+**THE GHOST-MODE CLAIM WAS WRONG.** `apple-glass-material-system.md` recorded that blur-behind is
+permanently dead on the notch because of `WDA_EXCLUDEFROMCAPTURE`. Researched and superseded:
+Microsoft's `SetWindowDisplayAffinity` reference lists exactly one caveat (DWM must be composing),
+there is no report anywhere of a conflict, and stealth-overlay apps ship content protection and
+acrylic together routinely - one project *requires* the exclusion for its blur, because a window that
+captures the screen behind itself without excluding itself samples its own output and greys out.
+
+The notch's real blockers are two, and both hold: `AllowsTransparency=True` makes it a per-pixel
+layered window, which bypasses the frame surface DWM paints a backdrop into; and it is never
+activated, and Microsoft documents that acrylic and mica fall back to a solid colour on deactivation.
+A backdrop there would render its flat fallback essentially always.
+
+**THE FINDING THAT REFRAMED IT.** Apple's own `SwiftUI.Material` docs: *"A material blurs a background
+that's part of your app, but not what appears behind your app on the screen."* The glass being
+admired mostly is not sampling the desktop. The gap was a RECIPE gap, not a blur gap.
+
+So: **the Library window gets real DWM acrylic** (`DWMWA_SYSTEMBACKDROP_TYPE 38` =
+`DWMSBT_TRANSIENTWINDOW 3`, Win11 22621+, with `Background=Transparent` AND
+`CompositionTarget.BackgroundColor=Transparent` - setting only the first leaves WPF clearing to
+opaque black first). It has neither blocker, and it is the honest A/B for judging the notch's fake
+version. Confirmed applied on the owner's machine. `InkScrim` keeps body text legible over it.
+Pattern adapted from WPF-UI's `WindowBackdrop` (MIT, credited); no dependency taken.
+
+**And the notch got the recipe:**
+- **3% tiled grain**, generated once, frozen, `ViewportUnits=Absolute` so it does NOT scale when the
+  notch morphs (scaled grain is an instant tell). Noise is a named layer in Microsoft's published
+  acrylic recipe: a smooth fill carries no high-frequency information and reads as synthetic, and
+  grain also dithers away the 8-bit banding that makes large dark gradients look cheap.
+- **Eased light falloff**: `CardPlateOpaque` goes from two stops to four, spaced on a `t^1.6` curve so
+  they bunch toward the top. Evenly spaced stops read as "a gradient was applied"; eased stops read as
+  a lit surface. Two-stop brushes are unaffected (0 and 1 are fixed points).
+
+Both are plain Brushes, so the no-Effect-in-an-animated-subtree rule holds and they cost nothing per
+frame or per resize.
+
+**REDUCE MOTION.** Toki honoured none of it. `Motion.Reduced` reads `SystemParameters.ClientAreaAnimation`
+live; `Ms()`, `Rise` and `Stagger()` collapse spatial travel while keeping opacity, because reduced
+motion means gentler, not absent - a hard cut loses the cause and effect that motion was carrying.
+Wired into the Library open, the mascot spring, the recording flip, the gap glide, the notes cascade
+and the calendar accordion.
+
+**Also in this pass:** the Library's two `DropShadowEffect` casters now leave for the ride and fade
+back on settle (they sit inside the subtree `PlayOpen`/`PlayClose` scale and fade, so every frame was
+a software repaint of a 22px blur); the recording-bar flip drops 520ms/480ms to 240ms/220ms and the
+fall 12px to 6px, because it fires on every recording start and played inside a 14px clipped box;
+`WarmFirstOpen` runs BEFORE the first summon so the first drop-down is not the cold one;
+`RevealMascot` defers to `Render` priority so Toki's spring clock starts with the window rather than
+before `Show()`; the settings toggle animates a `TranslateTransform` instead of `Margin`; and
+`NotesView.Cascade` staggers the note body at 45ms per item, capped at 300ms (live transcript rows
+are deliberately excluded - they already arrive staggered in time).
+
+2139/2139 green; `--revealtest --hittest --measuretest --themetest --notetest --fpstest` all pass;
+`--notetest` and `--llmtest` pass on the packaged dist. Plain-language story:
+`mansplain/57-smoothness-and-honest-notes.md`. Research: `docs/note-quality-research.md`.
+
+## The map step stops paraphrasing and starts citing (2026-09-02)
+
+Stage 3. The map step was where invention entered: it emitted paraphrased dash bullets, so by the time
+the writer ran the transcript was gone and it had nothing left to check itself against. A 40-minute
+meeting's note was written from a paraphrase of a paraphrase, and a name the map step misheard became
+a fact.
+
+Transcript lines are now numbered into each chunk, the map step must CITE the line every point came
+from, and `ValidateDigest` drops any point whose citation does not hold up: outside the window,
+uncited, or whose content words do not appear at the cited line or its neighbours (threshold 0.5,
+neighbours included because turn-merging can split a point across two lines). Citations are stripped
+before the writer sees them, and the surviving points narrow the provenance range to what they
+actually cover.
+
+**Both numbers below are measured on meeting 48, a real 26-minute recording.**
+
+First run dropped **2 of 4 windows entirely**. The diagnostics said `uncited 31, out-of-range 0,
+unsupported 0` - the model was ignoring the citation format, not inventing. Two fixes:
+
+- **Format-first prompting took citation compliance from 0% to about 94%** (32/34 and 23/25). The
+  rules used to come before the shape; a small model follows the last simple pattern it was shown far
+  better than a paragraph of conditions. The required shape and a two-line example now lead.
+- **A verification step must never be able to delete more than it verifies.** An uncited window now
+  falls back to the raw digest without provenance. Losing the content is far worse than losing the
+  citation, and an uncited digest is exactly what the pipeline used before, so the fallback is a
+  return to old behaviour rather than a new failure. This is the rule to remember.
+
+Diagnostics name their counts rather than reporting a bare verdict: a window that lost everything to
+UNCITED is a prompt problem, one that lost everything to UNSUPPORTED is invention or a threshold set
+too high, and those need opposite fixes. "Dropped" alone could not tell them apart, which is why the
+first run was a mystery for one build.
+
+Nine mutation probes in `DigestCitationTests` pin the balance: strict enough that a made-up point
+cannot cite its way in, loose enough that tidying spoken words is still allowed. 2139/2139 green;
+UI harnesses pass; `--notetest` and `--llmtest` pass on the packaged dist. Next steps are in
+`docs/backlog.md` under "NOTE QUALITY (2026-09-02)".
+
+## Measuring a note, and the gate that stops it inventing people (2026-09-02)
+
+Note quality could only be argued about before this, never measured. Three things landed.
+
+**`--groundtest`, the instrument.** Scores every stored note against its own transcript for hard
+entities (names, numbers, dates, money) by exact string match, no model involved. Precision is what
+the note claims and nobody said; recall ships beside it because **precision alone is gamed by writing
+less**, and without it every future "improvement" would just be the model getting terser. Report goes
+to `%TEMP%\toki-groundtest.txt` so runs can be diffed.
+
+Its first reading of the real 112-note Library was **67%** and almost all of it was the instrument
+being wrong. Four false-positive classes, each now a mutation probe in `GroundingTests`:
+
+1. A capital at the start of a bullet is grammar, not a proper noun. It was reporting "Identified",
+   "Agreed" and "Rotate" as invented people in nearly every note.
+2. People SAY "seventy percent" and Toki WRITES "70%". A digits-only comparison called a perfectly
+   grounded number an invention.
+3. A model that numbers its own bullets is not claiming the meeting mentioned the number 2.
+4. "Still open from last time" is built from OTHER meetings' action items, so its names are grounded
+   in a transcript the scorer is not holding. This one reported three correctly carried-over tasks as
+   invented people.
+
+**True baseline: 96.2% precision, 66.1% recall, 10 of 77 notes carrying an unsupported entity.** The
+writer was never as bad as the first reading claimed. Recorded here so the next change has something
+to beat.
+
+**The thin-input gate.** The worst note this engine ever wrote came from one 90-word utterance in
+which somebody said "I propose we do a sort of two-month rotation": it asserted three Options
+considered, a firm Decision, and a three-bullet Rationale. That is a MISSING NULL CASE, not a
+hallucination - the format had no legal way to say "there was not enough here". Below
+`ThinInputWords` (70) substantive words the writer is never consulted and the note is the honest
+minimal one. MEASURED against the real Library: median meeting 210 substantive words, that failure
+56, the junk ("Mm-hmm", "Hello hello hello") 1 to 14. The first attempt guessed 120 and swallowed
+every note test, which is how the calibration got done properly. It lives at the CALL SITE, not in
+`WriteAsync`: the writer's job is to write from what it is handed, and judging a meeting too thin to
+write about is the caller's call.
+
+**The name gate.** A person who was never in the meeting is the failure users never forgive, and a
+note that invents a colleague is not slightly wrong, it is untrustworthy in a way that poisons the
+true lines beside it. `Grounding.PruneUngroundedNames` drops any written line naming someone absent
+from the transcript (or its diarisation tags), running last on the assembled note so a name cannot
+sneak in via the map digest, the final pass or the retry. Two deliberate limits: **names only**,
+because numbers and dates get paraphrased legitimately ("about a hundred", "early next week"); and it
+**does nothing at all when the transcript names nobody**, because then an absent name is evidence the
+recogniser caught nothing, not evidence of invention. That second rule is the existing
+`Real_tasks_are_never_dropped_by_the_name_filter` guard catching this change in the act, and it is the
+same shape as Toki's evidence rule: below the floor, say nothing.
+
+2130/2130 green; all five UI harnesses pass; `--notetest` and `--llmtest` pass on the packaged dist.
+Findings behind all of it: `docs/note-quality-research.md`.
+
+## The three transitions nobody animated, and the 8-minute note cliff (2026-09-02)
+
+Two owner complaints, two root causes, both found by audit rather than guesswork.
+
+**Motion.** `PillWindow.OnStateChanged` decided whether a transition animated at all by asking
+`IsHoverPair(old, next)`. Three of the seven workflow steps failed that test and fell through to an
+in-place branch with NO size choreography: the card teleported in one frame. They were exactly the
+three the user clicks - accepting a meeting (169x40 -> 34x14), pressing Stop (272x64 -> 220x13), and
+opening the notes. Meanwhile the two most polished moments in the app (the drop-down, the 560ms
+notes-ready flight) are the two nobody asks for. The clip-morph machinery was always generic; only
+the gate was narrow. The in-place branch now rides `AnimateSize` like a hover expand, and animates
+by DEFAULT - `SnapResize` stays the explicit opt-out. Fixed alongside:
+
+- **The union-width flash.** `PinContentForMorph`'s completion nulled `Root.Clip` at `t = ms`, but
+  `AnimateSize`'s settle timer does not resize the window until `t = ms + 20`. Root stretches, so for
+  1-2 frames the card repainted at the UNION width - collapsing Home flashed back to 344px, fully
+  plated, every single time. It now holds the target rect until the window has actually resized.
+- **~36% of every close was a dead frame.** `ConcealUp` clipped at the WINDOW height while Root is
+  `CardPadB` shorter, so the retract started 24px above the card. Same bug in the handoff flight.
+- **Content no longer pops.** `ShowNotesReady` / `RestoreTuckedView` swapped children at full opacity
+  and then animated the box around them. Both now fade in under the morph (`FadeHostIn`).
+- Toki's bubble fades out on Stop instead of vanishing in one frame; the linear (un-eased) opacity
+  animations got their curves; `Motion`'s easings are cached and frozen instead of allocating a new
+  unfrozen Freezable on every property read.
+
+**Notes.** The quality ceiling was arithmetic, not prompt wording. On a 4GB card `LlmRuntime` picks
+`ContextSize = 3072`, so `MaxChunkChars()` = `(3072 - 800) * 3` = 6,816 chars, which is about EIGHT
+MINUTES of speech. Every longer meeting was map-reduced into "2 to 5 short dash bullets" per window
+and the entire note was then written from those - a 40-minute meeting's note came from at most 25
+bullets, then capped at 5 bullets per section. The model was writing from a summary of a summary.
+
+- The map step now returns **5 to 12** bullets and is told this digest is all the writer will ever
+  see of that part, keeping names, numbers, dates and quantities verbatim (220 -> 420 tokens).
+- The per-section bullet cap **scales with the meeting** (5 / 7 / 9) instead of being 5 forever.
+- The final pass gets **760 tokens**, not 480. The truncated-tail guard existed precisely because
+  480 landed inside ACTION ITEMS, the last thing written, so to-dos were the content most often lost.
+- **The writer is finally told what the meeting WAS.** Date, length, the app, the calendar event
+  title, who was invited, and which voices diarisation actually heard. All of it already existed in
+  `CurrentPrep` and was used only for name repair. A model that cannot tell a 4-minute catch-up from
+  a 90-minute review writes both the same way. Facts only, never a hint to go find something.
+
+**Two instruments were blind.** `--llmtest` and `--renotes` printed `notes.Decisions`, which the model
+path never populates - they have always printed `KEY POINTS (0)` for a model-written note. They print
+`Sections` now. You could not measure a note-quality change before this.
+
+**`--seed` was writing into the real Library.** It built `new MeetingStore()` with no path, i.e. the
+real `%APPDATA%\Toki	oki.db`, unguarded and not `#if DEBUG`. Two hand-written C# string literals
+(ids 1 and 2) are sitting in the owner's 112-note store, and they read better than real output, so
+anyone judging quality by browsing the Library was over-rating the product. It now uses a temp db.
+
+Also: `Disc_labels_pin_their_own_line_metrics` had been passing only because the test assembly was
+stale. Its regex embedded a literal CRLF while `PillParts.cs` is LF-only, so it could never match. The
+pattern is `
+?
+` now and the guard is real again. 2115/2115 green; `--revealtest`, `--hittest`,
+`--measuretest`, `--themetest`, `--notetest` all pass, and `--notetest` + `--llmtest` pass on the
+packaged dist.
+
+Skills: Emil Kowalski's `apple-design`, `animate`, `review-animations`, `improve-animations`,
+`animation-vocabulary` and `design-eng` are vendored (MIT) under `.claude/skills/emil-*` as the
+source-of-numbers layer beneath the house `motion-and-feel`, which still wins on conflict.
+
+## UI polish: rename, colour collisions, and the never-audited states (Fix 5) (2026-08-26)
 
 A batch of visual-polish work, added the `apple-design-motion` skill (MIT) as the source-of-numbers
 under `motion-and-feel`, and audited/fixed the design-audit's "missing states" hole.
@@ -1921,8 +2216,9 @@ including the three hypotheses for the disagreement that were tested and all tur
 
 ## The five menu-bar pill states, from the Figma CSS export (2026-08-14)
 
-The owner supplied 22 screenshots plus `css code for all the design layers.txt` - the raw Figma
-export of the whole "Redesign by SKz" board, 46,687 lines covering **23 screens**: the notch
+The owner supplied 22 screenshots plus `css code for all the design layers.txt` (moved 2026-09-03
+to `docs/design/figma-layer-css.txt`, see `docs/design/README.md`) - the raw Figma export of the
+whole "Redesign by SKz" board, 46,687 lines covering **23 screens**: the notch
 (dashboard, three onboarding steps, live transcription, notes, ask, settings, meetings list), six
 menu-bar states, and the full 1440px Library window. This entry builds the six menu-bar frames; the
 rest is tracked as the open front.

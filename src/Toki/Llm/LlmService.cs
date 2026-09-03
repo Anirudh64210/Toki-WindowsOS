@@ -159,12 +159,12 @@ public sealed class LlmService
     /// The summary is written from the TRANSCRIPT alone; the user's sticky note is deliberately
     /// not an input - the note must say what was actually said.</summary>
     public async Task<NoteSet?> WriteNotesAsync(IReadOnlyList<TranscriptSegment> transcript,
-        CancellationToken ct = default, NoteTemplate? force = null)
+        CancellationToken ct = default, NoteTemplate? force = null, string? about = null)
     {
         var llm = Active();
         if (llm is null || !llm.Ready) return null;
         force ??= DefaultForced();   // honour the user's "always use X" default when no explicit override
-        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force); }
+        try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force, about); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }
     }
 

@@ -27,10 +27,20 @@
              width - no hardcoded range that only covers part of a wider bar. -->
         <Border x:Name="Track" Grid.Row="0" Height="3" VerticalAlignment="Center" Margin="16,0"
                 ClipToBounds="True" SizeChanged="OnTrackSizeChanged">
-            <Border x:Name="Shimmer" Width="70" HorizontalAlignment="Left" CornerRadius="1.5"
-                    Background="{DynamicResource Shimmer}" RenderTransformOrigin="0.5,0.5">
-                <Border.RenderTransform><TranslateTransform x:Name="ShimmerMove"/></Border.RenderTransform>
-            </Border>
+            <Grid>
+                <!-- STAGE PROGRESS. The wait can run for minutes and the only signal that anything was
+                     happening was a shimmer looping identically forever, which is exactly what a hung
+                     app looks like. This fills a third at a time as the pipeline moves through
+                     transcribing, identifying speakers and writing, so the sliver answers "is it
+                     getting anywhere?" without being opened. The shimmer stays on top as the
+                     within-stage heartbeat, because a stage has no measurable progress of its own. -->
+                <Border x:Name="Progress" Width="0" HorizontalAlignment="Left" CornerRadius="1.5"
+                        Background="{DynamicResource Shimmer}" Opacity="0.34"/>
+                <Border x:Name="Shimmer" Width="70" HorizontalAlignment="Left" CornerRadius="1.5"
+                        Background="{DynamicResource Shimmer}" RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform><TranslateTransform x:Name="ShimmerMove"/></Border.RenderTransform>
+                </Border>
+            </Grid>
         </Border>
 
         <!-- Expanded content (revealed only when you hover the working sliver fully open). -->
@@ -45,6 +55,10 @@
             <TextBlock x:Name="Dots" Text="" FontFamily="{StaticResource UiFont}" FontSize="13"
                        FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
                        Width="16" VerticalAlignment="Center"/>
+            <!-- Elapsed, and only once the wait is long enough to worry about. A number that keeps
+                 moving is the difference between "slow" and "stuck". -->
+            <TextBlock x:Name="Elapsed" Text="" FontFamily="{StaticResource UiFont}" FontSize="11.5"
+                       Foreground="{DynamicResource TextLow}" Margin="9,1,0,0" VerticalAlignment="Center"/>
         </StackPanel>
     </Grid>
 </UserControl>

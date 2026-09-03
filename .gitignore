@@ -20,7 +20,7 @@ dist/
 # Windows shortcuts (machine-specific absolute paths)
 *.lnk
 
-# Images dropped in the repo ROOT (screenshots, references, exports) — the intentional design
+# Images dropped in the repo ROOT (screenshots, references, exports): the intentional design
 # assets live in Toki-ProductDesign/ and stay tracked; only stray root-level images are ignored.
 /*.png
 /*.jpg
@@ -29,7 +29,7 @@ dist/
 /*.bmp
 /*.webp
 
-# Trial / demo / screen-recording videos — large, machine-specific, never committed
+# Trial / demo / screen-recording videos: large, machine-specific, never committed
 *.mp4
 *.mov
 *.avi
@@ -41,7 +41,7 @@ dist/
 *.gguf
 *.bin
 *.tar.bz2
-# Audio recordings — never committed
+# Audio recordings, never committed
 *.wav
 *.mp3
 *.m4a
@@ -71,3 +71,38 @@ design-web/dist/
 video/node_modules/
 video/out/
 video/public/raw.mp4
+
+# ---------------------------------------------------------------------------
+# Screenshots, screen recordings and render output, ANYWHERE in the tree.
+# The root-only /*.png rules above miss anything dropped into a subfolder, and
+# the filming workflow (docs: film the transition, do not reason about it)
+# produces contact sheets and frame dumps that are large and regenerable.
+Screenshot *.png
+Screenshot_*.png
+Recording *.mp4
+WhatsApp Image *
+*-sheet.png
+*-contact.png
+frames/
+shots/
+renders/
+render-out/
+libshot/
+
+# Self-test PNG output (--render <dir> / --libshot <dir>) when pointed at the repo.
+toki-render/
+toki-shots/
+
+# Claude Code machine-local state. The PERMISSION list and any local settings are
+# per-machine and can name absolute paths; they are never shared.
+.claude/settings.local.json
+.claude/settings.json.bak
+
+# NOT ignored, deliberately: .claude/skills/. Those SKILL.md files are part of the
+# constitution (CLAUDE.md requires loading motion-and-feel + apple-design-motion on
+# every visual change) and are the record of decisions already paid for in bugs.
+# A clone without them loses the rules, so they stay tracked.
+# Provenance: the vendored ones (emil-*, apple-design-motion) each carry their own
+# MIT attribution line in their SKILL.md header. This repo is PRIVATE, so that is
+# provenance only. If it is ever made public, that becomes a redistribution notice
+# obligation and the full MIT licence text has to ship beside them.

@@ -36,16 +36,23 @@ public partial class RecordingBarView : UserControl
     void PlayFlipAndFall()
     {
         Flip.Angle = 0;
-        Fall.Y = -12;
+        Fall.Y = -6;
         // Turn leads, fall follows 60ms late. Character motion is exempt from the 350ms cap
         // (Motion.cs). Transforms only - nothing in this subtree may carry an Effect.
+        // WAS 520ms + 480ms. Two problems, both measured: this fires on EVERY recording start, which
+        // puts it far past the 250ms budget for a frequent action (the single loudest "sluggish"
+        // tell), and it plays inside a 14px-tall ClipToBounds box, so most of a 12px fall was clipped
+        // away and never seen. Shortened to the frequency band, and the fall shortened to what
+        // actually fits the box it happens in.
+        if (Theme.Motion.Reduced) { Flip.Angle = 180; Fall.Y = 0; return; }
+
         Flip.BeginAnimation(RotateTransform.AngleProperty,
-            new DoubleAnimation(0, 180, TimeSpan.FromMilliseconds(520))
+            new DoubleAnimation(0, 180, TimeSpan.FromMilliseconds(240))
             { EasingFunction = Theme.Motion.Move });
         Fall.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(-12, 0, TimeSpan.FromMilliseconds(480))
+            new DoubleAnimation(-6, 0, TimeSpan.FromMilliseconds(220))
             {
-                BeginTime = TimeSpan.FromMilliseconds(60),
+                BeginTime = TimeSpan.FromMilliseconds(40),
                 EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 },
             });
     }

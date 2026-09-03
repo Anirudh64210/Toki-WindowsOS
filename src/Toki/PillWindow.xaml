@@ -71,6 +71,11 @@
              whole number of DEVICE pixels so the stroke lands crisp at 125%/150%. -->
         <Border x:Name="Root" Margin="68,0,20,24" CornerRadius="24" BorderThickness="1"
                 Background="{DynamicResource CardPlateOpaque}" BorderBrush="{DynamicResource CardRim}">
+            <!-- Absorbs a change in the card's distance from the top edge (TopGapFor) so the gap
+                 glides instead of the WINDOW teleporting. Composited: never a layout pass. -->
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="RootShift"/>
+            </Border.RenderTransform>
             <Grid>
                 <theme:CardMaterial x:Name="Material"/>
                 <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">

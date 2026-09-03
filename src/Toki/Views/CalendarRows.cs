@@ -360,6 +360,19 @@ static class CalendarRows
     {
         var from = el.ActualHeight;
         var growing = to > from;
+
+        // Height is a LAYOUT property: animating it re-runs Measure and Arrange over this row's whole
+        // subtree every frame, on the UI thread. It is kept here and nowhere else because an
+        // accordion genuinely has to reflow its neighbours - a transform would slide the row over the
+        // ones below instead of moving them. The mitigation is to keep it SHORT (Micro/Exit) and to
+        // let reduced motion skip it outright rather than pay per-frame layout for a decoration.
+        if (Motion.Reduced)
+        {
+            el.BeginAnimation(FrameworkElement.HeightProperty, null);
+            el.Height = to;
+            return;
+        }
+
         el.BeginAnimation(FrameworkElement.HeightProperty,
             new System.Windows.Media.Animation.DoubleAnimation(from, to, Motion.Dur(growing ? Motion.Micro : Motion.Exit))
             { EasingFunction = growing ? Motion.EaseOut : Motion.EaseIn });

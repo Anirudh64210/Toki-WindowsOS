@@ -1,5 +1,176 @@
 # Toki - backlog & "what's next" (living doc)
 
+## 🎨 OWNER CALL OPEN: accent drift between the Figma file and Theme.xaml (2026-09-03)
+
+Found while cleaning the repo, not while looking for it. The root file `css code for all
+the design layers.txt` (a 46,687-line Figma "copy as CSS" dump of node `288:4`) moved to
+`docs/design/figma-layer-css.txt`, and `docs/design/README.md` now explains what it is,
+what it must never be used for, and what was extracted from it.
+
+The dump CONFIRMS the constitution on the things that matter: `rgba(33, 30, 30, 0.5)` 72
+times, the 1px white-10% rim 38 times, the 99/24/16/12 radius ladder by real usage, and
+the 90/50/25 white-opacity text ladder. None of that has drifted.
+
+Four of the six accents HAVE drifted:
+
+| Meaning | Figma | Theme.xaml |
+|---|---|---|
+| amber | `#F5A05C` | `#F5A05C`, matches |
+| green | `#45C98A` | `#3DD68C` |
+| blue | `#4DB8F5` | `#5AA9F9` |
+| pink | `#EA72B0` | `#F09CC7` |
+| purple | `#B477E8` | `#C08AF0` |
+
+All four shipped values are slightly lighter and more saturated than the file, and they
+drift in the same direction, which looks like a deliberate hand-tune rather than a slip.
+
+**Not changed, deliberately.** Accent colour is a visible product decision and the rule is
+no spreading a change for consistency without approval. Two questions for the owner:
+
+1. Which wins, the file or the tuned values? "The Figma file is the boss" argues for the
+   file; the consistent direction of the drift argues someone tuned these on purpose.
+2. `Theme.xaml` carries TWO accent families (`Amber #E89B3C` alongside `AccentAmber
+   #F5A05C`, and a plain `Green`/`Blue` beside them). Which is authoritative on which
+   surface is not answerable from the tokens alone. Worth resolving whichever way (1) goes,
+   because a second family is how the first one silently comes back.
+
+Cheap either way: these are token values in one file, and `--themetest` walks every notch
+view in both themes afterwards.
+
+## 🎙️ APPROVED DESIGN, NOT YET BUILT: the recording bar (2026-09-03)
+
+Owner saw it and said "I like the design, we'll work on it later." Build from the artifact, not from
+this summary: **https://claude.ai/code/artifact/8d0da9ff-9ebb-4c18-a0b2-bb31cbec42b6** (both bars live
+at true size, hover the proposed one).
+
+**The thesis:** the bar is on screen for the whole meeting and today it shows a clock, fourteen grey
+dots, and three round controls of EQUAL weight - one of which stops the recording and two of which are
+rarely touched. It should answer three questions and offer one action.
+
+**To build:**
+1. **Stop becomes a labelled pill**, not a red disc among grey ones. Costs ~16px of width and turns a
+   glyph into a word; that is the right trade for the only destructive control on the bar.
+2. **Ghost and expand recede** to opacity 0 until pointer or keyboard focus reaches the bar.
+3. **The waveform says WHO is talking** - two tones plus a small label. This is the strongest idea in
+   the set: Toki captures the mic and the meeting as separate streams and already knows which is
+   louder, and then draws one anonymous grey wave. No competitor can copy it, because they join the
+   call as a bot on a single stream. `LevelMeter` already carries both levels.
+4. **A breathing live dot**, 6px, StopRed, 2.4s cycle, stopped under reduced motion.
+
+**Already shipped from this pass:** tabular figures on the clock, and even optical insets (18 left /
+16 right, chevron overhang 6 to 2).
+
+**Tried and reverted, do not retry:** spanning the waveform across the full row to centre it on the
+card. Rendered, it ran underneath the ghost and stop buttons - the wave stretches to its span. A few
+px off centre beats colliding with the controls.
+
+**Two owner calls still open:** whether the wide Stop pill is worth the extra width versus keeping the
+disc and only fading the other two; and whether the 38px speaker label earns its space or the wave's
+colour alone should carry it.
+
+## ✅ FIXED 2026-09-03: Toki flickered opening a panel from a peek
+
+**FIXED, and verified on film.** `CollapsedView` is literally just a `TokiBlob` - the peek IS Toki -
+so the cross-fade was photographing him and dissolving the picture at the card's centre while the
+real bubble sprang in at the panel's gutter. The duplicate was the OUTGOING SNAPSHOT, not the
+timing, which is why three rounds of delaying the bubble never touched it. A mascot-only peek is now
+never snapshotted; there is nothing to carry across anyway, since the card behind it is bare.
+
+Filming the fix immediately showed a NEW fault it had caused: ~10 frames with no Toki at all,
+because the 170ms delay was still waiting for a duplicate that no longer existed. Back to 70ms.
+
+History kept below, because the three failed attempts are each a real bug that was fixed on the way. Recording it is the only way to make
+progress on this - `dist\Toki.exe --noghost --state collapsed,home,collapsed,home`, then ffmpeg
+gdigrab at 60fps and tile the frames. Ghost mode hides the notch from every screen recorder, so
+`--noghost` is mandatory.
+
+**What the frames show (60fps, verified):** the peek's Toki sits at the card's RIGHT, then in one
+frame he is gone and a different Toki springs in at the LEFT, dim and oversized.
+
+**Why there are two:** a peek draws its OWN small Toki inside its content, because the floating
+bubble is hidden in that state (CLAUDE.md: "peeks carry their own tiny one"). So the peek's Toki is
+still on screen inside the OUTGOING page (now a cross-fade snapshot) while `MascotZone`'s bubble
+springs in at the panel's gutter. Different positions, same frames.
+
+**Attempts so far, all landed and none sufficient:**
+1. Deferred `RevealMascot` to Render priority so his clock starts with the window. Real bug (the
+   cold first open), not this one.
+2. Made the arming synchronous - opacity and scale set in the same frame - so he can never be
+   painted at final values before the entrance runs. Real bug, not this one.
+3. Delayed the bubble to 170ms so the peek's Toki has faded before it starts. Still reported.
+
+**What to check next, in order:**
+- Is he being REPLACED or MOVED? If `PlaceMascot`/`MascotShift.X` is gliding him from the peek spot
+  to the gutter at the same time as a fresh spring, two motions are fighting over one element.
+- The window recentres when it resizes, which shifts every window-anchored child instantly.
+  `AnimateSize` compensates via `MascotShift.X`, but the compensation and `PlaceMascot`'s own X may
+  be double-counting on the peek-to-panel path specifically.
+- Consider not drawing a mascot inside peek CONTENT at all, and instead moving the one bubble. One
+  element that travels cannot flicker; two that hand over always can.
+
+## 🧊 MOTION + GLASS (2026-09-03) - shipped and open
+
+**Shipped:** one animated path for every notch transition (the allowlist is gone; `SnapResize` is the
+only opt-out); `GlideTopGap`; reduce-motion (`Motion.Reduced/Ms/Rise/Stagger`); the Library's shadow
+casters hidden during its open/close; the recording flip at 240/220; `WarmFirstOpen` before the first
+summon; the mascot spring deferred to Render priority; `BottomBreath` 14 to 6; the settings toggle on
+a transform; `NotesView.Cascade`; **real DWM acrylic on the Library window**; grain + eased falloff on
+the notch card.
+
+**OPEN, in order:**
+
+1. **Interruptibility.** The largest remaining motion gap. Every animation is a fixed-duration
+   `DoubleAnimation` that restarts from zero, so a state change mid-morph jumps. Apple's core rule is
+   that motion starts from the CURRENT on-screen value and carries velocity. Real work, not a patch.
+2. **The loading state.** Between Stop and notes-ready the user sees one 3px shimmer in a 13px sliver
+   for what can be minutes. No progress, no step count. `App.SummarizeStage` already raises the stage
+   name and it is only visible if you click the sliver.
+3. **The recording bar's visual redesign.** Owner named it in the first message of the 2026-09-01
+   session; only its measurements were changed, never its design.
+4. **A captured blurred backdrop for the notch** (Part H6 of the research). Only if the recipe proves
+   insufficient beside the Library's real glass - judge them side by side first.
+5. **Grain: watch it.** Grain was removed once before for "reading as texture" and has been
+   reintroduced differently (128px, 3%, absolute viewport, paired with the eased falloff that
+   addresses the banding complaint at source). **If the owner reports texture again, the earlier
+   finding wins and it comes out.**
+6. No reduce-motion equivalent yet for `prefers-reduced-transparency`; Windows exposes a transparency
+   setting that should probably drop the acrylic and grain together.
+
+## 🔬 NOTE QUALITY (2026-09-02) - the current front
+
+Full findings and the evidence for every line below: `docs/note-quality-research.md`.
+Shipped today: `--groundtest` (the instrument), the thin-input gate, the name gate, and the extractive
+citing map step. **Baseline to beat: 96.2% precision, 66.1% recall over 77 stored notes.**
+
+**NEXT, in order:**
+
+1. **Regenerate the Library and re-measure.** Every number above describes notes written by the OLD
+   pipeline; nothing shipped retroactively improves them. Needs a persisting rewrite path -
+   `--renotes` prints and discards today.
+2. **Wire provenance through to the note.** `ValidateDigest` now returns verified, narrowed line
+   ranges, but `NoteSection.Sources` / `ActionItem.Source` are still never assigned and
+   `MeetingStore.ReplaceNotes` does not persist `src_first`/`src_last`. The documented +4.6pp
+   precision-at-1 gain is STILL not in the product.
+3. **Evidence-gated sections.** Model returns line ids per section type; CODE decides a section exists
+   above a threshold, so an absent section is an absence of evidence rather than a judgement. Lands
+   after the format is settled.
+4. **The note format.** Outcome line first (not a "Summary" heading), commitments second and anchored,
+   topic-derived headings, "For you" above the body, "Risks / open questions", decisions and questions
+   as earned inline marks rather than standing sections. Ban "discussed" as a lint rule shaped like
+   `NoEmDashTests`. **Owner call on the shape before building.**
+5. **Grammar-constrain the classification passes only**, never the prose pass. The map citation format
+   is the first candidate now that its compliance is measurable.
+6. **Microphone health check at meeting start.** Toki has measured this failure (mic 38dB below the
+   meeting stream, half the transcript invented) and has better instruments than the products shipping
+   the check.
+7. **The measure.** The note column has no `MaxWidth`: about 140 characters in a wide window, 6 to 8
+   words in the Library pane. Owner decision 2026-08-24 stands; the number to come back to is 600.
+
+**Owner decisions parked here, NOT to be taken unilaterally:** auto-start recording with a cancellable
+countdown (converts the ask-first rule to opt-out, CLAUDE.md rule 3); the note format in item 4; and
+deleting the two seeded fake notes (ids 1 and 2) that `--seed` wrote into the real Library before it
+was guarded.
+
 ## 🧭 OWNER RE-PRIORITISATION (2026-08-25) - THIS is the current order
 
 Supersedes the 2026-08-19 open list below for ordering. Priority: (1) transcription/speaker quality,
@@ -331,18 +502,18 @@ and would otherwise have silently done nothing). T5's two constant costs are fix
 measured and blocked on two owner decisions. Details: `docs/ui-performance.md`,
 `docs/real-meeting-findings.md`.
 
-**T5 UI — decided by measurement, not opinion:**
+**T5 UI, decided by measurement, not opinion:**
 - ✅ `Select()` no longer rebuilds the list to move a highlight: **424 ms → 0.4 ms**.
 - ✅ Search debounced 180 ms: typing "pricing" costs 1 rebuild, not 7.
 - ✅ New `--uitest` asserts budgets against the real database.
-- ⬜ **Virtualization — now justified**: a build is 424 ms at 54 meetings and ~343 ms of that is WPF
+- ⬜ **Virtualization, now justified**: a build is 424 ms at 54 meetings and ~343 ms of that is WPF
   arranging cards nobody can see; it grows linearly (≈3.9 s at 500 meetings) while the visible portion
   stays at ~6 rows. Approach: `ItemsControl` subclass overriding `PrepareContainerForItemOverride` so the
   existing code-built `Card(m)` is reused, plus `VirtualizingStackPanel` with recycling. **Main risk:
-  drag-reorder walks `Cards.Children` BY INDEX** — indices become positions in the realised window, not
+  drag-reorder walks `Cards.Children` BY INDEX**: indices become positions in the realised window, not
   the list. Five other `Cards.Children` sites also need rework (see the table in `docs/ui-performance.md`).
 
-**T8 diarisation — blocked on two owner decisions:**
+**T8 diarisation, blocked on two owner decisions:**
 1. **Persistent voiceprints?** Owner leaned toward "only people you name" (the Circleback model, plus an
    Otter-style "Rematch" over old meetings). Not yet confirmed explicitly, and it stores biometric data
    for colleagues who did not consent. Transient-only is the zero-exposure alternative.

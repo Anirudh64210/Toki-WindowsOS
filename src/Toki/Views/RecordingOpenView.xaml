@@ -26,9 +26,10 @@
              24, because the GLASS PUCK on it is 26: a 26px control in a 24px row gets a layout clip,
              which sliced the bottom off the chevron's disc and cropped its shadow rings flat. The row
              sizes to its tallest control; the pill height it adds up to is unchanged.
-             18 left / 14 right: the timer needs a touch more air off the rounded corner than the round
-             controls do, which sit on their own discs and already carry their own. -->
-        <Grid x:Name="BarRow" Margin="18,12,14,12" Height="26" Background="Transparent"
+             18 left / 16 right, and the chevron now hangs only 2px past it rather than 6. It used to
+             measure 8px of optical right inset against 18 on the left, so the control cluster sat
+             visibly nearer its corner than the timer did to its own. -->
+        <Grid x:Name="BarRow" Margin="18,12,16,12" Height="26" Background="Transparent"
               MouseLeftButtonUp="OnCollapse" Cursor="Hand" ToolTip="Collapse">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -39,10 +40,20 @@
             </Grid.ColumnDefinitions>
 
             <!-- Amber, not white: one meaning one colour, and amber is time everywhere else in Toki. -->
+            <!-- TABULAR figures. This ticks every second, and proportional digits are different
+                 widths, so 0:09 to 0:10 changed the timer's width and nudged everything beside it
+                 once a second for the whole meeting. Tabular numerals are why clocks do not wobble. -->
             <TextBlock x:Name="Timer" Grid.Column="0" Text="0:00"
                        FontFamily="{StaticResource UiFont}" FontSize="13" FontWeight="SemiBold"
+                       Typography.NumeralAlignment="Tabular"
                        Foreground="{DynamicResource Amber}" VerticalAlignment="Center"/>
 
+            <!-- STAYS IN THE MIDDLE COLUMN. Spanning the whole row and centring on the card was
+                 tried (2026-09-03) so the wave would sit on the card's true centreline rather than
+                 midway between a narrow timer and a wide control cluster. Rendered, it overlapped the
+                 ghost and stop buttons - the wave stretches to its span, so a full-row span makes it
+                 wide enough to run under them. A few px off centre is a smaller fault than colliding
+                 with the controls, and space-between is what the frame specifies anyway. -->
             <controls:VoiceWave x:Name="Wave" Grid.Column="2" BarCount="14" Height="20"
                                 VerticalAlignment="Center"/>
 
@@ -60,7 +71,7 @@
                 <!-- Stop: the themed StopRed disc with a white rounded square (built in code so the
                      disc, not the glyph, is the hit target). -->
                 <ContentControl x:Name="StopHost" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                <ContentControl x:Name="ExpandHost" VerticalAlignment="Center" Margin="0,0,-6,0"/>
+                <ContentControl x:Name="ExpandHost" VerticalAlignment="Center" Margin="0,0,-2,0"/>
             </StackPanel>
         </Grid>
 

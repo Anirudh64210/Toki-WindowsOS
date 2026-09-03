@@ -1654,7 +1654,8 @@ hand and re-sync.
 ## The capsule states, and one card that had to get out of the way (2026-08-14)
 
 The owner supplied the raw Figma export of the whole board (`css code for all the design layers.txt`,
-46,687 lines, 23 screens). Building its six "Menu Bar" frames forced two structural decisions.
+46,687 lines, 23 screens; moved 2026-09-03 to `docs/design/figma-layer-css.txt`, see
+`docs/design/README.md`). Building its six "Menu Bar" frames forced two structural decisions.
 
 **Decision: some states draw their own capsules; the window's card steps aside.** Every notch state
 so far has been content laid on ONE glass card that the window draws. Three of the menu-bar frames
@@ -3789,3 +3790,192 @@ interjection family joins um/uh, and comma-parenthetical discourse fillers ("it 
 "do you know what time"; the literal uses have no comma and are untouched, so the exact wording of
 everything real is preserved and evidence links still match. Genuinely rambling speech and side-talk that
 was actually said stays: faithful, like Granola. Every change ships a mutation probe (14 new tests).
+
+## Animate by default; snapping is the exception (2026-09-02)
+
+`OnStateChanged` gated ALL size choreography behind `IsHoverPair`, an allowlist of five state pairs.
+Everything else - including `MeetingPrompt -> RecordingBar` and `RecordingOpen -> Summarizing`, the
+two transitions a user actually clicks - fell through to a branch that called `SizeWindowNow` and
+teleported. The rule is inverted now: the in-place branch animates through `AnimateSize`, and a snap
+must be asked for explicitly (`SnapResize`, used by onboarding). The machinery did not change; it was
+already generic and already correct about the hard parts (window sized twice per transition to the
+union box, content pinned so it lays out once, the only Effect hidden for the ride).
+
+Corollary found in the same pass, and worth stating as a rule: **a clip must be dropped only after the
+window has actually reached its target size.** `PinContentForMorph` cleared `Root.Clip` on the
+animation's `Completed`, 20ms before `AnimateSize`'s settle timer resized the window, and Root
+stretches - so the card repainted at the union width for 1-2 frames on every collapse. The clip now
+holds the target rect and `SettleCorners` replaces it after the resize.
+
+## The note writer's context window is a product constraint, not a runtime detail (2026-09-02)
+
+`MaxChunkChars()` derives the map/reduce chunk size from `LlmRuntime.ContextSize`, which is chosen
+from detected VRAM. On a 4GB card that is 3072, giving 6,816 chars per window - about eight minutes of
+speech. Above that the note is written from digests, not from the transcript, and the digest budget
+("2 to 5 short dash bullets" per window) was set without reference to how much of the meeting it had
+to carry. The consequence was invisible in every test because the suite tests the layers, not the
+artifact, and both CLI instruments printed the wrong field.
+
+Two decisions follow:
+
+1. **The digest is the product, not an intermediate.** For any meeting over ~8 minutes the digest IS
+   what the note is written from, so it is budgeted accordingly (5-12 bullets, 420 tokens, and an
+   explicit instruction that names, numbers, dates and quantities survive verbatim because nothing
+   downstream can recover them).
+2. **Output caps scale with input.** A fixed 5-bullets-per-section cap claims a 90-minute meeting
+   holds no more than a 3-minute one. It is 5/7/9 by content length now.
+
+**The writer is given the meeting's facts.** Date, duration, host app, calendar title, invitees, and
+the voices diarisation found. This is the one place a hint is safe, and only because every line is
+something Toki OBSERVED. It states context and asks for nothing - consistent with "a template is a
+claim": a prompt that tells the model to go looking for something is a claim the transcript may not
+support, and that is how sections fill with invention.
+
+## A dev seam that writes to the real store is a data bug (2026-09-02)
+
+`--seed` constructed `new MeetingStore()` with no path - the real `%APPDATA%\Toki	oki.db` - and
+mirrored hand-written demo notes into the real `Notes\` folder. It was not `#if DEBUG` guarded, while
+`--dbtest` beside it correctly used a temp path. Two literal-string notes have been in the owner's
+Library since, and being hand-written they read better than anything the pipeline produces, which
+silently biased every quality judgement made by browsing. Rule: **a harness names its store
+explicitly; a default-constructed store is the user's.**
+
+## Two paths that must agree will disagree (2026-09-03)
+
+`OnStateChanged` gated animation behind `IsHoverPair`, an allowlist of five state pairs. The first
+fix widened the allowlist. That was the wrong shape, and it failed within a day: `deferPeekBg` still
+read `peek && hoverMorph`, so a newly-animated collapse stripped the card's surface on frame one and
+then shrank an empty box. The owner reported it as glitching, and it was worse than the snap it
+replaced.
+
+The correction is structural, not a patch. `hoverMorph` is now `!fromHidden` and there is ONE branch
+for every visible-to-visible transition, sharing one surface-deferral and one mascot path.
+`SnapResize` is the single explicit opt-out.
+
+**The rule: when a behaviour must be consistent across cases, do not widen the gate - remove it.** A
+second path that has to be kept in step with the first is a defect with a delay on it.
+
+Corollary already recorded on 2026-09-02 and reaffirmed here: a clip must be dropped only after the
+window has reached its target size, and a change in `TopGapFor` rides the morph as a composited
+transform (`GlideTopGap`) rather than a per-frame window move, because a layered window pays a native
+move plus a DWM surface update on every frame.
+
+## Reduced motion is gentler motion, not no motion (2026-09-03)
+
+`Motion.Reduced` reads `SystemParameters.ClientAreaAnimation` live (it can change while running).
+`Ms()` caps a duration, `Rise` zeroes entry travel, `Stagger()` zeroes a cascade. The rule applied
+everywhere: keep opacity and colour, which carry meaning; drop translation, scale and overshoot,
+which carry spatial drama. Cutting transitions outright is its own accessibility bug - elements then
+teleport and the viewer loses what moved where.
+
+## The ghost-mode blur claim was wrong, and the gap was a recipe (2026-09-03)
+
+`apple-glass-material-system.md` recorded blur-behind as permanently impossible on the notch because
+of `WDA_EXCLUDEFROMCAPTURE`. **SUPERSEDED.** Microsoft's `SetWindowDisplayAffinity` reference lists
+exactly one caveat - DWM must be composing, which is a requirement not a conflict - and no report of
+an incompatibility exists in the Electron, WPF or overlay-app corpus. One project *requires* the
+exclusion for its blur: a window that captures the screen behind itself without excluding itself
+samples its own output and greys out within frames.
+
+The notch's actual blockers, both verified as documented behaviour:
+
+1. `AllowsTransparency=True` makes it a per-pixel layered window (`WS_EX_LAYERED`), which bypasses the
+   frame surface DWM paints a system backdrop into.
+2. It is never activated (`ShowActivated=False`), and Microsoft documents that acrylic and mica
+   "replace translucency and texture with a solid color" when a window deactivates. A backdrop there
+   would render its flat fallback essentially always - the plate it already has, for a rewrite.
+
+The reframing finding is Apple's own: *"A material blurs a background that's part of your app, but
+not what appears behind your app on the screen."* The admired glass is largely not sampling the
+desktop, so the quality gap was a RECIPE gap.
+
+**Decisions taken:** the Library window, which has neither blocker, gets real DWM acrylic
+(`DWMWA_SYSTEMBACKDROP_TYPE = 38`, `DWMSBT_TRANSIENTWINDOW = 3`, Win11 build 22621+), requiring BOTH
+`Background=Transparent` and `HwndSource.CompositionTarget.BackgroundColor=Transparent` - setting only
+the former leaves WPF clearing the surface to opaque black before DWM sees it. `InkScrim` (Ink at
+0xD9) keeps body text on a stable ground. Pattern adapted from WPF-UI's `WindowBackdrop` (MIT); no
+dependency taken, because it is ~40 lines of P/Invoke and the package drags a competing style system.
+
+The notch instead gets the material recipe: 3% tiled grain at ABSOLUTE viewport units (grain that
+scales with the card is an instant tell), and an eased four-stop luminance falloff on `t^1.6` instead
+of a two-stop ramp. Both are Brushes, so the standing no-Effect-inside-an-animated-subtree rule holds
+and they cost nothing per frame or per resize.
+
+**Rejected, with reasons:** `SetWindowCompositionAttribute` acrylic (documented input lag on drag,
+unfixed since 2018, unsupported API); WinUI 3 / XAML Islands (officially not embeddable in WPF);
+Windows Graphics Capture live blur (draws a coloured capture border unless the app requests borderless
+access, which shows a consent prompt and needs a packaged manifest capability - three violations of
+hard constraint 4); `CreateHostBackdropBrush` (high interop cost, reported not to update live).
+
+**Still open:** a captured-and-blurred backdrop for the notch (GDI `BitBlt` a padded region, downscale,
+blur, `ImageBrush`), if the recipe proves insufficient beside the Library's real glass. Ghost mode
+makes that technique work rather than breaking it.
+
+## Film the transition; do not reason about it (2026-09-03)
+
+Four separate mechanisms produced one symptom - the owner's "glitch resize" - and each was fixed in a
+separate round because each was only visible once the one above it was gone. Reading the code found
+none of them. Filming the notch at 60fps and tiling the frames found all four, and then immediately
+caught two more faults that the fixes themselves had introduced.
+
+**The method, now that it is proven:** `dist\Toki.exe --noghost --state a,b,a,b`, ffmpeg `gdigrab` at
+60fps, then `fps=60,crop=...,tile=6x8` into a contact sheet. `--noghost` is mandatory -
+`WDA_EXCLUDEFROMCAPTURE` hides the notch from every screen recorder, which is exactly its job, and
+discovering that cost a round.
+
+**The four causes, in the order they became visible:** content arranged at the union width and then
+re-laid-out on completion; the outgoing page destroyed so the card showed the new page cropped to the
+old size; the clip's origin left relative to the union box after the window had already resized; and
+the settle running on a `DispatcherTimer` at `ms + 20` rather than the animation's own completion.
+
+**The rule worth keeping:** a symptom that survives a correct fix is not evidence the fix was wrong.
+Verify the fix landed, then look again for the next cause. And when a fix "improves but does not
+cure", that is the signature of stacked causes, not of an insufficient fix.
+
+## Interruptibility: animate from the presentation value (2026-09-03)
+
+Every animation must start from what is on screen, never from where a fresh animation would start.
+The clip rect always did this (it reads its live `Rect`, because `_cardW/_cardH` already claim the
+destination while a morph runs). Two things did not, and both are fixed: the zoom had an
+unconditional `From`, so interrupting snapped the content back and re-zoomed; and the outgoing
+snapshot rendered `Host.Children[0]` rather than `Host`, discarding the half-faded old page that an
+interrupting morph was actually looking at.
+
+Corollary pinned by test: **nothing may disable hit-testing for the duration of a transition.** A
+morph that swallows clicks is not interruptible however carefully its values are computed.
+
+## A reading surface holds its own colour (2026-09-03)
+
+Real DWM acrylic on the Library window worked, was confirmed on the owner's machine, and is now OFF.
+Translucency means the desktop tints the page; in the LIGHT theme that read as the whole window
+turning grey. This is not a tuning problem - it is what translucency does to a light surface, and no
+scrim opacity makes it both glassy and stable.
+
+Reverted with it: the eased `t^1.6` gradient stop distribution, which was aimed at the notch plate but
+applied to every Down/Up gradient with more than two stops and so silently changed `CardRim` as well.
+**A change to a shared builder is a change to every one of its callers**; enumerate them before
+editing one.
+
+Grain came out for the second time in this codebase's history. `CardMaterial` records both attempts
+and the reason, so it is not tried a third time.
+
+## The artifact is the proposal, the render is the acceptance test (2026-09-03)
+
+The owner asked why the app never looks as good as the mockup. The honest answer has four parts, and
+only one is closeable:
+
+1. Chromium beats WPF at this. Sub-pixel text positioning, better small-size hinting, cheap real blur,
+   a compositor that does not drop small animations. WPF snaps to whole device pixels, renders 12-13px
+   text heavier, and puts anything with an `Effect` on the CPU.
+2. Mockup content is chosen; real content is "Barbarasad", a title wrapping to three lines, and a
+   section with one bullet.
+3. A mockup has no loading, empty, error or overflow states, and those are most of the app.
+4. **Attention asymmetry, and this is the closeable one.** The artifact gets full attention on one
+   screen in the medium it is built in, and it gets LOOKED AT. The app change is a diff into a large
+   file and is mostly verified by tests.
+
+**Decision:** `--render` output is the acceptance test. Nothing visual ships until the rendered PNG is
+compared against the mockup, and where it cannot match, say why rather than quietly shipping worse.
+This caught two things in one session that reasoning missed - a waveform spanning under the buttons,
+and note text running 140 characters wide.
+

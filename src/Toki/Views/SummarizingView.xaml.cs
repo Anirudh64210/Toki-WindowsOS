@@ -26,6 +26,8 @@ public partial class SummarizingView : UserControl
         Loaded += (_, _) =>
         {
             StartShimmer(); StartBob(); _dots = 0; _dotTimer.Start();
+            _elapsedTimer.Tick += (_, _) => TickElapsed();
+            _elapsedTimer.Start(); TickElapsed();
             // NAME THE STAGE. A single unchanging phrase across a wait that can run for minutes is
             // indistinguishable from a hung app; the pipeline now says whether it is transcribing or
             // writing, and this reads it. Subscribed on load and dropped on unload, because this view
@@ -37,6 +39,7 @@ public partial class SummarizingView : UserControl
         {
             App.SummarizeStageChanged -= OnStage;
             _dotTimer.Stop();
+            _elapsedTimer.Stop();
             ShimmerMove.BeginAnimation(TranslateTransform.XProperty, null);
             _bob.BeginAnimation(TranslateTransform.YProperty, null);
         };
@@ -44,10 +47,37 @@ public partial class SummarizingView : UserControl
 
     void OnStage(object? sender, EventArgs e) => ShowStage();
 
+    /// <summary>The pipeline's stages, in the order App raises them. Index drives the sliver's fill;
+    /// an unrecognised stage leaves the fill where it is rather than guessing backwards.</summary>
+    static readonly string[] Stages = { "Transcribing", "Identifying speakers", "Writing your notes" };
+
+    readonly DateTime _started = DateTime.UtcNow;
+    readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+
     void ShowStage()
     {
         var stage = App.SummarizeStage;
-        if (!string.IsNullOrWhiteSpace(stage)) StageLabel.Text = stage;
+        if (string.IsNullOrWhiteSpace(stage)) return;
+        StageLabel.Text = stage;
+
+        // Fill a third per stage. Animated, not set: the jump between thirds is the one moment in
+        // this whole wait where something visibly ADVANCES, and a snap wastes it.
+        var idx = Array.FindIndex(Stages, s => stage.StartsWith(s, StringComparison.OrdinalIgnoreCase));
+        if (idx < 0) return;
+        var target = Track.ActualWidth * (idx + 1) / Stages.Length;
+        if (target <= 0) return;
+        Progress.BeginAnimation(WidthProperty,
+            new DoubleAnimation(target, Theme.Motion.Dur(Theme.Motion.Ms(Theme.Motion.Morph)))
+            { EasingFunction = Theme.Motion.ArriveStrong });
+    }
+
+    /// <summary>Elapsed time, shown only after 20s. Before that a timer is noise; after it, a wait
+    /// with no number reads as a hang. Hidden state is the default so a quick meeting never sees it.</summary>
+    void TickElapsed()
+    {
+        var secs = (int)(DateTime.UtcNow - _started).TotalSeconds;
+        if (secs < 20) { Elapsed.Text = ""; return; }
+        Elapsed.Text = secs < 60 ? $"{secs}s" : $"{secs / 60}m {secs % 60:00}s";
     }
 
     static SineEase Smooth => new() { EasingMode = EasingMode.EaseInOut };

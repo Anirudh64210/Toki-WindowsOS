@@ -1391,8 +1391,14 @@
                                  sit inside.) -->
                             <Border x:Name="Hl" CornerRadius="10.5" Opacity="0" IsHitTestVisible="False"
                                     Background="{DynamicResource HoverOverlay}"/>
+                            <!-- The travel is a TRANSFORM, never Margin: animating Margin re-runs Measure and
+                                 Arrange on the whole switch every frame, on the UI thread. -->
                             <Border x:Name="Thumb" Width="15" Height="15" CornerRadius="7.5"
-                                    Background="{DynamicResource WhiteBtn}" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                                    Background="{DynamicResource WhiteBtn}" HorizontalAlignment="Left" Margin="3,0,0,0">
+                                <Border.RenderTransform>
+                                    <TranslateTransform/>
+                                </Border.RenderTransform>
+                            </Border>
                         </Grid>
                     </Border>
                     </Grid>
@@ -1424,22 +1430,22 @@
                                  content, so a green toggle was a second meaning for the same colour.
                                  Blue = Toki-active chrome (matches the loader), distinct from content. -->
                             <Setter TargetName="Track" Property="Background" Value="{DynamicResource Blue}"/>
-                            <Setter TargetName="Thumb" Property="Margin" Value="18,0,0,0"/>
+                            <Setter TargetName="Thumb" Property="RenderTransform"><Setter.Value><TranslateTransform X="15"/></Setter.Value></Setter>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin" From="3,0,0,0" To="18,0,0,0" Duration="0:0:0.14">
-                                            <ThicknessAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></ThicknessAnimation.EasingFunction>
-                                        </ThicknessAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" From="0" To="15" Duration="0:0:0.14">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin" From="18,0,0,0" To="3,0,0,0" Duration="0:0:0.14">
-                                            <ThicknessAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></ThicknessAnimation.EasingFunction>
-                                        </ThicknessAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" From="15" To="0" Duration="0:0:0.14">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>

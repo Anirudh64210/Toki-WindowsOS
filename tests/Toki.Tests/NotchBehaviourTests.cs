@@ -160,24 +160,28 @@ public sealed class NotchBehaviourTests
         var flip = Regex.Match(code,
             @"RotateTransform\.AngleProperty,\s*new DoubleAnimation\(0, 180, TimeSpan\.FromMilliseconds\((?<ms>\d+)\)\)\s*\{\s*EasingFunction = (?<ease>[\w.]+)");
         Assert.True(flip.Success, "the flip animation is not where this test expects it");
-        Assert.Equal(520, int.Parse(flip.Groups["ms"].Value));
+        // RETUNED 2026-09-02, and the reason is the point of the test now: this fires on EVERY
+        // recording start, which puts it in the "dozens of times a session" band where anything
+        // over ~250ms reads as sluggish. It also plays inside a 14px-tall ClipToBounds box, so
+        // most of the old 12px fall was clipped away and never seen by anyone.
+        Assert.Equal(240, int.Parse(flip.Groups["ms"].Value));
         // A glyph turning over is transforming IN PLACE - it neither arrives nor leaves - so it eases
         // at both ends (motion skill §2).
         Assert.Equal("Theme.Motion.Move", flip.Groups["ease"].Value);
 
         var fall = Regex.Match(code,
-            @"TranslateTransform\.YProperty,\s*new DoubleAnimation\(-12, 0, TimeSpan\.FromMilliseconds\((?<ms>\d+)\)\)\s*\{\s*BeginTime = TimeSpan\.FromMilliseconds\((?<begin>\d+)\),\s*EasingFunction = new BackEase \{ EasingMode = EasingMode\.EaseOut, Amplitude = (?<amp>[\d.]+) \}");
+            @"TranslateTransform\.YProperty,\s*new DoubleAnimation\(-6, 0, TimeSpan\.FromMilliseconds\((?<ms>\d+)\)\)\s*\{\s*BeginTime = TimeSpan\.FromMilliseconds\((?<begin>\d+)\),\s*EasingFunction = new BackEase \{ EasingMode = EasingMode\.EaseOut, Amplitude = (?<amp>[\d.]+) \}");
         Assert.True(fall.Success, "the fall animation is not where this test expects it");
         var fallMs = int.Parse(fall.Groups["ms"].Value);
         var beginMs = int.Parse(fall.Groups["begin"].Value);
         Assert.Equal(0.5, Num(fall.Groups["amp"].Value));
-        // The turn LEADS and the drop follows it, and the whole flow lands together at ~540ms.
+        // The turn LEADS and the drop follows it, and the whole flow lands together.
         Assert.True(beginMs is > 0 and <= 80, $"the fall starts at {beginMs}ms - it should trail the turn");
-        Assert.Equal(540, beginMs + fallMs);
+        Assert.Equal(260, beginMs + fallMs);   // turn 240, drop lands just after it
 
         // A delayed animation shows the element's BASE value until its clock starts, so the base has to
         // BE the From or the delay is a preview of the ending (the armed-entrance lesson).
-        Assert.Contains("Fall.Y = -12;", code);
+        Assert.Contains("Fall.Y = -6;", code);
     }
 
     // ── 5. the collapse takes Toki with it, and the first open is paid for in advance ──
