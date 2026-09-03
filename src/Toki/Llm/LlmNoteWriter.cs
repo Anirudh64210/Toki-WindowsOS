@@ -721,6 +721,49 @@ public sealed class LlmNoteWriter
     /// </summary>
     internal static int DigestLines(int chunkChars) => Math.Clamp(chunkChars / 450, 6, 20);
 
+    /// <summary>How many seconds of speech either side of a cited line should count as supporting
+    /// it. A spoken sentence runs roughly five to eight seconds, and a point drawn faithfully from
+    /// one sentence can cite any line inside it.</summary>
+    const double NeighbourSeconds = 6.0;
+
+    /// <summary>
+    /// HOW MANY LINES EITHER SIDE OF A CITATION COUNT AS SUPPORTING IT.
+    ///
+    /// This was a flat "one either side", which measures the neighbourhood in LINES. A line is not a
+    /// unit of meaning: it is however much speech landed between two pauses, and that varies by a
+    /// factor of three between meetings.
+    ///
+    /// MEASURED 2026-09-03 on two stored meetings, same pipeline, same day:
+    ///
+    ///   meeting 48   468 segments / 26 min = 3.3s per line   ->  +/-1 covers ~10s  ->  kept 25/26, 29/31, 22/23
+    ///   meeting 28  1140 segments / 20 min = 1.05s per line  ->  +/-1 covers ~3s   ->  kept 4/10, 15/30, 3/9
+    ///
+    /// Meeting 28 is a heavily turn-merged call at about a second a line, so a sentence spans five or
+    /// six lines and a faithful point citing the middle of it failed against a three-line check. The
+    /// gate was dropping TRUE content, not catching invention: nearly all its losses were
+    /// `unsupported` rather than `uncited` or `out-of-range`.
+    ///
+    /// So scale the neighbourhood to cover a comparable amount of SPEECH. The cap matters as much as
+    /// the scaling: this widens a safety gate, and a very wide haystack would let a genuinely
+    /// invented point find its words somewhere nearby. Five lines either side is the ceiling.
+    ///
+    /// DO NOT "fix" a poor keep rate by lowering CitationOverlap instead. That lowers the bar for
+    /// every meeting including the clean ones, and this gate is the only thing standing between a
+    /// digest and invention.
+    /// </summary>
+    internal static int NeighbourLines(IReadOnlyList<TranscriptSegment> transcript)
+    {
+        if (transcript.Count < 2) return 1;
+        var first = transcript[0];
+        var last = transcript[^1];
+        var spanMs = last.EndMs - first.StartMs;
+        // No usable timing (a transcript built without timestamps) keeps the old behaviour.
+        if (spanMs <= 0) return 1;
+        var secondsPerLine = spanMs / 1000.0 / transcript.Count;
+        if (secondsPerLine <= 0) return 1;
+        return Math.Clamp((int)Math.Round(NeighbourSeconds / secondsPerLine), 1, 5);
+    }
+
     /// <summary>How much of a digest line's own vocabulary must appear in the transcript line it
     /// cites. Not 1.0: the map step is allowed to trim and tidy, only not to invent. Half the content
     /// words is enough to tell "tidied" from "made up".</summary>
@@ -761,9 +804,11 @@ public sealed class LlmNoteWriter
             var text = m.Groups[2].Value.Trim();
             if (text.Length == 0) { uncited++; continue; }
 
-            // The cited line plus one either side - turn-merging can split a single point in two.
+            // The cited line plus its NEIGHBOURS IN TIME, not a fixed number of lines. See
+            // NeighbourLines: a line is not a unit of meaning, a few seconds of speech is.
+            var span = NeighbourLines(transcript);
             var near = string.Join(" ",
-                Enumerable.Range(Math.Max(windowFirst, id - 1), 3)
+                Enumerable.Range(Math.Max(windowFirst, id - span), span * 2 + 1)
                     .Where(i => i <= windowLast && i < transcript.Count)
                     .Select(i => transcript[i].Text));
 
