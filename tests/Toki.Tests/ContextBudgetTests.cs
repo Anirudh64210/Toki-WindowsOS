@@ -42,6 +42,17 @@ public sealed class ContextBudgetTests
     }
 
     [Fact]
+    public void The_ratio_stays_conservative_because_the_failure_is_asymmetric()
+    {
+        // A window slightly too SMALL costs a little detail. A window slightly too LARGE throws and
+        // costs the whole window and everything said in it. 2.6 was an estimate; one window in 43
+        // still overflowed on a real ten-meeting run, so the ratio may tighten but must never drift
+        // back up on a hunch.
+        Assert.True(LlmNoteWriter.ChunkCharsPerToken <= 2.4,
+            "a generous chars-per-token estimate silently deletes whole windows of a meeting");
+    }
+
+    [Fact]
     public void The_budget_never_collapses_to_nothing()
     {
         // A tiny or misreported context must still produce a usable window rather than 0, which

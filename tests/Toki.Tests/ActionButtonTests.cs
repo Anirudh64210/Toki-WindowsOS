@@ -219,23 +219,30 @@ public sealed class ActionButtonTests
         Assert.DoesNotContain("Content=\"&#xE724;\"", send);
     }
 
-    // ── 8. the Library list's accent bar codes what the note IS ──
+    // ── 8. the Library list never colours a row by its id ──
 
     [Fact]
-    public void The_card_accent_is_coded_by_kind_not_by_id()
-    {
-        Assert.Equal("Blue", LibraryWindow.CardAccentKey(MeetingKind.Meeting));
-        Assert.Equal("Purple", LibraryWindow.CardAccentKey(MeetingKind.Manual));
-    }
-
-    [Fact]
-    public void The_card_accent_uses_two_colours_and_no_id_arithmetic()
+    public void The_library_list_never_colours_a_row_by_id()
     {
         var lib = CodeOnly(Src("src", "Toki", "LibraryWindow.xaml.cs"));
-        // The old version spread six accents across the list by id, so the colour meant nothing and
-        // five of the design system's six accents were spent on noise.
+        // HISTORY, kept because it is the reason this test exists. The list once spread six accents
+        // across the rows BY ID, so the colour meant nothing and five of the design system's six
+        // accents were spent on noise. It was then reduced to two colours coding the note's KIND
+        // (blue = recorded meeting, purple = manual note), guarded by asserting that call site.
+        //
+        // SUPERSEDED 2026-09-03 by the owner-approved card design: the rail is gone entirely,
+        // because the meta line already says "Note" or the app's name in words, so the bar was a
+        // second and dimmer copy of a fact already on the card. `CardAccentKey` went with it rather
+        // than linger as a helper nothing calls.
+        //
+        // What survives is the rule that outlived both designs: a row's colour may never be a
+        // function of its id. Decorative rotation is how the first version happened.
+        // ONE ASSERTION THAT IS ACTUALLY TRUE. A first attempt also tried to prove no colour is
+        // chosen by id, by excluding the legitimate uses of `m.Id` and searching for the rest. It
+        // failed instantly on `App.Store.Get(m.Id)`: a row's id is used constantly for lookups and
+        // hit-target tags, so a substring search cannot tell those from a colour lookup. A clever
+        // check that misfires is worse than a narrow one that holds, so this guards the named
+        // palette the original decorative rotation needed.
         Assert.DoesNotContain("CardAccents", lib);
-        Assert.Contains("CardAccentKey(m.Kind)", lib);
-        Assert.DoesNotContain("CardAccentKey(m.Id)", lib);
     }
 }

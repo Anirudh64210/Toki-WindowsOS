@@ -2009,8 +2009,19 @@ public partial class LibraryWindow : Window
             if (row is not Border host || host.Tag is not long id) continue;
             // The fill lives on the INNER card (the redesign's date column sits OUTSIDE it and must
             // never highlight); the outer host is only the hit target + id carrier.
-            if (_cardFills.TryGetValue(id, out var fill))
-                fill.SetResourceReference(Border.BackgroundProperty, id == _selected ? "Chip" : "RowFill");
+            if (!_cardFills.TryGetValue(id, out var fill)) continue;
+            // SELECTION IS THE ONLY FILL NOW (owner-approved card design, 2026-09-03). Superseding
+            // the earlier "every row gets a fill so a list of cards reads as a list": a fill on every
+            // row inside a pane that is already a panel draws a stack of tiles, and selection then
+            // has to shout to be heard over them. With one ground tint and a left inset, the column
+            // reads as a list and the selected row is obvious without raising its voice.
+            if (id == _selected) fill.SetResourceReference(Border.BackgroundProperty, "RowFill");
+            else fill.Background = Brushes.Transparent;
+            // The inset is ALWAYS 2px and only its COLOUR changes. Adding the border on selection
+            // would push the row's text 2px right as you click it, so every selection would nudge
+            // the thing you are reading.
+            if (id == _selected) fill.SetResourceReference(Border.BorderBrushProperty, "TextDim");
+            else fill.BorderBrush = Brushes.Transparent;
         }
     }
 
@@ -2020,39 +2031,22 @@ public partial class LibraryWindow : Window
     {
         var selected = _selected == m.Id;
 
-        // The bare date column, outside the card.
-        var date = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 0, 0), Width = 30 };
-        // SetResourceReference, not a captured brush: this label does not go through a Style, so a
-        // captured brush would not recolour on a theme swap.
-        var dayNum = new TextBlock
-        {
-            Text = m.StartedAt.Day.ToString(), FontFamily = (FontFamily)FindResource("UiFont"),
-            FontSize = 20, FontWeight = FontWeights.Black,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        dayNum.SetResourceReference(TextBlock.ForegroundProperty, "TextHi");
-        date.Children.Add(dayNum);
-        date.Children.Add(new TextBlock
-        {
-            Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = St("Dim"), FontSize = 11,
-            FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 0),
-        });
+        // NO ACCENT RAIL. It encoded the note's KIND, and the meta line below already says it in
+        // words ("Note" against "Chrome"), so the bar was a second, dimmer copy of a fact the reader
+        // can already read, so the bar was a second, dimmer copy of a fact already on the card.
 
-        // The accent bar inside the card - blue for a recorded meeting, purple for a manual note.
-        var accent = new Border
-        {
-            Width = 3, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(0, 2, 10, 2),
-            VerticalAlignment = VerticalAlignment.Stretch,
-        };
-        // Resource reference, not a captured brush - the bar has to repaint on a theme switch.
-        accent.SetResourceReference(Border.BackgroundProperty, CardAccentKey(m.Kind));
-
+        // TITLE, THEN THE OUTCOME, THEN THE FACTS. The outcome answers "which one was this?", which
+        // is the only question a list is ever asked; the app and the timing are how you confirm it
+        // afterwards, so they sit under it rather than between it and the title.
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
-        content.Children.Add(new TextBlock { Text = CardMeta(m), Style = St("Dim"), FontSize = 12, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 4, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxHeight = 34, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 8, 0, 0) });
+            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12.5, TextWrapping = TextWrapping.Wrap, MaxHeight = 36, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0) });
+        content.Children.Add(new TextBlock
+        {
+            Text = CardMeta(m), Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 6, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
 
         var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0) };
         if (m.OpenActions > 0) chips.Children.Add(Chip($"{m.OpenActions} open", "Amber", "AmberDark"));
@@ -2060,34 +2054,40 @@ public partial class LibraryWindow : Window
         if (chips.Children.Count > 0) content.Children.Add(chips);
 
         var inner = new Grid();
-        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        inner.Children.Add(accent);
-        Grid.SetColumn(content, 1);
         inner.Children.Add(content);
 
-        // EVERY row gets a fill, not just the selected one - a list of cards reads as a list.
-        // Selection is then a BRIGHTER fill.
+        // SELECTION IS THE ONLY FILL. Superseding the earlier "every row gets a fill so a list of
+        // cards reads as a list" (kept here because the reasoning was sound and the context changed):
+        // inside a pane that is already a panel, a fill on every row draws a stack of tiles, and the
+        // selected one then has to shout over them. One quiet ground tint plus a left inset instead.
         var card = new Border
         {
-            CornerRadius = new CornerRadius(16), Padding = new Thickness(12),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(13, 11, 13, 11),
             Cursor = Cursors.Hand, Child = inner,
+            Background = Brushes.Transparent,
+            // Always reserve the inset; only its colour says "selected" (see HighlightSelectedCard).
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            BorderBrush = Brushes.Transparent,
         };
-        card.SetResourceReference(Border.BackgroundProperty, selected ? "Chip" : "RowFill");
+        if (selected)
+        {
+            card.SetResourceReference(Border.BackgroundProperty, "RowFill");
+            card.SetResourceReference(Border.BorderBrushProperty, "TextDim");
+        }
 
-        var row = new Grid { Margin = new Thickness(0, 0, 2, 12), Tag = m.Id };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+        // NO HANGING DATE COLUMN. A 31 / AUG block is a lot of ink for something read as "yesterday",
+        // and CardMeta already carries the date: TimeAgo gives a relative word inside a week and an
+        // absolute date beyond it, which is the way anyone actually refers to a meeting.
+        var row = new Grid { Margin = new Thickness(0, 0, 2, 2), Tag = m.Id };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.Children.Add(date);
-        Grid.SetColumn(card, 2);
         row.Children.Add(card);
 
         // The OUTER border keeps the id-Tag contract every consumer relies on - and the whole row
         // is the click target, date column included.
         var host = new Border { Background = Brushes.Transparent, Child = row, Tag = m.Id, Cursor = Cursors.Hand };
-        host.MouseEnter += (_, _) => { if (_selected != m.Id) card.SetResourceReference(Border.BackgroundProperty, "RowFillHover"); };
-        host.MouseLeave += (_, _) => { if (_selected != m.Id) card.SetResourceReference(Border.BackgroundProperty, "RowFill"); };
+        host.MouseEnter += (_, _) => { if (_selected != m.Id) card.SetResourceReference(Border.BackgroundProperty, "RowFill"); };
+        host.MouseLeave += (_, _) => { if (_selected != m.Id) card.Background = Brushes.Transparent; };
         host.PreviewMouseLeftButtonUp += (_, _) => Select(m.Id);
         _cardFills[m.Id] = card;   // the highlight paints the INNER card, not the outer host
         return host;
@@ -2096,10 +2096,6 @@ public partial class LibraryWindow : Window
     // The inner card fill per meeting id - HighlightSelectedCard repaints these (the outer border's
     // background must stay transparent or the date column would highlight too).
     readonly Dictionary<long, Border> _cardFills = new();
-
-    /// <summary>The colour of a card's left bar says WHAT THE NOTE IS: blue = a recorded meeting,
-    /// purple = a manual note. One meaning, one colour - never a decorative rotation.</summary>
-    internal static string CardAccentKey(MeetingKind kind) => kind == MeetingKind.Manual ? "Purple" : "Blue";
 
     Border Chip(string text, string fgKey, string bgKey) => new()
     {
