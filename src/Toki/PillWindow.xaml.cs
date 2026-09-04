@@ -730,6 +730,10 @@ public partial class PillWindow : Window
             // live races the wall-clock animation, so a busy machine fails a correct build.
             _entranceArm = ((Root.Clip as RectangleGeometry)?.Rect.Height ?? -1,
                             MascotZone.Opacity, MascotPop.ScaleX, Host.Opacity);
+            // THE ONE SAFE MOMENT TO PHOTOGRAPH THE BACKDROP: the position is final and the window
+            // is still off screen, so it cannot capture itself. Ghost mode would also protect us,
+            // but it is off on the owner's machine, so this does not rely on it.
+            RefreshBackdrop(w, targetH);
             Show(); ApplyGhost();          // re-apply WDA - hide/show can drop it
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
             if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent - re-assert glass
@@ -1197,6 +1201,10 @@ public partial class PillWindow : Window
             // full material; "Glassy notch" is purely a transparency switch.
             Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty,
                 Toki.Llm.AppSettings.Current.GlassyNotch ? "CardPlate" : "CardPlateOpaque");
+            // Not a capture: only shows or hides the photograph we already hold. Capturing here
+            // would run while the card is on screen, which is how a window photographs itself.
+            Backdrop.Visibility = Toki.Llm.AppSettings.Current.GlassyNotch && Backdrop.Background is not null
+                ? Visibility.Visible : Visibility.Collapsed;
             ApplyBlur(false); ApplyRoundRegion(false);
         }
         // The rim, corner radius, clip and Toki's disc rim are ONE decision (ApplyCornerGeometry).
@@ -1268,6 +1276,49 @@ public partial class PillWindow : Window
         Dispatcher.BeginInvoke(new Action(ApplyCornerGeometry), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
+    /// <summary>
+    /// Photograph what is behind the card, blurred, as the glass backdrop.
+    ///
+    /// TWO RULES, both learned the hard way and both load-bearing:
+    ///
+    /// ONLY WHILE HIDDEN. Ghost mode keeps the notch out of screen captures, so a ghosted window
+    /// cannot photograph itself. But ghost mode is OFF on the owner's machine, and a visible window
+    /// capturing the screen underneath itself photographs its own last frame, which compounds into a
+    /// smear that looks exactly like a rendering bug. So the capture only runs when the window is
+    /// not on screen, and the photograph taken then is reused until the next time it is hidden.
+    ///
+    /// NEVER FROM A RENDER CALLBACK. One BitBlt plus a blur is fractions of a millisecond, which is
+    /// nothing on a state change and ruinous at 60Hz.
+    /// </summary>
+    void RefreshBackdrop(double winW, double winH)
+    {
+        if (!Toki.Llm.AppSettings.Current.GlassyNotch)
+        {
+            Backdrop.Visibility = Visibility.Collapsed;
+            Backdrop.Background = null;
+            return;
+        }
+
+        var src = PresentationSource.FromVisual(this);
+        if (src?.CompositionTarget is not { } ct) return;
+
+        // Card rect in DEVICE pixels. The window is deliberately BIGGER than the card (mascot
+        // gutter left, shadow pads right and bottom), so photographing the window rect would blur
+        // the wrong region and offset the whole material.
+        var topLeft = ct.TransformToDevice.Transform(new System.Windows.Point(Left + CardPadL, Top));
+        var size = ct.TransformToDevice.Transform(new System.Windows.Point(CardW(winW), CardH(winH)));
+        var origin = ct.TransformToDevice.Transform(new System.Windows.Point(0, 0));
+        var area = new System.Windows.Int32Rect(
+            (int)Math.Round(topLeft.X), (int)Math.Round(topLeft.Y),
+            (int)Math.Round(size.X - origin.X), (int)Math.Round(size.Y - origin.Y));
+        if (area.Width <= 0 || area.Height <= 0) return;
+
+        var brush = Theme.ScreenBackdrop.Capture(area);
+        if (brush is null) { Backdrop.Visibility = Visibility.Collapsed; return; }
+        Backdrop.Background = brush;
+        Backdrop.Visibility = Visibility.Visible;
+    }
+
     void ApplyCornerGeometry()
     {
         var rim = RimThickness();
@@ -1305,6 +1356,9 @@ public partial class PillWindow : Window
         // plate's clamped radius, minus the rim it sits inside, so the arcs hug the real corners.
         var plateRadius = Math.Min(CornerRadius, Math.Min(rw, rh) / 2);
         Material.Radius = Math.Max(0, plateRadius - rim);
+        // The photograph is concentric with the plate for the same reason the material is: a corner
+        // at the wrong radius cuts an arc across the card and reads as a rendering fault.
+        Backdrop.CornerRadius = new System.Windows.CornerRadius(Math.Max(0, plateRadius - rim));
 
         if (_cornersPinned || rw <= 4 * rim || rh <= 4 * rim)
         {

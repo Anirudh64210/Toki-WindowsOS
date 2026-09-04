@@ -1,5 +1,89 @@
 # Toki - backlog & "what's next" (living doc)
 
+## ✅ FIXED 2026-09-03: the note body could never exceed SEVEN bullets
+
+Found by measuring, then diagnosed rather than escalated. Ten meetings regenerated: the notes claimed
+**37 hard facts where the stored ones claimed 75**. I first filed this as "how terse should notes be",
+a product decision. It was a bug.
+
+```
+var bulletBudget = content.Length > 9000 ? 9 : content.Length > 4000 ? 7 : 5;
+```
+
+`content` is the DIGEST handed to the final pass, not the meeting. `MaxChunkChars` caps that digest,
+so **the `> 9000` branch could never fire** and the real ceiling was seven. The `General` template has
+exactly one section ("Key points"), so seven bullets was the entire body of nearly every note, for a
+three-minute call and a ninety-minute review alike. Roughly ninety verified extracted points were
+being compressed into seven lines.
+
+The code's own comment already stated the intent: "a cap that does not scale claims a 90-minute
+meeting holds no more than a 3-minute one". The implementation measured the wrong quantity.
+
+**Fixed:** `BulletBudget(spokenChars)` measures what was SAID, the only honest proxy for how much a
+meeting holds: 5 bullets under 4k characters, 7 under 15k, 10 under 40k, 14 beyond. Coarse on
+purpose, and a ceiling the model may leave unfilled; the prompt still forbids inventing content to
+reach it.
+
+**How to tell whether it bought coverage or padding:** re-run `--regentest 10` and read precision
+beside the fact count. Facts should rise; if precision falls with them, the extra room is being
+filled with invention and the ladder comes back down. Not yet measured, because the owner is taking
+the build to real meetings first, which is the better test.
+
+**One debt:** this fix has no guard test yet (`BulletBudgetTests`, asserting the budget scales with
+what was said, stays tight on a short meeting, and stays finite). The old digest-length formula would
+fail it. Add it before touching this area again.
+
+**Still open, deliberately:** "Key points" as a single junk-drawer section. Even 14 bullets in one
+unnamed heap is worse than three named things, and the owner-approved note page says so. That IS the
+note-format decision below, and it is theirs.
+
+## 🔴 BLOCKED ON THE OWNER (2026-09-03) - nothing here moves without a decision
+
+Consolidated so it is one list rather than scattered through the file. Each item is engineering-ready;
+what is missing is a call only the owner can make. Ordered by how much is waiting behind it.
+
+**1. The note FORMAT.** The biggest one: items 3 and 5 below cannot start until it is settled.
+Proposed shape, from `docs/note-quality-research.md` Part E: an outcome line first rather than a
+"Summary" heading; commitments second and anchored; headings derived from the content instead of a
+fixed template; "For you" above the body; decisions and questions as EARNED inline marks rather than
+standing sections, promoted to a block only above a threshold. Plus a lint rule banning "discussed"
+and its family, shaped like `NoEmDashTests`.
+*Why it is the owner's:* it changes what a note looks like on every meeting, forever.
+
+**2. Regenerating the stored Library.** Every note written before today was produced by a pipeline
+that, on long meetings, fell to the heuristic floor. Rewriting them would apply today's fixes
+retroactively. **It overwrites real notes**, so it is not something to run unilaterally, and
+`--regentest` deliberately saves nothing. Needs a persisting path plus an explicit go-ahead. Consider
+doing one meeting first and reading it.
+
+**3. Evidence-gated sections.** Model returns line ids per section type; CODE decides whether a
+section exists, above a threshold. An absent section then means an absence of evidence rather than a
+model's judgement. Waits on item 1.
+
+**4. The microphone health check at meeting start.** The DETECTION already exists and is good:
+`--mictest` catches the trap where Windows' "Communications" default microphone differs from the
+"Console" one the user sees metering, which is the failure that once cost half a transcript. What is
+missing is running it automatically when a meeting starts and SAYING something. What Toki says, when,
+and how interruptible it is, is a product decision. Options: a one-line warning on the recording bar;
+a pre-record check in the meeting prompt; silent logging only.
+
+**5. The note measure.** The note column has no `MaxWidth`: about 140 characters in a wide window, 6
+to 8 words in the Library pane. The number to come back to is 600. Owner decision of 2026-08-24
+stands, recorded here so it is not lost.
+
+**6. Auto-start recording with a cancellable countdown.** Converts the ask-first rule to opt-out and
+touches CLAUDE.md hard constraint 3. Owner decision, deliberately parked.
+
+**7. Per-WORD ASR timestamps for evidence clips.** Perfect sub-utterance cuts need timestamps the
+pipeline currently discards. A cost/benefit call about decode time and storage.
+
+**8. The two seeded fake notes (ids 1 and 2)** that `--seed` wrote into the real Library before it was
+guarded. Deleting rows from the real store is the owner's call.
+
+**9. Accent drift.** Four of six accents differ from the Figma file, all drifting the same direction
+(see the section further down). File wins, or the tuned values win?
+
+
 ## 🚨 ROOT CAUSE FOUND AND FIXED: long meetings were never written by the model (2026-09-03)
 
 **This is very likely the bulk of "the note quality is mediocre at best".** It was arithmetic.
@@ -273,6 +357,22 @@ no spreading a change for consistency without approval. Two questions for the ow
 
 Cheap either way: these are token values in one file, and `--themetest` walks every notch
 view in both themes afterwards.
+
+## 📝 APPROVED DESIGN, NOT YET BUILT: the note page (2026-09-03)
+
+Owner reviewed it and said "the note redesign I have selected, the new design is good". Build from
+the artifact, not from any summary of it:
+**https://claude.ai/code/artifact/5dba62d4-1b71-4d43-a260-a2effcb78411**
+
+**The link was missing from this file until 2026-09-03.** An approved design with no recorded link is
+a decision that has to be made twice, so it is logged here now beside the recording bar. Check this
+file has the URL before closing any session that produces a design the owner accepts.
+
+**Not to be confused with the note FORMAT**, which is a different, still-open owner call (item 4 of
+the note-quality list: outcome line first, commitments anchored, topic-derived headings, decisions
+and questions as earned inline marks). This entry is the PAGE: how a finished note is laid out and
+read in the Library. The format is what the writer produces; the page is how it is presented. Either
+can ship without the other.
 
 ## 🎙️ APPROVED DESIGN, NOT YET BUILT: the recording bar (2026-09-03)
 

@@ -25,7 +25,50 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## Where the notes were dying, in two places (2026-09-03, latest)
+## Four constants that described the machinery, not the work (2026-09-03, latest)
+
+The day's note-quality work reduced to one shape. Every defect was a number that described Toki's
+internals rather than the thing being summarised, and none of them were prompt problems, which is
+why round after round of prompt tuning had never moved the quality.
+
+| constant | assumed | actually |
+|---|---|---|
+| characters per token | 3 | 2.6 for numbered transcript lines |
+| re-reduce trigger | digests must fit a window | summarising summaries empties the note |
+| digest budget | lines per WINDOW | should be lines per minute of meeting |
+| citation neighbourhood | one line either side | one line is 3s or 10s depending on the meeting |
+
+**The fourth one, found last.** `ValidateDigest` accepted the cited line plus one either side. A line
+is not a fixed quantity: meeting 48 runs 468 segments over 26 minutes (3.3s a line) while meeting 28
+runs 1,140 over 20 minutes (1.05s a line). A spoken sentence takes five to eight seconds, so the
+check read a whole sentence on one meeting and a third of one on the other. Nearly every loss on the
+fragmented meeting was `unsupported`, never `uncited`: the model was citing a real line in the right
+format, and the words were simply spread wider than the check looked. **The gate was deleting true
+content, not catching invention.** `NeighbourLines` now covers about six seconds of speech either
+side, capped at five lines because widening a safety gate has a cost.
+
+The tempting fix was lowering `CitationOverlap` until the number improved. That would lower the bar
+for every meeting including the clean ones, and this gate is the only thing between a digest and
+invention. **Fix the unit, not the threshold.**
+
+**Measured, with a correction.** Citation keep rate, aggregated per run: 70.4% (250/355) with the
+context fix alone, 87.3% (138/158) after the context raise, trim and scaled budget, 91.8% (101/110)
+with the time-based neighbourhood. The last step is +4.5 points, about 1.5 standard errors. An earlier
+note claimed a far larger swing from reading a single window; that was wrong and is corrected here.
+The change is kept because the unit was wrong, not because the number proves it.
+
+**And a caution about the instrument itself.** A single meeting's recall drifts about twelve points
+between runs of identical code, because Qwen samples at temperature 0.7 by design. `--regentest` is
+therefore a detector of STRUCTURAL faults, not a quality meter: at n=2 it correctly found zero-bullet
+notes, notes with no checkable facts, and a pipeline falling to the heuristic floor, and it cannot
+resolve a four-point recall move. `--linktest` is the model to copy, with its fixed seed and paired
+McNemar test.
+
+Where the pipeline stands after the day: long meetings are written by the model again rather than
+falling back to quoting the transcript, meeting 48 went from zero bullets to six, provenance reached
+10/11 bullets and 7/7 actions, and citation keep rate went 70% to 92%.
+
+## Where the notes were dying, in two places (2026-09-03)
 
 Follows directly from the entry below, and both fixes came out of measurements rather than hunches.
 

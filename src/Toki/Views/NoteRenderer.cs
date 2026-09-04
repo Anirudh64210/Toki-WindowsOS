@@ -274,12 +274,53 @@ public static class NoteRenderer
         // its rows, both starting at the same left edge, grouped by SPACE (heading-above 24,
         // heading-below 8, rows 8) rather than a bar down the side. Space groups; a line is a last
         // resort (see the symmetry-and-spacing and design-taste skills).
+        // THE OUTCOME LEADS, WITH NO HEADING OVER IT (owner-approved page design, 2026-09-03).
+        // A "Summary" heading labels a thing the reader can already see is a summary: it sits where
+        // the answer should be and pushes it down a line. Set instead in the note's own ink at a
+        // step up from the body, so someone who reads nothing else still leaves with the point.
         if (!string.IsNullOrWhiteSpace(m.Notes.Tldr))
-        {
-            doc.Blocks.Add(DocHeader("Summary", fs, first: true));
             doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr))
-            { Foreground = B("TextSoft"), LineHeight = fs + 7, TextAlignment = TextAlignment.Left, Margin = new Thickness(0, 0, 0, 0) });
+            {
+                Foreground = B("Text"),
+                FontSize = fs + 1.5,
+                FontWeight = FontWeights.Medium,
+                LineHeight = fs + 9,
+                TextAlignment = TextAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 0),
+            });
+
+        // COMMITMENTS BEFORE DISCUSSION, split by whose they are. "Action items" was one list mixing
+        // what the reader must do with what they are waiting on someone else for, which are different
+        // questions asked at different moments. Ownership is already known; it just was not used.
+        var mine = m.Notes.Actions.Where(IsMine).ToList();
+        var theirs = m.Notes.Actions.Where(a => !IsMine(a)).ToList();
+        var firstActions = true;
+        void ActionBlock(string heading, List<ActionItem> items)
+        {
+            if (items.Count == 0) return;
+            doc.Blocks.Add(DocHeader(heading, fs));
+            // Owners arrive a few seconds later when speakers resolve; say so on the FIRST block
+            // only, rather than let a name appear out of nowhere or say it twice.
+            if (resolving && firstActions)
+                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("working out who owns these"))
+                { Margin = new Thickness(0, 0, 0, 6) });
+            firstActions = false;
+            for (var i = 0; i < items.Count; i++)
+                doc.Blocks.Add(DocAction(items[i], fs, Player, last: i == items.Count - 1));
         }
+        // NAME A GROUP FOR WHAT IT IS. A first cut only named the halves when both existed and fell
+        // back to "To do", which put "To do" over three tasks owned by Vade, Sudamba and Barbarasad:
+        // it tells the reader to do work that is actually pending on someone else, which is worse
+        // than not splitting at all. When only one side exists it still gets its true name; only the
+        // word "Yours" is dropped, because with nothing to contrast against it labels the obvious.
+        if (mine.Count > 0 && theirs.Count > 0)
+        {
+            ActionBlock("Yours to do", mine);
+            ActionBlock("Waiting on others", theirs);
+        }
+        else if (theirs.Count > 0) ActionBlock("Waiting on others", theirs);
+        else ActionBlock("To do", mine);
+
         foreach (var sec in m.Notes.EffectiveSections())
         {
             if (sec.Bullets.Count == 0) continue;
@@ -294,17 +335,6 @@ public static class NoteRenderer
                 var last = i == sec.Bullets.Count - 1;
                 doc.Blocks.Add(WithEvidence(sec.Bullets[i], fs + 7, new Thickness(0, 0, 0, last ? 0 : 6), sec.SourceFor(i)));
             }
-        }
-        if (m.Notes.Actions.Count > 0)
-        {
-            doc.Blocks.Add(DocHeader("Action items", fs));
-            // Owners arrive a few seconds later when speakers resolve; say so, rather than let a
-            // name appear out of nowhere.
-            if (resolving)
-                doc.Blocks.Add(new BlockUIContainer(new ThinkingDots("working out who owns these"))
-                { Margin = new Thickness(0, 0, 0, 6) });
-            for (var i = 0; i < m.Notes.Actions.Count; i++)
-                doc.Blocks.Add(DocAction(m.Notes.Actions[i], fs, Player, last: i == m.Notes.Actions.Count - 1));
         }
 
         // THE SPLIT: never nest the editable sticky inside this read-only document. A RichTextBox's
@@ -685,6 +715,12 @@ public static class NoteRenderer
             p.Inlines.Add(new InlineUIContainer(play) { BaselineAlignment = BaselineAlignment.Center });
         return p;
     }
+
+    /// <summary>Is this to-do the reader's own? An unowned task in the user's own meeting is theirs
+    /// by default, and "You" is the stream word for the same thing. Anything else names someone
+    /// else and belongs under "Waiting on others".</summary>
+    static bool IsMine(ActionItem a) =>
+        !Meaningful(a.Owner) || a.Owner!.Trim().Equals("You", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The owner/due tail for a to-do, as plain muted prose: "   Priya  ·  Fri".</summary>
     static string ActionMeta(ActionItem a)

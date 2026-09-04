@@ -142,7 +142,7 @@ public sealed class LlmNoteWriter
         var spoken = string.Join("\n", transcript.Select(s => s.Text));
 
         // REDUCE / FINAL: the adaptive, honest note in the chosen template.
-        var note = await FinalNote(source, sourceIsDigests, template, spoken, about, ct);
+        var note = await FinalNote(source, sourceIsDigests, template, spoken, about, ct, spoken.Length);
         if (note is null) return heuristic;                  // total LLM failure → heuristic floor
         if (IsNothing(note.Summary) && note.Sections.Count == 0 && note.Actions.Count == 0)
             return LowSubstanceNote();                       // model judged it low-substance
@@ -275,13 +275,13 @@ public sealed class LlmNoteWriter
 
     // ── REDUCE / FINAL: adaptive, honest note in the chosen template ──
     async Task<FinalNoteResult?> FinalNote(string content, bool contentIsDigests, NoteTemplate template,
-        string spoken, string? about, CancellationToken ct)
+        string spoken, string? about, CancellationToken ct, int spokenChars = 0)
     {
         var what = contentIsDigests ? "these notes from consecutive parts of one meeting" : "this meeting transcript";
 
         // A cap that does not scale claims a 90-minute meeting holds no more than a 3-minute one.
         // Short meetings keep the tight 5; longer ones earn room.
-        var bulletBudget = content.Length > 9000 ? 9 : content.Length > 4000 ? 7 : 5;
+        var bulletBudget = BulletBudget(spokenChars);
         var sectionSpec = string.Join("\n\n", template.Sections.Select(s =>
             $"{s.ToUpperInvariant()}\n- up to {bulletBudget} SHORT bullets for \"{s}\", aim for 6 to 12 words each, one idea per bullet. "
             + "Every bullet must carry information a busy person needs - drop anything vague, obvious, or logistical. "
@@ -484,13 +484,46 @@ public sealed class LlmNoteWriter
     /// <summary>Context budget for a chunk, in characters, sized from the model's context window.</summary>
     static int MaxChunkChars() => MaxChunkChars((int)LlmRuntime.ContextSize);
 
+    /// <summary>
+    /// HOW MANY BULLETS A SECTION MAY HOLD, FROM THE SIZE OF THE MEETING.
+    ///
+    /// This was `content.Length > 9000 ? 9 : > 4000 ? 7 : 5`, where `content` is the DIGEST handed to
+    /// the final pass. That is the wrong quantity twice over. It is an implementation detail of the
+    /// chunking rather than a fact about the meeting, and it is capped by `MaxChunkChars`, so the
+    /// `> 9000` branch could never fire and the real ceiling was SEVEN.
+    ///
+    /// MEASURED 2026-09-03, ten meetings: the notes claimed 37 hard facts where the stored ones
+    /// claimed 75. The `General` template has exactly one section ("Key points"), so seven bullets
+    /// was the entire body of almost every note, whether the meeting ran three minutes or ninety.
+    /// Roughly ninety verified extracted points were being compressed into seven lines.
+    ///
+    /// Measured against what was SAID, which is the only honest proxy for how much a meeting holds.
+    /// The ladder is deliberately coarse: the number is a ceiling the model may leave unfilled, and
+    /// the prompt still forbids inventing content to reach it. Precision is the check that this
+    /// bought coverage rather than padding, and `--regentest` reports both.
+    /// </summary>
+    internal static int BulletBudget(int spokenChars) =>
+        spokenChars >= 40_000 ? 14 :
+        spokenChars >= 15_000 ? 10 :
+        spokenChars >= 4_000 ? 7 : 5;
+
     /// <summary>Tokens a window must leave free: the system prompt and instructions (~500), the
     /// generated answer (420 on the map pass, 760 on the final), and margin. </summary>
     internal const int ReserveTokens = 1600;
 
-    /// <summary>Characters per token for NUMBERED TRANSCRIPT LINES, which tokenise far worse than
-    /// prose: "[147] Craig: " is punctuation and digits, and a mis-heard name splits into pieces.</summary>
-    internal const double ChunkCharsPerToken = 2.6;
+    /// <summary>
+    /// Characters per token for NUMBERED TRANSCRIPT LINES, which tokenise far worse than prose:
+    /// "[147] Craig: " is punctuation and digits, and a mis-heard name splits into pieces.
+    ///
+    /// 2.6 was an estimate and one real window disproved it. Measured 2026-09-03 over a ten-meeting
+    /// run: 1 window in 43 still threw, this time `ContextOverflowException` rather than NoKvSlot,
+    /// with a 520-token generation inside a 4096 context. So some transcripts tokenise worse than
+    /// 2.6, and the failure is ASYMMETRIC: a window slightly too small costs a little detail, a
+    /// window slightly too large costs the ENTIRE window and everything said in it. Be conservative.
+    ///
+    /// At ctx 4096 this gives 5,491 chars a window, still well above the 4,347 the NoKvSlot fix left.
+    /// </summary>
+    internal const double ChunkCharsPerToken = 2.2;
 
     /// <summary>
     /// HOW MUCH TRANSCRIPT FITS IN ONE WINDOW.

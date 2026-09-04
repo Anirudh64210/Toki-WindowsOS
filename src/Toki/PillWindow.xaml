@@ -77,6 +77,11 @@
                 <TranslateTransform x:Name="RootShift"/>
             </Border.RenderTransform>
             <Grid>
+                <!-- THE CAPTURED BACKDROP. A photograph of the screen this card is about to cover,
+                     shrunk and blurred (Theme/ScreenBackdrop.cs), sitting UNDER the plate tint so the
+                     card's translucency has something real to reveal. Collapsed unless the glassy
+                     notch is on and a capture succeeded, so the painted material remains the floor. -->
+                <Border x:Name="Backdrop" Visibility="Collapsed" ClipToBounds="True"/>
                 <theme:CardMaterial x:Name="Material"/>
                 <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
                     <Grid.RenderTransform>
