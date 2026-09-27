@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -166,9 +166,22 @@ public sealed class NoteQualityTests
             return Task.FromResult(answer);
         }
 
+        /// <summary>ILlm's contract is that this yields THE SAME ANSWER as CompleteAsync, a piece at a
+        /// time. This used to yield one empty string, which was harmless only while nothing streamed.
+        /// The moment the note pass started streaming (so the notch can show the title while the rest
+        /// is written) that stub silently emptied every note in this file. A fake that does not honour
+        /// the interface is a test that measures the fake.
+        ///
+        /// Split on newlines so the fake exercises the real multi-piece path, including the per-line
+        /// observer the title reveal depends on.</summary>
         public async IAsyncEnumerable<string> StreamAsync(string s, string u, int m,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
             IReadOnlyList<string>? stop = null)
-        { yield return ""; await Task.CompletedTask; }
+        {
+            var whole = await CompleteAsync(s, u, m, ct);
+            var lines = whole.Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+                yield return i < lines.Length - 1 ? lines[i] + "\n" : lines[i];
+        }
     }
 }

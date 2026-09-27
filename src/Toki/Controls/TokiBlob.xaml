@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Controls.TokiBlob"
+﻿<UserControl x:Class="Toki.Controls.TokiBlob"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!--
@@ -49,12 +49,23 @@
                      after the rebuild: dropped frames per notch transition went from 1.2 to 16.8, and
                      the CONTENT cost line from 3 percent to 12-38 percent.
                      The body never changes SHAPE, only transform, which is exactly the case a bitmap
-                     cache exists for. RenderAtScale 4 keeps it crisp everywhere it is drawn, from the
-                     44px notch bubble up to the 256px app icon. The motion skill's warning about
-                     BitmapCache killing ClearType does not apply: there is no text in here. -->
+                     cache exists for. The motion skill's warning about BitmapCache killing ClearType
+                     does not apply: there is no text in here.
+
+                     RENDERATSCALE IS SET IN CODE, per displayed size (see SyncCacheScale). It was a
+                     FIXED 4, on the reasoning that "4 keeps it crisp everywhere it is drawn, from
+                     the 44px notch bubble up to the 256px app icon". That is backwards for every
+                     size except the icon. RenderAtScale is relative to this Canvas's own 67x52 box,
+                     so 4 rasterises a 268px bitmap; the notch bubble then draws it at about 55
+                     device pixels, a FIVE-FOLD minification, and WPF composites a cached layer with
+                     bilinear filtering, which samples four texels out of twenty-five. That is not
+                     softness, it is aliasing - the hard stair-stepped edge and the dark fringe in
+                     the owner's screenshot (2026-09-27: "rough, leaking edges and just low
+                     resolution and cheap"). Oversampling past the display scale HURTS without
+                     mipmaps. -->
                 <Canvas Width="67" Height="52">
                     <Canvas.CacheMode>
-                        <BitmapCache RenderAtScale="4" EnableClearType="False" SnapsToDevicePixels="False"/>
+                        <BitmapCache x:Name="BodyCache" RenderAtScale="1" EnableClearType="False" SnapsToDevicePixels="False"/>
                     </Canvas.CacheMode>
                     <!-- ── THE BODY ──
                          The path is the design's Vector node (325:288) verbatim. Do not "tidy" it:
@@ -83,10 +94,20 @@
                     <Path Canvas.Left="0" Canvas.Top="4" IsHitTestVisible="False"
                           Data="M27.4168 0.0439105C27.7899 0.0125787 28.3679 0 28.7515 0C32.9906 0.0038307 37.0098 1.64726 39.729 4.48815C41.0304 5.84354 41.3616 6.74919 43.3084 7.73882C44.755 8.47438 45.3972 8.46849 46.959 8.8559C49.3313 9.4639 51.4908 10.5823 53.2392 12.1085C55.9217 14.4471 57.4299 17.621 57.4319 20.9312C57.4208 24.6086 55.6357 28.0527 52.4072 30.4546C50.8977 31.5775 49.6979 31.9525 48.5994 33.6049C47.8552 34.6249 47.664 35.7215 47.2942 36.8678C46.5434 39.1941 44.9545 41.292 42.8656 42.886C38.3887 46.3021 34.3829 40.0285 28.7515 40.0182C22.6942 40.021 17.7107 46.0289 13.3369 41.8383C12.0847 40.6385 11.091 39.2388 10.4618 37.7249C9.7477 36.0068 9.75444 34.6283 8.45776 33.1075C7.47901 31.9594 6.60185 31.5174 5.34464 30.6747C2.54343 28.7976 0.532911 25.6181 0.116654 22.5663C-0.690722 17.0413 2.7529 11.7093 8.58423 9.45527C10.6896 8.64178 12.4614 8.64504 14.3439 7.63665C15.9027 6.80167 16.4434 5.85612 17.5137 4.69924C20.0818 1.9233 23.402 0.444534 27.4168 0.0439105Z">
                         <Path.Fill>
+                            <!-- THE EXTREMITIES ARE PALE, and that is the character. The design draws
+                                 Toki lightening to near-white at his edges and feet; a previous pass
+                                 removed it because white feet vanished on a light surface, and what
+                                 was left was a flat blue pebble. Owner, 2026-09-26: "toki mascot on
+                                 the notch is fully blue, unlike what actual toki is, a little white
+                                 on its extremities."
+                                 The rim carries it now rather than the body gradient, so the centre
+                                 stays fully saturated and the silhouette never dissolves: the blue
+                                 core is what holds the shape against a white card. -->
                             <RadialGradientBrush GradientOrigin="0.5,0.46" Center="0.5,0.46" RadiusX="0.56" RadiusY="0.60">
-                                <GradientStop Color="#00C7F0FC" Offset="0.58"/>
-                                <GradientStop Color="#26C7F0FC" Offset="0.86"/>
-                                <GradientStop Color="#4DC7F0FC" Offset="1.0"/>
+                                <GradientStop Color="#00C7F0FC" Offset="0.50"/>
+                                <GradientStop Color="#2ED8F2FF" Offset="0.78"/>
+                                <GradientStop Color="#73EAF9FF" Offset="0.92"/>
+                                <GradientStop Color="#A6F4FCFF" Offset="1.0"/>
                             </RadialGradientBrush>
                         </Path.Fill>
                     </Path>
@@ -245,7 +266,7 @@
                          under a transform, and the writing scribble runs them at 30fps for as long as
                          a recording lasts. -->
                     <Canvas.CacheMode>
-                        <BitmapCache RenderAtScale="4" EnableClearType="False" SnapsToDevicePixels="False"/>
+                        <BitmapCache x:Name="PropCache" RenderAtScale="1" EnableClearType="False" SnapsToDevicePixels="False"/>
                     </Canvas.CacheMode>
                     <Canvas.Resources>
                         <LinearGradientBrush x:Key="PenNavy" StartPoint="1,0.7" EndPoint="0,0.05">

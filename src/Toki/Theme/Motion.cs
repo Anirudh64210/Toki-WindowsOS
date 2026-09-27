@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Media.Animation;
 
@@ -33,8 +33,34 @@ public static class Motion
     // Drawer is the iOS sheet / Dynamic Island settle - the curve the notch morph rides.
     /// <summary>Strong ease-out for entering elements - fast start, soft landing.</summary>
     public static IEasingFunction ArriveStrong { get; } = Frozen(new BezierEase(0.23, 1.00, 0.32, 1.00));
-    /// <summary>Accelerating exit - things leave without ceremony.</summary>
+    /// <summary>Accelerating exit - things leave without ceremony. For elements that FADE out, where
+    /// a long flat head is invisible because opacity does the leaving. Never for something whose
+    /// POSITION or SIZE is the exit: see <see cref="Retract"/>.</summary>
     public static IEasingFunction Depart { get; } = Frozen(new BezierEase(0.30, 0.00, 0.80, 0.15));
+    /// <summary>
+    /// The notch furling back into the top edge. Owner, twice: the close "just cuts back up", and
+    /// then "it still shuts back up like a shutter, it needs to go out smoothly and quick the same
+    /// way it opens up".
+    ///
+    /// FRONT-LOADED, like the open - and this replaces an ACCELERATING curve that was textbook-
+    /// correct for an exit and still wrong here. The first version of this rode `Depart`, which has
+    /// covered 15.4% of its distance at its own halfway point, so the card looked frozen and then
+    /// jumped. The second version fixed that with a gentle accelerate (34.1% at the midpoint) and
+    /// the owner still called it a shutter. Filming both directions says why:
+    ///
+    ///     50ms into the motion    OPEN 79% travelled    CLOSE 23% travelled
+    ///
+    /// The open is a pop-and-settle: `Drawer` puts it over three quarters of the way out in the
+    /// first fifty milliseconds and spends the rest easing into place. ANY accelerating exit is the
+    /// mirror image of that in feel, however smooth its curve, because it spends its first half
+    /// barely moving. "The same way it opens" is not a curve you derive, it is one you copy: leave
+    /// decisively, then ease.
+    ///
+    /// Sits just inside `Drawer` (70% at 50ms against its 82%) so the card does not snap out of
+    /// existence and leave a shadow behind it. The lesson worth keeping: the conventional exit
+    /// curve is the wrong tool when the ENTRANCE is not conventional either.
+    /// </summary>
+    public static IEasingFunction Retract { get; } = Frozen(new BezierEase(0.22, 0.61, 0.24, 1.00));
     /// <summary>The sheet/notch settle curve (Dynamic Island's) - use for the window size morph.</summary>
     public static IEasingFunction Drawer { get; } = Frozen(new BezierEase(0.32, 0.72, 0.00, 1.00));
     /// <summary>Something already on screen transforming IN PLACE (a glyph turning over, a row

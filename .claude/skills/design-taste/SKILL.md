@@ -1,4 +1,4 @@
----
+﻿---
 name: design-taste
 description: The review instrument that separates a considered interface from generated "AI slop" - the visual tells, why each happens, the principles that replace them, how a senior designer writes UI copy, and an ordered audit procedure. Load before any design review, before shipping a screen, and when something looks generic but you cannot say why.
 ---
@@ -158,3 +158,16 @@ Taste is a tiebreaker, not an authority. It loses immediately to:
 - https://www.developersdigest.tech/blog/ai-design-slop-and-how-to-spot-it
 - https://superdesign.dev/blog/why-ai-design-looks-generic
 - https://www.holistics.io/blog/data-ink-ratio/
+
+## The numbers, when "it looks cheap" needs a value rather than a verdict
+
+`references/premium-notetaker-numbers.md` (added 2026-09-27) carries the measured layer under this
+skill: Granola's and Wispr Flow's real type, spacing and colour-restraint specs; the published light
+-theme rules (white is the CARD not the canvas, tinted not black-alpha ramps, the separation order,
+the hairline band); typography numbers with sources; NN/g's reading-length data; the chip-versus-text
+decision table; and the CHI 2011 retrieval study that settles whether a meetings Library earns its
+place.
+
+**Read section 9 before proposing any colour.** Toki's card is `Glass` at 85%, so every value in
+every design system - all of which assume opaque surfaces - has to clear a contrast case those
+systems never faced. Three recommended values were adopted, measured and rejected on exactly that.

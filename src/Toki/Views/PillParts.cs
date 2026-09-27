@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -121,13 +121,24 @@ public static class PillParts
     /// triangle carries its mass on the left) and must be a RENDER transform, not a margin:
     /// a margin inside a centre-aligned ContentPresenter widens the content box and re-centres it.
     /// </summary>
-    public static Path PlayGlyph(string fillKey) =>
-        new Path
+    public static Path PlayGlyph(string fillKey)
+    {
+        // ROUNDED, NOT A SHARD. At 8x10 a mathematically sharp triangle renders three needle points
+        // that alias into grey pixels, which is what made this read as cheap beside body text (owner,
+        // 2026-09-26: "the play button looks very ugly"). Stroking the same geometry with a round
+        // join and painting stroke and fill from one brush softens the corners without a second
+        // path: the outline adds half its thickness back, so the triangle is drawn slightly smaller
+        // to keep the optical size it had.
+        var p = new Path
         {
-            Data = PlayTriangle(), Stretch = Stretch.None,
+            Data = PlayTriangleSmall(), Stretch = Stretch.None,
+            StrokeThickness = 1.6, StrokeLineJoin = PenLineJoin.Round,
             RenderTransform = new TranslateTransform(1, 0),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-        }.Themed(Shape.FillProperty, fillKey).SubPixel();
+        };
+        p.Themed(Shape.FillProperty, fillKey).Themed(Shape.StrokeProperty, fillKey);
+        return p.SubPixel();
+    }
 
     /// <summary>
     /// An outline icon, drawn at TRUE SIZE with Stretch.None. Never author on a large viewbox and
@@ -236,6 +247,10 @@ public static class PillParts
     /// <summary>lucide/play at 8x10 - the evidence player's triangle, authored at its final pixel
     /// size so nothing scales the shape (see Outline).</summary>
     public static Geometry PlayTriangle() => G("M0,0 L8,5 L0,10 Z");
+
+    /// <summary>The play triangle inset by the round join's half-thickness, so stroke plus fill
+    /// occupies the same box the sharp one did.</summary>
+    public static Geometry PlayTriangleSmall() => G("M0.8,1.4 L6.9,5 L0.8,8.6 Z");
 
     /// <summary>
     /// lucide/chevron-down at 11x5.5 - the recording bar's disclosure. Starts at 0,0 with no inset

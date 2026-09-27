@@ -29,13 +29,19 @@ public static class TimeText
         return string.Join(" · ", parts);
     }
 
-    /// <summary>Duration · full date/time · app - the reading-pane meta line under a note title.</summary>
+    /// <summary>When it happened, and how long it ran - the reading-pane meta line under a note title.</summary>
     public static string FullMeta(MeetingRecord m)
     {
-        var parts = new List<string>();
+        // TWO FACTS, NOT FOUR. This line used to read "24 min · Thursday, Sept 17 · 6:00 PM · Chrome",
+        // sitting directly under the title of a note the reader opened deliberately from a list that
+        // had already told them the app and the date. The reference notetaker sets the entire line
+        // as "12:56 AM today".
+        // The weekday and the app both go: the weekday is decoration once the date is present, and
+        // which app hosted the call has never changed what anyone did with a note. Duration stays -
+        // it is the one fact here that says something about the MEETING rather than about filing it.
+        // Owner, 2026-09-27: "minimise the text". (Supersedes the four-part line of 2026-09-03.)
+        var parts = new List<string> { m.StartedAt.ToString("MMM d · h:mm tt") };
         if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
-        parts.Add(m.StartedAt.ToString("dddd, MMM d · h:mm tt"));
-        if (!string.IsNullOrWhiteSpace(m.App)) parts.Add(m.App!);
         return string.Join("  ·  ", parts);
     }
 }

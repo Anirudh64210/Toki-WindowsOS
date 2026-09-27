@@ -1,4 +1,4 @@
-<Window x:Class="Toki.PillWindow"
+﻿<Window x:Class="Toki.PillWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:theme="clr-namespace:Toki.Theme"
@@ -8,7 +8,23 @@
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="{StaticResource UiFont}"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Grayscale"
         Width="120" Height="40" KeyDown="OnKeyDown">
+    <!-- GRAYSCALE, EXPLICITLY, AND ON THE NOTCH ESPECIALLY (2026-09-27).
+             Two reasons, and the second is the one that was actually costing us:
+             1. Inter is drawn for grayscale antialiasing. Measured on a real screen capture, the
+                same line of text carries a mean per-pixel colour spread of 93 under ClearType and
+                0.3 under Grayscale, while the ink comes out slightly DARKER - so the fringing goes
+                and nothing thins.
+             2. WPF SILENTLY DROPS CLEARTYPE whenever text sits under a RenderTransform or on a
+                layered window, and this window is both: it is AllowsTransparency, and HostScale
+                zooms the content on every single state morph. So the notch's text was flipping
+                rendering mode at the start and end of every transition, which is a visible weight
+                change on every word. Pinning the mode means there is nothing left to flip.
+             Ideal, not Display: see LibraryWindow.xaml for the full note - Display mode forces
+             integer glyph advances through hinting Inter does not ship. -->
+
     <!-- Transparent window (like Cluely / Cheating Daddy): the Border IS the pill, with
          a translucent frosted surface so the desktop shows through. Ghost mode
          (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
@@ -77,15 +93,26 @@
                 <TranslateTransform x:Name="RootShift"/>
             </Border.RenderTransform>
             <Grid>
-                <!-- THE CAPTURED BACKDROP. A photograph of the screen this card is about to cover,
-                     shrunk and blurred (Theme/ScreenBackdrop.cs), sitting UNDER the plate tint so the
-                     card's translucency has something real to reveal. Collapsed unless the glassy
-                     notch is on and a capture succeeded, so the painted material remains the floor. -->
-                <Border x:Name="Backdrop" Visibility="Collapsed" ClipToBounds="True"/>
+                <!-- NO PHOTOGRAPHED BACKDROP. A blurred screen-capture layer lived here from
+                     2026-09-03 to 2026-09-23 and it was a mistake twice over. The claim in its own
+                     comment - "sitting UNDER the plate tint" - was FALSE: a Border paints its
+                     Background behind its CHILD, so the photograph covered the plate at full opacity
+                     instead of tinting under it. What the owner saw was their browser smeared across
+                     every card as a yellow-brown wash. Removed, not re-layered: the ask was to fix
+                     fake glass and the answer was a faker shine. The card's material is painted,
+                     honest, and the same in both themes. -->
                 <theme:CardMaterial x:Name="Material"/>
                 <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
                     <Grid.RenderTransform>
-                        <ScaleTransform x:Name="HostScale"/>
+                        <!-- A GROUP, so the retract can lift the content while the morph scales it.
+                             HostShift is used by ConcealUp only: the clip that furls the card is in
+                             Root's own coordinate space, so translating Root would carry the clip
+                             with it and nothing would move relative to anything. The content has to
+                             travel INSIDE the card for the close to read as the open reversed. -->
+                        <TransformGroup>
+                            <ScaleTransform x:Name="HostScale"/>
+                            <TranslateTransform x:Name="HostShift"/>
+                        </TransformGroup>
                     </Grid.RenderTransform>
                 </Grid>
             </Grid>

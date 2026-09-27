@@ -25,7 +25,553 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## Four constants that described the machinery, not the work (2026-09-03, latest)
+## The rendering itself was wrong, in three separate places (2026-09-27, latest)
+
+The owner, on the previous round: "what you are doing is, oh here's this thing i have to do, and
+then, okay let me do it and as long as i just went from a to b its cool, no no, quality needs to be
+top, rendering needs to be perfect, the actual issue needs to be addressed and fixed". Fair. Three
+of the four items below are defects I introduced or failed to find, and all four were diagnosed by
+MEASURING the real screen rather than reading code.
+
+### The text was mangled because I changed the font and left the text mode
+
+`TextFormattingMode="Display"` rounds every glyph advance to a whole pixel and rasterises through
+the font's own TrueType hinting. That is right for Segoe UI Variable, which Microsoft hints heavily
+for exactly this. Inter ships almost no hinting, because it is drawn for rasterisers that place
+glyphs at fractional pixels - so Display mode forced integer advances onto a design never fitted to
+them and stems came back uneven and broken. The owner's screenshot of the word "Contact" shows it
+exactly: stem weights all over the place, several strokes nearly gone.
+
+**A text mode is a property of the TYPEFACE, not of the window.** I swapped the font and left the
+setting that had been chosen for the old one.
+
+Now Ideal, plus Grayscale rendering set explicitly. Measured on a real screen capture of the same
+line: mean per-pixel edge colour spread **93 under ClearType, 0.3 under Grayscale**, with the ink
+coming out slightly darker - the orange/blue fringing goes and nothing thins. The notch gets the
+same treatment and needs it more: WPF silently drops ClearType under a RenderTransform, and the
+notch scale-animates on every morph, so its text was changing rendering mode on every transition.
+
+### The mascot was being minified, not rendered
+
+`BitmapCache RenderAtScale="4"` on a 67x52 board rasterises a 268px bitmap. The notch bubble draws
+it at about 55 device pixels - a five-fold reduction, composited with a bilinear filter that samples
+four texels out of twenty-five. That is not softness, it is aliasing, and it is the stair-stepped
+edge and dark fringe in the screenshot. **Oversampling a cache without mipmaps makes minification
+worse, not better.** RenderAtScale is now computed per displayed size (`SyncCacheScale`), with 1.5x
+headroom for the rotations. Measured on a screen capture: antialiased edge pixels per row up from
+2.9 to 4.5, and rows carrying any blending at all from 13 to 31.
+
+### The notch "resize glitch" was never a resize
+
+Reported twice, and last round I fixed a different cause (cold view measurement) and declared it
+done. Filming it frame by frame and measuring the card's geometry: **the width never changes at all**
+- the morph log reads 380 -> 380 every time. What changes is the CORNER. Every clip animation ran on
+a RectangleGeometry with circular radii while the resting card wore a squircle, so the silhouette
+snapped shape twice per transition, measured at 3px per side 20px down from the top edge.
+
+`Squircle.cs` claimed the two shapes "depart by under half a pixel ... screenshots won't show it".
+That is true only along the corner diagonal: smoothing starts the curve 38px from the corner where
+an arc starts at 24px. The header also claimed a squircle must never be rebuilt per frame; that was
+untested, and `DriveClip` now rebuilds one every frame of every reveal, retract and morph for a
+measured 2-3% content cost and ~7 dropped frames per transition, indistinguishable from before.
+Both claims are corrected in place rather than deleted.
+
+### The close was still a shutter because I copied the wrong thing
+
+Last round I replaced a dead-start exit curve with a gentle accelerating one - textbook correct for
+an exit, and still wrong here. Filming both directions:
+
+```
+50ms into the motion:   OPEN 79% travelled    CLOSE 23% travelled
+```
+
+The open is a pop-and-settle; any accelerating exit is its mirror image in feel, because it spends
+its first half barely moving. "The same way it opens" is not a curve you derive, it is one you copy.
+`Motion.Retract` is now front-loaded like the open, at 180ms - matched to the reveal's *measured*
+travel rather than its nominal 280ms, most of which is the tail of a curve already 99% done. After:
+both directions are ~75% done within 33ms.
+
+Suite 2237/2237; all eight UI batteries pass, plus `--hittest`, `--notetest`, `--revealtest` and
+`--llmtest` on the packaged `dist` build. Two new mutation probes in `--revealtest`, each verified
+to fail against the unfixed code.
+
+## Toki stops looking like a Windows utility (2026-09-27)
+
+The owner rejected the previous typography pass in one sentence: "instead of removing all the
+little subheading, and unecessary and overwhelming text ... you just increased its size basically
+of all the text and made it ugly". That was accurate. Asked to remove text, I had enlarged it.
+They supplied two screenshots of a reference notetaker and asked for that level of quality, plus a
+custom title bar, the page colour on the notch, and a close animation that is not a cut.
+
+Every colour below was SAMPLED from those screenshots rather than guessed.
+
+### Toki is set in Inter, and note titles in Spectral
+
+Segoe UI Variable is the face every Windows utility is set in, so setting Toki in it made Toki look
+like one. Both families are bundled inside the exe under the SIL Open Font License 1.1 (credited on
+the "Built with" screen and in `THIRD-PARTY-NOTICES.md` - that is a licence obligation, not a
+courtesy). STATIC weights, because WPF cannot address variable-font axes and would render every
+weight at 400.
+
+Note titles are a serif. A meeting note is a document, and the reference sets its document title in
+a serif while every control around it stays grotesque; that one contrast is most of why it reads as
+a written thing rather than a dialog, and it costs no extra ink.
+
+### The page is now the lightest thing, and the cards are tints on it
+
+This inverts the layering decided one day earlier. The reference's whole window is four greys and
+one ink: page `#FCFCFB` (82% of its pixels), card `#F5F4F0`, chip `#EEEBE3`, rule `#DAD9D5`, ink
+`#1A1A1A`. With the page as the lightest surface a card needs no border and no shadow to be legible,
+so the edge count drops - which is most of what "cheap" was. The notch carries the same page colour
+now, so the notch and the window read as cut from one sheet.
+
+### Its own title bar
+
+`WindowStyle=None` plus `WindowChrome`, which keeps Aero Snap, snap layouts, drag-to-restore, edge
+resize and the system shadow - the recipe that drops `WindowChrome` gives all of that up. Back moved
+here as a chevron chip and left the sidebar, where it had been the heaviest object in the window for
+the action taken least often. The "maximised window covers the taskbar" trap that owning the frame
+normally introduces was already solved: `StyleChrome` has answered `WM_GETMINMAXINFO` with the work
+area since the per-monitor-DPI fix. Checked rather than assumed - a second hook would have
+double-corrected the bounds.
+
+### Text removed, not resized
+
+A list row was a 20px title wrapping to two lines, a two-line snippet and a four-fact meta line: up
+to five lines per meeting, 85 times down the list. It is now three fixed lines - title at body size,
+one-line snippet, date and duration. Eight meetings fit where four did. `NoWrap` had to be set
+explicitly; the shared styles turn wrapping on, so dropping the local `Wrap` gave trimming that
+never fired. Also gone: the permanent "85" beside the word Library (it appears only when a filter
+makes it an answer), the query syntax taught in the search placeholder, the weekday and host app
+under every note title, and the last two coloured things in the note toolbar.
+
+### The close was a cut twice over, and the film proved it
+
+Owner: it "just cuts back up, not that nice". Both halves were measurable.
+
+**The curve.** The retract rode `Depart`, which at the HALFWAY point of the animation has moved
+15.4% of the distance (Material's accelerate: 32.5%). So for the first 85ms of a 170ms close the card
+had moved a seventh of the way and looked frozen, then covered the rest in a few frames. New curve
+reaches 34.1% at the midpoint, over 200ms - about 70% of the 280ms open, which is the house rule.
+Note what "close it the same way it opens" cannot mean: the literal time-reverse of the opening
+curve is an even more extreme dead-start. That is the trap the old value fell into.
+
+**The content.** `ConcealUp` called `BeginAnimation(OpacityProperty, null)` before starting its fade.
+Clearing an animation reverts the property to its LOCAL value, and `MorphContent` leaves that at 0
+(it sets opacity 0 and animates UP to 1). So the content snapped invisible in one frame and the fade
+then ran 0 to 0. Filmed at 60fps: legible at t=0, gone at t=16ms, card still at full height. Fixed by
+reading the current animated value and animating from it; never null an animation you are about to
+replace. Guarded by a mutation probe in `--revealtest`, verified to fail against the unfixed code.
+
+The notch's separator rules are gone from About, Calendar and Settings - a full-width hairline across
+a 380px card is a hard edge dividing a heading from content it already owns.
+
+Suite 2237/2237; `--hittest`, `--measuretest`, `--themetest`, `--revealtest`, `--notetest`,
+`--uitest`, `--wavetest`, `--stickytest` all pass, and `--hittest`/`--notetest`/`--llmtest` pass on
+the packaged `dist` build.
+
+## The notch stops reshaping, and the text stops being cheap (2026-09-27)
+
+The owner's list, after looking at a real recording. Most of it turned out to be measurable defects
+rather than taste, and two research threads (premium notetaker UI; whether a meetings Library earns
+its place) supplied numbers instead of opinion.
+
+### Structure
+
+**One width for every panel page.** The panels were 330, 344, 356, 360, 380, 392 and 404 wide. The
+card is screen-centred, so every navigation moved BOTH edges and re-wrapped every line inside. Owner:
+"toki readjusts and re renders everytime a notch state is changed ... a real premium product never
+works like that." Now 380 for every page; only height varies, growing downward from a fixed top.
+Onboarding keeps 330 - it is a standalone first-run flow with no neighbour to be consistent with, and
+widening it collapsed the height gap its step-snap depends on (`--revealtest` caught that).
+
+**The Library stops opening a note at you.** `Reload` auto-selected the newest meeting and rendered
+its full text, so the window greeted you with a wall of someone else's decisions. No surveyed
+competitor does this. Now a resting Toki and one line. An explicit "open this note" and a
+previously-read note still restore; only the silent fallback is gone.
+
+**The button labelled Library opens the Library.** `ShowLibrary()` defaulted to the Ask page, so a
+pill reading "Library", tooltipped "Every meeting and note, searchable", opened a chat box - and the
+window is titled Library too. Three places named the archive; none of them went there.
+
+### Text
+
+**Three optical font cuts, not one.** `UiFont` was `Segoe UI Variable Display` for every string from
+9.5px up. Microsoft assigns Small at or below 12, Text 14-18, Display 20 and up; Display is drawn for
+large type, with strokes too fine to survive at 12px. This is the literal answer to "the text
+rendering feels cheap".
+
+**`TextFormattingMode="Display"` on the Library window.** Never set anywhere, so WPF used Ideal,
+which places glyphs at fractional pixels. The WPF text team's own guidance is that Ideal only wins
+above about 15pt. Set on the window and NOT the notch, because Display blurs under a RenderTransform
+and the notch scale-animates on every morph.
+
+**The measure is capped at 560px.** The note had no width limit in an 800-1000px pane, so body text
+ran 118-148 characters per line against Microsoft's own 50-60 guidance. Left-aligned, not centred -
+`RenderManual` already recorded that a centred column reads as detached from the page.
+
+**The note went monochrome.** Section headings were painted green for decisions, teal for actions,
+pink for questions, amber for the transcript: four hues on one page, plus a tinted chip per action
+and an amber count pill. A Granola note uses ZERO colour; headings are body-size semibold and the
+hierarchy comes from weight. Title dropped from Bold to Semibold - Windows 11 removes Bold from the
+ramp outright.
+
+### Colour
+
+**The dark material is neutral, not warm brown.** `#211E1E` / `#2B2828` / `#343130` are warm greys,
+and at that lightness warm grey reads as aged plastic. The dark Surface beside them was already
+slightly cool, so the theme carried two colour keys at once. Every value keeps its lightness and only
+loses the cast. The LIGHT theme went the other way and is now warm, because there the references are
+one-directional (Granola `#F7F7F2`, Notion) - warm light reads as paper where warm dark reads as dust.
+
+**The page is no longer the card.** `Ink` sat on `Surface` at a lightness difference of about 2 -
+invisible - so the reading pane never read as a page on a ground. Canvas tinted, card lightest.
+
+**Six full-width dividers deleted.** The Settings page carried seven `Height=1` rules at 28px margins
+each side. Material 3 is explicit that a divider belongs only where elements "cannot be separated
+using white space"; 56px of air is not that case.
+
+Also: the stacked three-rectangle fake shadow under buttons (hard edges cannot blur, so they rendered
+as visible steps - the "ugly 3d rendering"), the amber transcript badge, the sharp play triangle, the
+amber "N open" pills in all three places, and vague due strings like "as soon as possible".
+
+### Two reference values that did NOT survive contact
+
+Both were recommended by research, both measured fine on every opaque surface, and both failed on the
+light card over a BLACK wallpaper - because Toki's card is Glass at 85%, so what a colour sits on
+depends on the user's desktop. The published systems assume opacity and never had to clear that case.
+
+- `TextDim` at `#646464` (where Radix, Geist, Primer and Material independently landed for secondary)
+  measured **3.74:1**. The ceiling here is about `#575757`, and `#56565A` was already on it.
+- The neutral dark `Glass` at `#1F1F21` put Amber at 4.50:1 and Blue at 4.49:1 against a 4.5 bar,
+  purely because it was a fraction lighter than the warm value it replaced. Darkened to `#1D1D1F`.
+
+`ContrastTests` caught both. Suite 2237/2237; `--hittest`, `--measuretest`, `--themetest`,
+`--revealtest`, `--notetest`, `--uitest` all pass.
+
+## Hover intent, and one "no" per meeting (2026-09-23)
+
+Two owner reports, both about Toki interrupting or failing to respond.
+
+### The notch now asks whether you ARRIVED, not whether you waited
+
+"random hovers it opens up, random hovers it don't ... theres no system in place for how toki is
+activated." Both failures came from one line:
+
+```csharp
+_overMs = over ? _overMs + HoverPollMs : 0;   // 850ms target
+```
+
+It had no idea how fast the cursor was moving, so a transit that paused opened the notch. And it
+zeroed the whole dwell on a SINGLE sample outside a 3px-slack rectangle, so a jitter threw away 800ms
+of honest intent. The long dwell was the only defence in place, and its length was itself the second
+failure: every millisecond was another chance to miss a hover the user meant.
+
+Researched against Apple's home-indicator gesture and the published pointer-intent work. The useful
+half was not the swipe mechanics - there is no release event in a hover, so velocity projection does
+not transfer - it was hoverIntent's concrete insight that **an arrival is a cursor that SLOWS DOWN,
+and a transit is one that does not** (published default: under 6px per 100ms, about 60px/s).
+
+`State/HoverIntent.cs` now owns the judgement. Three rules, only the first about time:
+
+| rule | why |
+|---|---|
+| dwell accrues only while inside AND settled AND not descending through | the speed gate is what rejects a cursor crossing the top band for a browser tab |
+| inside-but-fast HOLDS the dwell; only a sustained exit clears it | a 300ms grace, so one jittery sample cannot discard real intent |
+| enter on a tight rect, stay on a loose one | something already open should be harder to dismiss than it was to summon |
+
+With speed and direction carrying the rejection, the dwell came down from **850ms to 360ms**.
+Measured on the real notch: eight fast sweeps across the top band produced **zero** state changes;
+one deliberate reach-and-rest summoned the peek and opened it **386ms** later.
+
+The downward bound is deliberately HALF the speed gate. At the same threshold the direction rule
+would reject nothing the speed gate had not already caught, and a rule that can never fire is worse
+than no rule.
+
+### A refusal is about the CALL, not about ten minutes
+
+"when toki prompts meeting in place, record? prompt, when user selects not to, every 10 mins or so it
+re asks, it becomes redundant and pointless." One method doing two contradictory things:
+
+```csharp
+public void Snooze(DetectedApp app)
+{
+    _cooldownUntil[app.Id] = _now() + Cooldown;   // silence for 10 minutes
+    _prompted.Remove(app.Id);                     // ...and forget we ever asked
+}
+```
+
+Every ten minutes it forgot the refusal and asked again, for the length of the meeting. A test
+asserted this as correct - "it isn't silenced for the whole mic-session after a single Not now" -
+which was a defensible reading until it met a real ninety-minute call. Superseded, with the old
+reasoning kept in words because someone will propose it again.
+
+Now: **one "no" per call.** Not a timer - time does not make a refusal stale, a new meeting does.
+Toki asks again only once the app has genuinely left the mic. The subtlety is that the old code
+treated ONE absent poll as "the call ended", and muting, switching headset or a driver hiccup all
+drop the mic for a moment; a call must now be off the mic for about 15 seconds before the next
+appearance counts as a new meeting.
+
+Guarded by `HoverIntentTests` (11, three of them mutation probes against the old behaviour) and three
+rewritten `MeetingDetectorTests`. Suite 2237/2237.
+
+## Eyes on every state, both themes (2026-09-23)
+
+After the fake glass came out, the owner asked for the rest: "fix all design bugs, in all states and
+in all themes, it cannot make weird changes, weird colors". So all 27 notch states and 11 Library
+pages were photographed in BOTH palettes and read one by one. Seven more defects, none of which any
+green test had ever noticed.
+
+**Weird colours, all of them token misuse rather than bad taste:**
+
+| where | was | now |
+|---|---|---|
+| Licence chips (About) | filled amber - a pale yellow lozenge on the light card | the same neutral chip every licence gets, weight carrying the obligation |
+| Day picker: selected day, today ring, Today link | magenta | brand blue |
+| The imminent "Join" | an amber-filled pill beside the amber countdown - cream in light | the same primary button as every other Join |
+| Amber's LIGHT value | `#794F1A`, a brown, on the recording timer | `#87430A`, 93% saturated |
+
+Amber's rule is time and counts. A licence is neither; "chosen day" is chrome, not a question; and a
+Join beside an amber countdown does not need to be amber itself.
+
+**The amber value is worth its own note.** Contrast was never the problem - `#794F1A` cleared 4.5:1
+everywhere and simply looked like mud, which is why no test caught it. Two brighter candidates were
+tried and REJECTED by `ContrastTests`: `#B45309` and `#A04B06` both measured 3.79:1 on the light card
+over a black wallpaper. The binding constraint is not the plate, it is that the card is 85% glass, so
+what amber lands on depends on the desktop. `#87430A` is the most saturated value that survives it.
+
+**Affordance:**
+- `NoSpeech`'s "Okay" did not read as a button in either theme. `Chip` is tuned against `Surface`
+  (`#0E0E10`); the notch plate is `#343130`, which `Chip` lands a few points from. New `ChipOnCard`.
+- The Library search field was an empty rectangle - a black void beside "+ New note". It now says
+  "Search your meetings".
+
+**The one that was live in the shipped app:** every ON toggle in the LIGHT theme had a near-black
+knob on a dark blue track. The knob used `WhiteBtn`, which inverts per theme - so it turned black at
+exactly the moment the track turned dark. New `SwitchKnobOn` stays light in both, because the knob's
+job is to contrast with the TRACK, not the page.
+
+Guarded by `DesignTokenTests` (8), including a SATURATION assertion for amber - contrast alone could
+never have caught a brown that measured fine. Suite 2225/2225; `--themetest`, `--hittest`,
+`--measuretest`, `--revealtest`, `--notetest` all pass on the packaged build.
+
+## The fake glass, deleted (2026-09-23)
+
+The owner recorded a real meeting and sent six screenshots. "there is an ugly yellow color, and the
+toki bubble is lower like its sagging, the fake glass got faker than ever, i asked you to fix the
+fake glass we had and you literally created a fake shine, i HATE it". Three separate causes.
+
+### 1. The yellow was their browser, painted on the card
+
+`ScreenBackdrop` (added 2026-09-03) photographed the screen behind the notch, blurred it, and
+painted it as `<Border x:Name="Backdrop">`, the FIRST child of Root's inner Grid. Its own comment
+said it sat "UNDER the plate tint". **That was false.** A Border paints its Background behind its
+CHILD, so the photograph covered the plate at full opacity instead of tinting beneath it. Every
+card carried a blurred picture of whatever was behind it - a yellow-brown wash on every screenshot.
+
+Deleted rather than re-layered. The ask was to fix fake glass; the answer had been a faker shine.
+`ScreenBackdrop.cs` is gone, along with `RefreshBackdrop`, the capture call at the hidden-window
+seam, and the `Backdrop` border. **This feature was never once looked at after it was built** - a
+previous session recorded it as "built and compiled but never seen" and shipped it anyway.
+
+### 2. The bubble sagged because the fake glass moved it
+
+`GlassTopBleed` grew the panel 8px upward so the backdrop could run to the screen edge, and
+`PlaceMascot` clamped Toki's zone to that bleed: `Math.Max(BleedDip, (cardH - zone) / 2)`. On the
+52px recording bar that resolved to 8, pushing a 58px zone 8px DOWN a card shorter than itself. The
+disc hung 13px below the bar with its contact shadow entirely outside the card. The bleed is gone
+with the backdrop, the clamp is 0, and `RecordingOpen` sits flush with the card floor instead of 8px
+past it.
+
+### 3. The shine that was left
+
+`SheenHeight` was a fixed 48px band with no bound relative to the card. Correct on a 400px panel;
+on the 52px recording bar it covers 92% of the card and the whole pill reads as one glossy
+top-to-bottom gradient. Now capped at a third of the card height, so tall panels are untouched
+(320 * 0.34 = 108, the fixed 48 still wins) and a short pill gets an edge, not a surface.
+
+Verified by FILMING the real notch (`--noghost` + ffmpeg gdigrab, contact sheet), not by reasoning:
+the bar is now an even capsule with the bubble level with it. Guarded by `CardMaterialTests` (5).
+Suite 2217/2217, `--hittest` / `--measuretest` / `--themetest` / `--revealtest` all pass.
+
+## The wait stops being blank (2026-09-04)
+
+The notch showed "Writing your notes" for the whole final pass, then the note appeared at once. That
+pass generates TITLE first and runs for ~12s, so the meeting's name existed long before anything was
+shown. `TextPass` now streams when a caller is watching, parses the title the moment its LINE closes,
+and the loader says it in place of the stage.
+
+Measured on meeting 128: title known at 23:20:09, note ready at 23:20:18 - **9.1 seconds early**, the
+last third of the wait. **Correction to an earlier claim**: that is 2s into the FINAL pass, not 2s
+into the wait. The title is written from the digests, so it cannot arrive before the map is done.
+
+Details that mattered: the observer fires per completed LINE, never per token (a half-written title
+that then corrects itself reads as a glitch, and per-token flushing is the documented notch-flicker
+bug); the dots are hidden while a title shows, because an ellipsised title next to animated dots is
+two kinds of dot in a row; `SummarizingView` now applies its state in the CONSTRUCTOR as well as on
+Loaded, since a cached view can be measured or photographed without ever being connected to a window.
+`--render` gained `Summarizing_open_title_{none,short,long}` so the trim can be looked at rather than
+reasoned about.
+
+**A latent bug this exposed.** `ScriptedLlm` in `NoteQualityTests` stubbed `StreamAsync` as
+`yield return ""`, which was harmless only while nothing streamed. The moment the note pass streamed,
+six notes came back empty. `ILlm` documents StreamAsync as "like CompleteAsync but token-by-token";
+the fake was not honouring its own interface, and a fake that does not is a test that measures the
+fake. Fixed, and `TitleRevealTests` now pins that streaming does not change the note.
+
+Guarded by `TitleRevealTests` (3). Suite 2212/2212.
+
+## Under a minute, by generating six times less (2026-09-04)
+
+The owner set the bar: "the goal is to make our notetaker deliver results fast, as fast as possible,
+every other notetaker, even the fully local ones, take less than a minute ... no compromise in
+quality." Two research threads and a day of measurement later, it is met.
+
+| meeting | length | was | now | |
+|---|---|---|---|---|
+| 107 | 22.3 min | 176.2s | **45.6s** | 3.9x |
+| 128 | 12.7 min | 130.6s | **22.2s** | 5.9x |
+| 126 | 1.4 min | 81.0s | **9.9s** | 8.2x |
+
+### The map step now PICKS lines instead of rewriting them
+
+Instrumenting every pass showed the map phase was 85% of a long meeting (115.8s of meeting 107's
+136.7s across 5 windows), and that generation, not prompt reading, is the whole wait: a 12-token
+pass over a 3.4k-char prompt costs 2-3s while a 430-token pass over the same size costs 20-58s.
+
+So the map no longer writes prose. It emits only the numbers of the transcript lines worth keeping,
+and Toki copies those lines out verbatim. A window falls from ~430 generated tokens to ~70.
+`Materialise` rebuilds the exact format the old path produced, so `ValidateDigest`, `TrimToFit` and
+provenance are untouched. Precedent: "Attribute First, then Generate" (arXiv 2403.17104).
+
+**Quality was measured, not assumed** (`--regentest 5`, both modes): pooled precision 100.0% to
+96.8%, recall 38.9% to 33.3%, provenance 68% to 69% of bullets, facts claimed 22 to 31. Every
+difference is three facts or fewer at n=5. Action OWNERS came out equal or better: on meeting 107 the
+old path named nobody across 6 actions while the new one named 3-4 across 5, twice running. Raw
+speech carries "Kashish, can you get Koshi?"; a rewrite drops the name. `TOKI_MAP=extract` restores
+the old behaviour for an A/B.
+
+### Two things measurement overturned
+
+**Full GPU offload is faster and is still refused.** Three runs per config beat the single run that
+had said 3%: 43.0s at 32 layers vs 28.9s at all 37. But llama.cpp is the allocator and it reports
+3370 MiB free, against ~3254 MiB for a full offload - a 116 MiB margin, where the failure is an
+uncatchable crash onto the heuristic floor. With the select map, 32 layers puts the longest meeting
+at 35.9s and full offload at 24.7s; both are under target, so the margin buys nothing. Raise it only
+behind real free-VRAM gating.
+
+**KV cache quantisation is a trap on this backend.** q8_0 for K is documented as nearly free
+(KLD 0.00094) and halving the cache is what would fund a parallel batch. Measured here: **99s against
+28.9s, 2.3x SLOWER**. The Vulkan attention path falls off onto something far worse. The arithmetic
+said yes and the hardware said no.
+
+Also checked and rejected: switching to CUDA (Vulkan is at parity or ahead for generation on Ampere;
+CUDA wins only on prefill, which is 6% of the wait).
+
+Guarded by `MapSelectionTests` (8) and `GpuTierTests` (7). Suite 2209/2209.
+
+## Two thirds of the GPU was never used (2026-09-04)
+
+The owner said summaries had got slower. Nothing timed the model calls, so neither of us could
+answer. `TextPass` now logs prompt size, token cap, output size and duration per pass.
+
+The first reading, replaying a stored meeting, settled it. **Prompt reading is nearly free and
+generation is the entire wait**: a 12-token pass over a 3.4k-char prompt costs 2-3s, while a
+430-token pass over a similar prompt costs 58s. The four passes of a note generate roughly 1000
+tokens, at 8-11 tokens/second.
+
+That rate is set by how much of the model is on the GPU, and the 4GB tier offloaded **20 layers**.
+That number had never been timed. It was a defensive guess against a native VRAM OOM, which is an
+uncatchable crash rather than a catchable exception, and it left most of the card unclaimed.
+
+Total model time for one note, same meeting, on the owner's RTX 3050 4GB:
+
+| layers | model time |
+|---|---|
+| 20 (the guess) | 121.8s |
+| 28 | 75.7s |
+| **32 (shipped)** | **45.8s** |
+| 34 | 47.5s, 48.7s |
+| all | 44.7s |
+
+**32 is the knee: 2.7x faster, within 3% of full offload, and still over a gigabyte spare** for the
+desktop and the video call the same GPU is driving. Full offload is refused deliberately; the last
+3% is not worth a crash that cannot be caught.
+
+**On the owner's actual question:** yesterday's changes did add generated tokens on purpose (the
+bullet budget scales with the meeting now, the digest budget with the window), and generated tokens
+are exactly what costs time, so the observation was real. But the comparison was also confounded -
+the fast old summaries were short meetings, and the very longest ones were fast because they were
+*failing* into the heuristic floor. At 32 layers a full 14-bullet note now costs less than a capped
+7-bullet one did before, so the quality work is paid for and there is change left over.
+
+**Known limit, in the backlog:** a constant cannot know how busy the GPU is right now.
+`DetectVramBytes` reads the card's total size from the registry, never what is free. Sizing from
+DXGI's `QueryVideoMemoryInfo` budget is the real fix.
+
+Guarded by `GpuTierTests` (6). Suite 2200/2200.
+
+### Measured against the owner's REAL past meetings, not one replay
+
+The owner pushed back on the first comparison ("don't compare yesterday's, compare the past
+recordings, the long ones too"). They were right to: the first pass dismissed the fast old summaries
+as "short meetings", and meeting 107 disproves that - 22.3 minutes and 20,573 chars, the largest in
+the Library, at 8.6s per 1k chars, the BEST ratio of any meeting. Length was never the explanation.
+
+Joining the log's `saved meeting` -> `notes written by LLM` deltas against `duration_ms` and
+transcript size in the store, then replaying the same meetings through the new build:
+
+| meeting | length | transcript | was | now (model time) | |
+|---|---|---|---|---|---|
+| 107 | 22.3 min | 20,573 ch | 176.2s | **109.2s** (7 passes) | 1.6x |
+| 121 | 19.5 min | 4,842 ch | 91.5s | **42.6s** (4 passes) | 2.1x |
+| 128 | 12.7 min | 6,800 ch | 130.6s | **45.8s** (4 passes) | 2.9x |
+| 126 | 1.4 min | 970 ch | 81.0s | **9.2s** (2 passes) | 8.8x |
+
+The "was" column is end to end from the log and the "now" column is model time only; both carry the
+same 8-17s of diarisation and model load, which the log shows separately. Every historical meeting is
+now faster than it has ever been, and the gain is largest where it was most embarrassing: 126 is a
+84-second meeting that took 81 seconds to summarise and now takes 9.
+
+107 stays the slowest at 109s because 20k chars genuinely needs four map windows, and the map passes
+are 20-22s each. That is 84s of its 109s. Cutting it further means generating fewer digest tokens,
+which is a note-quality trade and is not being made on speed grounds alone.
+
+**The variance in the old numbers was never about meeting length.** A 1.4-minute meeting cost 81s
+while a 22-minute one cost 176s. What actually moved was generated tokens and whether the model had
+to be reloaded, neither of which anyone could see before this instrumentation existed.
+
+## The loader that never ended (2026-09-04)
+
+The owner recorded a short meeting and watched the notch summarize for fifteen minutes. The progress
+bar read **1275m 37s**. Two independent bugs, and the second made the first look sixty times worse.
+
+**The hang.** Toki has a thin-input gate: below 70 substantive words, do not wake the 4B model, write
+an honest short note instead. That fired correctly here (21 words) and the note was written, saved and
+mirrored **8 seconds after the recording stopped**. The branch then ended with a bare `return;`,
+meaning "skip the model". But it sat inside the whole background summarize lambda, whose last act is
+the dispatcher call that moves the notch out of Summarizing. `AppState` permits exactly two exits from
+that state (Notes, NoSpeech) and there is no timeout, so the loader span forever over finished work.
+
+The fix is structural rather than a patch on the branch, because the `return` was only the first way
+in: **the advance now runs from a `finally`**. Any future unguarded throw - `InferOwners`, a store
+write, anything outside the inner try - still ends the loader. The thin-input gate skips the model
+with an `else`, and `InferOwners` is null-guarded because the catch above it can null the record out.
+
+Nothing caught this because the gate only fires on a nearly silent meeting. Every test meeting had
+enough words to take the model path, which reaches the advance normally.
+
+**The clock.** `readonly DateTime _started = DateTime.UtcNow` is a field initialiser, so it stamps at
+construction - and `PillWindow` caches one view per state for the life of the process. The loader had
+been built the previous evening, so it was reporting process uptime: 21h15m is 1275 minutes exactly.
+Now stamped on `Loaded`. Same file, same shape of bug: `_elapsedTimer.Tick +=` also lived in `Loaded`,
+stacking one handler per meeting on the cached view; it moved to the constructor.
+
+**Guarded by** `SummarizeExitTests` (9): five detectors against the real source, and four MUTATION
+PROBES that feed those same detectors the pre-fix code and assert each one catches it - so the
+detectors are proven to discriminate, not merely to pass. Suite 2194/2194.
+
+## Four constants that described the machinery, not the work (2026-09-03)
 
 The day's note-quality work reduced to one shape. Every defect was a number that described Toki's
 internals rather than the thing being summarised, and none of them were prompt problems, which is

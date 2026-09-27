@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -20,17 +20,19 @@ public static class NoteRenderer
     static Brush B(string key) => (Brush)Res(key);
     static FontFamily Ui => (FontFamily)Res("UiFont");
 
-    // One meaning -> one accent: decisions green, actions teal, open questions pink,
-    // transcript amber; everything else quiet.
-    static string HeaderColorKey(string title)
-    {
-        var t = (title ?? "").ToUpperInvariant();
-        if (t.Contains("DECISION")) return "Green";
-        if (t.Contains("ACTION") || t.Contains("TASK") || t.Contains("TODO") || t.Contains("NEXT STEP")) return "AccentTeal";
-        if (t.Contains("QUESTION") || t.Contains("OPEN") || t.Contains("RISK") || t.Contains("BLOCKER")) return "Pink";
-        if (t.Contains("TRANSCRIPT")) return "AccentAmber";
-        return "TextDim";
-    }
+    /// <summary>A NOTE HAS NO COLOUR. Section headings used to be painted green for decisions, teal
+    /// for actions, pink for questions and amber for the transcript - four hues on one page, plus a
+    /// tinted chip per action and an amber count pill. "One meaning one accent" is a real rule and it
+    /// was being applied per SECTION, which turns a document into a legend.
+    ///
+    /// The reference settles it: a Granola note uses ZERO colour. Headings are body-size semibold,
+    /// same ink as the text under them, and the hierarchy comes from WEIGHT. Owner, 2026-09-26: "it
+    /// needs to look like a premium product with quality notes ... feels cheap, like a cheap AI slop
+    /// product."
+    ///
+    /// Colour is not banned from Toki - it is spent where it changes what you DO (the record button,
+    /// an overdue date, Toki himself). A heading that says "Decisions" is already labelled.</summary>
+    static string HeaderColorKey(string title) => "Text";
 
     // Old rows may carry placeholder junk ("->", "-", "TBD") the model left behind.
     static bool Meaningful(string? v)
@@ -167,8 +169,19 @@ public static class NoteRenderer
         if (!embedded)
         doc.Blocks.Add(new Paragraph(new Run(m.Title))
         {
-            FontSize = spacious ? 26 : 18, FontWeight = spacious ? FontWeights.Bold : FontWeights.SemiBold,
-            Foreground = B("Text"), Margin = new Thickness(0, 0, 0, spacious ? 6 : 3),
+            // THE ONE SERIF IN THE PRODUCT, and the only large thing on the page.
+            // A meeting note is a document, and the reference notetaker the owner supplied sets its
+            // document title in a serif while every control around it stays grotesque. That one
+            // contrast is most of why the reference reads as a written thing rather than a dialog,
+            // and it costs no extra ink - it is the same string, in a different voice.
+            //
+            // REGULAR weight, not SemiBold: a serif at 27px already outweighs everything near it,
+            // and the reference's title is regular and MUTED rather than heavy and black. Semibold
+            // here (superseded from 2026-09-26, whose "never Bold" half still stands) was carrying
+            // hierarchy the typeface now carries by itself.
+            FontFamily = (FontFamily)Res("TitleSerif"),
+            FontSize = spacious ? 27 : 19, FontWeight = FontWeights.Normal,
+            Foreground = B("Text"), Margin = new Thickness(0, 0, 0, spacious ? 5 : 3),
         });
         var meta = embedded ? "" : MeetingMeta(m);
         if (!string.IsNullOrEmpty(meta))
@@ -176,16 +189,26 @@ public static class NoteRenderer
             // Meta row: the facts as text, then the same status chips the list cards carry.
             var mp = new Paragraph { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) };
             mp.Inlines.Add(new Run(meta));
-            var open = m.Notes?.Actions?.Count(a => !a.Done) ?? 0;
-            var people = m.Transcript.Select(t => t.Label).Where(l => !string.IsNullOrWhiteSpace(l))
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            if (open > 0) { mp.Inlines.Add(new Run("   ")); mp.Inlines.Add(new InlineUIContainer(MetaChip($"{open} open", "AccentAmber")) { BaselineAlignment = BaselineAlignment.Center }); }
-            if (people >= 2) { mp.Inlines.Add(new Run("  ")); mp.Inlines.Add(new InlineUIContainer(MetaChip($"{people} people", "TextMid")) { BaselineAlignment = BaselineAlignment.Center }); }
+            // NO COUNT CHIPS. "4 open" and "2 people" sat under the title of a document whose own
+            // body lists both, in full, a few lines down - the reader is about to SEE the to-dos and
+            // the speakers. Owner, 2026-09-27: "too much unneccessary information, remove it".
+            // Every product surveyed renders an outstanding count as a plain numeral beside its
+            // noun, and none of them repeats it above the thing it counts.
+            // TextMid, not AccentAmber. Both chips are the same KIND of fact - a count of things in
+            // this meeting - and colouring one of them made the least important number on the page
+            // the loudest, as a pale yellow lozenge in the light theme. Owner, 2026-09-26: "the
+            // yellow 3 open, i do not like". Same treatment as "N people" beside it.
             doc.Blocks.Add(mp);
         }
 
-        // The sticky note's button, at the top under the title; the note it opens is placed further down.
-        if (sticky is not null)
+        // NOTHING SITS BETWEEN THE TITLE AND THE NOTE. The "Add sticky note" button used to be a
+        // block here, wedged between the meta line and the first sentence, so every read of every
+        // note started by stepping over a control. Owner, 2026-09-27: "nothing comes in between the
+        // notes, that are minimal, direct to the point".
+        // It now lives in the toolbar beside the template picker, which is where the note's other
+        // controls already are. The sticky note itself still appears further down, in its own place.
+        // (The notch's compact renderer has no toolbar, so it keeps the inline button.)
+        if (sticky is not null && topBar is null)
             doc.Blocks.Add(new BlockUIContainer(sticky.ToggleButton) { Margin = new Thickness(0, 0, 0, spacious ? 18 : 14) });
 
         // ── evidence links ──
@@ -729,8 +752,20 @@ public static class NoteRenderer
         // "You" is the implicit owner in the user's own meeting - showing it on every task is noise.
         if (Meaningful(a.Owner) && !a.Owner!.Trim().Equals("You", StringComparison.OrdinalIgnoreCase))
             parts.Add(a.Owner!.Trim());
-        if (Meaningful(a.Due)) parts.Add(a.Due!.Trim());
+        if (Meaningful(a.Due) && !IsVagueDue(a.Due!)) parts.Add(a.Due!.Trim());
         return parts.Count == 0 ? "" : " " + string.Join("  ·  ", parts);
+    }
+
+    /// <summary>A "due date" that names no date. "As soon as possible" beside a task is four words
+    /// saying what every open task already implies, and set in muted grey next to a bullet it reads
+    /// as a field the product could not fill in. Owner, 2026-09-26. A REAL date earns its place;
+    /// urgency-as-prose does not, and dropping it also takes text off a page already too dense.</summary>
+    static bool IsVagueDue(string due)
+    {
+        var d = due.Trim().TrimEnd('.', '!').ToLowerInvariant();
+        return d is "asap" or "as soon as possible" or "soon" or "immediately" or "right away"
+                 or "tbd" or "tbc" or "n/a" or "na" or "none" or "no due date" or "ongoing"
+                 or "when possible" or "at your earliest convenience" or "urgent" or "high priority";
     }
 
     /// <summary>

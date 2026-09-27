@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using LLama;
 using LLama.Common;
 using LLama.Sampling;
@@ -36,9 +36,21 @@ public sealed class LlamaLlm : ILlm, IDisposable
         {
             ContextSize = LlmRuntime.ContextSize, GpuLayerCount = gpuLayers,
             Threads = threads, BatchThreads = threads,
+            // K and V must be the SAME type - a mismatch drops off the fused flash-attention kernel.
+            TypeK = LlmRuntime.KvTypeK, TypeV = LlmRuntime.KvTypeV,
         };
+        App.Log($"llm: {LlmRuntime.Reason}, kvK={LlmRuntime.KvTypeK} kvV={LlmRuntime.KvTypeV}, ctx={LlmRuntime.ContextSize}");
         _model = LLamaWeights.LoadFromFile(p);
         OnGpu = gpuLayers > 0;
+        // WHAT DOES A CONTEXT COST? StatelessExecutor builds and disposes one PER CALL, and a note is
+        // 7 calls, so this number decides whether reusing one context is worth rewriting the
+        // inference path for. Measured once at load, against the same params inference will use.
+        var t0 = global::System.Diagnostics.Stopwatch.GetTimestamp();
+        using (var probe = _model.CreateContext(p)) { }
+        var ctxMs = (global::System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000
+                    / global::System.Diagnostics.Stopwatch.Frequency;
+        App.Log($"llm: one context costs {ctxMs}ms to build and drop - a note pays this per pass");
+
         _executor = new StatelessExecutor(_model, p);
     }
 

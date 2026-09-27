@@ -1,4 +1,4 @@
-# ARCHITECTURE.md - decisions and why
+﻿# ARCHITECTURE.md - decisions and why
 
 Running log of technical decisions. The stack itself was decided by the owner before this repo existed (see `WINDOWS-BUILD-PROMPT.md` §4) and is not re-litigated here; this file records how we apply it and every decision made along the way.
 
@@ -4312,3 +4312,508 @@ X%".
 
 The wider lesson stands: pick the measurement that can see the effect you are claiming, then do not
 read a single sample of it as the result.
+
+
+---
+
+## The state machine's only exit must not be on the happy path (2026-09-04)
+
+**Decision: the dispatcher call that advances the notch out of `Summarizing` runs from a `finally`,
+and the summarize lambda contains no bare `return`.**
+
+`AppState` deliberately allows only two transitions out of `Summarizing` (`Notes`, `NoSpeech`) and
+there is no watchdog or timeout. That is a reasonable design - a loader that times out into a wrong
+state is worse than one that waits - but it makes the single line that performs the transition a
+**single point of failure for the whole app's perceived liveness**. Anything that skips it hangs the
+UI over work that has already completed and been saved.
+
+That shipped. The thin-input gate (below `ThinInputWords`, write an honest minimal note and do not
+consult the model) ended in `return;`. The author's intent was "skip the model"; the language's
+meaning, inside that lambda, was "abandon the pipeline". The note for the meeting was written, saved
+to SQLite and mirrored to Markdown 8 seconds after the recording stopped, and the notch span for
+fifteen minutes.
+
+**Why the fix is not "remove the return".** The `return` was one way to skip the advance; an
+exception from any step not individually wrapped was another, and `InferOwners` was exactly such a
+step. Fixing the instance leaves the shape. So the entire lambda body is now a `try`, the advance is
+its `finally`, and `transcript`/`meeting` are hoisted so the finally can advance on whatever the
+pipeline produced before it gave up. A note that failed to generate still shows the user *something*.
+
+This is the same lesson as [one path, not a wider gate]: when correctness depends on every path
+reaching one line, make reaching it unconditional rather than auditing the paths.
+
+**Why no test saw it.** The gate only fires on a nearly silent meeting. Every test meeting had enough
+words and took the model path, which reaches the advance normally. The guard is now a source-shape
+test with mutation probes, because the defect is control flow, not a value: `SummarizeExitTests`
+holds five detectors plus four probes that feed those detectors the pre-fix code and assert each
+catches it.
+
+## A cached view's field initialisers measure process uptime (2026-09-04)
+
+**Decision: anything in a notch view that means "when this showing began" is stamped in `Loaded`, and
+event subscriptions on long-lived objects are made in the constructor.**
+
+`PillWindow.ViewFor` caches one `UserControl` per `PillState` in `_views` for the life of the
+process - correct, and load-bearing for animation smoothness (a cold build inside a transition eats
+the head of the animation). The consequence is that a view's constructor runs **once, ever**.
+
+`SummarizingView` had `readonly DateTime _started = DateTime.UtcNow;`. On a two-minute meeting the
+loader read **1275m 37s**, which is precisely the time since the app had launched the previous
+evening. The elapsed display was a genuinely good idea - a long wait with no number reads as a hang -
+made actively harmful by being anchored to the wrong event.
+
+The mirror-image bug sat three lines away: `_elapsedTimer.Tick += ...` inside `Loaded`. `Loaded`
+fires on every show, `Unloaded` never removed it, so the handler count grew by one per meeting.
+Subscriptions to an object that outlives the showing belong in the constructor; subscriptions to
+something external (`App.SummarizeStageChanged`) correctly stay paired across Loaded/Unloaded.
+
+**The general rule for this codebase:** in a cached view, a constructor is "once per process", not
+"once per appearance". Ask which of the two a line actually wants.
+
+
+## The offload tier is measured, and generation is the only cost that matters (2026-09-04)
+
+**Decision: the 4GB partial-offload tier moves from 20 layers to 32, and `LlmRuntime.Tier` becomes a
+pure function so the numbers can be asserted.**
+
+Until now nothing timed a model call. `TextPass` logs per pass: prompt chars, token cap, output
+chars, milliseconds. The first reading reframed the problem. Prompt processing is close to free
+(~3s for 3.4k chars) and **generation is essentially the whole wait**, at 8-11 tok/s for ~1000
+tokens per note. Anything that changes generated-token count changes the wait proportionally;
+anything that only changes prompt size barely registers.
+
+Generation rate is set by the share of the model resident on the GPU. The 20 was chosen defensively
+because a native VRAM OOM is an uncatchable crash, and it was never timed. Measured (one meeting,
+RTX 3050 4GB): 20 layers 121.8s, 28 layers 75.7s, 32 layers 45.8s, 34 layers 47.5s/48.7s, full
+offload 44.7s.
+
+**Why 32 and not full offload.** Full is 3% better and takes most of the remaining headroom on a card
+that is also driving the video call being summarised. The failure mode is not a slow note, it is a
+process death with no exception to catch, which lands the user on the heuristic floor. Three percent
+does not buy that risk. 32 keeps over a gigabyte free.
+
+**The honest limit.** This is still a constant, and the warning from
+[a constant that describes the machinery] applies: it cannot know how busy the GPU is at load time.
+`DetectVramBytes` reads TOTAL card size from the driver registry key, never free VRAM. The correct
+instrument is DXGI `IDXGIAdapter3::QueryVideoMemoryInfo`, whose `Budget` field is exactly "how much
+you may use right now"; sizing layers from it would give full offload on an idle machine and
+automatic backoff on a busy one. Backlogged rather than rushed, because the code path it guards
+crashes rather than throws. The Windows `GPU Adapter Memory` performance counter was evaluated and
+rejected: its instances are keyed by adapter LUID with no reliable mapping back to the adapter
+llama.cpp chose, and on the owner's machine it reported 2035 MiB in use on an adapter where full
+offload demonstrably fit.
+
+**Consequence for note quality.** Bullet and digest budgets that scale with the meeting cost
+generated tokens, which is the expensive axis. At 32 layers a full 14-bullet note is cheaper than
+the old capped 7-bullet one, so the quality work of 2026-09-03 is paid for by this change with room
+to spare. Future quality work should still be costed in generated tokens, not in prompt size.
+
+
+## The map step selects, it does not summarise (2026-09-04)
+
+**Decision: the map pass emits transcript LINE NUMBERS only, and Toki copies those lines out of the
+transcript verbatim. `LlmNoteWriter.MapMode.Select`, the default.**
+
+Per-pass instrumentation established two facts that reframe the pipeline. Generation is the entire
+wait (a 12-token pass over a 3.4k-char prompt costs 2-3s; a 430-token pass over the same prompt costs
+20-58s), and the map phase is ~85% of a long meeting's generation because it runs once per window and
+each window emitted ~430 tokens of rewritten prose.
+
+Selection cuts a window to ~70 generated tokens. `Materialise` reconstitutes the identical
+`[n] Label: text` format the extract path produced, so `ValidateDigest`, `TrimToFit`, `AttachProvenance`
+and the citation neighbourhood all keep working with no branch.
+
+**Grounding was expected to rise and did not fall.** A copied line cannot drift from its own citation,
+so the "window came back uncited, keeping it without provenance" fallback - which once cost a quarter
+of meeting 48 - cannot fire. Over 5 meetings: precision 100.0% to 96.8%, recall 38.9% to 33.3%,
+provenance 68% to 69%, facts claimed 22 to 31; each difference is <=3 facts at n=5.
+
+**The finding that nearly went the other way.** A single side-by-side on meeting 128 showed the new
+path losing every action owner, and it was almost written up as a regression. Repeating on meeting
+107 reversed it completely and twice: the old path named nobody across 6 actions, the new one named
+3-4 across 5. Note generation runs at temperature 0.7; one sample is not a result. This was the third
+time in one day a single stochastic run nearly became a conclusion (see also the offload timing).
+
+**The cost that is real:** the digest is now raw speech rather than the model's tidied version, so the
+final pass has more to do and the digest is longer. `TrimToFit` absorbs the length. If a future
+regression shows up in prose quality rather than facts, this is where to look.
+
+## Two measurements that overturned their own arithmetic (2026-09-04)
+
+**Full offload is refused despite being 33% faster.** Three runs per config: 43.0s at 32 layers,
+28.9s at 37. But llama.cpp reports "3370 MiB free" and a full offload allocates model 2375.91 + KV
+576.00 + compute 301.75 + host 18.01 = ~3254 MiB. A 116 MiB margin against an uncatchable native OOM
+is not a margin. With the select map both configurations are under the target (35.9s vs 24.7s on the
+longest meeting), so the risk buys nothing. nvidia-smi's more generous 3965 MiB is not the number
+that matters: the allocator's view is.
+
+**KV quantisation lost to its own documentation.** q8_0 for K is published at KLD 0.00094 and would
+have funded a parallel batch. Measured on this Vulkan build: 99s against 28.9s, 2.3x slower - the
+fused attention path degrades badly, the same class as llama.cpp #12526 / #27137. `GpuTierTests`
+asserts f16 so that the next person to read the KLD table has to read the measurement first.
+
+
+## Streaming is a display concern and must not change the answer (2026-09-04)
+
+**Decision: `TextPass` takes an optional per-line observer and streams only when given one; the final
+note pass uses it to publish `App.SummarizeTitle` while the rest is still being written.**
+
+The title is the first thing the final prompt asks for and that pass runs ~12s, so the name of the
+meeting existed 9.1 seconds before the note was shown (measured, meeting 128). Showing it turns the
+last third of the wait from a description of Toki into a fact about the user's meeting.
+
+Three constraints are load-bearing:
+
+**Per completed LINE, never per token.** A stream delivers several pieces inside one line; reporting
+on each would put "AI-Dri" on screen and then correct it. This is also the shape of the documented
+notch-flicker bug, where a flush 14 times a second regrew the window under the user.
+
+**The buffered and streamed paths must return identical text.** `Generate` is the only place that
+branches, and `TitleRevealTests.Streaming_does_not_change_the_note` asserts the two produce the same
+title, summary, bullets and actions. A display feature that quietly altered notes would be a bad
+trade at any latency.
+
+**The parse must be the SAME parse.** The observer runs `ParseNote` on the partial text, so the notch
+can never show a title the finished note then disagrees with.
+
+This surfaced a real defect in the test doubles: `ScriptedLlm` stubbed `StreamAsync` as
+`yield return ""`. Harmless while nothing streamed, and it silently emptied six notes the moment
+something did. `ILlm` documents the two methods as equivalent, so the fake was wrong, not the change.
+**A fake that does not honour its interface is a test that measures the fake.**
+
+Also fixed here: `SummarizingView` applied its state only in `Loaded`. A cached view can be measured
+or photographed without ever being connected to a window - the render harness does exactly that - so
+it showed the XAML placeholder. State is now applied in the constructor too.
+
+
+## A Border paints its Background behind its CHILD (2026-09-23)
+
+**Decision: the notch card has no photographed backdrop. `ScreenBackdrop` is deleted, not fixed.**
+
+The captured-backdrop layer added on 2026-09-03 was meant to give the card's translucency something
+real to reveal: photograph the screen the card is about to cover, shrink it, blur it, paint it under
+the plate tint. The comment in `PillWindow.xaml` claimed exactly that, and it was wrong about WPF.
+`Root` is a Border whose Background paints behind its Child; the `Backdrop` border was the first
+child of that Child. So the photograph painted ON TOP of the plate, at full opacity, and every card
+wore a blurred picture of the desktop behind it.
+
+The owner saw it as "an ugly yellow color" on every screenshot - their browser, smeared.
+
+**Why deleted rather than re-ordered.** The feature existed to answer an earlier ask to fix the
+notch's fake glass. A photograph of the desktop is not glass; it is a still image that does not
+track what moves behind it, cannot be right at more than one moment, and was shipped without anyone
+ever looking at it (a prior session's own note: "built and compiled but never seen"). Re-layering it
+correctly would produce a subtler version of a thing that should not exist. The card's material is
+painted, honest, identical in both themes, and it is the floor the rest of the design was built on.
+
+Two things went with it: `GlassTopBleed` (8px of upward growth that existed only so the photograph
+could reach the screen edge) and the `Backdrop` border itself.
+
+**The general rule:** in WPF, a decorator's Background is BEHIND its content. A layer that must sit
+under a tint has to be under a *sibling* that carries the tint, or behind a transparent parent.
+Writing "sitting UNDER the plate tint" in a comment does not make it so, and this shipped for three
+weeks because nobody ran it and looked.
+
+## A highlight may own the top third of a surface, never the whole of it (2026-09-23)
+
+**Decision: the card sheen is capped at a third of the card's height.**
+
+`CardMaterial.SheenHeight` was deliberately a FIXED 48px band rather than a fraction - the reasoning
+(still correct) is that spreading the same light over a 400px panel stops it reading as an edge
+catching it. What was missing is the other end. Nothing bounded it against SHORT cards, and the notch
+morphs down to a 52px recording bar and a 50px loader, where a 48px sheen covers 92% of the card. The
+highlight stops being a highlight and becomes the surface: the pill reads as one glossy gradient.
+
+`SheenFor(cardHeight) = Min(48, cardHeight * 0.34)`, re-applied on every SizeChanged because the card
+morphs. Tall panels are unchanged by construction. Guarded by `CardMaterialTests`, which pins both
+ends: the short pill must be under 40% shine, and the 320px panel must still get exactly 48.
+
+This is the same shape as the constants logged in [a constant that describes the machinery]: a value
+that was right for the case it was written against and was never asked what it becomes at the other
+extreme.
+
+
+## A token is right for the surface it was measured against (2026-09-23)
+
+**Decision: `ChipOnCard` and `SwitchKnobOn` exist because two tokens were being asked to work on
+surfaces they were never tuned for.**
+
+`Chip` (`#2C2C2E` / `#E7E7EC`) is correct against `Surface` (`#0E0E10`), the Library's near-black
+page. The notch's plate is `#343130` - far lighter - and `Chip` lands within a few luminance points
+of it, so a secondary button on the card stops reading as a box. That is the project's own "the box
+IS the button" rule failing not through a missing Background but through a Background measured
+elsewhere.
+
+`WhiteBtn` (`#F2F2F2` / `#1D1D1F`) is the primary CTA fill, and inverting per theme is exactly right
+for a button on a page. It was also the switch knob. But the switch TRACK turns `Blue` when on, and
+`Blue`'s light value is `#1C579B` - dark. So in the light theme the knob went near-black at the same
+moment the track went dark blue, and every "on" switch in the app became unreadable. The knob's
+contrast partner is the track, not the page, so it gets its own token that does not invert.
+
+**The general rule: a colour token is only valid against the surfaces it was checked on.** When a
+token crosses into a new context - a different plate, a different state's fill - it needs re-checking
+there, and usually its own name.
+
+## Contrast is necessary and not sufficient (2026-09-23)
+
+**Decision: `DesignTokenTests` asserts amber's SATURATION, alongside `ContrastTests`' readability.**
+
+`Amber`'s light value was `#794F1A`. It cleared 4.5:1 against every surface, so `ContrastTests`
+passed it, `--themetest` passed it, and the recording timer rendered as a brown stain on a white
+card. **The defect was real, visible, and orthogonal to every number being measured.**
+
+Replacing it exposed the opposite trap. `#B45309` looked right and failed at 3.79:1 - not on any
+opaque surface, but on the light card composited over a BLACK wallpaper, because the card is `Glass`
+at 85%. A second attempt, `#A04B06`, passed every opaque surface and failed the same case identically.
+`#87430A` is the most saturated amber that survives both ends.
+
+So the palette now has two guards with different jobs: contrast for "can it be read", saturation for
+"is it the colour we said it was". The second exists because the first was green for a bug the owner
+found in one glance - which is the same lesson as the hover-contrast bug of 2026-08, in reverse.
+
+
+## An arrival is a cursor that slows down (2026-09-23)
+
+**Decision: the peek's open decision moves out of `HoverTick` into `State/HoverIntent.cs`, and is
+gated on cursor SPEED and DIRECTION rather than on dwell alone.**
+
+The notch's peek sits in the top-centre band that every cursor crosses on its way to browser tabs
+and the window controls. The old rule - accumulate 60ms per poll while inside a 3px-slack rectangle,
+open at 850ms - failed in both directions at once, which is exactly why it read as random:
+
+- **False opens:** no speed term at all, so a cursor that crossed the band and paused for a beat was
+  indistinguishable from a deliberate hover.
+- **Missed opens:** a single sample outside the rectangle zeroed the entire dwell. On a 52x42 target,
+  a pixel of hand tremor discarded 800ms of honest intent.
+
+The dwell was long BECAUSE it was the only defence, and its length was the second failure.
+
+**What transferred from the iOS home gesture, and what did not.** The swipe mechanics do not port:
+velocity projection (`v/1000 * rate / (1 - rate)`, already vendored in the emil-apple-design skill)
+decides where a RELEASED object lands, and a hover has no release. What ports is the framing from
+WWDC 2018 session 803 - intent is legible in the derivatives of motion, not in elapsed time - and
+hoverIntent's concrete version: an arrival is a cursor that slows down inside the target (under 6px
+per 100ms, about 60px/s); a transit is one that does not.
+
+Three rules, only the first about the clock: dwell accrues only while inside AND settled AND not
+descending through; inside-but-fast HOLDS the dwell rather than losing it, because the user may be
+homing in; a departure is forgiven for 300ms before the dwell is lost. The caller then widens its
+hit rectangle from 3px to 20px once `DwellMs > 0` - enter tight, stay loose, the asymmetry every
+mature hover menu ends up shipping.
+
+**The downward bound is half the speed gate, on purpose.** At the same threshold the direction rule
+rejects nothing the speed gate has not already caught. A rule that can never fire is worse than no
+rule, because it reads in the source as a defence that is not actually there.
+
+With the gates carrying the rejection, `OpenDwellMs` fell from 850 to 360. Verified on the real
+window rather than only in a test: eight fast sweeps across the top band produced zero state changes;
+one deliberate reach-and-rest opened it 386ms after the peek appeared.
+
+Also unified here: `EdgeTick` kept its own private copy of "how far did the cursor move", updated on
+some paths and skipped on others. Both consumers now read one `TrackCursorStep`, because two answers
+to that question drift apart the moment one caller returns early.
+
+## A refusal is scoped to the call, not to a clock (2026-09-23)
+
+**Decision: declining the record prompt silences it for that meeting, with no re-ask.**
+
+`MeetingDetector.Snooze` set a 10-minute cooldown AND cleared the "already offered" mark, so the
+cooldown's expiry re-armed the question. On a long call that is a prompt every ten minutes, which
+the owner reported as redundant and pointless.
+
+A test asserted the old behaviour deliberately: a single "Not now" should not silence a whole
+mic-session, because an ongoing meeting you change your mind about is a real case. That reasoning is
+sound and it loses to the actual cost - starting a recording by hand is one click, and being asked
+the same question repeatedly during a meeting is not free. The test is superseded rather than
+deleted, with its reasoning preserved, because it will be proposed again.
+
+**Time does not make a refusal stale; a new meeting does.** The refusal lifts once the app has been
+off the mic for `SessionEndPolls` (about 15s). The subtlety that makes this work: the previous code
+treated a SINGLE absent poll as the end of a call, and muting, changing headset or a driver hiccup
+all drop the mic for a moment - so a one-poll rule would hand the prompt straight back.
+
+## Toki ships its own typefaces (2026-09-27)
+
+**Decision: the interface is set in Inter, note titles in Spectral, both bundled in the exe.**
+
+Segoe UI Variable is the face every Windows utility is set in. Using it made Toki look like one, and
+that was the single largest visual difference between Toki and the reference notetaker the owner
+supplied. Both families are SIL OFL 1.1, which permits bundling with an application and requires the
+licence travel with it; both OFL texts ship as resources beside the fonts and both are credited on
+the "Built with" screen, on the same footing as Parakeet and Qwen.
+
+STATIC weights (Regular/Medium/SemiBold), never the variable TTFs: WPF cannot address variable-font
+axes, so a variable file renders every weight at 400 and lets WPF synthesise the rest.
+
+This SUPERSEDES the three-optical-cuts decision of 2026-09-26, whose reasoning is kept because it
+still constrains us: a face drawn for display sizes has stems too fine to survive at 12px, which is
+why Toki must never set body text in a display cut. Inter needs no optical cuts, so the three font
+keys now differ only in intent.
+
+A typeface change invalidates every measured size floor. `--measuretest` immediately named PrepCard
+as holding 13px it never filled, because Inter sets those rows tighter than Segoe did. A floor is a
+claim about CONTENT and has to be re-measured whenever the typeface changes.
+
+## The page is the lightest surface (2026-09-27)
+
+**Decision: the light theme's canvas is the lightest thing in the window and cards are tints DOWN
+from it.**
+
+This reverses the layering decided one day earlier ("canvas tinted, card lightest", on the Apple
+grouped-list and Carbon patterns). What overturned it: every value in the owner's reference was
+sampled directly, and the reference does the opposite - page `#FCFCFB` at 82% of all pixels, card
+`#F5F4F0`, chip `#EEEBE3`, rule `#DAD9D5`, ink `#1A1A1A`. Four greys and one ink for a whole window.
+
+The old note's reasoning is preserved in `ThemeManager` because it was sound. What it got wrong is
+the analogy: the Apple grouped-list pattern is for LISTS OF GROUPS, and Toki's reading pane is one
+document. Inverting the stack means a card needs neither border nor shadow to read, so the number of
+edges in the window drops - which is most of what "cheap" was.
+
+The warmth finding from 2026-09-26 survives and is reinforced: every light value is still warm, and
+so is the reference. The light `Glass` token now carries the page colour too, so the notch and the
+Library read as one sheet - and because a lighter card composited over a dark wallpaper lands
+lighter, this RAISES the contrast ceiling documented in the translucent-card finding.
+
+## Toki draws its own window chrome (2026-09-27)
+
+**Decision: `WindowStyle=None` + `WindowChrome`, not `AllowsTransparency`.**
+
+`WindowChrome` keeps the non-client frame real and only lets us paint it, so Aero Snap, snap layouts
+on the maximise button, drag-to-restore, edge resizing and the system shadow all survive. The
+`AllowsTransparency` recipe gives up every one of those and produces a window that feels broken on
+Windows. `CaptionHeight` must equal the title row's height, and anything in that strip needing clicks
+sets `IsHitTestVisibleInChrome`.
+
+The title row is NOT a bar: it has no background of its own, because in the reference the controls
+sit straight on the page with no fill, rule or shadow, which is why that window reads as one surface.
+No window title is drawn either - this window has one identity and the sidebar masthead already says
+it.
+
+The trap this normally introduces - a maximised window covering the taskbar - was ALREADY solved:
+`StyleChrome` has hooked `WM_GETMINMAXINFO` and answered with the monitor work area since the
+per-monitor-DPI maximise fix. It was checked before writing a second hook, which would have
+double-corrected the bounds.
+
+Close means HIDE, as the old back button did: Toki lives in the tray with a warm model and possibly a
+live recording behind it. Caption glyph and tooltip follow `WindowState`, because a maximise button
+that still says maximise is the classic hand-rolled-chrome bug.
+
+## Never null an animation you are about to replace (2026-09-27)
+
+**Decision: `ConcealUp` reads the current animated opacity and animates FROM it.**
+
+The owner reported the notch close as "it just cuts back up". Two independent causes, both measured.
+
+First, the easing. The retract rode `Depart`, a bezier that has covered **15.4%** of its distance at
+the halfway point (Material's accelerate: 32.5%). For the first 85ms of a 170ms close the card had
+barely moved, then covered the rest in a few frames. `Motion.Retract` reaches 34.1% at the midpoint,
+over 200ms - roughly 70% of the 280ms open, per the house exit/enter ratio. Worth recording because it
+will be proposed again: "close it the same way it opens" cannot mean mirroring the curve. The literal
+time-reverse of the opening ease-out is an even more severe dead-start; mirroring an ease-out ALWAYS
+yields a harsh ease-in, and that is exactly the trap the old value fell into. An exit has to share the
+enter's character, not its geometry.
+
+Second, and larger: the content was not fading at all. The code called
+`Host.BeginAnimation(OpacityProperty, null)` and then started a To-only fade to 0. Clearing an
+animation does not freeze a property at what you can see - it reverts it to the LOCAL value, and
+`MorphContent` leaves that at 0 (it sets opacity 0 and animates UP to 1, so 1 was only ever the
+animation's doing). The null therefore dropped the content to invisible in ONE frame, and the fade
+that followed ran 0 to 0 and was never visible. Filmed at 60fps: legible at t=0, gone at t=16ms, with
+the card still at full height behind it.
+
+Reading `Host.Opacity` first yields the current animated value, and a From/To animation replaces the
+running one with no null needed. A mutation probe in `--revealtest` guards it, verified to FAIL
+against the unfixed code. The probe also had to learn to pump the entrance first: without that it was
+measuring a card that had never become visible, and it failed against the correct fix.
+
+The clip is only a MASK, so on its own it eats the card while the text inside stands still. The
+content now rides up 10px with the furl, mirroring the reveal's settle.
+
+Also fixed here: the `--state` dev seam mapped unparseable names to `Hidden` and then dropped every
+`Hidden`, so the one transition the seam exists to drive was the one it could not drive. It now
+filters on the parse result.
+
+## A text mode belongs to the typeface, not the window (2026-09-27)
+
+**Decision: `TextFormattingMode=Ideal` + `TextRenderingMode=Grayscale`, set explicitly on both
+windows.**
+
+This REVERSES the `Display` decision of 2026-09-26, whose reasoning is preserved in LibraryWindow.xaml
+because it was correct for the font it was written for. Display mode rounds glyph advances to whole
+pixels and rasterises through the font's TrueType hinting: a win for Segoe UI Variable, which is
+hinted heavily and specifically for it. Inter ships almost no hinting - it is drawn for rasterisers
+that position glyphs at fractional pixels - so Display forced integer advances onto a design never
+fitted to them and returned uneven, broken stems. **The font changed and the mode did not.**
+
+Grayscale over ClearType, measured on a real screen capture rather than a `RenderTargetBitmap`:
+mean per-pixel edge colour spread 93 vs 0.3, with mean ink luminance 51 vs 41, i.e. the fringing
+disappears and the strokes get marginally HEAVIER. The owner's own reference screenshot measures 21
+on the same metric, so it is not subpixel rendering they were objecting to - it was the broken stems.
+
+Set explicitly rather than left on Auto, and this is the part that matters for the notch: WPF
+silently drops ClearType for text under a RenderTransform or on a layered window, and `PillWindow` is
+both. Its text was therefore changing rendering mode at the start and end of every state morph.
+
+**Verification note worth keeping: `--render` and `--libshot` cannot see this class of bug at all.**
+`RenderTargetBitmap` does not apply ClearType, so every PNG I produced looked clean while the real
+screen did not. Text rendering has to be checked with a screen capture.
+
+## Oversampling a bitmap cache makes minification worse (2026-09-27)
+
+**Decision: `TokiBlob`'s `BitmapCache.RenderAtScale` is computed from the size Toki is actually drawn
+at (`SyncCacheScale`), not fixed at 4.**
+
+`RenderAtScale` is relative to the cached element's own box, which is the 67x52 board - not to the
+screen. A fixed 4 always rasterised 268x208 and let WPF shrink it to whatever size Toki appeared at.
+For the 44px notch bubble that is a five-fold minification through a bilinear filter, which samples
+four texels out of twenty-five: aliasing, not softness. It is the stair-stepped silhouette and dark
+fringe the owner photographed. The old comment claimed 4 "keeps it crisp everywhere it is drawn,
+from the 44px notch bubble up to the 256px app icon" - it is backwards for every size except the icon.
+
+Now clamped to [1, 6] with 1.5x headroom (Toki is permanently under a breathe/hop/tilt, and rotation
+resamples the cache), quantised to quarter steps so hover growth does not rebuild the bitmap every
+pixel. Measured on a screen capture: blended edge pixels per row 2.9 -> 4.5.
+
+## The card keeps its squircle in motion (2026-09-27)
+
+**Decision: `Root.Clip` is ALWAYS a squircle. The animated rect is data (`_clipBox`), and `DriveClip`
+rebuilds the shape from it on `CompositionTarget.Rendering`.**
+
+The owner reported a split-second resize on page switches twice. The first time I found a real cause
+(pages measuring cold inside the transition), fixed it, and stopped looking. Filming it and measuring
+the card's geometry per frame shows **the width never changes** - the morph log reads 380 -> 380 - so
+it was never a resize. Every clip animation ran on a `RectangleGeometry` with circular corner radii
+while the resting card wore a squircle, so the silhouette snapped shape at both ends of every
+transition: 3px per side, measured 20px down from the top edge, plainly visible frame by frame.
+
+Two claims in `Squircle.cs` had made that look safe, and both were wrong; both are corrected in place
+there. The half-pixel deviation is the maximum along the corner DIAGONAL, not the horizontal extent
+at a given y (smoothing starts the curve at 1.6r = 38px where an arc starts at 24px). And "never
+rebuild a squircle per frame" was never measured: across repeated `--fpstest` runs the content cost
+stays at 2-3% and ~7 dropped frames per transition, indistinguishable from before. A StreamGeometry
+of a dozen segments is nothing beside the layout pass the clip exists to avoid.
+
+Because the clip and the rim now agree, the real squircle rim stays visible through the motion
+instead of handing over to Root's arc `Border` - the reason that handover existed has gone.
+`ApplyCornerGeometry` returns early while pinned instead of installing the arc, and `DriveClip`
+self-parks after six unchanged frames so a caller that forgets to release cannot leak a per-frame
+handler. Guarded by `AuditClipIsSquircle` in `--revealtest`.
+
+## An exit copies the entrance's character, it does not derive it (2026-09-27)
+
+**Decision: `Motion.Retract` is FRONT-loaded, like the open, at 180ms.**
+
+Superseding the accelerating curve adopted hours earlier, whose own note argued (correctly) that
+mirroring an ease-out yields a harsh ease-in and therefore an exit should share the enter's
+character. It then picked a curve that did not. Filmed, both directions, as a fraction of travel:
+
+    50ms in    OPEN 79%    CLOSE 23%
+
+The open is a pop-and-settle - `Drawer` puts it three quarters of the way out in the first 50ms and
+spends the rest easing into place. ANY accelerating exit is its mirror image in feel, however smooth
+the curve, because it spends its first half barely moving. Both directions now reach ~75% within
+33ms.
+
+The duration is matched to the reveal's MEASURED travel (~180ms), not its nominal 280ms: most of
+that 280 is the tail of a curve already 99% complete, so matching the constant would have made the
+close feel longer than the open while looking shorter on paper.

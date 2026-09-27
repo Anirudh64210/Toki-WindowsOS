@@ -30,11 +30,23 @@ public sealed class InterruptibleMorphTests
         Path.Combine(RepoRoot(), "src", "Toki", "PillWindow.xaml.cs"));
 
     /// <summary>The clip has always read its live Rect; this pins it so a future edit cannot quietly
-    /// go back to _cardW/_cardH, which already claim the DESTINATION while a morph is running.</summary>
+    /// go back to _cardW/_cardH, which already claim the DESTINATION while a morph is running.
+    ///
+    /// The EXPRESSION changed on 2026-09-27 and the invariant did not. Root.Clip is no longer a
+    /// RectangleGeometry at all: the card is clipped to a squircle rebuilt every frame, so the
+    /// animated rect moved to its own field (_clipBox) and this now reads that. Worth keeping the
+    /// history, because a source assertion that pins a SPELLING rather than a BEHAVIOUR will go red
+    /// on a refactor that is perfectly correct - as this one did. The question to ask when it fails
+    /// is "does the live value still reach the animation", not "has the line changed".</summary>
     [Fact]
     public void The_clip_starts_from_the_live_rect_not_the_target()
     {
-        Assert.Matches(@"var live = \(Root\.Clip as RectangleGeometry\)\?\.Rect;", Pill());
+        var code = Pill();
+        Assert.Matches(@"var live = _clipBox\?\.Rect;", code);
+        // And the thing that actually matters: the destination fields are NOT what it falls back to
+        // first. _cardW/_cardH may only be the last resort, behind the live rect.
+        Assert.Matches(@"var fromW = live is \{ Width: > 1 \}", code);
+        Assert.Matches(@"var fromH = live is \{ Height: > 1 \}", code);
     }
 
     /// <summary>MUTATION PROBE: the zoom used to be `new DoubleAnimation(startScale, 1, ...)` with an

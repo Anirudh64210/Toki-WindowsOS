@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:theme="clr-namespace:Toki.Theme">
 
@@ -111,7 +111,34 @@
     <SolidColorBrush x:Key="CoralText" Color="#24100D"/>
     <SolidColorBrush x:Key="DangerTint" Color="#1AE5484D"/>
 
-    <FontFamily x:Key="UiFont">Segoe UI Variable Display, Segoe UI</FontFamily>
+    <!-- TOKI IS SET IN INTER, NOT IN A SYSTEM FONT.
+         Segoe UI Variable is the face every Windows utility is set in, so setting Toki in it makes
+         Toki look like one. The owner's verdict on the previous pass was blunt - "the font selection
+         is not something i like ... i want that level of quality UI UX" (2026-09-27), against two
+         screenshots of a reference notetaker. The single largest difference between that reference
+         and Toki was the typeface.
+         Inter is a grotesque drawn for screen UI at small sizes (tall x-height, open apertures,
+         disambiguated l/I/1), SIL OFL 1.1, and is what this whole category of app is set in. It
+         ships INSIDE the exe as three static weights; see Toki.csproj for why static and not
+         variable. The system-font fallbacks stay on the end of each list so a failed pack-URI
+         resolve degrades to something sane rather than to Times.
+
+         SUPERSEDES the three-optical-cuts finding of 2026-09-26, which is kept because its reasoning
+         still holds and still constrains us: a face drawn for display sizes has stems too fine to
+         survive at 12px, which is why Toki must never set body text in a display cut. Inter needs no
+         optical cuts (one design across the range), so the three keys now differ only in what they
+         are FOR, and UiFontDisplay is no longer a finer drawing - callers that reach for it get the
+         same face and must carry their own weight and size. -->
+    <FontFamily x:Key="UiFontSmall">pack://application:,,,/Fonts/#Inter</FontFamily>
+    <FontFamily x:Key="UiFontText">pack://application:,,,/Fonts/#Inter</FontFamily>
+    <FontFamily x:Key="UiFont">pack://application:,,,/Fonts/#Inter</FontFamily>
+    <FontFamily x:Key="UiFontDisplay">pack://application:,,,/Fonts/#Inter</FontFamily>
+    <!-- The one editorial moment. A meeting note is a DOCUMENT, and the reference sets its document
+         title in a serif while every piece of chrome around it stays grotesque - that contrast is
+         most of why the reference reads as a written thing rather than a dialog. Spectral (Production
+         Type, OFL 1.1) is drawn for screen reading and has the low x-height and bracketed serifs the
+         reference title shows. Used for the note title ONLY; nowhere else. -->
+    <FontFamily x:Key="TitleSerif">pack://application:,,,/Fonts/#Spectral</FontFamily>
     <!-- Windows' crisp monochrome icon font (Win11 Fluent, falls back to Win10 MDL2). -->
     <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
@@ -295,9 +322,16 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Rectangle RadiusX="21" RadiusY="21" Margin="-3,2,-3,-4" Fill="{DynamicResource Shadow1}" IsHitTestVisible="False"/>
-                        <Rectangle RadiusX="21" RadiusY="21" Margin="-2,2,-2,-3" Fill="{DynamicResource Shadow2}" IsHitTestVisible="False"/>
-                        <Rectangle RadiusX="21" RadiusY="21" Margin="-1,2,-1,-2" Fill="{DynamicResource Shadow3}" IsHitTestVisible="False"/>
+                    <!-- NO FAKE SHADOW. Three stacked translucent rounded rectangles stood in for a
+                         drop shadow here, because a real DropShadowEffect inside the notch's
+                         scale-animated Host renders in software every frame. The substitute is worse
+                         than nothing: three HARD-EDGED shapes cannot blur, so at this size they
+                         render as two visible steps under the pill and the button reads as embossed.
+                         Owner, 2026-09-26: "the buttons have an ugly 3d rendering".
+                         A button sitting ON a card does not need to float above it. The rim and the
+                         plate say where it is; depth here was decoration, and it cost three shapes
+                         per button. The Shadow1/2/3 tokens stay - the notch CARD still uses them,
+                         where the geometry is big enough for the steps to read as a gradient. -->
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="24"
                             BorderBrush="{DynamicResource CardRim}" BorderThickness="1"
                             RenderTransformOrigin="0.5,0.5">
@@ -849,11 +883,6 @@
         </Setter>
     </Style>
 
-    <Style x:Key="StarButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
-        <Setter Property="Background" Value="{DynamicResource AmberDark}"/>
-        <Setter Property="Foreground" Value="{DynamicResource Amber}"/>
-    </Style>
-
     <!-- VS Code-style pane splitter: a wide invisible grab strip with a 1px seam line that lights
          up (pink, 2px) on hover/drag. Smooth because only the thin line animates, not a grey bar. -->
     <Style x:Key="PaneSplitter" TargetType="GridSplitter">
@@ -965,6 +994,80 @@
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ═══ WINDOW CAPTION BUTTONS: minimise, maximise/restore, close ═══
+         Toki draws its own title bar, so it draws its own chrome buttons. The shape is taken from
+         the reference notetaker the owner supplied (2026-09-27): thin dark glyphs sitting directly
+         on the page with no boxes, no separators, no tinted strip behind them, and generous space
+         between them. Windows' own caption buttons are 46x32 filled rectangles that run hard into
+         the window corner, which is the single most "this is a Windows utility" thing on screen.
+
+         WIDER THAN TALL (44x30) because that is the rhythm a caption row reads in, and the hover
+         wash is a ROUNDED box inset inside it rather than a full-bleed rectangle.
+
+         CLOSE DOES NOT TURN RED. Every other app does it, and CLAUDE.md reserves Apple system red
+         for Stop-a-recording alone - a red that means "you are about to lose audio" cannot also
+         mean "this window will shut". The reference's close button is not red either. -->
+    <Style x:Key="CaptionButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
+        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+        <!-- 10px: the Fluent chrome glyphs (E921/E922/E923/E8BB) are drawn on a 10px grid and go
+             fuzzy at any other size, because they are hinted strokes and not outlines. -->
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="Width" Value="44"/>
+        <Setter Property="Height" Value="30"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <!-- Without this the chrome swallows the click: WindowChrome treats the whole caption strip
+             as draggable frame, and only elements that opt in receive input. -->
+        <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent">
+                        <Grid>
+                            <Border x:Name="Hl" CornerRadius="8" Margin="4,1" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource HoverOverlay}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource Text}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Hl" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.08">
+                                            <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <!-- No press-compress here, and the omission is deliberate: these three sit
+                             1px from the screen corner, and a control that shrinks under the pointer
+                             at the very edge of the display reads as a misfire rather than as
+                             feedback. The wash deepening is the press state. -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
+                            <Setter TargetName="Hl" Property="Opacity" Value="1"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -1430,6 +1533,10 @@
                                  content, so a green toggle was a second meaning for the same colour.
                                  Blue = Toki-active chrome (matches the loader), distinct from content. -->
                             <Setter TargetName="Track" Property="Background" Value="{DynamicResource Blue}"/>
+                            <!-- The knob contrasts with the TRACK. Off, the track is Chip and WhiteBtn's
+                                 per-theme inversion is exactly right; on, the track is Blue in both
+                                 themes and the knob must stay light or it vanishes. -->
+                            <Setter TargetName="Thumb" Property="Background" Value="{DynamicResource SwitchKnobOn}"/>
                             <Setter TargetName="Thumb" Property="RenderTransform"><Setter.Value><TranslateTransform X="15"/></Setter.Value></Setter>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>

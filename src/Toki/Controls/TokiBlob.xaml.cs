@@ -42,6 +42,55 @@ public partial class TokiBlob : UserControl
         // Only animate while actually on screen - cached-but-hidden views must not burn CPU.
         IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Pause(); };
         Unloaded += (_, _) => Pause();
+        // The bitmap caches have to be sized to where this Toki is actually DRAWN, and that is not
+        // knowable until he has been arranged. Both events matter: SizeChanged for the 44px notch
+        // bubble against the 104px Library one, DpiChanged for dragging between monitors.
+        SizeChanged += (_, _) => SyncCacheScale();
+        Loaded += (_, _) => SyncCacheScale();
+    }
+
+    /// <summary>Dragged to a monitor at a different scale: the cache has to be rebuilt for it.
+    /// (Visual.OnDpiChanged, not Window.DpiChanged - a UserControl has no such event.)</summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        SyncCacheScale();
+    }
+
+    /// <summary>The board the art is drawn on, in layout units (see the XAML header).</summary>
+    const double BoardW = 67, BoardH = 52;
+
+    /// <summary>
+    /// Match each BitmapCache to the DEVICE pixels Toki actually occupies, so the cached bitmap is
+    /// composited at roughly 1:1 instead of being minified.
+    ///
+    /// RenderAtScale is relative to the cached element's own box, which is the 67x52 board - NOT to
+    /// the screen. A fixed 4 therefore always rasterised 268x208 and let WPF's bilinear filter
+    /// shrink it to whatever size Toki was drawn at, which for the notch bubble is a five-fold
+    /// reduction and reads as jagged, fringed edges. Oversampling a cache without mipmaps makes
+    /// minification WORSE, not better.
+    ///
+    /// The 1.5x headroom is for the transforms: Toki is permanently under a breathe/hop/tilt, and a
+    /// rotation resamples the cache, so a cache at exactly 1:1 would soften as he leans. 1.5 is
+    /// enough to absorb that and still nowhere near the minification cliff.
+    /// </summary>
+    void SyncCacheScale()
+    {
+        if (BodyCache is null && PropCache is null) return;
+        var w = ActualWidth > 0 ? ActualWidth : Width;
+        var h = ActualHeight > 0 ? ActualHeight : Height;
+        if (double.IsNaN(w) || double.IsNaN(h) || w <= 0 || h <= 0) return;
+
+        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // Uniform Viewbox: the limiting axis sets the scale, exactly as the Viewbox computes it.
+        var fit = Math.Min(w / BoardW, h / BoardH);
+        // Clamped at both ends: never below 1 (a cache coarser than the art is pointless) and never
+        // above 6 (the app icon renders at 256px, which is already scale 3.8).
+        var scale = Math.Clamp(fit * dpi * 1.5, 1.0, 6.0);
+        // Quantise, or every pixel of hover growth rebuilds both bitmaps.
+        scale = Math.Round(scale * 4) / 4;
+        if (BodyCache is not null && Math.Abs(BodyCache.RenderAtScale - scale) > 0.01) BodyCache.RenderAtScale = scale;
+        if (PropCache is not null && Math.Abs(PropCache.RenderAtScale - scale) > 0.01) PropCache.RenderAtScale = scale;
     }
 
     /// <summary>

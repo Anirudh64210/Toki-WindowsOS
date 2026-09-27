@@ -1,4 +1,4 @@
-<Window x:Class="Toki.LibraryWindow"
+﻿<Window x:Class="Toki.LibraryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Toki.Controls"
@@ -6,8 +6,61 @@
         xmlns:theme="clr-namespace:Toki.Theme"
         Title="Library" Height="640" Width="960" MinWidth="720" MinHeight="460"
         WindowStartupLocation="Manual" Background="{DynamicResource Ink}"
-        FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True">
+        FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        WindowStyle="None"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Grayscale">
+    <!-- TOKI DRAWS ITS OWN TITLE BAR (owner, 2026-09-27: "they have their own custom bar to close
+         minimise the window, we have the default windows one, fix that as well").
+         WindowStyle=None removes the system caption; WindowChrome puts back everything that would
+         otherwise be lost with it - Aero Snap, snap layouts on the maximise button, drag-to-restore,
+         edge resizing and the system shadow - because the chrome is still a real non-client frame,
+         just one we paint. Doing this with ResizeMode/AllowsTransparency instead (the other common
+         recipe) gives up all of that and produces a window that feels broken on Windows.
+         CaptionHeight must match the title row's height exactly: it is the strip Windows treats as
+         draggable, and anything inside it that needs clicks sets IsHitTestVisibleInChrome.
+         GlassFrameThickness 0 keeps DWM from painting its own frame over our top edge. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="6"
+                      CornerRadius="0" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <!-- IDEAL, NOT DISPLAY - and this REVERSES the 2026-09-26 decision, whose reasoning is kept
+         because it was correct FOR THE FONT IT WAS WRITTEN FOR:
+
+             "DISPLAY, NOT IDEAL. WPF defaults to Ideal, which positions glyphs at fractional
+              pixels; the WPF text team's own guidance is that Ideal only wins ABOVE about 15pt and
+              that below it the benefits are negated by blurry rendering, with Display as the
+              documented fix. Every string in this window is 9.5-28px."
+
+         Display mode rounds every glyph advance to a whole pixel and rasterises through the font's
+         own TrueType HINTING. That is a win for Segoe UI Variable, which Microsoft hints heavily
+         and specifically for this. Inter is the opposite kind of font: it ships almost no hinting,
+         because it is drawn for rasterisers that position glyphs at fractional pixels. Running it
+         in Display mode forces integer advances onto a design that was never fitted to them, so
+         stems land half on and half off a pixel and come back uneven and broken.
+         The owner's screenshot of the word "Contact" is exactly that: stem weights all over the
+         place, several strokes nearly gone, and heavy orange/blue fringing - "thinned out text
+         words, no boundaries, rough, ugly and cheap" (2026-09-27).
+
+         I CHANGED THE FONT AND LEFT THE MODE THAT HAD BEEN CHOSEN FOR THE OLD ONE. A text mode is
+         not a property of the window, it is a property of the TYPEFACE in it.
+
+         GRAYSCALE, not ClearType. Measured on a real screen capture of this window, the same line
+         carries a mean per-pixel edge colour spread of 93 under ClearType and 0.3 under Grayscale,
+         and the ink comes out slightly DARKER - so the orange/blue fringing the owner photographed
+         disappears and nothing thins. Inter is drawn for grayscale rasterisers. Set EXPLICITLY
+         rather than left on Auto so the choice is reviewable here instead of WPF inferring it
+         per-element from opacity and transforms, which is what makes text change weight
+         mid-animation. -->
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
+        <Grid.RowDefinitions>
+            <!-- The title row is the PAGE, not a bar. In the reference there is no strip: the
+                 controls sit straight on the page colour with no fill, no rule and no shadow under
+                 them, which is why that window reads as one surface and Toki's read as two. So this
+                 row has no Background of its own and nothing separates it from the content. -->
+            <RowDefinition Height="44"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <!-- Nav sidebar is a FIXED rail (no drag-resizer) - Ask/Library/Templates don't need resizing.
                  240 is the frame's own width (Library - List + Detail, "Frame 525"). -->
@@ -34,7 +87,61 @@
              this card a 9px gutter to the window edge, and a shadow wider than its gutter does not
              read as softer, it reads as CUT OFF along the left and bottom. Opacities are the recipe's
              (22% / 12%), scaled to 70% in the light theme by ApplyShadowDepth. -->
-        <Grid Grid.Column="0" Margin="9,9,0,9">
+        <!-- ═══════════ The title row ═══════════
+             Left: back. Right: minimise, maximise, close. Nothing in between - no window title, no
+             icon, no breadcrumb. The reference draws no title either, and this window has exactly
+             one identity ("Toki", already on the sidebar masthead two lines below); a title bar that
+             repeats it is a line of text the reader has to skip past on the way in. -->
+        <Grid Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent">
+            <!-- BACK LIVES HERE NOW, and it is a chip, not a slab.
+                 It used to be a full-width filled button pinned to the bottom of the sidebar reading
+                 "< Back to Toki" - the heaviest object in the window, for the action a user takes
+                 least often, occupying the corner the eye rests on last. The reference puts exactly
+                 this control in exactly this place as a small tinted square with a bare chevron, and
+                 the label is unnecessary: there is one place back can go. -->
+            <Button x:Name="BackBtn" Click="OnBack" Cursor="Hand" Focusable="False"
+                    WindowChrome.IsHitTestVisibleInChrome="True"
+                    HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0"
+                    Width="38" Height="30" ToolTip="Back to Toki">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="10" Background="{DynamicResource Chip}">
+                            <Path x:Name="Gl" Width="7" Height="12" Stretch="Uniform"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  Data="M 7,0 L 1,6 L 7,12" StrokeThickness="1.6"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Stroke="{DynamicResource Text}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- A STROKED PATH, not a font glyph. The chevron in the reference is a
+                                 drawn stroke with round caps; the Fluent chevron character is a
+                                 filled outline with flat ends and reads blunt beside it. Same
+                                 finding as the play triangle (2026-09-26). -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ChipOnCard}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                <Button x:Name="MinBtn" Style="{StaticResource CaptionButton}" Content="&#xE921;"
+                        Click="OnMinimise" ToolTip="Minimise"/>
+                <!-- Glyph and tooltip both swap with the window state (E922 maximise / E923 restore),
+                     in OnStateChanged - a maximise button that still says maximise is the classic
+                     hand-rolled-chrome bug. -->
+                <Button x:Name="MaxBtn" Style="{StaticResource CaptionButton}" Content="&#xE922;"
+                        Click="OnMaximiseRestore" ToolTip="Maximise"/>
+                <Button x:Name="CloseBtn" Style="{StaticResource CaptionButton}" Content="&#xE8BB;"
+                        Click="OnCloseWindow" ToolTip="Close"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1" Grid.Column="0" Margin="9,0,0,9">
             <Border x:Name="SidebarKeyShadow" CornerRadius="18" Background="#01000000" IsHitTestVisible="False">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="22" ShadowDepth="6" Direction="270" Opacity="0.22" Color="#000000"/>
@@ -63,14 +170,10 @@
                            FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
                            Margin="12,0,0,34" Height="28" VerticalAlignment="Center"/>
 
-                <!-- Back to Toki (bottom) -->
-                <!-- Content (chevron+label) is set in code so both pieces are vertically centered. -->
-                <!-- Its own opaque fill, NOT one of the Glass tokens: those are tuned for the notch
-                     and over the sidebar card they land within 1.02:1 of it, which is a button you
-                     cannot see. -->
-                <Button DockPanel.Dock="Bottom" x:Name="BackBtn" Style="{StaticResource PillButton}"
-                        Background="{DynamicResource SidebarButton}"
-                        HorizontalContentAlignment="Center" Padding="13,10" FontSize="12" Click="OnBack"/>
+                <!-- BACK MOVED TO THE TITLE ROW (2026-09-27). It was a full-width filled pill docked
+                     here at the bottom, and it was the heaviest object in the window for the action
+                     taken least often. The sidebar now ends with the nav and nothing else, which is
+                     what makes the empty space below it read as deliberate rather than unfinished. -->
 
                 <!-- Nav items (built in code so the active one highlights) -->
                 <StackPanel x:Name="Nav" DockPanel.Dock="Top"/>
@@ -82,7 +185,7 @@
         <!-- ═══════════ Main pane ═══════════ -->
         <!-- No left seam any more: the sidebar floats as its own card with air around it, so a rule
              here would draw a line down the middle of that gap. -->
-        <Border Grid.Column="1" Background="Transparent">
+        <Border Grid.Row="1" Grid.Column="1" Background="Transparent">
             <Grid x:Name="MainHost">
 
                 <!-- ── Ask (conversation + landing) ── -->
@@ -115,20 +218,20 @@
                     <DockPanel>
                         <!-- Top bar: current chat title, History (past conversations), and New chat. -->
                         <Grid DockPanel.Dock="Top" Margin="40,16,40,0">
-                            <TextBlock x:Name="ChatTitle" Style="{StaticResource Dim}" FontSize="12" FontWeight="SemiBold"
+                            <TextBlock x:Name="ChatTitle" Style="{StaticResource Dim}" FontSize="13.5" FontWeight="SemiBold"
                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="Ask Toki"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <Button x:Name="HistoryBtn" Style="{StaticResource PillButton}" Background="{DynamicResource Chip}"
-                                        Padding="13,7" FontSize="11.5" Click="OnHistory">
+                                        Padding="13,7" FontSize="13.5" Click="OnHistory">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                        <TextBlock Text="&#xE81C;" FontFamily="{StaticResource IconFont}" FontSize="13.5"
                                                    VerticalAlignment="Center" Margin="0,0,7,0"/>
                                         <TextBlock Text="History" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
                                 <!-- New Chat is the WHITE pill (figma): the one primary action on this bar. -->
                                 <Button x:Name="NewChatBtn" Style="{StaticResource WhiteButton}"
-                                        Padding="13,7" FontSize="11.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New chat"/>
+                                        Padding="13,7" FontSize="13.5" Margin="8,0,0,0" Click="OnNewChat" Content="+  New chat"/>
                             </StackPanel>
                         </Grid>
 
@@ -155,7 +258,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBox x:Name="AskBox" Background="Transparent" BorderThickness="0"
                                          Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                         FontSize="14" VerticalContentAlignment="Center" Padding="12,11"
+                                         FontSize="15" VerticalContentAlignment="Center" Padding="12,11"
                                          FontFamily="{StaticResource UiFont}" KeyDown="OnAskKeyDown"/>
                                 <!-- Voice overlay: replaces the box while listening / transcribing (Google-/Safari-
                                      style). A pulsing dot + status word; the mic drives it in code. -->
@@ -164,7 +267,7 @@
                                             IsHitTestVisible="False">
                                     <Ellipse x:Name="VoiceDot" Width="9" Height="9" Fill="{DynamicResource Coral}"
                                              VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                    <TextBlock x:Name="VoiceStatusText" Text="Listening…" FontSize="14"
+                                    <TextBlock x:Name="VoiceStatusText" Text="Listening…" FontSize="15"
                                                Foreground="{DynamicResource TextDim}" FontFamily="{StaticResource UiFont}"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
@@ -181,7 +284,7 @@
                                      disc seated in it is r19 - concentric, inner = outer minus pad. -->
                                 <Button Grid.Column="2" x:Name="AskBtn" Style="{StaticResource RoundPuck}"
                                         Background="{DynamicResource GlassFill}" Foreground="{DynamicResource TextHi}"
-                                        FontFamily="{StaticResource IconFont}" FontSize="14"
+                                        FontFamily="{StaticResource IconFont}" FontSize="15"
                                         Width="38" Height="38" Margin="4,0,0,0" VerticalAlignment="Center"
                                         ToolTip="Ask" Click="OnAsk">
                                     <!-- The plane glyph carries its mass at the tail, so box-centred it reads
@@ -239,13 +342,13 @@
                                              chips below it - the reason the page exists - read as
                                              secondary. A greeting carries no information; it should not
                                              be the largest type in the window. Demote, never promote. -->
-                                        <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="14" FontWeight="Medium"
+                                        <TextBlock x:Name="Greeting" Style="{StaticResource Body}" FontSize="15" FontWeight="Medium"
                                                    Foreground="{DynamicResource TextSoft}"
                                                    TextAlignment="Center" TextWrapping="Wrap"/>
                                         <!-- AskHint no longer carries an identity line ("Your meeting
                                              assistant."): a sentence describing the interface to somebody
                                              already using it is narration. It still shows voice hints. -->
-                                        <TextBlock x:Name="AskHint" Style="{StaticResource Dim}" FontSize="12.5" TextAlignment="Center"
+                                        <TextBlock x:Name="AskHint" Style="{StaticResource Dim}" FontSize="13.5" TextAlignment="Center"
                                                    Margin="0,6,0,22" TextWrapping="Wrap"/>
                                         <!-- A uniform 2-col grid, not a ragged wrap: equal-width chips
                                              read as one considered set, not offcuts. -->
@@ -264,9 +367,9 @@
                                     HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
                                     Padding="11,5" Click="OnChatJumpToLatest">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9.5"
+                                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                                Foreground="{DynamicResource Pink}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                    <TextBlock Text="Latest" FontFamily="{StaticResource UiFont}" FontSize="10.5" FontWeight="SemiBold"
+                                    <TextBlock Text="Latest" FontFamily="{StaticResource UiFont}" FontSize="12" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextSoft}" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Button>
@@ -303,13 +406,13 @@
                                 <TextBlock Text="Library" FontFamily="{StaticResource UiFont}" FontSize="20"
                                            FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
                                            VerticalAlignment="Center"/>
-                                <TextBlock x:Name="CountLabel" FontFamily="{StaticResource UiFont}" FontSize="14"
+                                <TextBlock x:Name="CountLabel" FontFamily="{StaticResource UiFont}" FontSize="15"
                                            Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
                                            Margin="12,1,0,0"/>
                                 <Border x:Name="CountRule" Width="1" Height="15" Margin="10,1,10,0"
                                         Background="{DynamicResource GlassBorder}" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="ScopeLabel" Visibility="Collapsed" FontFamily="{StaticResource UiFont}"
-                                           FontSize="14" Foreground="{DynamicResource TextMid}"
+                                           FontSize="15" Foreground="{DynamicResource TextMid}"
                                            VerticalAlignment="Center" Margin="0,1,0,0"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -347,17 +450,22 @@
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="15"
                                                Foreground="{DynamicResource TextMid}" Opacity="0.75"
                                                VerticalAlignment="Center" Margin="8,0,8,0" IsHitTestVisible="False"/>
                                     <Grid Grid.Column="1">
-                                        <TextBlock x:Name="SearchPlaceholder" Text="Search these notes - you: / them"
+                                        <!-- "Search these notes - you: / them" taught the query
+                                             syntax in the placeholder, where it was clipped by the
+                                             field's own width and read as an error message. One
+                                             word. The you:/them: filters still work and belong in
+                                             help, not on the resting state of an input. -->
+                                        <TextBlock x:Name="SearchPlaceholder" Text="Search"
                                                    IsHitTestVisible="False" VerticalAlignment="Center"
-                                                   FontFamily="{StaticResource UiFont}" FontSize="13.5"
+                                                   FontFamily="{StaticResource UiFont}" FontSize="15"
                                                    Foreground="{DynamicResource TextLow}"/>
                                         <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
                                                  Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
-                                                 VerticalContentAlignment="Center" FontSize="13.5" TextChanged="OnSearch"/>
+                                                 VerticalContentAlignment="Center" FontSize="15" TextChanged="OnSearch"/>
                                     </Grid>
                                 </Grid>
                             </Border>
@@ -408,7 +516,7 @@
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                             </views:MeetingList>
-                            <TextBlock x:Name="CardsEmpty" Style="{StaticResource Dim}" FontSize="12"
+                            <TextBlock x:Name="CardsEmpty" Style="{StaticResource Dim}" FontSize="13.5"
                                        TextAlignment="Center" TextWrapping="Wrap" Margin="0,24,0,0"
                                        VerticalAlignment="Top" Visibility="Collapsed"/>
                         </Grid>
@@ -449,7 +557,7 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,26">
                             <TextBlock Text="Settings" Style="{StaticResource PageTitle}"/>
                             <!-- Bottom-aligned with a nudge - WPF has no Baseline alignment for siblings. -->
-                            <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="11.5"
+                            <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="13.5"
                                        VerticalAlignment="Bottom" Margin="14,0,0,4"/>
                         </StackPanel>
 
@@ -474,16 +582,20 @@
 
                         <!-- Positive reinforcement after a successful save. -->
                         <StackPanel x:Name="LibNameSaved" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
-                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="LibNameSavedText" Style="{StaticResource Body}" FontSize="12.5"
+                            <TextBlock x:Name="LibNameSavedText" Style="{StaticResource Body}" FontSize="13.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
                         </StackPanel>
 
                         <!-- ── Appearance: the redesign's CARD of rows - one rounded surface, rows split
                              by hairlines, the switch on the right. Directly under the name, as the frame
                              orders it (353:9154). ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <!-- NO CAPTION under this heading (taste audit 2026-08-24). It read "How Toki
                              looks and what it shows in a share." - the first half restates the word
                              "Appearance" to somebody who just read it, which is the interface narrating
@@ -528,7 +640,7 @@
                                              for. Off means Toki is invisible to anything that captures the
                                              screen, which is not guessable from the label alone. -->
                                         <TextBlock Text="Off keeps Toki out of screen shares and recordings."
-                                                   Style="{StaticResource Dim}" FontSize="11" Margin="0,2,0,0"
+                                                   Style="{StaticResource Dim}" FontSize="12" Margin="0,2,0,0"
                                                    TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <CheckBox x:Name="LibGhostToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
@@ -543,15 +655,19 @@
                              escape hatch existed with no handle on it. A name typed here is TRUSTED: it
                              beats what the recogniser heard, it lets a spoken name be attached to a voice,
                              and it is the only fix for a name the library cannot settle by frequency. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="People Toki should spell right" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="One per line, or comma separated." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
+                        <TextBlock Text="One per line, or comma separated." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
                         <Border x:Name="PinnedCard" Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 HorizontalAlignment="Stretch">
                             <TextBox x:Name="LibPinnedBox" Background="Transparent" BorderThickness="0"
                                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                                     MinHeight="72" MaxHeight="150" FontSize="13.5" FontFamily="{StaticResource UiFont}"
+                                     MinHeight="72" MaxHeight="150" FontSize="15" FontFamily="{StaticResource UiFont}"
                                      AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                                      TextChanged="OnLibPinnedChanged"/>
                         </Border>
@@ -563,9 +679,9 @@
                                     Content="Cancel" Padding="20,9" Margin="8,0,0,0" Click="OnLibPinnedCancel"/>
                         </StackPanel>
                         <StackPanel x:Name="LibPinnedSaved" Orientation="Horizontal" Margin="0,14,0,0" Visibility="Collapsed">
-                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                            <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="13.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="LibPinnedSavedText" Style="{StaticResource Body}" FontSize="12.5"
+                            <TextBlock x:Name="LibPinnedSavedText" Style="{StaticResource Body}" FontSize="13.5"
                                        Foreground="{DynamicResource Green}" VerticalAlignment="Center"/>
                         </StackPanel>
 
@@ -575,21 +691,29 @@
                              fix them quietly at startup. A transcript is a record of what people said;
                              rewriting one the user has already read is not a favour. So: a button, a
                              plain statement of what it will and will not touch, and a count afterwards. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="Re-clean saved transcripts" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="Tidies older transcripts. Your notes and ticks stay." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
+                        <TextBlock Text="Tidies older transcripts. Your notes and ticks stay." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="LibRecleanButton" Style="{StaticResource PillButton}"
                                     Background="{DynamicResource Chip}" Content="Re-clean transcripts"
                                     Padding="18,9" Click="OnLibReclean"/>
-                            <TextBlock x:Name="LibRecleanStatus" Style="{StaticResource Dim}" FontSize="12.5"
+                            <TextBlock x:Name="LibRecleanStatus" Style="{StaticResource Dim}" FontSize="13.5"
                                        VerticalAlignment="Center" Margin="14,0,0,0" Visibility="Collapsed"/>
                         </StackPanel>
 
                         <!-- ── AI summaries (the mode + BYO-API-key flow, moved whole from the notch) ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="AI summaries" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="On-device by default, or bring your own key." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
+                        <TextBlock Text="On-device by default, or bring your own key." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
                         <views:AiSummariesSection x:Name="AiSection"/>
 
                         <!-- ── Calendars ──
@@ -601,9 +725,13 @@
                              A CONNECTED row shrinks to a small provider mark plus the account it is
                              signed in as (owner's ask): once it is done, it is a fact to confirm at a
                              glance, not an action taking up a button's worth of space. -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="Calendars" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="Connect one or both. Toki merges them into one agenda." Style="{StaticResource Dim}" FontSize="11.5" Margin="0,-8,0,12"/>
+                        <TextBlock Text="Connect one or both. Toki merges them into one agenda." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
 
                         <!-- Google -->
                         <Grid x:Name="LibGoogleRow">
@@ -618,13 +746,13 @@
                             <Border x:Name="LibGoogleMark" Width="26" Height="26" CornerRadius="13"
                                     Background="{DynamicResource Chip}" Margin="0,0,10,0"
                                     VerticalAlignment="Center" Visibility="Collapsed">
-                                <TextBlock Text="G" FontFamily="{StaticResource UiFont}" FontSize="12"
+                                <TextBlock Text="G" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            FontWeight="SemiBold" Foreground="{DynamicResource Text}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="Google Calendar" Style="{StaticResource BodyStrong}"/>
-                                <TextBlock x:Name="LibGoogleStatus" Style="{StaticResource Dim}" FontSize="12"
+                                <TextBlock x:Name="LibGoogleStatus" Style="{StaticResource Dim}" FontSize="13.5"
                                            Margin="0,2,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -649,13 +777,13 @@
                             <Border x:Name="LibOutlookMark" Width="26" Height="26" CornerRadius="13"
                                     Background="{DynamicResource Chip}" Margin="0,0,10,0"
                                     VerticalAlignment="Center" Visibility="Collapsed">
-                                <TextBlock Text="O" FontFamily="{StaticResource UiFont}" FontSize="12"
+                                <TextBlock Text="O" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            FontWeight="SemiBold" Foreground="{DynamicResource Text}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="Outlook" Style="{StaticResource BodyStrong}"/>
-                                <TextBlock x:Name="LibOutlookStatus" Style="{StaticResource Dim}" FontSize="12"
+                                <TextBlock x:Name="LibOutlookStatus" Style="{StaticResource Dim}" FontSize="13.5"
                                            Margin="0,2,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -668,7 +796,11 @@
                         </Grid>
 
                         <!-- ── About ── -->
-                        <Border Height="1" Background="{DynamicResource Hairline}" Margin="0,28,0,28"/>
+                        <!-- Divider removed 2026-09-27: 28px of air on each side already separates these
+                             sections. Material 3 is explicit that a divider belongs only where elements
+                             "cannot be separated using white space", and that too many lines make an
+                             interface look cluttered. The gap does the work; the line was noise. -->
+                        <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="About" Style="{StaticResource SectionTitle}"/>
                         <!-- A BUTTON, and its hover comes from the shared style rather than from two
                              hand-written MouseEnter/MouseLeave handlers that had to re-implement what
@@ -685,7 +817,7 @@
                                     <TextBlock Text="Built with - open source &amp; licences" Style="{StaticResource BodyStrong}"/>
                                 </StackPanel>
                                 <TextBlock Grid.Column="1" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="12" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
+                                           FontSize="13.5" Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
                             </Grid>
                         </Button>
 

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -179,11 +179,15 @@ public static class DayPicker
             // Today is RINGED, the chosen day is FILLED: two different facts, two different marks.
             BorderThickness = new Thickness(isToday && !isSelected ? 1 : 0),
         };
-        if (isSelected) surface.SetResourceReference(Border.BackgroundProperty, "Pink");
+        // BLUE, NOT PINK. Pink is a reserved CONTENT colour (questions); chrome that says "this one
+        // is chosen" is Toki-active blue, which is exactly why the loader shimmer moved off pink in
+        // 2026-08. The day picker was the last place it survived, and a magenta calendar reads as a
+        // different product. Ink stays the on-accent text in both themes.
+        if (isSelected) surface.SetResourceReference(Border.BackgroundProperty, "Blue");
         else surface.Background = Brushes.Transparent;
         if (isToday && !isSelected)
         {
-            surface.SetResourceReference(Border.BorderBrushProperty, "Pink");
+            surface.SetResourceReference(Border.BorderBrushProperty, "Blue");
             Theme.GlassSurface.CrispRim(surface);   // only the ringed cell has a rim to snap
         }
 
@@ -204,7 +208,7 @@ public static class DayPicker
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         text.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
-        text.SetResourceReference(TextBlock.ForegroundProperty, "Pink");
+        text.SetResourceReference(TextBlock.ForegroundProperty, "Blue");
 
         var surface = new Border
         {

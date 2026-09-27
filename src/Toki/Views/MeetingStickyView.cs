@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -138,10 +138,16 @@ public sealed class MeetingStickyView : Border
         {
             if (_toggle is not null) return _toggle;
 
-            // Segoe MDL2 "Pinned", tying the button to the amber-edged panel it opens.
+            // Segoe MDL2 "Pinned". NOT amber (2026-09-27): it sat in a row of three otherwise
+            // grey note controls and was the only coloured thing on the page, so the least
+            // important button in the toolbar was the brightest. The amber used to "tie the
+            // button to the amber-edged panel it opens" - but a tie only needs to be legible
+            // once the panel is OPEN, and by then the panel is on screen saying so itself.
+            // Owner on this exact colour in its other three homes: "the yellow 3 open, i do
+            // not like".
             var pin = new TextBlock
             {
-                Text = "", FontSize = 11, Foreground = B("Amber"),
+                Text = "", FontSize = 11, Foreground = B("TextDim"),
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0),
             };
             pin.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");

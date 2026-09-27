@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.SummarizingView"
+﻿<UserControl x:Class="Toki.Views.SummarizingView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -49,8 +49,13 @@
             <controls:TokiBlob x:Name="Toki" Width="26" Height="24" Margin="0,0,10,0" Visibility="Collapsed"
                                VerticalAlignment="Center" RenderTransformOrigin="0.5,1"/>
             <!-- 13 SemiBold at white 90% - the frame's label size for every one of these pills. -->
+            <!-- MaxWidth + ellipsis because this line now carries the MEETING'S TITLE once the model
+                 has written one, and a real title ("Organization Catalog Simplification and AI
+                 Workflow Research") is far wider than the 220 card. Trimming keeps the row on one
+                 line at its designed height; the whole title is on the note a few seconds later. -->
             <TextBlock x:Name="StageLabel" Text="Tidying up your notes" FontFamily="{StaticResource UiFont}"
                        FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
+                       MaxWidth="168" TextTrimming="CharacterEllipsis"
                        VerticalAlignment="Center"/>
             <TextBlock x:Name="Dots" Text="" FontFamily="{StaticResource UiFont}" FontSize="13"
                        FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
