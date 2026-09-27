@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -42,56 +42,14 @@ public partial class TokiBlob : UserControl
         // Only animate while actually on screen - cached-but-hidden views must not burn CPU.
         IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) Run(); else Pause(); };
         Unloaded += (_, _) => Pause();
-        // The bitmap caches have to be sized to where this Toki is actually DRAWN, and that is not
-        // knowable until he has been arranged. Both events matter: SizeChanged for the 44px notch
-        // bubble against the 104px Library one, DpiChanged for dragging between monitors.
-        SizeChanged += (_, _) => SyncCacheScale();
-        Loaded += (_, _) => SyncCacheScale();
     }
 
-    /// <summary>Dragged to a monitor at a different scale: the cache has to be rebuilt for it.
-    /// (Visual.OnDpiChanged, not Window.DpiChanged - a UserControl has no such event.)</summary>
-    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
-    {
-        base.OnDpiChanged(oldDpi, newDpi);
-        SyncCacheScale();
-    }
-
-    /// <summary>The board the art is drawn on, in layout units (see the XAML header).</summary>
-    const double BoardW = 67, BoardH = 52;
-
-    /// <summary>
-    /// Match each BitmapCache to the DEVICE pixels Toki actually occupies, so the cached bitmap is
-    /// composited at roughly 1:1 instead of being minified.
-    ///
-    /// RenderAtScale is relative to the cached element's own box, which is the 67x52 board - NOT to
-    /// the screen. A fixed 4 therefore always rasterised 268x208 and let WPF's bilinear filter
-    /// shrink it to whatever size Toki was drawn at, which for the notch bubble is a five-fold
-    /// reduction and reads as jagged, fringed edges. Oversampling a cache without mipmaps makes
-    /// minification WORSE, not better.
-    ///
-    /// The 1.5x headroom is for the transforms: Toki is permanently under a breathe/hop/tilt, and a
-    /// rotation resamples the cache, so a cache at exactly 1:1 would soften as he leans. 1.5 is
-    /// enough to absorb that and still nowhere near the minification cliff.
-    /// </summary>
-    void SyncCacheScale()
-    {
-        if (BodyCache is null && PropCache is null) return;
-        var w = ActualWidth > 0 ? ActualWidth : Width;
-        var h = ActualHeight > 0 ? ActualHeight : Height;
-        if (double.IsNaN(w) || double.IsNaN(h) || w <= 0 || h <= 0) return;
-
-        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        // Uniform Viewbox: the limiting axis sets the scale, exactly as the Viewbox computes it.
-        var fit = Math.Min(w / BoardW, h / BoardH);
-        // Clamped at both ends: never below 1 (a cache coarser than the art is pointless) and never
-        // above 6 (the app icon renders at 256px, which is already scale 3.8).
-        var scale = Math.Clamp(fit * dpi * 1.5, 1.0, 6.0);
-        // Quantise, or every pixel of hover growth rebuilds both bitmaps.
-        scale = Math.Round(scale * 4) / 4;
-        if (BodyCache is not null && Math.Abs(BodyCache.RenderAtScale - scale) > 0.01) BodyCache.RenderAtScale = scale;
-        if (PropCache is not null && Math.Abs(PropCache.RenderAtScale - scale) > 0.01) PropCache.RenderAtScale = scale;
-    }
+    // SyncCacheScale and its DPI hook are GONE (2026-09-27). They existed to keep a BitmapCache
+    // sized to the display, and the cache itself has been removed - see TokiBlob.xaml for why a
+    // cache can never beat uncached vector rasterisation. Recorded here because the intermediate
+    // version (cache sized per display) measurably beat the original (fixed RenderAtScale=4) and
+    // would look like a sensible thing to reintroduce: it is not, it is a smaller amount of the
+    // same mistake.
 
     /// <summary>
     /// The body is ONE blue in both themes (see the XAML): a near-white foot and a pale crown wash
@@ -308,6 +266,7 @@ public partial class TokiBlob : UserControl
         // The mood itself is not forgotten - Run() puts it back through EnterMood.
         MoodBob.BeginAnimation(TranslateTransform.YProperty, null); MoodBob.Y = 0;
         MoodLean.BeginAnimation(RotateTransform.AngleProperty, null); MoodLean.Angle = 0;
+        StopBreathing();   // unhook the per-frame idle, or it runs for the life of the app
         Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         Breathe.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         Hop.BeginAnimation(TranslateTransform.YProperty, null); Hop.Y = 0;
@@ -318,20 +277,88 @@ public partial class TokiBlob : UserControl
         RightBlink.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
 
+    // ════════════════════ THE IDLE ENGINE: why Toki stops reading as a sprite ════════════════════
+    //
+    // Owner, 2026-09-27: "toki in the bubble doesn't have enough personality, right now its just a
+    // static figure with moving eyes, it needs to LIVE inside the bubble".
+    //
+    // He was already breathing - a 3.5s AutoReverse sine on Breathe. Two things made that read as
+    // static anyway. It was PERFECTLY PERIODIC, and a loop the eye can predict stops being motion
+    // and becomes texture; and it was the ONLY channel, so the body never went anywhere.
+    //
+    // Replaced by a sum of sines on MUTUALLY IRRATIONAL periods (3.1 / 4.7 / 7.3 / 11.9 s). Their
+    // least common multiple is effectively never, so the composite pose does not repeat inside any
+    // session - which is the whole difference between "alive" and "looping". Amplitudes are kept
+    // deliberately BELOW the threshold of description: if you can say what the motion is doing, it
+    // is too big. At the 44px notch bubble the largest excursion here is about half a pixel.
+    //
+    // One handler, no allocation, transforms only - never Width/Height/Margin, which would run
+    // layout every frame. CompositionTarget.Rendering fires forever once subscribed, even hidden,
+    // so Pause() must unsubscribe; that is a real battery cost on a notch that is always present.
+    const double PeriodBreath = 3.1, PeriodFloat = 4.7, PeriodSway = 7.3, PeriodLean = 11.9;
+    readonly System.Diagnostics.Stopwatch _idleClock = new();
+    bool _idleHooked;
+
     void StartBreathing()
     {
-        // ~3.5s full cycle at <=2% amplitude (relaxed breathing: 15-20 breaths/min, tiny travel).
-        var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
-        var y = new DoubleAnimation(1.0, 0.982, TimeSpan.FromMilliseconds(1750))
-        {
-            AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease,
-        };
-        var x = new DoubleAnimation(1.0, 1.014, TimeSpan.FromMilliseconds(1750))
-        {
-            AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = ease,
-        };
-        Breathe.BeginAnimation(ScaleTransform.ScaleYProperty, y);
-        Breathe.BeginAnimation(ScaleTransform.ScaleXProperty, x);
+        if (_idleHooked) return;
+        _idleHooked = true;
+        // A random start offset so two Tokis on screen at once (the notch bubble and the Library's
+        // resting one) are never in step - nothing gives away a canned animation faster.
+        if (!_idleClock.IsRunning) { _idleClock.Start(); _idlePhase = Rng.NextDouble() * 100.0; }
+        System.Windows.Media.CompositionTarget.Rendering += OnIdleFrame;
+    }
+
+    void StopBreathing()
+    {
+        if (!_idleHooked) return;
+        _idleHooked = false;
+        System.Windows.Media.CompositionTarget.Rendering -= OnIdleFrame;
+        IdleBreath.ScaleX = IdleBreath.ScaleY = 1;
+        IdleFloat.X = IdleFloat.Y = 0;
+        IdleLean.Angle = 0;
+    }
+
+    double _idlePhase;
+
+    /// <summary>
+    /// True while the notch is morphing between pages. The idle holds still for those ~300ms.
+    ///
+    /// Not a micro-optimisation: the mascot is drawn as live vector (no bitmap cache, for quality),
+    /// so every transform write here forces WPF to re-rasterise three gradient-filled beziers. A
+    /// morph is the one moment the UI thread is already doing its heaviest work - building and
+    /// laying out the incoming page - and a per-frame clip trace showed the first 72ms of a morph
+    /// running at roughly 15-30fps while its tail ran at 120. Those first 72ms are where the Drawer
+    /// curve does 78% of its travel, so that is precisely the part the eye reads as a lurch.
+    /// Nothing is lost: sub-pixel idle drift is invisible underneath a card that is resizing.
+    /// </summary>
+    internal static bool IdleSuspended;
+
+    void OnIdleFrame(object? sender, EventArgs e)
+    {
+        if (IdleSuspended) return;
+        var t = _idleClock.Elapsed.TotalSeconds + _idlePhase;
+
+        // BREATH, asymmetric: the inhale takes 40% of the cycle and the release 60%, which is how a
+        // chest actually moves. A symmetric sine is the tell of a programmer's breathing loop.
+        var c = (t / PeriodBreath) % 1.0;
+        var u = c < 0.40 ? (c / 0.40) * 0.5 : 0.5 + ((c - 0.40) / 0.60) * 0.5;
+        var breath = (1 - Math.Cos(u * 2 * Math.PI)) * 0.5;          // 0 -> 1 -> 0
+        // Volume-preserving squash: what he gains in height he gives up in width, so he reads as a
+        // soft body with mass rather than a picture being scaled.
+        IdleBreath.ScaleY = 1.0 + 0.022 * breath;
+        IdleBreath.ScaleX = 1.0 - 0.009 * breath;
+
+        // FLOAT and SWAY. Amplitude is itself modulated by a much slower sine, so no two cycles are
+        // quite the same size (the +/-15% per-cycle jitter a hand animator would put in).
+        var jitter = 1.0 + 0.15 * Math.Sin(t / 17.3 * 2 * Math.PI);
+        IdleFloat.Y = -0.80 * jitter * Math.Sin(t / PeriodFloat * 2 * Math.PI);
+        IdleFloat.X = 0.60 * jitter * Math.Sin(t / PeriodSway * 2 * Math.PI);
+
+        // LEAN, on the longest period of all, pivoting near the feet so the head travels and the
+        // base does not. This is the channel that does most of the work: a body that tips slightly
+        // is alive, and one that only changes size is a balloon.
+        IdleLean.Angle = 1.30 * Math.Sin(t / PeriodLean * 2 * Math.PI);
     }
 
     // ── Moods (the redesign's Characters row): what Toki is DOING, shown on the mascot itself ──

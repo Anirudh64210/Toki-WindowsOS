@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -263,7 +263,7 @@ public partial class PrepCardView : UserControl
 
         var text = new TextBlock
         {
-            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 11.5, TextWrapping = TextWrapping.Wrap,
+            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(9, 0, 0, 0), Foreground = (Brush)FindResource("TextSoft"),
         };
         if (!string.IsNullOrWhiteSpace(a.Owner))
@@ -282,12 +282,12 @@ public partial class PrepCardView : UserControl
         var p = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
         p.Children.Add(new TextBlock
         {
-            Text = "•", Foreground = (Brush)FindResource("TextDim"), FontSize = 11,
+            Text = "•", Foreground = (Brush)FindResource("TextDim"), FontSize = 12,
             Margin = new Thickness(2, 0, 8, 0), FontFamily = (FontFamily)FindResource("UiFont"),
         });
         p.Children.Add(new TextBlock
         {
-            Text = line, Foreground = (Brush)FindResource("TextDim"), FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Text = line, Foreground = (Brush)FindResource("TextDim"), FontSize = 12, TextWrapping = TextWrapping.Wrap,
             FontFamily = (FontFamily)FindResource("UiFont"), MaxWidth = 276,   // fits inside the inset box at the 356 card width
         });
         return p;

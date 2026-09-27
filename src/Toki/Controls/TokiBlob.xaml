@@ -35,6 +35,17 @@
                              like close to the left of the bubble, its not symmetric"). One fixed
                              translate centres the body without touching a single prop coordinate. -->
                         <TranslateTransform X="4.78"/>
+                        <!-- THE IDLE LAYER gets its OWN transforms, and that is not tidiness: it is
+                             driven per-frame from a Stopwatch, while Breathe/Hop/Tilt below are
+                             driven by BeginAnimation for reactions. A running animation outranks a
+                             local value, so if the idle wrote to those same transforms every frame
+                             it would go silently dead for the whole of every reaction and snap back
+                             afterwards. Separate channels compose instead of fighting.
+                             IdleBreath is anchored at the FEET (CenterY 48) so the base stays planted
+                             and only the body swells - a character breathing, not a sprite scaling. -->
+                        <ScaleTransform x:Name="IdleBreath" CenterX="28.7" CenterY="48"/>
+                        <TranslateTransform x:Name="IdleFloat"/>
+                        <RotateTransform x:Name="IdleLean" CenterX="28.7" CenterY="46"/>
                         <ScaleTransform x:Name="Breathe" CenterX="28.7" CenterY="48"/>
                         <TranslateTransform x:Name="Hop"/>
                         <TranslateTransform x:Name="MoodBob"/>
@@ -48,25 +59,25 @@
                      the mood lean) - so every frame re-rasterised all three. Measured with the fpstest flag
                      after the rebuild: dropped frames per notch transition went from 1.2 to 16.8, and
                      the CONTENT cost line from 3 percent to 12-38 percent.
-                     The body never changes SHAPE, only transform, which is exactly the case a bitmap
-                     cache exists for. The motion skill's warning about BitmapCache killing ClearType
-                     does not apply: there is no text in here.
+                     NO BITMAP CACHE, and this is the whole fix for "worst rendering/quality/clean
+                     pixels" (owner, 2026-09-27). A BitmapCache is a PERFORMANCE feature and can never
+                     be a quality one: WPF rasterises the subtree once into a single texture and the
+                     GPU composites it with BILINEAR filtering and NO mipmaps (mip/anisotropic
+                     filtering are documented for 3D content only). So cached quality is capped at
+                     uncached quality, with equality only at exactly 1:1 and integer translation -
+                     and Toki is never at either, because he is permanently under a breathe/hop/tilt
+                     and a rotated cache resamples every single frame whatever its scale.
 
-                     RENDERATSCALE IS SET IN CODE, per displayed size (see SyncCacheScale). It was a
-                     FIXED 4, on the reasoning that "4 keeps it crisp everywhere it is drawn, from
-                     the 44px notch bubble up to the 256px app icon". That is backwards for every
-                     size except the icon. RenderAtScale is relative to this Canvas's own 67x52 box,
-                     so 4 rasterises a 268px bitmap; the notch bubble then draws it at about 55
-                     device pixels, a FIVE-FOLD minification, and WPF composites a cached layer with
-                     bilinear filtering, which samples four texels out of twenty-five. That is not
-                     softness, it is aliasing - the hard stair-stepped edge and the dark fringe in
-                     the owner's screenshot (2026-09-27: "rough, leaking edges and just low
-                     resolution and cheap"). Oversampling past the display scale HURTS without
-                     mipmaps. -->
+                     The previous attempt sized the cache to the display (SyncCacheScale, which
+                     replaced a fixed RenderAtScale=4 that was minifying 268px down to ~55). That was
+                     a real improvement and still the wrong shape of answer. Uncached, WPF
+                     re-rasterises the geometry ANALYTICALLY at the final composed transform every
+                     frame, which is strictly sharper at every size.
+
+                     Perf is the thing to watch, not quality: the fpstest flag is the gate. The cache was
+                     added when the rebuilt art cost 12-38% of the content budget; if it does again,
+                     the answer is simpler geometry for small sizes, not a blurrier texture. -->
                 <Canvas Width="67" Height="52">
-                    <Canvas.CacheMode>
-                        <BitmapCache x:Name="BodyCache" RenderAtScale="1" EnableClearType="False" SnapsToDevicePixels="False"/>
-                    </Canvas.CacheMode>
                     <!-- ── THE BODY ──
                          The path is the design's Vector node (325:288) verbatim. Do not "tidy" it:
                          the asymmetry is deliberate (the right foot hangs lower than the left) and it
@@ -262,12 +273,9 @@
                             <RotateTransform x:Name="PenTilt" CenterX="42.8" CenterY="44.2"/>
                         </TransformGroup>
                     </Canvas.RenderTransform>
-                    <!-- Cached for the same reason as the body: five static paths that only ever move
-                         under a transform, and the writing scribble runs them at 30fps for as long as
-                         a recording lasts. -->
-                    <Canvas.CacheMode>
-                        <BitmapCache x:Name="PropCache" RenderAtScale="1" EnableClearType="False" SnapsToDevicePixels="False"/>
-                    </Canvas.CacheMode>
+                    <!-- Uncached, for the same reason as the body above: these five paths move under
+                         a transform for as long as a recording lasts, and a rotated cache resamples
+                         every frame. -->
                     <Canvas.Resources>
                         <LinearGradientBrush x:Key="PenNavy" StartPoint="1,0.7" EndPoint="0,0.05">
                             <GradientStop Color="#3E5E92" Offset="0.0"/>

@@ -88,7 +88,7 @@ public static class NoteRenderer
                 : "The AI writer was not available, so Toki fell back to basic on-device extraction. These are lifted from what was said, so check them against the transcript.")
             : "You selected the \"My API key\" option, but no key is saved, so your notes were written on-device by the local model. Nothing left your computer. Add a key in Settings to use your API model.";
 
-        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = 12, Foreground = B("TextMid"), LineHeight = 17 };
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontFamily = Ui, FontSize = 13.5, Foreground = B("TextMid"), LineHeight = 17 };
         text.Inlines.Add(new Run(lead + "   ") { FontWeight = FontWeights.SemiBold, Foreground = B(accentKey) });
         text.Inlines.Add(new Run(body));
 
@@ -187,7 +187,7 @@ public static class NoteRenderer
         if (!string.IsNullOrEmpty(meta))
         {
             // Meta row: the facts as text, then the same status chips the list cards carry.
-            var mp = new Paragraph { FontSize = 11, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) };
+            var mp = new Paragraph { FontSize = 12, Foreground = B("TextDim"), Margin = new Thickness(0, 0, 0, sticky is null ? (spacious ? 20 : 15) : 12) };
             mp.Inlines.Add(new Run(meta));
             // NO COUNT CHIPS. "4 open" and "2 people" sat under the title of a document whose own
             // body lists both, in full, a few lines down - the reader is about to SEE the to-dos and
@@ -305,8 +305,17 @@ public static class NoteRenderer
             doc.Blocks.Add(new Paragraph(new Run(m.Notes.Tldr))
             {
                 Foreground = B("Text"),
-                FontSize = fs + 1.5,
-                FontWeight = FontWeights.Medium,
+                // BODY SIZE, BODY WEIGHT. This was fs + 1.5 at Medium, which made the summary both
+                // bigger AND heavier than the section headings beneath it (fs + 1 SemiBold) - the
+                // page's own organising structure outranked by one paragraph of its content. Owner,
+                // 2026-09-27: "notes now have summary in bold, and everything else is smaller and
+                // weird, like its not readable".
+                // The 2026-09-03 intent it replaces was right and is kept: "someone who reads
+                // nothing else still leaves with the point". What carries that is POSITION - the
+                // summary is the first thing under the title, in full ink, with air under it - not
+                // extra weight. A lead paragraph does not need to shout to be read first.
+                FontSize = fs,
+                FontWeight = FontWeights.Normal,
                 LineHeight = fs + 9,
                 TextAlignment = TextAlignment.Left,
                 Margin = new Thickness(0, 0, 0, 0),
@@ -393,36 +402,32 @@ public static class NoteRenderer
             var countLabel = new TextBlock
             {
                 Text = $"{m.Transcript.Count} line{(m.Transcript.Count == 1 ? "" : "s")}",
-                FontFamily = (FontFamily)Res("UiFont"), FontSize = 11, Foreground = B("TextDim"),
+                FontFamily = (FontFamily)Res("UiFont"), FontSize = 12, Foreground = B("TextDim"),
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
             };
 
             var accent = B("AccentAmber");
-            var icon = new Border
-            {
-                Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
-                Background = Transparent(accent, 0x2E), Margin = new Thickness(0, 0, 7, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = "", FontFamily = (FontFamily)Res("IconFont"), FontSize = 9.5, Foreground = accent,
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
+            // NO ICON CHIP. This header carried an 18px accent-tinted disc with a Fluent glyph in
+            // it - the last survivor of a pattern this file's own DocHeader comment already rules
+            // out: "headers are body-ish size, semibold, sentence case, full ink, no rule and no
+            // icon; the icon chips were the cheap emoji look" (research 2026-08-25).
+            // Owner, 2026-09-27: "transcript/show full transcript still has a emoji/symbol in it
+            // which i wanted gone".
             var head = new Grid();
-            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            head.Children.Add(icon);
             var title = new TextBlock
             {
-                Text = "TRANSCRIPT", FontFamily = (FontFamily)Res("UiFont"), FontWeight = FontWeights.Bold,
-                FontSize = 10, Foreground = accent, VerticalAlignment = VerticalAlignment.Center,
+                // Sentence case, semibold, full ink, at the same size as every other section
+                // heading on the page. It was BOLD ALL-CAPS in the amber accent - three separate
+                // ways of shouting, for the one section a reader is least likely to open.
+                Text = "Transcript", FontFamily = (FontFamily)Res("UiFont"), FontWeight = FontWeights.SemiBold,
+                FontSize = 15, Foreground = B("Text"), VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(title, 1); head.Children.Add(title);
-            Grid.SetColumn(countLabel, 2); head.Children.Add(countLabel);
-            Grid.SetColumn(chev, 3); head.Children.Add(chev);
+            Grid.SetColumn(title, 0); head.Children.Add(title);
+            Grid.SetColumn(countLabel, 1); head.Children.Add(countLabel);
+            Grid.SetColumn(chev, 2); head.Children.Add(chev);
 
             // A real Button spanning the row: the whole strip is the control, so the hit target,
             // the hover box and the visible box are one rectangle.
@@ -588,7 +593,10 @@ public static class NoteRenderer
         var p = new Paragraph { Margin = new Thickness(0, first ? 0 : 24, 0, 8) };
         p.Inlines.Add(new Run(SentenceCase(title))
         {
-            FontWeight = FontWeights.SemiBold, Foreground = B("Text"), FontSize = fs + 1,
+            // fs + 1.5, not fs + 1: a section heading has to outrank every line it owns, and the
+            // summary now sits at fs. This lands it on 15 against a 13.5 body and a 12 detail line -
+            // one clean descending step each, under the 27px serif title.
+            FontWeight = FontWeights.SemiBold, Foreground = B("Text"), FontSize = fs + 1.5,
         });
         if (trailing is not null)
             p.Inlines.Add(new InlineUIContainer(trailing) { BaselineAlignment = BaselineAlignment.Center });
@@ -630,7 +638,7 @@ public static class NoteRenderer
             Style = (Style)Res("BareButton"),
             Content = new TextBlock
             {
-                Text = "Not relevant", FontSize = 9.5, FontWeight = FontWeights.SemiBold,
+                Text = "Not relevant", FontSize = 12, FontWeight = FontWeights.SemiBold,
                 Foreground = B("TextLow"), FontFamily = (FontFamily)Res("UiFont"),
             },
             Margin = new Thickness(10, 0, 0, 0), Padding = new Thickness(6, 2, 6, 2),
@@ -652,7 +660,7 @@ public static class NoteRenderer
             Background = Transparent(accent, 0x1A), BorderBrush = Transparent(accent, 0x4D), BorderThickness = new Thickness(1),
             Child = new TextBlock
             {
-                Text = text, FontSize = 9.5, FontWeight = FontWeights.SemiBold,
+                Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold,
                 Foreground = accent, FontFamily = Ui,
             },
         };

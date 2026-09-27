@@ -16,7 +16,7 @@
                  called it out again on 2026-09-26. The column stays so the grid is unchanged. -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="Title" Text="Transcript" Style="{StaticResource PanelTitle}"/>
-                <TextBlock x:Name="Subtitle" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>
+                <TextBlock x:Name="Subtitle" Text="" Style="{StaticResource Dim}" FontSize="12"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button x:Name="CopyBtn" Style="{StaticResource IconButton}" Content="&#xE8C8;"

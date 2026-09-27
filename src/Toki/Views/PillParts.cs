@@ -32,7 +32,7 @@ public static class PillParts
         content.Children.Add(Solid(icon, 16, "TextHi", new Thickness(0, 0, 8, 0)));
         content.Children.Add(new TextBlock
         {
-            Text = label, FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Text = label, FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center, FontFamily = UiFont,
         }.Themed(TextBlock.ForegroundProperty, "TextHi"));
         return new Button

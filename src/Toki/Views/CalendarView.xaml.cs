@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -126,7 +126,13 @@ public partial class CalendarView : UserControl
 
         foreach (var byWeek in upcoming.GroupBy(e => WeekStartOf(e.StartLocal.Date)).OrderBy(g => g.Key))
         {
-            var (band, label) = WeekBand(byWeek.Key, today);
+            // The FIRST week gets a marker with no label. The header subtitle directly above already
+            // reads "This week - 5 events", so printing THIS WEEK again as the first line of the
+            // list was the same fact twice, in a third all-caps style, eight pixels apart. Later
+            // weeks keep their label, because there it is genuinely separating one from the next.
+            // The element itself always goes in: it is what the scroll-synced subtitle measures
+            // against (see _bands), so it has to be in the tree and laid out even when it is blank.
+            var (band, label) = WeekBand(byWeek.Key, today, showLabel: _bands.Count > 0);
             Days.Children.Add(band);
             _bands.Add((band, label, byWeek.Count()));
 
@@ -151,7 +157,7 @@ public partial class CalendarView : UserControl
     }
 
     // A week separator + its friendly label (for the scroll-synced subtitle).
-    (FrameworkElement, string) WeekBand(DateTime weekStart, DateTime today)
+    (FrameworkElement, string) WeekBand(DateTime weekStart, DateTime today, bool showLabel)
     {
         var thisWeek = WeekStartOf(today);
         var label = weekStart == thisWeek ? "This week"
@@ -159,8 +165,10 @@ public partial class CalendarView : UserControl
                   : $"{weekStart:MMM d} – {weekStart.AddDays(6):MMM d}";
         var tb = new TextBlock
         {
-            Text = label.ToUpperInvariant(), FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 9.5,
-            FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TextDim"), Margin = new Thickness(2, 16, 0, 2),
+            Text = showLabel ? label.ToUpperInvariant() : string.Empty,
+            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12,
+            FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TextDim"),
+            Margin = showLabel ? new Thickness(2, 16, 0, 2) : default,
         };
         return (tb, label);
     }
@@ -168,11 +176,20 @@ public partial class CalendarView : UserControl
     Border DayHeader(DateTime day, bool today)
     {
         var label = day.ToString("ddd, MMM d", CultureInfo.InvariantCulture).ToUpperInvariant();
+        // ONE DAY-HEADER STYLE, and today is the SAME style in fuller ink.
+        // It was Bold + Amber for today against SemiBold + TextDim for every other day, sitting
+        // directly under a THIRD all-caps label for the week: three competing treatments of the same
+        // kind of thing in one scrolling column. Owner, 2026-09-27: "calendar notch page has the
+        // WORST text styling and symettry ... theres a weird text style for a subheading".
+        // Bold is gone on the house rule (Windows 11 drops Bold from the ramp; SemiBold is the
+        // emphasis weight). Amber is gone because in the light theme it resolves to #87430A, a dark
+        // brown, and colour here was carrying a fact the red now-line already marks - today is the
+        // only day with a now-line through it.
         var tb = new TextBlock
         {
             Text = today ? $"TODAY · {label}" : label,
-            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 10, FontWeight = FontWeights.Bold,
-            Foreground = (Brush)FindResource(today ? "Amber" : "TextDim"),
+            FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource(today ? "Text" : "TextDim"),
         };
         return new Border
         {
@@ -189,7 +206,7 @@ public partial class CalendarView : UserControl
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var t = new TextBlock
         {
-            Text = now.ToString("h:mm", CultureInfo.InvariantCulture), FontSize = 9, Foreground = (Brush)FindResource("Coral"),
+            Text = now.ToString("h:mm", CultureInfo.InvariantCulture), FontSize = 12, Foreground = (Brush)FindResource("Coral"),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
             FontFamily = (FontFamily)FindResource("UiFont"),
         };
@@ -398,7 +415,7 @@ public partial class CalendarView : UserControl
         if (art is not null) StatePanel.Children.Add(art);
         StatePanel.Children.Add(new TextBlock
         {
-            Text = message, Style = (Style)FindResource("Body"), FontSize = 12, TextAlignment = TextAlignment.Center,
+            Text = message, Style = (Style)FindResource("Body"), FontSize = 13.5, TextAlignment = TextAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 0), MaxWidth = 260,
         });
         if (cta is { } c)
@@ -531,8 +548,14 @@ public partial class CalendarView : UserControl
         NewButton.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
         if (on) TodayButton.Visibility = Visibility.Collapsed;
         HeaderTitle.Text = on ? (_editing is null ? "New meeting" : "Edit meeting") : "Calendar";
+        // NO INSTRUCTION LINE UNDER THE HEADING. It read "Fill it in and press Create" - a caption
+        // narrating a form the reader is already looking at, under a heading that already says "New
+        // meeting", above a button that already says "Create". Owner, 2026-09-27: that line is what
+        // they meant by the calendar's title card, and by "subtext within headings ... needs to be
+        // removed". The subtitle slot stays for the AGENDA, where it carries a real changing fact
+        // ("This week - 5 events"); in the composer it is simply empty.
         if (!on) UpdateSubtitleFromScroll();
-        else Subtitle.Text = _editing is null ? "Fill it in and press Create" : "Change it and press Save";
+        else Subtitle.Text = string.Empty;
     }
 
     void OnComposerCancel(object s, RoutedEventArgs e) => CloseComposer();

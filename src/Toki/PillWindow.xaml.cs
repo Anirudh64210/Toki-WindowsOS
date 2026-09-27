@@ -1151,8 +1151,11 @@ public partial class PillWindow : Window
         {
             EasingFunction = Theme.Motion.Drawer,
         };
+        // The mascot's live-vector idle holds still for the morph: see TokiBlob.IdleSuspended.
+        Controls.TokiBlob.IdleSuspended = true;
         anim.Completed += (_, _) =>
         {
+            Controls.TokiBlob.IdleSuspended = false;
             if (gen != _pinGen) return;   // a newer morph owns the content now
             // Releasing to Stretch is now a NO-OP visually: the page was already arranged at exactly
             // this size, so nothing moves. That is the whole point of pinning to the target rather
@@ -1354,8 +1357,24 @@ public partial class PillWindow : Window
     int _clipStill;
 
     /// <summary>Animate this rect and paint the card as a squircle of it on every frame.</summary>
+    /// <summary>
+    /// DEV SEAM: TOKI_CLIPTRACE=1 logs the card's clip height on every composited frame of every
+    /// reveal, retract and morph, with a millisecond timestamp.
+    ///
+    /// Kept because it is the only instrument that answers "is the animation smooth" honestly. A
+    /// 60fps screen recording cannot: ffmpeg drops frames of its own, and on 2026-09-27 that made a
+    /// perfectly smooth 300ms morph look like it snapped 87px in a single frame, which sent me
+    /// hunting a bug that was in my capture. The trace showed the real defect instead - the first
+    /// 72ms running at 15-30fps while the tail ran at 120 - which is the half of the animation the
+    /// Drawer curve spends 78% of its travel in.
+    /// Costs one bool test per frame when off; the interpolation never runs.
+    /// </summary>
+    internal static readonly bool _traceClip = System.Environment.GetEnvironmentVariable("TOKI_CLIPTRACE") == "1";
+    static readonly System.Diagnostics.Stopwatch _clipWatch = System.Diagnostics.Stopwatch.StartNew();
+
     void DriveClip(RectangleGeometry box)
     {
+        if (_traceClip) { _clipWatch.Restart(); App.Log("CLIPTRACE --- new drive ---"); }
         _clipBox = box;
         _clipStill = 0;
         _lastPainted = Rect.Empty;
@@ -1393,7 +1412,16 @@ public partial class PillWindow : Window
     {
         if (_clipBox is not { } box) return false;
         var r = box.Rect;              // the animation's CURRENT value
-        if (r == _lastPainted) return false;
+        if (_traceClip) App.Log($"CLIPTRACE {_clipWatch.Elapsed.TotalMilliseconds:F1} h={r.Height:F2}");
+        // A QUARTER-PIXEL DEADBAND, not exact equality. Drawer is heavily front-loaded, so the last
+        // two thirds of a morph move the edge by hundredths of a pixel per frame - and each of those
+        // frames was rebuilding a StreamGeometry and re-clipping the card to paint a change smaller
+        // than a device pixel. Exact equality never fired because the doubles always differ.
+        if (Math.Abs(r.Height - _lastPainted.Height) < 0.25 &&
+            Math.Abs(r.Width  - _lastPainted.Width)  < 0.25 &&
+            Math.Abs(r.X      - _lastPainted.X)      < 0.25 &&
+            Math.Abs(r.Y      - _lastPainted.Y)      < 0.25 &&
+            _lastPainted != Rect.Empty) return false;
         _lastPainted = r;
         _clipStill = 0;
 

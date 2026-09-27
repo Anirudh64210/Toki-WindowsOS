@@ -490,8 +490,10 @@ public partial class LibraryWindow : Window
     LibraryWindow()
     {
         InitializeComponent();
-        // BackBtn no longer takes Content: it is a chevron chip in the title row and draws its own
-        // stroked Path. (BackButtonInner still serves the labelled back button inside the note pane.)
+        // BackBtn (the title-row chevron) draws its own stroked Path and takes no Content.
+        // BackHomeBtn is the labelled one at the foot of the sidebar; its chevron+label are composed
+        // in code so both pieces sit on the same optical centre line.
+        BackHomeBtn.Content = BackButtonInner();
         // Stick-to-bottom for the chat thread: auto-follow the newest text only while already parked
         // at the bottom, so a streaming answer never yanks the reader down. A user scroll
         // (ExtentHeightChange == 0) updates the flag; ~120px threshold (a tight one is hair-trigger
@@ -589,6 +591,20 @@ public partial class LibraryWindow : Window
             DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int)); // title bar follows theme (DWMWA_USE_IMMERSIVE_DARK_MODE)
             int borderColor = light ? 0x00E2E2E2 : 0x00161616;      // window border matches the theme
             DwmSetWindowAttribute(hwnd, 34, ref borderColor, sizeof(int)); // DWMWA_BORDER_COLOR (COLORREF 0x00BBGGRR)
+
+            // ROUNDED CORNERS, cut by the compositor rather than by us (owner, 2026-09-27: the window
+            // "has like these sharp rigid edges on all fours ... curve is sexy").
+            // WindowStyle=None squares the frame off, and Windows 11 will not round a frame the app
+            // has taken over unless it is asked. DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2.
+            //
+            // The compositor is the right place for this and a clip is the wrong one: DWM rounds the
+            // window REGION, so the shadow, the border colour set just above and the resize hit-areas
+            // all follow the curve. Clipping the content instead would leave a square shadow behind a
+            // round card, which is the tell of every hand-rolled attempt at this.
+            // Silently ignored before Windows 11 21H2, which is the correct degradation - a square
+            // window, exactly as now.
+            int round = 2;
+            DwmSetWindowAttribute(hwnd, 33, ref round, sizeof(int));
 
             StripTitleBarIcon(hwnd);
             // ...and AGAIN after layout: WPF applies its own icon after SourceInitialized, which
@@ -1340,7 +1356,7 @@ public partial class LibraryWindow : Window
         {
             var title = new TextBlock { Text = c.Title, FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 230 };
             title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-            var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 12, Margin = new Thickness(0, 1, 0, 0) };
+            var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 13.5, Margin = new Thickness(0, 1, 0, 0) };
             var textCol = new StackPanel { Children = { title, when } };
             // The cross is the house PATH, not a "✕" character - a font glyph's weight and size come
             // from whichever font the machine falls back to, and this one sat beside a 1.6px stroked
@@ -1613,7 +1629,7 @@ public partial class LibraryWindow : Window
         if (ans.Sources.Count > 0)
         {
             var chips = new WrapPanel { Margin = new Thickness(0, 11, 0, 0) };
-            chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+            chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
             foreach (var s in ans.Sources) chips.Children.Add(SourceChip(s));
             stack.Children.Add(chips);
         }
@@ -1660,7 +1676,7 @@ public partial class LibraryWindow : Window
                     return;
                 }
                 chips.Children.Clear();
-                chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+                chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
                 foreach (var s in srcs) chips.Children.Add(SourceChip(s));
                 chips.Visibility = Visibility.Visible;
             },
@@ -1709,7 +1725,7 @@ public partial class LibraryWindow : Window
 
     Border SourceChip(Llm.NotesQa.Source s)
     {
-        var t = new TextBlock { Text = s.Title, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 };
+        var t = new TextBlock { Text = s.Title, FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 };
         t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         var c = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(9, 3, 9, 4), Margin = new Thickness(0, 0, 6, 6), Cursor = Cursors.Hand, Child = t };
         c.SetResourceReference(Border.BackgroundProperty, "Chip");
@@ -1794,7 +1810,7 @@ public partial class LibraryWindow : Window
         // A tag whose value actually changes, which is the one kind worth drawing.
         if (isDefault)
         {
-            var tag = new TextBlock { Text = "Default", FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
+            var tag = new TextBlock { Text = "Default", FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
             tag.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
             var pill = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 2, 7, 3), Margin = new Thickness(9, 1, 0, 0), Child = tag };
             pill.SetResourceReference(Border.BackgroundProperty, "Chip");
@@ -1811,7 +1827,7 @@ public partial class LibraryWindow : Window
         var sections = new TextBlock
         {
             Text = string.Join("  ·  ", new[] { "Summary" }.Concat(t.Sections).Concat(new[] { "Action items" })),
-            FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"),
+            FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"),
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 0),
         };
         sections.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
@@ -2079,14 +2095,14 @@ public partial class LibraryWindow : Window
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12.5, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) });
+            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 13.5, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) });
         content.Children.Add(new TextBlock
         {
             // The open count appears ONLY when the list is sorted by it. Everywhere else it is a
             // number nobody asked for, on a line that already has a job; when it IS the sort key,
             // leaving it out would make the ordering look arbitrary.
             Text = CardMeta(m) + (_sort == LibrarySort.OpenTasks && m.OpenActions > 0 ? $"  ·  {m.OpenActions} open" : ""),
-            Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 4, 0, 0),
+            Style = St("Dim"), FontSize = 12, Margin = new Thickness(0, 4, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
 
@@ -2147,7 +2163,7 @@ public partial class LibraryWindow : Window
     {
         Background = (Brush)FindResource(bgKey), CornerRadius = new CornerRadius(5),
         Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 0, 6, 0),
-        Child = new TextBlock { Text = text, Foreground = (Brush)FindResource(fgKey), FontSize = 12, FontWeight = FontWeights.SemiBold },
+        Child = new TextBlock { Text = text, Foreground = (Brush)FindResource(fgKey), FontSize = 13.5, FontWeight = FontWeights.SemiBold },
     };
 
     static string CardMeta(MeetingSummary m)
@@ -2317,7 +2333,7 @@ public partial class LibraryWindow : Window
         DockPanel.SetDock(groupShell, Dock.Right);
         row.Children.Add(groupShell);
 
-        var status = new TextBlock { Style = St("Dim"), FontSize = 12, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+        var status = new TextBlock { Style = St("Dim"), FontSize = 13.5, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
         {
             var tmpl = TemplatePicker(m, status);
@@ -2392,13 +2408,16 @@ public partial class LibraryWindow : Window
             Text = m.Title == "Untitled note" ? "" : m.Title,
             Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"),
-            FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)FindResource("UiFont"),
+            // THE SAME TITLE TREATMENT AS A MEETING NOTE: 27px Spectral, regular weight. This was
+            // 26px semibold in the grotesque - a different size AND a different voice for the same
+            // object, which is a typed note's title. A hand-written note is not a lesser document.
+            FontSize = 27, FontWeight = FontWeights.Normal, FontFamily = (FontFamily)FindResource("TitleSerif"),
             Padding = new Thickness(0), TextWrapping = TextWrapping.Wrap,
         };
         var placeholder = new TextBlock
         {
-            Text = "Untitled note", FontSize = 26, FontWeight = FontWeights.SemiBold,
-            FontFamily = (FontFamily)FindResource("UiFont"), Foreground = (Brush)FindResource("TextDim"),
+            Text = "Untitled note", FontSize = 27, FontWeight = FontWeights.Normal,
+            FontFamily = (FontFamily)FindResource("TitleSerif"), Foreground = (Brush)FindResource("TextDim"),
             Opacity = 0.45, IsHitTestVisible = false, Margin = new Thickness(2, 0, 0, 0),
             Visibility = titleBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed,
         };
@@ -2457,7 +2476,7 @@ public partial class LibraryWindow : Window
         // The footer: save state on the left, the destructive action on the right.
         var status = new TextBlock
         {
-            Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+            Style = St("Dim"), FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0, Text = "Saved",
         };
         var footer = new Grid { Margin = new Thickness(0, 14, 0, 8) };
@@ -2575,7 +2594,7 @@ public partial class LibraryWindow : Window
         var main = SeamButton(mainLabel, new Thickness(15, 0, 13, 0), new CornerRadius(13, 0, 0, 13));
         var caretGlyph = new TextBlock
         {
-            Text = "▾", FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"),
+            Text = "▾", FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"),
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
         caretGlyph.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");

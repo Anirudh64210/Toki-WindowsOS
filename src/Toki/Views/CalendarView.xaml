@@ -19,9 +19,9 @@
                 <TextBlock x:Name="Subtitle" Style="{StaticResource Caption}" Text="This week"/>
             </StackPanel>
             <Button x:Name="TodayButton" Grid.Column="2" Style="{StaticResource PillButton}" Background="Transparent"
-                    Foreground="{DynamicResource TextDim}" FontSize="10.5" Padding="10,5" Content="Today"
+                    Foreground="{DynamicResource TextDim}" FontSize="12" Padding="10,5" Content="Today"
                     Opacity="0" Visibility="Collapsed" Margin="0,0,6,0" Click="OnToday"/>
-            <Button x:Name="NewButton" Grid.Column="3" Style="{StaticResource PillButton}" FontSize="11.5"
+            <Button x:Name="NewButton" Grid.Column="3" Style="{StaticResource PillButton}" FontSize="12"
                     Padding="12,7" Content="＋ New" Click="OnNew"/>
         </Grid>
 
@@ -63,9 +63,9 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Button x:Name="ComposerCancel" Style="{StaticResource PillButton}" Background="Transparent"
-                        Foreground="{DynamicResource TextMid}" FontSize="12" Padding="14,8"
+                        Foreground="{DynamicResource TextMid}" FontSize="13.5" Padding="14,8"
                         HorizontalAlignment="Left" Content="Cancel" Click="OnComposerCancel"/>
-                <Button x:Name="ComposerCreate" Grid.Column="1" Style="{StaticResource WhiteButton}" FontSize="12"
+                <Button x:Name="ComposerCreate" Grid.Column="1" Style="{StaticResource WhiteButton}" FontSize="13.5"
                         Padding="26,8" Content="Create" Click="OnComposerCreate"/>
             </Grid>
 
@@ -92,10 +92,15 @@
 
                     <!-- What the parse understood, in one line. This replaces a permanent hint AND a
                          separate green preview which between them took two lines to say one thing. -->
-                    <TextBlock x:Name="ParsePreview" FontFamily="{StaticResource UiFont}" FontSize="11.5"
-                               FontWeight="SemiBold" Foreground="{DynamicResource Green}"
+                    <!-- NOT GREEN. This line echoes what Toki understood from what you typed, which
+                         is a READBACK, not a decision - and green already means "decisions" in this
+                         product's one-meaning-one-colour scheme, so it was borrowing a colour that
+                         means something else to say something it did not mean. Full ink at semibold
+                         is enough: it is the only line in the composer that changes as you type. -->
+                    <TextBlock x:Name="ParsePreview" FontFamily="{StaticResource UiFont}" FontSize="12"
+                               FontWeight="SemiBold" Foreground="{DynamicResource Text}"
                                Margin="2,2,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="ComposerHint" FontFamily="{StaticResource UiFont}" FontSize="11.5"
+                    <TextBlock x:Name="ComposerHint" FontFamily="{StaticResource UiFont}" FontSize="12"
                                Foreground="{DynamicResource TextMid}" Margin="2,2,0,0" TextWrapping="Wrap"
                                Text="Type a day and time, or pick them"/>
 
@@ -109,16 +114,16 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Day" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                <TextBlock Text="Day" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
                                            Margin="16,0,0,0" Width="62"/>
                                 <TextBox x:Name="DateBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
                                          Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
-                                         FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                         FontSize="13.5" FontWeight="SemiBold" TextAlignment="Right"
                                          FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                                          TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
                                 <Button x:Name="DatePick" Grid.Column="2" Style="{StaticResource IconButton}"
-                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10"
+                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="12"
                                         Width="30" Height="30" Margin="2,0,8,0"
                                         Foreground="{DynamicResource TextMid}"
                                         ToolTip="Pick a day" Click="OnPickDay"/>
@@ -132,16 +137,16 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Starts" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                <TextBlock Text="Starts" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
                                            Margin="16,0,0,0" Width="62"/>
                                 <TextBox x:Name="TimeBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
                                          Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
-                                         FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                         FontSize="13.5" FontWeight="SemiBold" TextAlignment="Right"
                                          FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                                          TextChanged="OnComposerField" PreviewKeyDown="OnComposerKey"/>
                                 <Button x:Name="TimePick" Grid.Column="2" Style="{StaticResource IconButton}"
-                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="10"
+                                        Content="&#x25BE;" FontFamily="{StaticResource UiFont}" FontSize="12"
                                         Width="30" Height="30" Margin="2,0,8,0"
                                         Foreground="{DynamicResource TextMid}"
                                         ToolTip="Pick a start time" Click="OnPickTime"/>
@@ -155,12 +160,12 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Ends" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                <TextBlock Text="Ends" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
                                            Margin="16,0,0,0" Width="62"/>
                                 <Button x:Name="DurationChip" Grid.Column="1" Style="{StaticResource PillButton}"
                                         Background="Transparent" Foreground="{DynamicResource TextHi}"
-                                        FontSize="12.5" FontWeight="SemiBold" Padding="10,6" Margin="0,0,6,0"
+                                        FontSize="13.5" FontWeight="SemiBold" Padding="10,6" Margin="0,0,6,0"
                                         HorizontalAlignment="Right" HorizontalContentAlignment="Right"
                                         Click="OnPickDuration" ToolTip="When the meeting ends"/>
                             </Grid>
@@ -172,17 +177,17 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Guests" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                <TextBlock Text="Guests" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            Foreground="{DynamicResource TextMid}" VerticalAlignment="Center"
                                            Margin="16,0,0,0" Width="62"/>
                                 <Grid Grid.Column="1" Margin="0,0,16,0">
                                     <TextBlock x:Name="PeoplePlaceholder" Text="Add email addresses"
                                                IsHitTestVisible="False" Foreground="{DynamicResource TextLow}"
                                                VerticalAlignment="Center" TextAlignment="Right"
-                                               FontSize="12.5" FontFamily="{StaticResource UiFont}"/>
+                                               FontSize="13.5" FontFamily="{StaticResource UiFont}"/>
                                     <TextBox x:Name="PeopleBox" Background="Transparent" BorderThickness="0"
                                              Foreground="{DynamicResource TextHi}" CaretBrush="{DynamicResource TextHi}"
-                                             FontSize="12.5" FontWeight="SemiBold" TextAlignment="Right"
+                                             FontSize="13.5" FontWeight="SemiBold" TextAlignment="Right"
                                              FontFamily="{StaticResource UiFont}" VerticalContentAlignment="Center"
                                              TextChanged="OnPeopleChanged"/>
                                 </Grid>
@@ -196,7 +201,7 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Google Meet link" FontFamily="{StaticResource UiFont}" FontSize="12.5"
+                                <TextBlock Text="Google Meet link" FontFamily="{StaticResource UiFont}" FontSize="13.5"
                                            Foreground="{DynamicResource TextHi}" VerticalAlignment="Center"
                                            Margin="16,0,0,0"/>
                                 <CheckBox x:Name="MeetToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
@@ -229,12 +234,12 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="ActionText" Style="{StaticResource Body}" FontSize="11.5"
+                    <TextBlock x:Name="ActionText" Style="{StaticResource Body}" FontSize="12"
                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     <Button x:Name="ActionSecondary" Grid.Column="1" Style="{StaticResource PillButton}"
-                            Background="Transparent" FontSize="11" Padding="8,4" Margin="8,0,0,0"/>
+                            Background="Transparent" FontSize="12" Padding="8,4" Margin="8,0,0,0"/>
                     <Button x:Name="ActionPrimary" Grid.Column="2" Style="{StaticResource PillButton}"
-                            FontSize="11" Padding="10,4" Margin="8,0,0,0"/>
+                            FontSize="12" Padding="10,4" Margin="8,0,0,0"/>
                 </Grid>
             </Border>
         </Grid>

@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.OnboardingView"
+﻿<UserControl x:Class="Toki.Views.OnboardingView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -13,9 +13,9 @@
 
         <!-- STEP 0 - name -->
         <StackPanel x:Name="StepName" Margin="0,12,0,0">
-            <TextBlock Text="Hi, I'm Toki." Style="{StaticResource Body}" FontSize="16" FontWeight="SemiBold"
+            <TextBlock Text="Hi, I'm Toki." Style="{StaticResource Body}" FontSize="17" FontWeight="SemiBold"
                        HorizontalAlignment="Center"/>
-            <TextBlock Text="What should I call you?" Style="{StaticResource Dim}" FontSize="12"
+            <TextBlock Text="What should I call you?" Style="{StaticResource Dim}" FontSize="13.5"
                        HorizontalAlignment="Center" Margin="0,3,0,0"/>
             <Border x:Name="NameFieldRim" Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="12,0" Margin="0,14,0,0"
                     BorderBrush="{DynamicResource Hairline}" BorderThickness="1">
@@ -30,7 +30,7 @@
 
         <!-- STEP 1 - privacy is the pitch, not legalese -->
         <StackPanel x:Name="StepPrivacy" Visibility="Collapsed" Margin="0,12,0,0">
-            <TextBlock Text="Everything stays on this laptop." Style="{StaticResource Body}" FontSize="14.5"
+            <TextBlock Text="Everything stays on this laptop." Style="{StaticResource Body}" FontSize="15"
                        FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
             <StackPanel Margin="6,13,2,0">
                 <Grid Margin="0,0,0,9">
@@ -38,21 +38,21 @@
                     <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                Foreground="{DynamicResource Green}" VerticalAlignment="Top" Margin="0,1,10,0"/>
                     <TextBlock Grid.Column="1" Text="Recorded only when you say yes." Style="{StaticResource Dim}"
-                               FontSize="12" TextWrapping="Wrap"/>
+                               FontSize="13.5" TextWrapping="Wrap"/>
                 </Grid>
                 <Grid Margin="0,0,0,9">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                Foreground="{DynamicResource Green}" VerticalAlignment="Top" Margin="0,1,10,0"/>
                     <TextBlock Grid.Column="1" Text="Transcribed &amp; summarised on your device." Style="{StaticResource Dim}"
-                               FontSize="12" TextWrapping="Wrap"/>
+                               FontSize="13.5" TextWrapping="Wrap"/>
                 </Grid>
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12"
                                Foreground="{DynamicResource Green}" VerticalAlignment="Top" Margin="0,1,10,0"/>
                     <TextBlock Grid.Column="1" Text="Nothing is ever uploaded - no account, no cloud." Style="{StaticResource Dim}"
-                               FontSize="12" TextWrapping="Wrap"/>
+                               FontSize="13.5" TextWrapping="Wrap"/>
                 </Grid>
             </StackPanel>
             <Grid Margin="0,16,0,0">
@@ -69,10 +69,10 @@
 
         <!-- STEP 2 - all set -->
         <StackPanel x:Name="StepDone" Visibility="Collapsed" Margin="0,12,0,0">
-            <TextBlock x:Name="DoneTitle" Text="You're all set." Style="{StaticResource Body}" FontSize="16"
+            <TextBlock x:Name="DoneTitle" Text="You're all set." Style="{StaticResource Body}" FontSize="17"
                        FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
             <TextBlock Text="I'll appear at the top the moment you're in a meeting." Style="{StaticResource Dim}"
-                       FontSize="12" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                       FontSize="13.5" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                        Margin="0,4,0,0"/>
             <Button Style="{StaticResource WhiteButton}" Content="Get started" Padding="0,10" Margin="0,14,0,0"
                     HorizontalContentAlignment="Center" Click="OnFinish"/>

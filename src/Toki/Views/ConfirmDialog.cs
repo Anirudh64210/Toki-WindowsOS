@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -45,7 +45,7 @@ public static class ConfirmDialog
         });
         stack.Children.Add(new TextBlock
         {
-            Text = message, FontFamily = ui, FontSize = 12, Foreground = B("TextDim"),
+            Text = message, FontFamily = ui, FontSize = 13.5, Foreground = B("TextDim"),
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), LineHeight = 17,
         });
 

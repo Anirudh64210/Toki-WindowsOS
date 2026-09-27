@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -46,7 +46,7 @@ public static class NotePicker
                 }
                 var heading = new TextBlock
                 {
-                    Text = label, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                    Text = label, FontSize = 12, FontWeight = FontWeights.SemiBold,
                     Margin = new Thickness(11, 3, 11, 4), IsHitTestVisible = false,
                 };
                 heading.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
@@ -57,7 +57,7 @@ public static class NotePicker
 
             var text = new TextBlock
             {
-                Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+                Text = label, FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 260,
             };
             text.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
@@ -70,7 +70,7 @@ public static class NotePicker
                 if (isSelected) text.FontWeight = FontWeights.SemiBold;
                 var tick = new TextBlock
                 {
-                    Text = "", FontSize = 10, Width = 16, VerticalAlignment = VerticalAlignment.Center,
+                    Text = "", FontSize = 12, Width = 16, VerticalAlignment = VerticalAlignment.Center,
                     Opacity = isSelected ? 1 : 0,   // reserve the column so every label still lines up
                 };
                 tick.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");

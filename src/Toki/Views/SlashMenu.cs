@@ -144,18 +144,18 @@ public sealed class SlashMenu
     {
         var glyph = new TextBlock
         {
-            Text = cmd.Glyph, FontSize = 12, Width = 20,
+            Text = cmd.Glyph, FontSize = 13.5, Width = 20,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         glyph.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
 
-        var label = new TextBlock { Text = cmd.Label, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+        var label = new TextBlock { Text = cmd.Label, FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center };
         label.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         label.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");
 
         var hint = new TextBlock
         {
-            Text = cmd.Hint, FontSize = 10.5, VerticalAlignment = VerticalAlignment.Center,
+            Text = cmd.Hint, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 1, 0, 0),
         };
         hint.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");

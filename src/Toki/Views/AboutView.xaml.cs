@@ -105,7 +105,7 @@ public partial class AboutView : UserControl
         Body.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("Hairline"), Margin = new Thickness(0, 14, 0, 0) });
         Body.Children.Add(new TextBlock
         {
-            Style = (Style)FindResource("Dim"), FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Style = (Style)FindResource("Dim"), FontSize = 12, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(2, 10, 2, 2),
             Text = "Full licence texts ship with Toki (THIRD-PARTY-NOTICES). Segoe UI Variable and Segoe "
                  + "Fluent Icons are provided by Windows. Made with care in Toki.",
@@ -136,7 +136,7 @@ public partial class AboutView : UserControl
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
             Child = new TextBlock
             {
-                Text = c.Licence, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                Text = c.Licence, FontSize = 12, FontWeight = FontWeights.SemiBold,
                 FontFamily = (FontFamily)FindResource("UiFont"),
                 Foreground = (Brush)FindResource(strong ? "Text" : "TextDim"),
             },

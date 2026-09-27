@@ -25,7 +25,86 @@ Note: unit tests/CI can never verify audio, GPU, or model paths - those are veri
 
 One entry per milestone: what was built, how it was verified, what broke.
 
-## The rendering itself was wrong, in three separate places (2026-09-27, latest)
+## Seventeen font sizes were the slop tell (2026-09-27, latest)
+
+Owner: "the fully small text is the worst obvious tell for AI generated slop ... subtext within
+headings and buttons on the window needs to be removed, either understand heirarchy of sizes in
+text and readability and human intent".
+
+A census before touching anything: **17 distinct font sizes, 30 instances at 11px or below, three
+at 9px** - eleven physical pixels on a 125% display. That is not a scale, it is the absence of one,
+and a reader cannot rank seventeen things. Now five steps and a floor: **12 caption / 13.5 body /
+15 strong / 17 section / 20 page**, plus 27 for the serif note title. 156 sizes remapped across 38
+files; icon-font sizes deliberately excluded, since those are glyph boxes hinted on a 10px grid.
+`TypeScaleTests` fails on anything below the floor or off the scale, and immediately caught two the
+sweep had missed - the manual-note title at 26px sans while every other note title is 27px serif.
+
+**Captions under headings, deleted.** Four on the Settings page. The rule already existed in this
+codebase, from the owner on 2026-08-20: *a row whose label does not carry it should be renamed, not
+annotated*. It had been written for the notch and never applied to the window. "AI summaries"
+became "How notes get written"; the query-syntax hint moved into the input's own placeholder.
+
+**The note hierarchy was inverted.** The summary was `fs + 1.5` at Medium while the section headings
+under it were `fs + 1` SemiBold - one paragraph of content outranking the page's own structure. The
+summary is body size and body weight now; what makes it read first is position, not fat.
+
+**Gone from the transcript header:** an 18px amber-tinted disc holding a Fluent glyph, plus BOLD
+ALL-CAPS in the accent colour. Three ways of shouting for the section a reader opens least. This
+file's own `DocHeader` comment had ruled the pattern out in writing ("the icon chips were the cheap
+emoji look"); that one header was never converted.
+
+**Calendar.** Three competing treatments in one scrolling column: a grey all-caps week label, a Bold
+amber day header, and grey all-caps day headers - with the week label duplicating the subtitle eight
+pixels above it. One day-header style now, today differentiated by ink rather than hue (the red
+now-line already marks it), and the week label appears only where it separates one week from the
+next. The composer lost "Fill it in and press Create", a caption narrating a form you are looking
+at, above a button that says Create; its parse readback stopped being green, a colour that means
+"decisions" elsewhere in the product.
+
+**The send button is geometry.** There was already a 1px render nudge correcting the font glyph's
+uneven side bearings, and the owner still read it as off-centre. A `Path` has no bearings at all:
+its bounding box is the drawn shape, so `Stretch="Uniform"` centres it exactly at every DPI with
+no constant to drift. Same call already made for the play triangle and the back chevron.
+
+Also: rounded window corners via `DWMWA_WINDOW_CORNER_PREFERENCE` so the compositor cuts the shadow
+and resize areas too; `CardRim` made uniform (it ran from 55% white at the top to a dark hairline,
+so on a near-white page every panel edge dissolved as it went up); Back to Toki restored to the
+sidebar; a red hover on close.
+
+### The morph stutter, and why a screen recording lied about it
+
+Filmed at 60fps, a page morph looked like it snapped 87px in a single frame. **That snap was in the
+capture.** ffmpeg was dropping frames. A per-frame trace of the clip rect (`TOKI_CLIPTRACE=1`, kept
+as a dev seam) showed the animation running its full 300ms smoothly - and showed the real defect:
+
+```
+t=0.7   h=234.00
+t=11.6  h=234.00   <- 11ms frozen
+t=41.1  h=191.39
+t=71.9  h=182.54   <- 31ms gap
+...smooth the rest of the way
+```
+
+The first ~72ms ran at 15-30fps while the tail ran at 120, and the Drawer curve spends **78% of its
+travel** in exactly that window. Two causes, both self-inflicted: the mascot's idle drives live
+vector (no cache, for quality) so every frame re-rasterised three gradient beziers during the one
+moment the UI thread is busiest, and the squircle was being rebuilt on frames where the edge moved
+by hundredths of a pixel. The idle now holds still for a morph; the clip has a quarter-pixel
+deadband. First-90ms frame gaps went from an 11ms freeze plus a 31ms stall to a steady 8-9ms.
+
+### A setting that looked like a broken model
+
+`--llmtest` failed and reported "model unavailable?". It was not: `NotesMode` was `HeuristicOnly`,
+so `LlmService.Active()` returned null and the model was never asked. Two paths returned null in
+total silence - a deliberate setting and a broken model were indistinguishable from outside, and the
+self-test papered over both with a guess. Both now say what they found, and the test reports state
+instead of speculating. Same rule the heuristic-floor incident produced: a fallback good enough to
+ship is good enough to hide the failure that triggered it, so make it loud. (My first explanation
+for that failure - memory pressure - was wrong, and the owner was right to push back on it.)
+
+Suite 2240/2240; all eight UI batteries and six checks on the packaged `dist` build.
+
+## The rendering itself was wrong, in three separate places (2026-09-27)
 
 The owner, on the previous round: "what you are doing is, oh here's this thing i have to do, and
 then, okay let me do it and as long as i just went from a to b its cool, no no, quality needs to be
@@ -45,11 +124,15 @@ exactly: stem weights all over the place, several strokes nearly gone.
 **A text mode is a property of the TYPEFACE, not of the window.** I swapped the font and left the
 setting that had been chosen for the old one.
 
-Now Ideal, plus Grayscale rendering set explicitly. Measured on a real screen capture of the same
-line: mean per-pixel edge colour spread **93 under ClearType, 0.3 under Grayscale**, with the ink
-coming out slightly darker - the orange/blue fringing goes and nothing thins. The notch gets the
-same treatment and needs it more: WPF silently drops ClearType under a RenderTransform, and the
-notch scale-animates on every morph, so its text was changing rendering mode on every transition.
+Now Ideal, plus `TextRenderingMode=Auto`.
+
+**This paragraph originally said Grayscale, and was wrong.** The "real screen capture" it cited came
+from a process that was not DPI-aware, so Windows handed it a virtualised 1536x864 view of a
+1920x1080 screen - a 0.8x resample, which is exactly what destroys subpixel structure. ClearType's
+fringes measured as noise and Grayscale "won" a contest it could not lose. Grayscale is WPF's
+documented fallback quality, blurrier at small sizes. Corrected the same day; see ARCHITECTURE.md.
+The layered-window half was right and is now served by `ClearTypeHint="Enabled"` on the opaque card
+plate, since WPF drops ClearType for any buffer that could be transparent.
 
 ### The mascot was being minified, not rendered
 

@@ -12,7 +12,7 @@
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Meetings" Style="{StaticResource PanelTitle}"/>
-                <TextBlock x:Name="CountLabel" Text="" Style="{StaticResource Dim}" FontSize="9.5"/>
+                <TextBlock x:Name="CountLabel" Text="" Style="{StaticResource Dim}" FontSize="12"/>
             </StackPanel>
         </Grid>
 
@@ -28,19 +28,19 @@
                          The tip line underneath explains the you:/them: syntax, but only to someone
                          who already knows the box is for searching. Behind the TextBox, hidden the
                          moment anything is typed. -->
-                    <TextBlock x:Name="SearchHint" Text="Search your meetings" FontSize="12"
+                    <TextBlock x:Name="SearchHint" Text="Search your meetings" FontSize="13.5"
                                FontFamily="{StaticResource UiFont}" IsHitTestVisible="False"
                                Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
                     <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
                              Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                             VerticalContentAlignment="Center" Height="34" FontSize="12"
+                             VerticalContentAlignment="Center" Height="34" FontSize="13.5"
                              FontFamily="{StaticResource UiFont}" TextChanged="OnSearchChanged"/>
                 </Grid>
             </Border>
             <Button Grid.Column="1" Style="{StaticResource WhiteButton}" Margin="8,0,0,0" Padding="12,7"
                     Content="+ New note" Click="OnNewNote"/>
         </Grid>
-        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Dim}" FontSize="9" Margin="2,6,0,0"
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Dim}" FontSize="12" Margin="2,6,0,0"
                    Text="Tip:  you: pricing  finds only what you said  ·  them: webhook  finds only them"/>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,4,0,0" controls:SmoothScroll.Enabled="True">

@@ -4735,8 +4735,18 @@ filters on the parse result.
 
 ## A text mode belongs to the typeface, not the window (2026-09-27)
 
-**Decision: `TextFormattingMode=Ideal` + `TextRenderingMode=Grayscale`, set explicitly on both
-windows.**
+**Decision: `TextFormattingMode=Ideal` + `TextRenderingMode=Auto`, on both windows.**
+
+> **CORRECTED the same day.** This entry originally said `Grayscale`, "measured on a real screen
+> capture". THAT MEASUREMENT WAS INVALID and the paragraph below is kept only as the record of how.
+> The capturing process was not DPI-aware, so Windows handed it a virtualised 1536x864 view of a
+> 1920x1080 screen - every pixel had been through a 0.8x resample, which is precisely the operation
+> that destroys subpixel structure. ClearType's fringes became noise, so Grayscale "won" a contest
+> it could not lose. Grayscale is WPF's documented FALLBACK quality, blurrier at small sizes; Auto
+> means ClearType unless the user has turned font smoothing off. Explicit ClearType is also wrong
+> (dotnet/wpf#2025 hardcodes CLEARTYPE_NATURAL instead of asking DirectWrite for NATURAL_SYMMETRIC);
+> Auto never hits it. The layered-window half of the old note stands and is now served properly by
+> `RenderOptions.ClearTypeHint="Enabled"` on the opaque card plate.
 
 This REVERSES the `Display` decision of 2026-09-26, whose reasoning is preserved in LibraryWindow.xaml
 because it was correct for the font it was written for. Display mode rounds glyph advances to whole
@@ -4745,9 +4755,10 @@ hinted heavily and specifically for it. Inter ships almost no hinting - it is dr
 that position glyphs at fractional pixels - so Display forced integer advances onto a design never
 fitted to them and returned uneven, broken stems. **The font changed and the mode did not.**
 
-Grayscale over ClearType, measured on a real screen capture rather than a `RenderTargetBitmap`:
+~~Grayscale over ClearType, measured on a real screen capture rather than a `RenderTargetBitmap`:
 mean per-pixel edge colour spread 93 vs 0.3, with mean ink luminance 51 vs 41, i.e. the fringing
-disappears and the strokes get marginally HEAVIER. The owner's own reference screenshot measures 21
+disappears and the strokes get marginally HEAVIER.~~ (Superseded - see the correction above. The
+numbers are real; what they measure is Windows' resampling filter, not Toki.) The owner's own reference screenshot measures 21
 on the same metric, so it is not subpixel rendering they were objecting to - it was the broken stems.
 
 Set explicitly rather than left on Auto, and this is the part that matters for the notch: WPF
@@ -4817,3 +4828,114 @@ the curve, because it spends its first half barely moving. Both directions now r
 The duration is matched to the reveal's MEASURED travel (~180ms), not its nominal 280ms: most of
 that 280 is the tail of a curve already 99% complete, so matching the constant would have made the
 close feel longer than the open while looking shorter on paper.
+
+## Five type sizes, and a floor at 12 (2026-09-27)
+
+**Decision: every piece of text in Toki is 12, 13.5, 15, 17 or 20 DIP, plus 27 for the serif note
+title. Nothing below 12. Guarded by `TypeScaleTests`.**
+
+It had SEVENTEEN distinct sizes, thirty instances at 11px or below and three at 9px - which on the
+owner's 125% display is eleven physical pixels. The owner named this as the tell: "the fully small
+text is the worst obvious tell for AI generated slop". The structural reason they are right is that
+a screen with seventeen sizes has no hierarchy at all, because a reader cannot rank seventeen
+things. Five steps can be ranked at a glance.
+
+Icon-font sizes are excluded on purpose and the test skips them: a `FontSize` on a Fluent glyph is a
+GLYPH BOX chosen to fit a disc or a row, and the chrome glyphs are hinted on a 10px grid. That
+exclusion needs a two-line context window either side, because the `FontFamily` usually sits on its
+own line - three real text sizes hid behind a nearby icon and had to be fixed by hand.
+
+The guard is a source assertion rather than a runtime one deliberately: the size of any given label
+is a design decision, but the EXISTENCE of a scale is an invariant, and what needs constraining is
+what a future edit is allowed to type.
+
+## A caption under a heading is generated copy (2026-09-27)
+
+**Decision: no muted explanatory line under a section heading, anywhere.**
+
+This rule already existed, from the owner on 2026-08-20 about the notch: *a settings page that
+explains each of its own rows reads as generated copy, not as a product; a row whose label does not
+carry it should be renamed, not annotated.* It was written into `SettingsView.xaml` and never
+applied to the Library window, which carried one under every section.
+
+Applying it forces the rename it implies: "AI summaries" + "On-device by default, or bring your own
+key" became "How notes get written", which says the same thing in the place that was already there.
+A syntax hint ("One per line, or comma separated") is not a caption at all - it is guidance for
+TYPING, so it belongs in the input's placeholder, where it disappears once you have.
+
+`TypeScaleTests.No_caption_is_tucked_under_a_heading` pins the SHAPE that produced it - a muted
+caption pulled up under a heading by a negative top margin - rather than any particular string.
+
+## A heading must outrank the content it owns (2026-09-27)
+
+**Decision: in a note, section headings are `fs + 1.5` SemiBold and the summary is `fs` Normal.**
+
+The summary was `fs + 1.5` at Medium while the headings beneath it were `fs + 1` SemiBold: bigger
+AND heavier, so one paragraph of content outranked the page's own organising structure. The owner
+read exactly that - "notes now have summary in bold, and everything else is smaller and weird".
+
+The 2026-09-03 intent behind the old sizing was right and survives: *someone who reads nothing else
+still leaves with the point.* What carries that is POSITION - first under the title, full ink, air
+beneath it - not extra weight. A lead paragraph does not need to shout to be read first. The result
+is one clean descending step per level: 27 serif title, 15 heading, 13.5 body, 12 detail.
+
+## An optically-centred glyph should be geometry (2026-09-27)
+
+**Decision: the Ask send arrow is a `Path`, not a font character.**
+
+A glyph carries the font's own side bearings, so "centred" means centred INCLUDING whitespace that
+is not equal on both sides. The previous fix was a 1px `TranslateTransform` measured by hand against
+that asymmetry, and the owner still read the button as off-centre. A `Path` has no bearings: its
+bounding box IS the drawn shape, so `Stretch="Uniform"` in a fixed box centres it exactly, at every
+DPI, with no constant that can drift out of date.
+
+This is the third control to make the same move (the play triangle, the back chevron, now send), so
+it is the house rule rather than a one-off: **a small glyph that has to sit centred is drawn, not
+typed.** `ActionButtonTests` was updated to guard the new invariant - it had been pinning the
+nudge's presence, which is a SPELLING, not a behaviour.
+
+## The morph's first 72ms are the only ones that matter (2026-09-27)
+
+**Decision: the mascot's idle suspends for the duration of a morph, and the clip repaints only on
+changes of a quarter pixel or more.**
+
+The owner reported the notch still "resizing" after the corner-shape fix. Filmed at 60fps it looked
+like an 87px snap in one frame - and that snap was in the CAPTURE; ffmpeg was dropping frames. A
+per-frame trace of the clip rect showed the animation running its full 300ms smoothly, and showed
+the real defect: the first ~72ms ran at 15-30fps while the tail ran at 120. `Drawer` is heavily
+front-loaded and spends 78% of its travel in that window, so the stuttering part is the part the eye
+actually reads, and the smooth part is the part where nothing moves.
+
+Both causes were self-inflicted by the quality work that preceded them. The mascot now draws as live
+vector with no bitmap cache, so every transform write re-rasterises three gradient-filled beziers -
+during the one moment the UI thread is already building and laying out the incoming page. And the
+squircle was being rebuilt on frames where the edge moved by hundredths of a pixel, because the
+guard was exact `Rect` equality, which never fires on animated doubles.
+
+Measured the same way afterwards: first-90ms frame gaps went from an 11ms freeze plus a 31ms stall
+to a steady 8-9ms. Nothing is lost visually - sub-pixel idle drift is invisible under a resizing
+card.
+
+**`TOKI_CLIPTRACE=1` is kept as a dev seam.** It is the only instrument that answers "is this
+smooth" honestly; a screen recording cannot, and on this occasion it actively lied.
+
+## A silent null is indistinguishable from a fault (2026-09-27)
+
+**Decision: every path in `LlmService.Active()` and `WriteNotesAsync` that returns null logs why.**
+
+`--llmtest` failed reporting "LLM returned no notes (model unavailable?)". The model was fine:
+`NotesMode` was `HeuristicOnly`, so `Active()` returned null and the model was never asked. Two
+paths did that in complete silence, which made a deliberate SETTING and a broken MODEL identical
+from outside - and the self-test then papered over both with a guess that sent the diagnosis the
+wrong way for some time.
+
+Both paths now log. The self-test reports the state it found (mode, whether Qwen is installed)
+instead of speculating, and names the setting when that is the cause. This is the same rule the
+heuristic-floor incident produced, applied to the floor but never to the switch above it: **a
+fallback good enough to ship is good enough to hide the failure that triggered it, so make it
+loud.**
+
+Worth recording separately: the first explanation offered for that failure was memory pressure,
+supported by a real number (3.5GB free of 11.4GB). The number was true and the causal claim was not
+- the machine sits there normally, and the test had passed in that same state forty minutes
+earlier. The owner pushed back and was right. A measurement is not a diagnosis.

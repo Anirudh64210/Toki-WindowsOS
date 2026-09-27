@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -152,7 +152,7 @@ public partial class NotesView : UserControl
 
     TextBlock Dim(string text) => new()
     {
-        Style = (Style)FindResource("Body"), FontSize = 12,
+        Style = (Style)FindResource("Body"), FontSize = 13.5,
         Foreground = (Brush)FindResource("TextDim"), Margin = new Thickness(0, 12, 0, 0), Text = text,
     };
 
@@ -172,13 +172,13 @@ public partial class NotesView : UserControl
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 7, 0),
             Child = new TextBlock
             {
-                Text = seg.Label.ToUpperInvariant(), FontSize = 8.5, FontWeight = FontWeights.Bold,
+                Text = seg.Label.ToUpperInvariant(), FontSize = 12, FontWeight = FontWeights.Bold,
                 Foreground = (Brush)FindResource(you ? "Blue" : "TextDim"), FontFamily = (FontFamily)FindResource("UiFont"),
             },
         };
         var text = new TextBlock
         {
-            Text = seg.Text, Style = (Style)FindResource("Body"), FontSize = 11,
+            Text = seg.Text, Style = (Style)FindResource("Body"), FontSize = 12,
             MaxWidth = 300, TextAlignment = you ? TextAlignment.Right : TextAlignment.Left,
         };
         if (you) { row.Children.Add(text); row.Children.Add(chip); }

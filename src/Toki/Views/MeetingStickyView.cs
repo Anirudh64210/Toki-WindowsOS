@@ -35,13 +35,13 @@ public sealed class MeetingStickyView : Border
 
         _status = new TextBlock
         {
-            Style = (Style)Res("Dim"), FontSize = 10, Opacity = 0, Text = "Saved",
+            Style = (Style)Res("Dim"), FontSize = 12, Opacity = 0, Text = "Saved",
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0),
         };
 
         _delete = new Button
         {
-            Content = "Delete", Style = (Style)Res("PillButton"), FontSize = 10.5,
+            Content = "Delete", Style = (Style)Res("PillButton"), FontSize = 12,
             Padding = new Thickness(10, 4, 10, 4), Background = Brushes.Transparent,
             Foreground = B("TextDim"), Cursor = System.Windows.Input.Cursors.Hand,
         };
@@ -52,7 +52,7 @@ public sealed class MeetingStickyView : Border
         // only feedback is a status word that fades, and the user has nothing to press to be sure.
         _saveButton = new Button
         {
-            Content = "Save", Style = (Style)Res("PillButton"), FontSize = 10.5,
+            Content = "Save", Style = (Style)Res("PillButton"), FontSize = 12,
             Padding = new Thickness(12, 4, 12, 4), Background = B("Chip"),
             Cursor = System.Windows.Input.Cursors.Hand, Margin = new Thickness(0, 0, 6, 0),
         };
@@ -61,7 +61,7 @@ public sealed class MeetingStickyView : Border
         // The pencil is the way back in once the note is saved and reading as a section.
         _edit = new Button
         {
-            Style = (Style)Res("IconButton"), FontSize = 12, Visibility = Visibility.Collapsed,
+            Style = (Style)Res("IconButton"), FontSize = 13.5, Visibility = Visibility.Collapsed,
             Cursor = System.Windows.Input.Cursors.Hand, Margin = new Thickness(0, 0, 6, 0),
             ToolTip = "Edit this note",
             Content = new TextBlock
@@ -77,7 +77,7 @@ public sealed class MeetingStickyView : Border
         var left = new StackPanel { Orientation = Orientation.Horizontal };
         left.Children.Add(new TextBlock
         {
-            Text = "STICKY NOTE", FontFamily = (FontFamily)Res("UiFont"), FontSize = 10.5,
+            Text = "STICKY NOTE", FontFamily = (FontFamily)Res("UiFont"), FontSize = 12,
             FontWeight = FontWeights.SemiBold, Foreground = B("Amber"), VerticalAlignment = VerticalAlignment.Center,
         });
         left.Children.Add(_status);
@@ -147,7 +147,7 @@ public sealed class MeetingStickyView : Border
             // not like".
             var pin = new TextBlock
             {
-                Text = "", FontSize = 11, Foreground = B("TextDim"),
+                Text = "", FontSize = 12, Foreground = B("TextDim"),
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0),
             };
             pin.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");
@@ -226,7 +226,7 @@ public sealed class MeetingStickyView : Border
 
         _saved = new TextBlock
         {
-            Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 13,
+            Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 13.5,
             FontFamily = (FontFamily)Res("UiFont"), Foreground = B("TextSoft"), LineHeight = 21,
             LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
         };

@@ -9,7 +9,8 @@
         FontFamily="{StaticResource UiFont}" UseLayoutRounding="True" SnapsToDevicePixels="True"
         WindowStyle="None"
         TextOptions.TextFormattingMode="Ideal"
-        TextOptions.TextRenderingMode="Grayscale">
+        TextOptions.TextRenderingMode="Auto"
+        TextOptions.TextHintingMode="Fixed">
     <!-- TOKI DRAWS ITS OWN TITLE BAR (owner, 2026-09-27: "they have their own custom bar to close
          minimise the window, we have the default windows one, fix that as well").
          WindowStyle=None removes the system caption; WindowChrome puts back everything that would
@@ -45,13 +46,30 @@
          I CHANGED THE FONT AND LEFT THE MODE THAT HAD BEEN CHOSEN FOR THE OLD ONE. A text mode is
          not a property of the window, it is a property of the TYPEFACE in it.
 
-         GRAYSCALE, not ClearType. Measured on a real screen capture of this window, the same line
-         carries a mean per-pixel edge colour spread of 93 under ClearType and 0.3 under Grayscale,
-         and the ink comes out slightly DARKER - so the orange/blue fringing the owner photographed
-         disappears and nothing thins. Inter is drawn for grayscale rasterisers. Set EXPLICITLY
-         rather than left on Auto so the choice is reviewable here instead of WPF inferring it
-         per-element from opacity and transforms, which is what makes text change weight
-         mid-animation. -->
+         AUTO, NOT GRAYSCALE - and this reverses what I set on 2026-09-27, which was wrong twice over.
+         The claim was:
+
+             "Measured on a real screen capture ... mean per-pixel edge colour spread of 93 under
+              ClearType and 0.3 under Grayscale ... Inter is drawn for grayscale rasterisers."
+
+         The measurement was invalid. The capture process was not DPI-aware, so Windows handed it a
+         VIRTUALISED 1536x864 view of a 1920x1080 screen: every pixel I measured had been through a
+         0.8x resampling filter, which is precisely the operation that destroys subpixel structure.
+         ClearType's colour fringes became noise and Grayscale therefore "won". The owner's own
+         screenshots were true pixels, which is why they could see what I could not.
+
+         And the conclusion was backwards regardless. Grayscale is WPF's FALLBACK quality, which
+         Microsoft documents as blurrier at small sizes; Auto means ClearType unless the user has
+         turned font smoothing off. Setting Grayscale explicitly threw ClearType away on an opaque
+         window for nothing - it is most of "it still has the same cheap rendering problem".
+
+         Auto rather than an explicit ClearType, deliberately: dotnet/wpf#2025 - when the mode is set
+         EXPLICITLY, WPF hardcodes DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL instead of asking DirectWrite,
+         which would answer NATURAL_SYMMETRIC; horizontal-only antialiasing, vertical features sampled
+         out. Applications that leave it on Auto never hit it.
+
+         TextHintingMode=Fixed is "highest static quality". The notch flips its animated subtree to
+         Animated for the duration of a morph and back; this window does not scale, so it stays Fixed. -->
     <Grid x:Name="RootGrid" RenderTransformOrigin="0,0">
         <Grid.RowDefinitions>
             <!-- The title row is the PAGE, not a bar. In the reference there is no strip: the
@@ -137,7 +155,7 @@
                 <Button x:Name="MaxBtn" Style="{StaticResource CaptionButton}" Content="&#xE922;"
                         Click="OnMaximiseRestore" ToolTip="Maximise"/>
                 <Button x:Name="CloseBtn" Style="{StaticResource CaptionButton}" Content="&#xE8BB;"
-                        Click="OnCloseWindow" ToolTip="Close"/>
+                        Tag="danger" Click="OnCloseWindow" ToolTip="Close"/>
             </StackPanel>
         </Grid>
 
@@ -170,10 +188,19 @@
                            FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource TextHi}"
                            Margin="12,0,0,34" Height="28" VerticalAlignment="Center"/>
 
-                <!-- BACK MOVED TO THE TITLE ROW (2026-09-27). It was a full-width filled pill docked
-                     here at the bottom, and it was the heaviest object in the window for the action
-                     taken least often. The sidebar now ends with the nav and nothing else, which is
-                     what makes the empty space below it read as deliberate rather than unfinished. -->
+                <!-- BACK TO TOKI, RESTORED to the bottom of the sidebar (owner, 2026-09-27:
+                     "have back to toki at the left panel bottom button, its useful").
+                     I moved it to the title row earlier that day on the argument that it was "the
+                     heaviest object in the window for the action taken least often". The premise was
+                     wrong - it is not taken least often, it is how you get back to the notch, which
+                     is the app - and a bare chevron in the caption strip does not say where it goes.
+                     The chevron in the title row STAYS as well: one is the window control, this is
+                     the labelled way home. Lighter than the original though: a quiet chip on the
+                     sidebar rather than a full-width filled slab. -->
+                <Button DockPanel.Dock="Bottom" x:Name="BackHomeBtn" Style="{StaticResource PillButton}"
+                        Background="{DynamicResource SidebarButton}" Click="OnBack"
+                        HorizontalContentAlignment="Center" Padding="13,9" FontSize="13.5"
+                        Margin="12,0,12,4" Cursor="Hand"/>
 
                 <!-- Nav items (built in code so the active one highlights) -->
                 <StackPanel x:Name="Nav" DockPanel.Dock="Top"/>
@@ -271,8 +298,11 @@
                                                Foreground="{DynamicResource TextDim}" FontFamily="{StaticResource UiFont}"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
+                                <!-- 6px of air before the send disc. The mic sat hard against it, so two
+                                     controls of different shape and weight read as one smudged cluster. -->
                                 <Button Grid.Column="1" x:Name="MicBtn" Style="{StaticResource IconButton}"
-                                        Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic" VerticalAlignment="Center"/>
+                                        Content="&#xE720;" ToolTip="Ask by voice" Click="OnMic"
+                                        VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 <!-- The circular send: a filled disc so the bar ends in one clear action.
                                      It WAS a Chip-filled Border with an IconButton inside it, which put
                                      an r10 hover highlight inside an r18 circle - the box lit up in a
@@ -287,15 +317,20 @@
                                         FontFamily="{StaticResource IconFont}" FontSize="15"
                                         Width="38" Height="38" Margin="4,0,0,0" VerticalAlignment="Center"
                                         ToolTip="Ask" Click="OnAsk">
-                                    <!-- The plane glyph carries its mass at the tail, so box-centred it reads
-                                         as sitting left of the disc's middle. The correction is a RENDER
-                                         transform, not a margin: a 1px left margin inside a centre-aligned
-                                         ContentPresenter widens the content box by 1 and re-centres it, which
-                                         moves the glyph half a pixel and then layout rounding eats that. This
-                                         moves exactly one pixel and touches no layout. -->
-                                    <TextBlock Text="&#xE724;">
-                                        <TextBlock.RenderTransform><TranslateTransform X="1"/></TextBlock.RenderTransform>
-                                    </TextBlock>
+                                    <!-- GEOMETRY, NOT A FONT CHARACTER - the same call already made for the
+                                         play triangle and the back chevron. A glyph carries the font's own
+                                         side bearings, so "centred" means centred INCLUDING whitespace that
+                                         is not the same on both sides; the previous fix was a 1px render
+                                         nudge guessed against that, and the owner still reads it as off
+                                         ("symettry within the buttons is not present, send button in ask
+                                         toki", 2026-09-27).
+                                         A Path with Stretch=Uniform in a fixed box has no bearings at all:
+                                         its bounding box IS the drawn shape, so it centres exactly, at every
+                                         DPI, with no correction to drift out of date. -->
+                                    <Path Width="16" Height="16" Stretch="Uniform"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Fill="{DynamicResource TextHi}"
+                                          Data="M2.01 21 L23 12 L2.01 3 L2 10 L17 12 L2 14 Z"/>
                                 </Button>
                             </Grid>
                         </Border>
@@ -561,6 +596,13 @@
                                        VerticalAlignment="Bottom" Margin="14,0,0,4"/>
                         </StackPanel>
 
+                        <!-- NO CAPTION UNDER THE HEADING. This page had one under every section, and a
+                             settings page that explains each of its own rows reads as generated copy,
+                             not as a product - the owner ruled on exactly this for the NOTCH settings
+                             on 2026-08-20 and it was never applied here. Owner again 2026-09-27:
+                             "the fully small text is the worst obvious tell for AI generated slop ...
+                             subtext within headings and buttons on the window needs to be removed".
+                             A row whose label does not carry it gets RENAMED, not annotated. -->
                         <TextBlock Text="What should Toki call you?" Style="{StaticResource SectionTitle}"/>
                         <Border x:Name="NameCard" Background="{DynamicResource SurfaceHi}" CornerRadius="14" Padding="14,0"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
@@ -640,7 +682,7 @@
                                              for. Off means Toki is invisible to anything that captures the
                                              screen, which is not guessable from the label alone. -->
                                         <TextBlock Text="Off keeps Toki out of screen shares and recordings."
-                                                   Style="{StaticResource Dim}" FontSize="12" Margin="0,2,0,0"
+                                                   Style="{StaticResource Dim}" FontSize="13.5" Margin="0,2,0,0"
                                                    TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <CheckBox x:Name="LibGhostToggle" Grid.Column="1" Style="{StaticResource TokiSwitch}"
@@ -661,7 +703,9 @@
                              interface look cluttered. The gap does the work; the line was noise. -->
                         <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="People Toki should spell right" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="One per line, or comma separated." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
+                        <!-- "One per line, or comma separated." moved into the box's own placeholder,
+                             where a syntax hint belongs: it is guidance for TYPING, so it lives where
+                             you type and disappears once you have. -->
                         <Border x:Name="PinnedCard" Background="{DynamicResource SurfaceHi}" CornerRadius="12" Padding="14,10"
                                 BorderBrush="{DynamicResource Hairline}" BorderThickness="1"
                                 HorizontalAlignment="Stretch">
@@ -697,7 +741,6 @@
                              interface look cluttered. The gap does the work; the line was noise. -->
                         <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="Re-clean saved transcripts" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="Tidies older transcripts. Your notes and ticks stay." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="LibRecleanButton" Style="{StaticResource PillButton}"
                                     Background="{DynamicResource Chip}" Content="Re-clean transcripts"
@@ -712,8 +755,7 @@
                              "cannot be separated using white space", and that too many lines make an
                              interface look cluttered. The gap does the work; the line was noise. -->
                         <Border Height="0" Margin="0,28,0,0"/>
-                        <TextBlock Text="AI summaries" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="On-device by default, or bring your own key." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
+                        <TextBlock Text="How notes get written" Style="{StaticResource SectionTitle}"/>
                         <views:AiSummariesSection x:Name="AiSection"/>
 
                         <!-- ── Calendars ──
@@ -731,7 +773,6 @@
                              interface look cluttered. The gap does the work; the line was noise. -->
                         <Border Height="0" Margin="0,28,0,0"/>
                         <TextBlock Text="Calendars" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock Text="Connect one or both. Toki merges them into one agenda." Style="{StaticResource Dim}" FontSize="13.5" Margin="0,-8,0,12"/>
 
                         <!-- Google -->
                         <Grid x:Name="LibGoogleRow">

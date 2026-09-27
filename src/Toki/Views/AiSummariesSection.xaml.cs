@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -222,7 +222,7 @@ public partial class AiSummariesSection : UserControl
         var text = new TextBlock
         {
             Text = label, HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center, FontSize = 13.5,
             FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
             Foreground = (Brush)FindResource(on ? "Text" : "TextDim"),
             FontFamily = (FontFamily)FindResource("UiFont"),

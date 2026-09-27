@@ -9,22 +9,27 @@
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         FontFamily="{StaticResource UiFont}"
         TextOptions.TextFormattingMode="Ideal"
-        TextOptions.TextRenderingMode="Grayscale"
+        TextOptions.TextRenderingMode="Auto"
+        TextOptions.TextHintingMode="Fixed"
         Width="120" Height="40" KeyDown="OnKeyDown">
-    <!-- GRAYSCALE, EXPLICITLY, AND ON THE NOTCH ESPECIALLY (2026-09-27).
-             Two reasons, and the second is the one that was actually costing us:
-             1. Inter is drawn for grayscale antialiasing. Measured on a real screen capture, the
-                same line of text carries a mean per-pixel colour spread of 93 under ClearType and
-                0.3 under Grayscale, while the ink comes out slightly DARKER - so the fringing goes
-                and nothing thins.
-             2. WPF SILENTLY DROPS CLEARTYPE whenever text sits under a RenderTransform or on a
-                layered window, and this window is both: it is AllowsTransparency, and HostScale
-                zooms the content on every single state morph. So the notch's text was flipping
-                rendering mode at the start and end of every transition, which is a visible weight
-                change on every word. Pinning the mode means there is nothing left to flip.
-             Ideal, not Display: see LibraryWindow.xaml for the full note - Display mode forces
-             integer glyph advances through hinting Inter does not ship. -->
+    <!-- AUTO, NOT GRAYSCALE (corrected 2026-09-27, same day). The note this replaces claimed
+         Grayscale won on a measurement of 93 vs 0.3 colour spread; that capture had been through a
+         0.8x downscale because the capturing process was not DPI-aware, which is exactly the
+         operation that destroys subpixel structure. See LibraryWindow.xaml for the full correction.
+         Grayscale is WPF's FALLBACK quality and Microsoft documents it as blurrier at small sizes.
 
+         WHAT WAS RIGHT IN THE OLD NOTE AND STILL IS: this window is AllowsTransparency=True, and WPF
+         disables ClearType wherever the buffer may be per-pixel transparent. So Auto will resolve to
+         grayscale here ANYWAY - which is correct and automatic, rather than forced. The lever that
+         actually buys ClearType back on a layered window is RenderOptions.ClearTypeHint="Enabled" on
+         a node whose OWN background is fully opaque; that is the card plate, not this root, and it
+         is set there. An Effect or OpacityMask above the text kills it again, which is a second
+         reason for the standing house rule against Effects in animated subtrees.
+
+         TextHintingMode=Fixed is the resting value ("highest static quality"). The morph flips the
+         scaled subtree to Animated for its duration and restores Fixed on completion - that swap is
+         what removes the blur-then-snap pop on every transition, and it is why the morph must also
+         land on EXACTLY 1.0 scale (a resting fractional scale re-rasterises every glyph off-grid). -->
     <!-- Transparent window (like Cluely / Cheating Daddy): the Border IS the pill, with
          a translucent frosted surface so the desktop shows through. Ghost mode
          (WDA_EXCLUDEFROMCAPTURE, re-applied on every Show) still hides it from screen
@@ -102,7 +107,15 @@
                      fake glass and the answer was a faker shine. The card's material is painted,
                      honest, and the same in both themes. -->
                 <theme:CardMaterial x:Name="Material"/>
-                <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9">
+                <!-- ClearType back on a layered window. WPF turns it off for the whole window because
+                     AllowsTransparency means any pixel COULD be see-through; the hint says "this
+                     subtree's own background is opaque, subpixel-render it anyway". The plate behind
+                     Host is exactly that, so every string on a card gets ClearType while the peeks and
+                     the shadow stay honestly transparent. It is a no-op wherever the buffer really is
+                     translucent, so it cannot make a peek render wrong - but for the same reason it
+                     can only be confirmed by eye on a real screen, never from the render harness. -->
+                <Grid x:Name="Host" ClipToBounds="True" RenderTransformOrigin="0.5,0.9"
+                      RenderOptions.ClearTypeHint="Enabled">
                     <Grid.RenderTransform>
                         <!-- A GROUP, so the retract can lift the content while the morph scales it.
                              HostShift is used by ConcealUp only: the clip that furls the card is in

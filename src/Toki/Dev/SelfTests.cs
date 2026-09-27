@@ -239,6 +239,26 @@ static class SelfTests
         return 0;
     }
 
+    /// <summary>
+    /// NAME THE ACTUAL CAUSE, never guess at it. This used to read "LLM returned no notes (model
+    /// unavailable?)" - and on 2026-09-27 the guess was wrong: the machine was set to Heuristic, so
+    /// the model was never asked at all, and the speculation cost a real diagnosis. A self-test that
+    /// speculates about its own failure is worse than one that reports the state it found.
+    /// </summary>
+    static string WhyNoNotes()
+    {
+        var mode = Toki.Llm.AppSettings.Current.NotesMode;
+        var installed = Toki.Transcription.ModelManager.QwenInstalled;
+        if (mode == Toki.Llm.NotesMode.HeuristicOnly)
+            return "notes mode is Heuristic, so the model was never asked. This is a SETTING, not a "
+                 + "broken model - switch Settings > How notes get written to On-device, then re-run.";
+        if (mode == Toki.Llm.NotesMode.ApiKey && !installed)
+            return "notes mode is My API key, the key/model is not usable, and no on-device model is "
+                 + "installed to fall back to.";
+        return $"LLM returned no notes (mode={mode}, qwen installed={installed}). "
+             + "The reason is logged in %TEMP%/toki-m1.log.";
+    }
+
     static int LlmTest()
     {
         if (!ModelManager.QwenInstalled)
@@ -270,7 +290,7 @@ static class SelfTests
         // deadlock against this thread being blocked on the result.
         var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(transcript)).GetAwaiter().GetResult();
         sw.Stop();
-        if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
+        if (notes is null) return Fail(WhyNoNotes());
 
         Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms ({(LlmService.Instance.LocalLoaded ? "local Qwen" : "?")})");
         Console.WriteLine($"  TITLE: {notes.Title ?? "(none)"}");
@@ -510,7 +530,7 @@ static class SelfTests
         // Off the UI thread - LLamaSharp async continuations would deadlock a blocked caller.
         var notes = Task.Run(() => LlmService.Instance.WriteNotesAsync(m.Transcript)).GetAwaiter().GetResult();
         sw.Stop();
-        if (notes is null) return Fail("LLM returned no notes (model unavailable?).");
+        if (notes is null) return Fail(WhyNoNotes());
 
         Console.WriteLine($"  generated in {sw.ElapsedMilliseconds} ms");
         Console.WriteLine($"  TITLE  : {notes.Title ?? "(none → falls back to app + date)"}");

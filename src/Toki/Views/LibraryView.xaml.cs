@@ -34,7 +34,7 @@ public partial class LibraryView : UserControl
         {
             Cards.Children.Add(new TextBlock
             {
-                Style = (Style)FindResource("Dim"), FontSize = 11, Margin = new Thickness(2, 16, 0, 0),
+                Style = (Style)FindResource("Dim"), FontSize = 12, Margin = new Thickness(2, 16, 0, 0),
                 TextAlignment = TextAlignment.Center,
                 Text = string.IsNullOrWhiteSpace(SearchBox.Text)
                     ? "No meetings yet.\nToki saves a note here after every meeting it records."
@@ -54,15 +54,15 @@ public partial class LibraryView : UserControl
 
         var date = new StackPanel();
         date.Children.Add(new TextBlock { Text = m.StartedAt.Day.ToString(), Style = (Style)FindResource("Body"), FontSize = 15, FontWeight = FontWeights.Bold });
-        date.Children.Add(new TextBlock { Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = (Style)FindResource("Dim"), FontSize = 8.5 });
+        date.Children.Add(new TextBlock { Text = m.StartedAt.ToString("MMM").ToUpperInvariant(), Style = (Style)FindResource("Dim"), FontSize = 12 });
         grid.Children.Add(date);
 
         var body = new StackPanel { Margin = new Thickness(0, 0, 6, 0) };
-        body.Children.Add(new TextBlock { Text = m.Title, Style = (Style)FindResource("Body"), FontSize = 12, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        body.Children.Add(new TextBlock { Text = m.Title, Style = (Style)FindResource("Body"), FontSize = 13.5, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         var kindWord = m.Kind == MeetingKind.Manual ? "Note" : (m.App ?? "Meeting");
-        body.Children.Add(new TextBlock { Text = $"{kindWord} · {Ago(m.StartedAt)}", Style = (Style)FindResource("Dim"), FontSize = 9.5 });
+        body.Children.Add(new TextBlock { Text = $"{kindWord} · {Ago(m.StartedAt)}", Style = (Style)FindResource("Dim"), FontSize = 12 });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            body.Children.Add(new TextBlock { Text = m.Tldr, Style = (Style)FindResource("Dim"), FontSize = 10.5, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap, MaxHeight = 32, TextTrimming = TextTrimming.CharacterEllipsis });
+            body.Children.Add(new TextBlock { Text = m.Tldr, Style = (Style)FindResource("Dim"), FontSize = 12, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap, MaxHeight = 32, TextTrimming = TextTrimming.CharacterEllipsis });
 
         var tags = new StackPanel { Orientation = Orientation.Horizontal };
         // NOT AMBER. A filled amber pill rendered as a pale yellow lozenge in the light theme and
@@ -73,7 +73,7 @@ public partial class LibraryView : UserControl
         Grid.SetColumn(body, 1);
         grid.Children.Add(body);
 
-        var del = new Button { Style = (Style)FindResource("IconButton"), Content = "🗑", FontSize = 11, VerticalAlignment = VerticalAlignment.Top, Opacity = 0.5 };
+        var del = new Button { Style = (Style)FindResource("IconButton"), Content = "🗑", FontSize = 12, VerticalAlignment = VerticalAlignment.Top, Opacity = 0.5 };
         del.Click += (_, e) => { e.Handled = true; Delete(m); };
         Grid.SetColumn(del, 2);
         grid.Children.Add(del);
@@ -92,7 +92,7 @@ public partial class LibraryView : UserControl
     {
         Background = (Brush)FindResource(bgKey), CornerRadius = new CornerRadius(4),
         Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 6, 6, 0),
-        Child = new TextBlock { Text = text, FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource(fgKey), FontFamily = (FontFamily)FindResource("UiFont") },
+        Child = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource(fgKey), FontFamily = (FontFamily)FindResource("UiFont") },
     };
 
     static string Ago(DateTimeOffset when) => TimeText.Ago(when);

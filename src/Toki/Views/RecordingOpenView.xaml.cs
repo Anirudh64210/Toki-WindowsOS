@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -209,7 +209,7 @@ public partial class RecordingOpenView : UserControl, IWidthAware
 
         var tb = new TextBlock
         {
-            Text = text, FontSize = 12, LineHeight = 14, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            Text = text, FontSize = 13.5, LineHeight = 14, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             Opacity = opacity,
             FontFamily = (FontFamily)Application.Current.Resources["UiFont"],
             TextWrapping = TextWrapping.Wrap, MaxHeight = 28, TextTrimming = TextTrimming.CharacterEllipsis,
@@ -227,7 +227,7 @@ public partial class RecordingOpenView : UserControl, IWidthAware
     {
         var tb = new TextBlock
         {
-            Text = label, FontSize = 8, FontWeight = FontWeights.SemiBold,
+            Text = label, FontSize = 12, FontWeight = FontWeights.SemiBold,
             FontFamily = (FontFamily)Application.Current.Resources["UiFont"],
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
