@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,6 +16,27 @@ public partial class PillWindow : Window
 {
     // Logical-pixel content sizes per state. For AutoHeight pages the HEIGHT is only a fallback -
     // the real height is measured from the content. Width is always used.
+    /// <summary>ONE WIDTH FOR EVERY PAGE.
+    ///
+    /// The panels used to be 330, 344, 356, 360, 380, 392 and 404 wide - seven widths across nine
+    /// pages. The card is centred on the screen, so every navigation moved BOTH edges and re-wrapped
+    /// every line inside. The owner, 2026-09-26: "toki readjusts and re renders everytime a notch
+    /// state is changed, when we move from one notch page to another, that is simply bad design, and
+    /// a real premium product never works like that."
+    ///
+    /// They are right, and the reason is not performance - the views are cached and the morph is
+    /// already one composited clip. It is that a container which changes shape for every page is not
+    /// a container; it reads as a new window each time. A notch is furniture. It holds still while
+    /// its contents change.
+    ///
+    /// Height still varies, because height is what CONTENT legitimately controls, and it grows
+    /// downward from a fixed top edge - one axis moving instead of three.
+    ///
+    /// PEEKS AND STATUS PILLS ARE NOT PAGES and keep their own sizes: the launcher peek, the record
+    /// prompt, the recording bar and the loader are glanceable chrome sized to their content, and
+    /// making them 380 wide would put a mostly-empty card over the user's work.</summary>
+    internal const double PanelW = 380;
+
     static readonly Dictionary<PillState, (double W, double H)> Sizes = new()
     {
         [PillState.Collapsed]     = (52, 42),    // launcher peek (Toki alone)
@@ -24,20 +45,30 @@ public partial class PillWindow : Window
         [PillState.RecordingOpen] = (272, 48),   // recording bar. RecordingOpenView owns the live
                                                  // width (IWidthAware): its chevron widens it to 344.
         [PillState.Summarizing]   = (220, 50),   // "Tidying up your notes..." pill (lives mostly as a sliver)
-        [PillState.Notes]         = (360, 320),  // scrollable window into the notes
-        [PillState.NoSpeech]      = (300, 92),
-        [PillState.Home]          = (344, 190),   // fits the COMING UP list + Join pills
-        [PillState.Library]       = (404, 440),
-        [PillState.Settings]      = (380, 120),   // auto-height; 120 is only the floor
-        [PillState.ManualNote]    = (392, 410),
-        [PillState.Ask]           = (344, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
-        [PillState.Calendar]      = (360, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
-        [PillState.PrepCard]      = (356, 306),   // auto-height: first-time cards are short
-        [PillState.About]         = (380, 430),   // FIXED height + internal scroll (credits list) - mirrors Settings
+        [PillState.Notes]         = (PanelW, 320),  // scrollable window into the notes
+        [PillState.NoSpeech]      = (PanelW, 92),
+        [PillState.Home]          = (PanelW, 190),   // fits the COMING UP list + Join pills
+        [PillState.Library]       = (PanelW, 440),
+        [PillState.Settings]      = (PanelW, 120),   // auto-height; 120 is only the floor
+        [PillState.ManualNote]    = (PanelW, 410),
+        [PillState.Ask]           = (PanelW, 120),   // push-to-talk: compact while listening, grows for the answer (AutoHeight)
+        [PillState.Calendar]      = (PanelW, 430),   // FIXED height + internal scroll (auto-height fought the ScrollViewer)
+        // 293, not 306: Inter sets these rows a little tighter than Segoe UI Variable did, so the
+        // old floor held 13px of space the card never filled and every prep card carried a band of
+        // dead air under its last row (--measuretest reports it by name). A floor is a claim about
+        // CONTENT, so it has to be re-measured whenever the typeface changes.
+        [PillState.PrepCard]      = (PanelW, 293),   // auto-height: first-time cards are short
+        [PillState.About]         = (PanelW, 430),   // FIXED height + internal scroll (credits list) - mirrors Settings
         // AUTO-HEIGHT: each step sizes to its own content (name ~188, privacy ~212, all-set ~137), so
         // no page is padded or clipped. 130 is only the floor. The step-to-step size change is SNAPPED,
         // not animated (see SnapResize) - the next page simply appears at its size, so the user never
         // watches the card actively resize.
+        // NOT PanelW. The one-width rule exists so NAVIGATING between pages does not reshape the
+        // card; onboarding is a standalone first-run flow you never navigate away from and never
+        // come back to, so it has no neighbour to be consistent with. It is also better narrow: a
+        // 330 measure keeps the three short steps readable instead of stretching two sentences
+        // across a panel built for notes. Widening it to 380 collapsed the height difference
+        // between the name and privacy steps (219 vs 226), which --revealtest caught.
         [PillState.Onboarding]    = (330, 130),
     };
 
@@ -78,8 +109,6 @@ public partial class PillWindow : Window
     // curves the TOP corners that must be flush with the screen edge. So in glass mode the window is
     // extended this many px ABOVE the screen top - the rounded top corners fall off-screen, leaving a
     // straight flush top with the rounded bottom. The content is pushed down by the same amount.
-    const double GlassTopBleed = 8;
-    int _topBleedPx;   // physical-px version of the current bleed (0 unless glass panel)
 
     // Panels whose HEIGHT is measured from their actual content, so every page is concise with no
     // dead space below it. The Sizes width is still used; the Sizes height is only a fallback.
@@ -375,7 +404,7 @@ public partial class PillWindow : Window
         int gap = (int)Math.Round(TopGap * dpi);
         int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi);
         int x = work.Left + ((work.Right - work.Left) - winW) / 2 - skew;
-        int y = work.Top + gap - _topBleedPx;   // top edge fixed → height grows downward
+        int y = work.Top + gap;
         // Skip the move when nothing changed. NOTE this reads the window's CURRENT physical width,
         // so it must only run when the Win32 size is already correct: right after setting WPF's
         // Width (layout merely dirty) it centres for the OLD size - a visible sideways jump.
@@ -401,7 +430,7 @@ public partial class PillWindow : Window
         // shifts left by half the pad difference to put the card itself on the screen's centreline.
         int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi.DpiScaleX);
         int x = work.Left + ((work.Right - work.Left) - pw) / 2 - skew;
-        int y = work.Top + gap - _topBleedPx;
+        int y = work.Top + gap;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, pw, ph, SwpNoZOrder | SwpNoActivate);   // NOT SwpNoSize - set both
         _lastPlaceX = x; _lastPlaceY = y;
     }
@@ -503,8 +532,55 @@ public partial class PillWindow : Window
                 v.UpdateLayout();
             }
             App.Log("notch warm: first-open views and the mascot are built");
+            WarmRemainingPages();
         }
         catch (Exception ex) { App.Log($"notch warm (non-fatal): {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// BUILD EVERY OTHER PAGE BEFORE IT IS ASKED FOR, one per idle frame.
+    ///
+    /// Only Collapsed and Home were ever warmed. Every other page was built and measured for the
+    /// FIRST time inside the transition itself, by `ContentHeight` - which the transition's own
+    /// comment already describes as "a synchronous 50-150ms stall on a cold view". That stall is
+    /// the whole glitch the owner kept seeing: "there is still a tenth of a second mini glitch"
+    /// (2026-09-27). It is not a rendering artifact, it is the UI thread stopping, and it happens
+    /// exactly ONCE per page per session, which is why it felt random rather than reproducible.
+    ///
+    /// ONE PER IDLE CALLBACK, never a loop. Building nine views in a row would move the stall rather
+    /// than remove it - the point is that each build lands on a frame where nothing is animating.
+    /// A page the notch is currently showing is skipped: it belongs to its parent's layout pass.
+    /// </summary>
+    void WarmRemainingPages()
+    {
+        var queue = new Queue<PillState>(new[]
+        {
+            PillState.Settings, PillState.Notes, PillState.Library, PillState.Calendar,
+            PillState.ManualNote, PillState.Ask, PillState.About, PillState.PrepCard,
+            PillState.NoSpeech, PillState.MeetingPrompt, PillState.RecordingOpen, PillState.Summarizing,
+        });
+
+        void Next()
+        {
+            if (queue.Count == 0) { App.Log("notch warm: every page is built - no cold measure left"); return; }
+            var s = queue.Dequeue();
+            try
+            {
+                if (_views.ContainsKey(s) || s == _state.Current) { Next(); return; }
+                var v = ViewFor(s);
+                if (VisualTreeHelper.GetParent(v) is null)
+                {
+                    var (w, h) = CardSize(s);
+                    v.Measure(new Size(Math.Max(1, w - 2), double.PositiveInfinity));
+                    v.Arrange(new Rect(new Point(0, 0), v.DesiredSize));
+                    v.UpdateLayout();
+                }
+            }
+            catch (Exception ex) { App.Log($"notch warm ({s}, non-fatal): {ex.Message}"); }
+            Dispatcher.BeginInvoke(new Action(Next), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+
+        Dispatcher.BeginInvoke(new Action(Next), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     void OnStateChanged(PillState old, PillState next)
@@ -634,12 +710,8 @@ public partial class PillWindow : Window
         }
 
         if (announce) ShowNotesReady();   // the pill stands in for the page while it announces
-        // The glass top bleed hid DWM's top-corner rounding on a flush sheet; the hovering card has
-        // a real gap above it, so bleeding upward would just eat the hover. Always zero here.
-        var bleed = 0.0;
-        _topBleedPx = (int)Math.Round(bleed * dpi);
-        Host.Margin = new Thickness(0, bleed, 0, 0);
-        var targetH = fullH + bleed;
+        Host.Margin = new Thickness(0);
+        var targetH = fullH;
 
         // A hover pill expand/collapse is animated so it GROWS/SHRINKS smoothly, not a hard
         // size-snap. Other transitions stay instant.
@@ -662,6 +734,7 @@ public partial class PillWindow : Window
                 // here too, or a faint card ghost stays at the landing spot until the deferred swap.
                 Material.Visibility = Visibility.Collapsed;
                 PinCorners();
+                ReleaseClip();
                 Root.Clip = null;
                 // Computed, not read back: Window.Left updates asynchronously on WM_MOVE, so
                 // reading it right after the resize sees the OLD value.
@@ -716,8 +789,8 @@ public partial class PillWindow : Window
             SetCardSize(w, targetH);
             // Clip to ZERO height and hide the content BEFORE Show(), so the very first composited
             // frame is empty - not a full-height box. RevealDown animates the clip open from here.
-            PinCorners();   // the entrance is an animated rounded-RECT clip; the squircle waits for the settle
-            Root.Clip = new RectangleGeometry(new Rect(0, 0, w, 0));
+            PinCorners();   // the shape belongs to DriveClip until the settle
+            DriveClip(new RectangleGeometry(new Rect(0, 0, w, 0)));
             Host.Opacity = 0;
             PlaceMascot(targetH, 0);       // Toki starts at this state's spot - no glide on a fresh reveal
             // Lay out and force the FINAL physical size/position BEFORE Show(): on a hidden window
@@ -728,12 +801,8 @@ public partial class PillWindow : Window
             PlaceExactTopCenter(w, targetH);
             // Snapshot what the entrance starts FROM at the instant the window is shown - sampling
             // live races the wall-clock animation, so a busy machine fails a correct build.
-            _entranceArm = ((Root.Clip as RectangleGeometry)?.Rect.Height ?? -1,
+            _entranceArm = (_clipBox?.Rect.Height ?? -1,
                             MascotZone.Opacity, MascotPop.ScaleX, Host.Opacity);
-            // THE ONE SAFE MOMENT TO PHOTOGRAPH THE BACKDROP: the position is final and the window
-            // is still off screen, so it cannot capture itself. Ghost mode would also protect us,
-            // but it is off on the owner's machine, so this does not rely on it.
-            RefreshBackdrop(w, targetH);
             Show(); ApplyGhost();          // re-apply WDA - hide/show can drop it
             PlaceExactTopCenter(w, targetH);   // re-assert (handles the first-ever show, before the HWND existed)
             if (_blurOn) { ApplyBlur(true); ApplyRoundRegion(true); }   // Show can drop the accent - re-assert glass
@@ -820,7 +889,7 @@ public partial class PillWindow : Window
             //
             // Re-origin the clip in the SAME dispatcher run as the resize so they compose into one
             // frame; SettleCorners still follows to swap the arc for the squircle.
-            Root.Clip = new RectangleGeometry(new Rect(0, 0, w, h), CornerRadius, CornerRadius);
+            DriveClip(new RectangleGeometry(new Rect(0, 0, w, h)));
 
             // Settle onto the exact target: one resize, after the motion has finished.
             SizeWindowNow(w, h);
@@ -984,7 +1053,7 @@ public partial class PillWindow : Window
         // shifts left by half the pad difference to put the card on the screen's centreline.
         int skew = (int)Math.Round((CardPadL - CardPadR) / 2 * dpi.DpiScaleX);
         int x = work.Left + ((work.Right - work.Left) - pw) / 2 - skew;
-        int y = work.Top + gap - _topBleedPx;
+        int y = work.Top + gap;
         if (x == _lastPlaceX && y == _lastPlaceY) return;
         _lastPlaceX = x; _lastPlaceY = y;
         SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
@@ -1000,13 +1069,13 @@ public partial class PillWindow : Window
     {
         // The one path that sets no new clip: clear whatever is there so a stale one cannot cap the
         // content (the caller no longer clears it, because clearing it destroys the current size).
-        if (unionW <= 1 || unionH <= 1) { _pinGen++; PinCorners(); Root.Clip = null; SettleCorners(); onSettled?.Invoke(); return; }
+        if (unionW <= 1 || unionH <= 1) { _pinGen++; PinCorners(); ReleaseClip(); Root.Clip = null; SettleCorners(); onSettled?.Invoke(); return; }
 
         // ═══ START FROM WHERE THE CARD ACTUALLY IS ═══
         // _cardW/_cardH is written at the START of a morph, so while one is in flight it already
         // claims the DESTINATION - a superseding morph must read the LIVE clip's Rect (its current
         // animated value) or it produces a from==to animation and the card snaps.
-        var live = (Root.Clip as RectangleGeometry)?.Rect;
+        var live = _clipBox?.Rect;
         var fromW = live is { Width: > 1 } lw ? lw.Width : Math.Max(1, _cardW > 0 ? _cardW : toW);
         var fromH = live is { Height: > 1 } lh ? lh.Height : Math.Max(1, _cardH > 0 ? _cardH : toH);
         var gen = ++_pinGen;
@@ -1073,9 +1142,9 @@ public partial class PillWindow : Window
         // at its full size.
         App.Log($"morph clip {from.Width:F0}x{from.Height:F0} -> {to.Width:F0}x{to.Height:F0}"
               + $"  union {unionW:F0}x{unionH:F0}  ({ms}ms)");
-        var geo = new RectangleGeometry(from, CornerRadius, CornerRadius);
-        PinCorners();   // arc rim + arc corners for the ride; the squircle returns on the settle below
-        Root.Clip = geo;
+        var geo = new RectangleGeometry(from);
+        PinCorners();   // keep ApplyCornerGeometry off the shape; DriveClip owns it for the ride
+        DriveClip(geo);
         _clipGen++;   // supersede any reveal/conceal clip still in flight
 
         var anim = new RectAnimation(from, to, new Duration(TimeSpan.FromMilliseconds(ms)))
@@ -1099,7 +1168,7 @@ public partial class PillWindow : Window
             // the card at the union width, fully plated, for a frame or two. Collapsing Home (344)
             // to the peek (52) flashed back to 344px every single time. Hold the target rect until
             // the settle timer has actually resized the window; SettleCorners replaces it there.
-            Root.Clip = new RectangleGeometry(to);
+            DriveClip(new RectangleGeometry(to));
             // No SettleCorners here: AnimateSize's settle timer owns it, once the window has
             // actually reached the target size. And put Toki back: the shift is the clip's inset
             // WHILE the window is held at the union size - once the clip is dropped it is nonsense,
@@ -1148,11 +1217,6 @@ public partial class PillWindow : Window
         MascotShift.X = 0;
     }
 
-    /// <summary>The top bleed in DIPs. _topBleedPx is PHYSICAL pixels (used for SetWindowPos);
-    /// a RenderTransform is in DIPs, and mixing the two is off by the DPI scale.</summary>
-    double BleedDip => _topBleedPx <= 0 ? 0
-        : _topBleedPx / (_hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0);
-
     /// <summary>Glide Toki's bubble to the current state's spot: centered on a compact pill,
     /// bottom-left on the expanded recording panel, level with the header on tall panels.
     /// Composition-only (translate), never Margin.</summary>
@@ -1163,11 +1227,15 @@ public partial class PillWindow : Window
         // compact pill; only the tall expanded panel drops him to the bottom-left corner.
         double y = _state.Current switch
         {
-            // Clamped to the TOP BLEED, never negative: a compact pill is shorter than the bubble,
-            // and a flush state pulls the window above the work area, so an unclamped offset cuts
-            // the top off the circle. A few pixels low beats a circle with a flat top.
-            _ when cardH <= 90      => Math.Max(BleedDip, (cardH - zone) / 2.0),   // compact pill: centred, never clipped
-            PillState.RecordingOpen => Math.Max(0, cardH - zone + 8),      // corner overlap, pokes into the shadow pad
+            // A compact pill is SHORTER than the bubble, so "centred" means the circle overlaps the
+            // card's top and bottom equally. The window has no top pad, so 0 is the highest the zone
+            // can sit without its crown being clipped - which leaves the bubble hanging below a 48px
+            // bar. The old code clamped to the glass TOP BLEED instead of 0 and pushed it 8px lower
+            // still; that is the sag the owner reported, and the bleed is gone now.
+            _ when cardH <= 90      => 0,
+            // Flush with the card's floor, not 8px past it. "Pokes into the shadow pad" read as
+            // sagging off the corner on the real panel.
+            PillState.RecordingOpen => Math.Max(0, cardH - zone),
             _                       => 8,                                  // tall panel: level with the header row
         };
         if (ms <= 0)
@@ -1201,10 +1269,6 @@ public partial class PillWindow : Window
             // full material; "Glassy notch" is purely a transparency switch.
             Root.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty,
                 Toki.Llm.AppSettings.Current.GlassyNotch ? "CardPlate" : "CardPlateOpaque");
-            // Not a capture: only shows or hides the photograph we already hold. Capturing here
-            // would run while the card is on screen, which is how a window photographs itself.
-            Backdrop.Visibility = Toki.Llm.AppSettings.Current.GlassyNotch && Backdrop.Background is not null
-                ? Visibility.Visible : Visibility.Collapsed;
             ApplyBlur(false); ApplyRoundRegion(false);
         }
         // The rim, corner radius, clip and Toki's disc rim are ONE decision (ApplyCornerGeometry).
@@ -1265,6 +1329,97 @@ public partial class PillWindow : Window
     bool? _borderRimOn;           // avoids re-establishing the DynamicResource on every transition
 
     /// <summary>Hand the card's shape to the morph machinery: arc rim, arc corners, no squircle.</summary>
+    // ═══════════════ THE SILHOUETTE NEVER CHANGES SHAPE MID-MOTION ═══════════════
+    //
+    // Until 2026-09-27 every clip animation - the reveal, the retract, and every page morph - ran on
+    // a RectangleGeometry with CIRCULAR corner radii, while the card AT REST wore a squircle. So the
+    // corner silhouette snapped arc -> squircle twice on every single transition.
+    //
+    // Squircle.cs claims the two "depart by under half a pixel ... screenshots won't show it", and
+    // that is true only of the maximum deviation measured along the corner diagonal. Measured on
+    // film, 20px down from the top edge, the squircle sits THREE PIXELS further out per side,
+    // because smoothing starts the curve (1 + s) * r = 38px from the corner where the arc starts at
+    // 24px. Frame-by-frame the corner visibly rounds off as a transition begins and flattens as it
+    // ends. That is what the owner has now reported twice as "it still resizes for a split second"
+    // - it is not a resize at all, and the width never changes (the morph log reads 380 -> 380).
+    //
+    // So the clip box is now just DATA: an animated rect nothing is clipped by directly. Root.Clip
+    // is rebuilt as a squircle from it every frame, which also lets the real squircle rim stay
+    // visible throughout instead of handing over to Root's arc Border. Building a StreamGeometry of
+    // a dozen segments per frame is far cheaper than the layout pass the clip exists to avoid;
+    // --fpstest is the check, and it is why the rect is still the thing that animates.
+    RectangleGeometry? _clipBox;
+    bool _clipDriving;
+    Rect _lastPainted;
+    int _clipStill;
+
+    /// <summary>Animate this rect and paint the card as a squircle of it on every frame.</summary>
+    void DriveClip(RectangleGeometry box)
+    {
+        _clipBox = box;
+        _clipStill = 0;
+        _lastPainted = Rect.Empty;
+        PaintClipShape();
+        if (_clipDriving) return;
+        _clipDriving = true;
+        System.Windows.Media.CompositionTarget.Rendering += OnClipFrame;
+    }
+
+    /// <summary>Stop repainting and hand the shape back to <see cref="ApplyCornerGeometry"/>.</summary>
+    void ReleaseClip()
+    {
+        _clipBox = null;
+        if (!_clipDriving) return;
+        _clipDriving = false;
+        System.Windows.Media.CompositionTarget.Rendering -= OnClipFrame;
+    }
+
+    void OnClipFrame(object? sender, EventArgs e)
+    {
+        // SELF-PARKING. Every caller is supposed to release, and one of them will eventually forget;
+        // a per-frame handler that outlives its animation is a battery leak nobody would ever see.
+        // Six identical frames means nothing is animating this any more, so unhook. DriveClip hooks
+        // straight back up, so parking early costs a single subscription, never a dropped frame.
+        if (_clipBox is null) { ReleaseClip(); return; }
+        if (!PaintClipShape() && ++_clipStill > 6)
+        {
+            _clipDriving = false;
+            System.Windows.Media.CompositionTarget.Rendering -= OnClipFrame;
+        }
+    }
+
+    /// <summary>Returns true if the shape actually changed this frame.</summary>
+    bool PaintClipShape()
+    {
+        if (_clipBox is not { } box) return false;
+        var r = box.Rect;              // the animation's CURRENT value
+        if (r == _lastPainted) return false;
+        _lastPainted = r;
+        _clipStill = 0;
+
+        if (r.Width <= 0.5 || r.Height <= 0.5)
+        {
+            // A zero-height reveal frame, or a fully shut retract. Empty, not null: null means "no
+            // clip at all" and would paint the whole card.
+            Root.Clip = System.Windows.Media.Geometry.Empty;
+            RimPath.Visibility = Visibility.Collapsed;
+            return true;
+        }
+
+        Root.Clip = Theme.Squircle.Build(r, CornerRadius);
+        Root.CornerRadius = default;   // the clip is the only thing rounding the plate
+        SetBorderRim(false);
+        // The rim can follow the real corner now. It used to hide for the ride precisely BECAUSE the
+        // clip was a rounded rectangle and a squircle rim would have been cut at the corners; with
+        // the clip a squircle of the same box, the two agree and there is nothing to hide from.
+        if (_cardBare) { RimPath.Visibility = Visibility.Collapsed; return true; }
+        var rim = RimThickness();
+        RimPath.Data = Theme.Squircle.Outline(r, CornerRadius, rim);
+        RimPath.StrokeThickness = rim;
+        RimPath.Visibility = Visibility.Visible;
+        return true;
+    }
+
     void PinCorners() { _cornersPinned = true; ApplyCornerGeometry(); }
 
     /// <summary>Hand the shape back AFTER the pending layout pass, never synchronously: every settle
@@ -1275,50 +1430,6 @@ public partial class PillWindow : Window
         _cornersPinned = false;
         Dispatcher.BeginInvoke(new Action(ApplyCornerGeometry), System.Windows.Threading.DispatcherPriority.Loaded);
     }
-
-    /// <summary>
-    /// Photograph what is behind the card, blurred, as the glass backdrop.
-    ///
-    /// TWO RULES, both learned the hard way and both load-bearing:
-    ///
-    /// ONLY WHILE HIDDEN. Ghost mode keeps the notch out of screen captures, so a ghosted window
-    /// cannot photograph itself. But ghost mode is OFF on the owner's machine, and a visible window
-    /// capturing the screen underneath itself photographs its own last frame, which compounds into a
-    /// smear that looks exactly like a rendering bug. So the capture only runs when the window is
-    /// not on screen, and the photograph taken then is reused until the next time it is hidden.
-    ///
-    /// NEVER FROM A RENDER CALLBACK. One BitBlt plus a blur is fractions of a millisecond, which is
-    /// nothing on a state change and ruinous at 60Hz.
-    /// </summary>
-    void RefreshBackdrop(double winW, double winH)
-    {
-        if (!Toki.Llm.AppSettings.Current.GlassyNotch)
-        {
-            Backdrop.Visibility = Visibility.Collapsed;
-            Backdrop.Background = null;
-            return;
-        }
-
-        var src = PresentationSource.FromVisual(this);
-        if (src?.CompositionTarget is not { } ct) return;
-
-        // Card rect in DEVICE pixels. The window is deliberately BIGGER than the card (mascot
-        // gutter left, shadow pads right and bottom), so photographing the window rect would blur
-        // the wrong region and offset the whole material.
-        var topLeft = ct.TransformToDevice.Transform(new System.Windows.Point(Left + CardPadL, Top));
-        var size = ct.TransformToDevice.Transform(new System.Windows.Point(CardW(winW), CardH(winH)));
-        var origin = ct.TransformToDevice.Transform(new System.Windows.Point(0, 0));
-        var area = new System.Windows.Int32Rect(
-            (int)Math.Round(topLeft.X), (int)Math.Round(topLeft.Y),
-            (int)Math.Round(size.X - origin.X), (int)Math.Round(size.Y - origin.Y));
-        if (area.Width <= 0 || area.Height <= 0) return;
-
-        var brush = Theme.ScreenBackdrop.Capture(area);
-        if (brush is null) { Backdrop.Visibility = Visibility.Collapsed; return; }
-        Backdrop.Background = brush;
-        Backdrop.Visibility = Visibility.Visible;
-    }
-
     void ApplyCornerGeometry()
     {
         var rim = RimThickness();
@@ -1329,6 +1440,7 @@ public partial class PillWindow : Window
         // their own free-floating pills right out to the corners of the box.
         if (_cardBare)
         {
+            ReleaseClip();
             Root.Clip = null;
             Root.CornerRadius = new System.Windows.CornerRadius(CornerRadius);
             SetBorderRim(false);
@@ -1356,12 +1468,20 @@ public partial class PillWindow : Window
         // plate's clamped radius, minus the rim it sits inside, so the arcs hug the real corners.
         var plateRadius = Math.Min(CornerRadius, Math.Min(rw, rh) / 2);
         Material.Radius = Math.Max(0, plateRadius - rim);
-        // The photograph is concentric with the plate for the same reason the material is: a corner
-        // at the wrong radius cuts an arc across the card and reads as a rendering fault.
-        Backdrop.CornerRadius = new System.Windows.CornerRadius(Math.Max(0, plateRadius - rim));
+        // PINNED means a clip animation owns the shape: DriveClip is repainting Root.Clip and
+        // RimPath as a squircle of the animating box every frame, and anything written here would
+        // be a frame of the WRONG size fighting it (this runs from Root.SizeChanged, which fires
+        // mid-morph). Material.Radius above still applies - the plate's edge lights are not part of
+        // the clip. Formerly this branch installed the circular arc, which is what produced the
+        // shape pop; it now leaves the shape entirely alone.
+        if (_cornersPinned) return;
+        ReleaseClip();   // past this point the resting shape is authoritative
 
-        if (_cornersPinned || rw <= 4 * rim || rh <= 4 * rim)
+        // A box too small to hold the corner at all: the arc is the honest fallback, and a squircle
+        // clamped this hard is indistinguishable from it anyway.
+        if (rw <= 4 * rim || rh <= 4 * rim)
         {
+            Root.Clip = null;
             Root.CornerRadius = new System.Windows.CornerRadius(CornerRadius);
             SetBorderRim(true);
             RimPath.Visibility = Visibility.Collapsed;
@@ -1403,7 +1523,16 @@ public partial class PillWindow : Window
     // the only way to check it is to ask the real window.
 
     /// <summary>The card's clip rect, or null if it is not clipped. Should be zero-height on reveal.</summary>
-    internal Rect? AuditCardClip() => (Root.Clip as RectangleGeometry)?.Rect;
+    internal Rect? AuditCardClip() => _clipBox?.Rect;
+
+    /// <summary>
+    /// True when the card is currently clipped to a SQUIRCLE rather than a rounded rectangle.
+    /// The invariant this guards: the silhouette must be the same shape at rest and in motion. A
+    /// RectangleGeometry here means something has gone back to circular corners for the ride, which
+    /// is a 3px-per-side shape pop at both ends of every transition (the defect the owner reported
+    /// twice as "it resizes for a split second").
+    /// </summary>
+    internal bool AuditClipIsSquircle() => Root.Clip is not null && Root.Clip is not RectangleGeometry;
 
     /// <summary>Toki's opacity and scale at this instant. Both should be at their FROM on reveal.</summary>
     internal (double Opacity, double Scale) AuditMascotEntrance() => (MascotZone.Opacity, MascotPop.ScaleX);
@@ -1555,21 +1684,12 @@ public partial class PillWindow : Window
     public void RefreshSurface()
     {
         var s = _state.Current;
-        if (s == PillState.Hidden) { _topBleedPx = 0; ApplyBlur(false); ApplyRoundRegion(false); return; }
-        var peek = s is PillState.Collapsed or PillState.RecordingBar;
-        SetSurface(peek);
-        // Live toggle: add/remove the flush-top bleed on the CURRENT panel (height + content + position)
-        // so turning glass on/off updates immediately without a restart.
-        var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this).DpiScaleY : 1.0;
-        var bleed = (Toki.Llm.AppSettings.Current.GlassyNotch && !peek) ? GlassTopBleed : 0.0;
-        var delta = bleed - Host.Margin.Top;
-        if (Math.Abs(delta) > 0.1)
-        {
-            Host.Margin = new Thickness(0, bleed, 0, 0);
-            _topBleedPx = (int)Math.Round(bleed * dpi);
-            Height = Math.Max(1, ActualHeight + delta);   // window-space on both sides - no pad conversion
-            PositionTopCenter();
-        }
+        if (s == PillState.Hidden) { ApplyBlur(false); ApplyRoundRegion(false); return; }
+        SetSurface(s is PillState.Collapsed or PillState.RecordingBar);
+        // "Glassy notch" is now PURELY a transparency switch on the plate. It used to also grow the
+        // panel 8px upward so a photographed backdrop could run to the screen edge; that backdrop is
+        // gone (see PillWindow.xaml) and the bleed went with it, along with the 8px it was pushing
+        // Toki's bubble down by.
     }
 
     // ── real frosted glass (DWM acrylic blur-behind) for the "Glassy notch" toggle ──
@@ -1659,7 +1779,11 @@ public partial class PillWindow : Window
     {
         // Retract UP into the top edge, GPU-COMPOSITED: only an animated clip + content fade run -
         // the window is never resized per frame.
-        ConcealUp(CardW(ActualWidth), 170, Hide);
+        // 180ms. Filmed, the reveal's VISIBLE travel is over in about 180ms too (the 280 it is
+        // given is mostly the tail of a curve that is already 99% done), so matching the number on
+        // paper would have made the close feel longer than the open, not shorter. Match what the
+        // eye sees, not what the constant says.
+        ConcealUp(CardW(ActualWidth), 180, Hide);
     }
 
     /// <summary>Composited "unfurl": reveal the notch downward via an animated clip (render-only - no
@@ -1671,7 +1795,7 @@ public partial class PillWindow : Window
         var gen = ++_clipGen;
         var geo = new RectangleGeometry(new Rect(0, 0, w, 0));
         PinCorners();
-        Root.Clip = geo;
+        DriveClip(geo);
         var anim = new RectAnimation(new Rect(0, 0, w, 0), new Rect(0, 0, w, h),
             new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Drawer };
         // The clip only masks ROOT - the shadow caster is a sibling, so without this the full-size
@@ -1683,6 +1807,7 @@ public partial class PillWindow : Window
         anim.Completed += (_, _) =>
         {
             if (gen != _clipGen) return;
+            ReleaseClip();
             Root.Clip = null;
             SettleCorners();
             if (ShadowCaster.Visibility == Visibility.Visible)
@@ -1703,10 +1828,20 @@ public partial class PillWindow : Window
         // conceal is a dead frame (the peek is 42 tall inside a 66 tall window).
         var h = CardH(ActualHeight > 0 ? ActualHeight : Height);
         var geo = new RectangleGeometry(new Rect(0, 0, w, h));
-        PinCorners();   // and it stays pinned: ParkAfterHide leaves the clip shut, not squircled
-        Root.Clip = geo;
+        PinCorners();   // and it stays pinned: ParkAfterHide leaves the clip shut
+        DriveClip(geo);
         var anim = new RectAnimation(new Rect(0, 0, w, h), new Rect(0, 0, w, 0),
-            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Depart };
+            new Duration(TimeSpan.FromMilliseconds(ms))) { EasingFunction = Theme.Motion.Retract };
+        // THE CONTENT LEAVES WITH THE CARD. The clip is a MASK: on its own it eats the card from the
+        // bottom up while the text inside stands perfectly still, which is the other half of why the
+        // close read as a cut. The reveal has always paired its clip with MorphContent() so the
+        // content settles in; the retract had no counterpart at all. Now the content rides up a
+        // little as the card furls, so the two halves of the gesture match.
+        // Transform only, never layout: this is a RenderTransform on the already-composited host.
+        HostShift.BeginAnimation(TranslateTransform.YProperty, null);
+        HostShift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(0, -Theme.Motion.Rise, new Duration(TimeSpan.FromMilliseconds(ms)))
+            { EasingFunction = Theme.Motion.Retract });
         // The shadow leaves FIRST (a shadow with no caster is the tell of a cheap fade).
         ShadowCaster.BeginAnimation(OpacityProperty,
             new DoubleAnimation(0, Theme.Motion.Dur(Math.Max(60, ms - 60))) { EasingFunction = Theme.Motion.Depart });
@@ -1750,8 +1885,23 @@ public partial class PillWindow : Window
             System.Windows.Media.CompositionTarget.Rendering += tick;
         };
         geo.BeginAnimation(RectangleGeometry.RectProperty, anim);
-        Host.BeginAnimation(OpacityProperty, null);
-        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(Math.Max(60, ms - 20)))));
+        // ═══ THE CONTENT WAS NOT FADING. IT WAS BEING CUT. ═══
+        // This read `BeginAnimation(OpacityProperty, null)` and then started a To-only fade to 0.
+        // Clearing an animation does not freeze the property at what you can see - it reverts it to
+        // its LOCAL value, and MorphContent leaves that local value at 0 (it sets Host.Opacity = 0
+        // and then animates UP to 1, so 1 was only ever the animation's doing). So the null dropped
+        // the content to invisible in a single frame, and the "fade" that followed ran 0 -> 0 and
+        // was never visible at all.
+        //
+        // Filmed at 60fps: content fully legible at t=0, completely gone at t=16ms, with the card
+        // still at full height behind it. That is the other half of "it just cuts back up" (owner,
+        // 2026-09-27) - half was the easing curve, half was this.
+        //
+        // Reading Host.Opacity FIRST gives the current animated value (1), and a From/To animation
+        // replaces the running one without a null. Never null an animation you are about to replace.
+        Host.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(Host.Opacity, 0, new Duration(TimeSpan.FromMilliseconds(Math.Max(60, ms - 20))))
+            { EasingFunction = Theme.Motion.Retract });
     }
 
     /// <summary>Put the notch back to its "before it opens" state the moment it hides, so the last
@@ -1763,6 +1913,10 @@ public partial class PillWindow : Window
         // The clip is deliberately NOT cleared: it stays shut. Every path that shows this window
         // sets its own clip first, so nothing depends on it being null while hidden.
         ArmMascotReveal();
+        // Put the retract's content lift back to zero, or the next open starts with its content
+        // already sitting high inside the card and settles from the wrong place.
+        HostShift.BeginAnimation(TranslateTransform.YProperty, null);
+        HostShift.Y = 0;
         MascotZone.Visibility = Visibility.Collapsed;
         ShadowCaster.BeginAnimation(OpacityProperty, null);
         ShadowCaster.Opacity = 0;
@@ -1795,7 +1949,24 @@ public partial class PillWindow : Window
     const int LoaderTuckGraceMs = 540; // the open loader tucks this long after the cursor leaves it
     int _loaderOffMs;   // accumulated time the cursor has been off the open loader
     const int ExpandDwellMs = 260;   // recording peek → controls: quick (you want Stop fast)
-    const int OpenDwellMs = 850;     // launcher peek → Home: DELIBERATE - a brief hover just shows the peek
+
+    // HOVER INTENT, 2026-09-23. The owner: "random hovers it opens up, random hovers it don't ...
+    // theres no system in place for how toki is activated". The dwell below was the ONLY defence, so
+    // it had to be long, and a long dwell is itself the thing that makes an intended hover fail.
+    //
+    // The model is hoverIntent's, not a timer's: an ARRIVAL is a cursor that SLOWS DOWN inside the
+    // target. A transit is a cursor that keeps moving. Published default is 6px per 100ms (~60px/s);
+    // at this 60ms tick that is ~4px, which is tighter than a hand resting on a mouse actually holds,
+    // so PeekMaxStep sits at 10px/tick (~167px/s) - still 4x tighter than the edge summon's fling
+    // gate, because the peek is a much smaller target than the whole top edge.
+    //
+    // With speed and direction carrying the rejection, the dwell no longer has to. 850ms was nearly
+    // double NN/g's upper bound for exposing hidden content (300-500ms) and every millisecond of it
+    // was a chance to fail an intended hover.
+    const int OpenDwellMs = 360;     // launcher peek → Home, once the cursor has actually settled
+    const int PeekMaxStep = 10;      // per-tick cursor move above which the cursor is passing THROUGH
+    const int PeekReEntryGraceMs = 300; // a jitter out and straight back keeps the dwell it had earned
+    const int PeekExitSlackPx = 20;  // leaving is harder than arriving - see CursorOverVisiblePeek
     const int CollapseDelayMs = 120; // close soon after leaving - closing should feel snappy
     const int RecordingFoldMs = 2200; // the recording bar is opened by a CLICK, so it folds away on
                                       // its own schedule, not the instant the pointer leaves it
@@ -1817,6 +1988,9 @@ public partial class PillWindow : Window
     readonly System.Windows.Threading.DispatcherTimer _hoverPoll =
         new(System.Windows.Threading.DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(HoverPollMs) };
     int _overMs, _offMs, _tuckMs, _edgeMs, _lastX, _lastY;
+    readonly State.HoverIntent _peekIntent = new();   // "is this an arrival?" - see HoverIntent
+    int _stepPx;       // how far the cursor moved on this tick - the arrival/transit signal
+    int _stepY;        // and its vertical component: a cursor diving DOWN past the notch is leaving
     bool _hoverWired, _wasOver, _hasLast;
     bool _edgeArmed;   // true once the cursor has dropped clear of the top edge - a deliberate summon
                        // is a reach UP from the page body, never a cursor already parked up top.
@@ -1856,6 +2030,7 @@ public partial class PillWindow : Window
     {
         EnsureHoverPoll();
         _overMs = _offMs = _tuckMs = _edgeMs = 0;
+        _peekIntent.Reset();
         _wasOver = _hasLast = false;
         if (!_hoverPoll.IsEnabled) _hoverPoll.Start();
     }
@@ -2111,7 +2286,7 @@ public partial class PillWindow : Window
         var chh = CardH(ActualHeight > 0 ? ActualHeight : Height);   // card, not window (see ConcealUp)
         var geo = new RectangleGeometry(new Rect(0, 0, cw, chh));
         PinCorners();
-        Root.Clip = geo;
+        DriveClip(geo);
         geo.BeginAnimation(RectangleGeometry.RectProperty,
             new RectAnimation(new Rect(0, 0, cw, chh), new Rect(0, 0, cw, 0),
                 new Duration(TimeSpan.FromMilliseconds(380))) { EasingFunction = Theme.Motion.Depart });
@@ -2347,8 +2522,25 @@ public partial class PillWindow : Window
         finally { _growing = false; }
     }
 
+    /// <summary>How far the cursor moved since the last tick. ONE measurement, shared by the edge
+    /// summon and the peek, so the two cannot disagree about whether the cursor is moving. Runs every
+    /// tick including the ones that return early, or the next reading would be a jump.</summary>
+    void TrackCursorStep()
+    {
+        if (!GetCursorPos(out var p)) { _hasLast = false; _stepPx = 0; _stepY = 0; return; }
+        if (_hasLast)
+        {
+            var dx = p.X - _lastX; var dy = p.Y - _lastY;
+            _stepY = dy;
+            _stepPx = (int)Math.Round(Math.Sqrt((double)dx * dx + (double)dy * dy));
+        }
+        else { _stepPx = 0; _stepY = 0; }
+        _lastX = p.X; _lastY = p.Y; _hasLast = true;
+    }
+
     void HoverTick()
     {
+        TrackCursorStep();
         var cur = _state.Current;
 
         // Tucked away: watch the top-centre edge to summon the peek.
@@ -2357,7 +2549,9 @@ public partial class PillWindow : Window
         // A PEEK is judged against the few pixels it actually draws; a panel against the whole
         // window (see CursorOverVisiblePeek for why the two rules differ).
         var isPeek = cur is PillState.Collapsed or PillState.RecordingBar;
-        var over = isPeek ? CursorOverVisiblePeek() : CursorOverPill();
+        // 3px to arrive (enough that the edge of a small peek is reachable, not so much that the
+        // gutter comes back); PeekExitSlackPx to stay, once the dwell has already been earned.
+        var over = isPeek ? CursorOverVisiblePeek(_peekIntent.DwellMs > 0 ? PeekExitSlackPx : 3) : CursorOverPill();
 
         // Stayable pages: tuck to a sliver after idle; hover the sliver to bring the SAME
         // page back; keep it up while you're on it. Context is preserved (no rebuild).
@@ -2398,10 +2592,13 @@ public partial class PillWindow : Window
             // The launcher peek keeps its long deliberate dwell.
             var hoverOpens = cur == PillState.Collapsed;
             _offMs = 0;
-            _overMs = over && hoverOpens ? _overMs + HoverPollMs : 0;
-            if (hoverOpens && _overMs >= OpenDwellMs)
+
+            // ARRIVING, OR PASSING THROUGH? HoverIntent owns that judgement; this only feeds it the
+            // cursor's motion and asks.
+            if (!hoverOpens) _peekIntent.Reset();
+            if (hoverOpens && _peekIntent.Tick(over, _stepPx, _stepY, HoverPollMs,
+                                               PeekMaxStep, OpenDwellMs, PeekReEntryGraceMs))
             {
-                _overMs = 0;
                 // Hovering the resting peek opens the remembered page - UNLESS a prep card is armed
                 // for a meeting about to start. The card never takes the screen by itself; hover is
                 // the only way it appears before a meeting.
@@ -2437,7 +2634,9 @@ public partial class PillWindow : Window
     // centre band AND moving slowly. A fast reach toward a browser tab won't cross it.
     void EdgeTick()
     {
-        if (!EdgeSummon || EdgeSuppressed() || !GetCursorPos(out var p)) { _edgeMs = 0; _hasLast = false; return; }
+        // _hasLast/_lastX are TrackCursorStep's now - clearing them here would make the next tick
+        // read a jump of zero and call a fling "slow".
+        if (!EdgeSummon || EdgeSuppressed() || !GetCursorPos(out var p)) { _edgeMs = 0; return; }
         var work = PhysicalWorkArea();
         int cx = work.Left + (work.Right - work.Left) / 2;
 
@@ -2446,13 +2645,15 @@ public partial class PillWindow : Window
         // just-closed Toki instantly re-summons.
         if (p.Y > work.Top + EdgeReArmBelowPx) _edgeArmed = true;
 
-        // Brief cooldown right after a close-off. Still track motion so the dwell starts clean after.
-        if (Environment.TickCount64 < _edgeReadyTick) { _edgeMs = 0; _lastX = p.X; _lastY = p.Y; _hasLast = true; return; }
+        // Brief cooldown right after a close-off. Motion keeps being tracked by TrackCursorStep, so
+        // the dwell starts clean after it without this having to bookkeep anything.
+        if (Environment.TickCount64 < _edgeReadyTick) { _edgeMs = 0; return; }
 
         bool atEdge = p.Y <= work.Top + EdgeTopPx && Math.Abs(p.X - cx) <= EdgeBandHalf;
-        int dx = _hasLast ? p.X - _lastX : 0, dy = _hasLast ? p.Y - _lastY : 0;
-        bool slow = dx * dx + dy * dy <= EdgeMaxStep * EdgeMaxStep;
-        _lastX = p.X; _lastY = p.Y; _hasLast = true;
+        // The SHARED step (TrackCursorStep), not a second private one: two copies of "is the cursor
+        // moving" drift apart the moment one caller returns early, and this one used to skip its own
+        // update on the suppressed paths.
+        bool slow = _stepPx <= EdgeMaxStep;
 
         if (_edgeArmed && atEdge && slow)
         {
@@ -2512,7 +2713,15 @@ public partial class PillWindow : Window
     /// <summary>Is the pointer on the peek's own drawn pixels, not the (much larger) window around
     /// them? A peek judged by the window drops open when the pointer is nowhere near it. Panels keep
     /// the forgiving window test - the mascot gutter is genuinely part of them.</summary>
-    bool CursorOverVisiblePeek()
+    /// <summary>Is the cursor on the peek? <paramref name="slack"/> is how far outside the drawn card
+    /// still counts.
+    ///
+    /// ENTER AND EXIT ARE NOT THE SAME RECTANGLE. Opening is judged tightly, so a cursor that merely
+    /// grazes the peek does not start the clock. Staying open is judged loosely, because an element
+    /// that is already up should be harder to dismiss than it was to summon - a 1px drift closing a
+    /// panel is the flicker every hover menu in the world has had to fix. Win32 ships the same
+    /// asymmetry (tooltip 500ms in, 5000ms autopop) and so does every published mega-menu.</summary>
+    bool CursorOverVisiblePeek(int slack)
     {
         if (!GetCursorPos(out var p) || _rectR <= _rectL) return false;
         var dpi = _hwnd != IntPtr.Zero ? VisualTreeHelper.GetDpi(this) : new DpiScale(1, 1);
@@ -2528,9 +2737,6 @@ public partial class PillWindow : Window
         var cardHpx = _cardH > 0 ? (int)Math.Round(_cardH * dpi.DpiScaleY) : (_rectB - _rectT);
         var left = areaL + Math.Max(0, (areaW - cardWpx) / 2);   // the card is centred in that area
 
-        // Half the slack a panel gets: enough that the very edge of a small peek is still reachable,
-        // not so much that the gutter comes back.
-        const int slack = 3;
         return p.X >= left - slack && p.X <= left + cardWpx + slack
             && p.Y >= _rectT - slack && p.Y <= _rectT + cardHpx + slack;
     }

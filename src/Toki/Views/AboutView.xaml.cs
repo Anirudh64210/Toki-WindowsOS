@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -58,6 +58,17 @@ public partial class AboutView : UserControl
             new Credit("Recognizers-Text", "Natural-language dates", "Microsoft",
                        "MIT", "https://github.com/microsoft/Recognizers-Text"),
         }),
+        // TYPEFACES. Toki bundles these inside the exe, which is exactly the case the SIL Open Font
+        // License 1.1 permits and exactly the case where its attribution clause bites: the licence
+        // has to travel with the font. Both OFL texts ship as resources beside the .ttf files and in
+        // THIRD-PARTY-NOTICES.md, and they are credited here for the same reason Parakeet is.
+        ("TYPEFACES", new[]
+        {
+            new Credit("Inter", "Every word of Toki's interface", "Rasmus Andersson",
+                       "OFL-1.1", "https://github.com/rsms/inter"),
+            new Credit("Spectral", "Note titles", "Production Type",
+                       "OFL-1.1", "https://github.com/productiontype/Spectral"),
+        }),
     };
 
     public AboutView()
@@ -112,18 +123,22 @@ public partial class AboutView : UserControl
         left.Children.Add(sub);
         Grid.SetColumn(left, 0);
 
-        // CC-BY / Apache carry real obligations; their chips are tinted amber.
+        // CC-BY / Apache carry real obligations, so they are marked - but NOT in amber. Amber means
+        // time and counts everywhere else in Toki, and as a filled chip it rendered as a pale yellow
+        // pill on the light card, which the owner called out as an ugly yellow. The obligation now
+        // shows as full-strength text on the same neutral chip every other licence gets: one chip
+        // shape, one colour, weight carrying the difference. (2026-09-23)
         var strong = c.Licence.StartsWith("CC-BY") || c.Licence.StartsWith("Apache");
         var chip = new Border
         {
-            Background = (Brush)FindResource(strong ? "AmberDark" : "Chip"),
+            Background = (Brush)FindResource("Chip"),
             CornerRadius = new CornerRadius(7), Padding = new Thickness(8, 3, 8, 3),
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
             Child = new TextBlock
             {
                 Text = c.Licence, FontSize = 10, FontWeight = FontWeights.SemiBold,
                 FontFamily = (FontFamily)FindResource("UiFont"),
-                Foreground = (Brush)FindResource(strong ? "Amber" : "TextDim"),
+                Foreground = (Brush)FindResource(strong ? "Text" : "TextDim"),
             },
         };
         Grid.SetColumn(chip, 1);

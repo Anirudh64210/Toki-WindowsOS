@@ -54,6 +54,7 @@ static class RenderHarness
         // the open pill; this is the surface where the shimmer used to poke past the rounded ends, and
         // the "union" variant reproduces the tuck-morph width that caused it. Guards the capped track.
         SliverShot(dir);
+        TitledLoaderShot(dir);
 
         // The meeting prompt with REAL raw app identities - proves the friendly-name mapping and
         // that a long/wrapping prompt is fully visible at its measured height.
@@ -159,6 +160,48 @@ static class RenderHarness
     /// shimmer's containment inside the rounded ends is visible. Rendered twice: "flat" (content =
     /// card) and "union" (content wider than the card, as the tuck morph pins it) - the width that let
     /// the bar escape the rounded ends before the track was capped.</summary>
+    /// <summary>The OPEN loader at its real 220x50, with and without a meeting title. The title
+    /// replaces "Writing your notes" as soon as the model has written one (~2s into a 14s pass), and
+    /// a real title is far wider than the card - this is the shot that shows whether the trim reads
+    /// as a title or as damage. Deliberately uses the LONGEST title in the owner's Library.</summary>
+    static void TitledLoaderShot(string dir)
+    {
+        const double card = 220, full = 50;
+        var saved = App.SummarizeTitle;
+        var stage = App.SummarizeStage;
+        App.SummarizeStage = "Writing your notes";
+        foreach (var (tag, title) in new[]
+                 {
+                     ("none", null),
+                     ("short", "Hiring Sync"),
+                     ("long", "Organization Catalog Simplification and AI Workflow Research"),
+                 })
+        {
+            App.SummarizeTitle = title;
+            var view = new SummarizingView { Width = card, Height = full };
+            var pill = new Border { Width = card, Height = full };
+            pill.SetResourceReference(Border.BackgroundProperty, "CardPlate");
+            pill.Clip = Theme.Squircle.Build(new Rect(0, 0, card, full), 24);
+            var layered = new Grid();
+            layered.Children.Add(new Theme.CardMaterial { Radius = 23 });
+            layered.Children.Add(view);
+            pill.Child = layered;
+
+            var canvas = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3C)),
+                Padding = new Thickness(24), Child = pill,
+            };
+            double tw = card + 48, th = full + 48;
+            canvas.Measure(new Size(tw, th));
+            canvas.Arrange(new Rect(0, 0, tw, th));
+            canvas.UpdateLayout();
+            Save(canvas, tw, th, Path.Combine(dir, $"Summarizing_open_title_{tag}.png"));
+        }
+        App.SummarizeTitle = saved;
+        App.SummarizeStage = stage;
+    }
+
     static void SliverShot(string dir)
     {
         const double card = 220, full = 50, sliver = 13;

@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.CalendarView"
+﻿<UserControl x:Class="Toki.Views.CalendarView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -25,10 +25,17 @@
                     Padding="12,7" Content="＋ New" Click="OnNew"/>
         </Grid>
 
-        <!-- ONE hairline under the header. There used to be two: this one, and a second on the
-             composer's own top border 12px below it, which drew a pair of tram-lines across the
-             panel the moment you pressed New (owner, 2026-08-14). -->
-        <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource Hairline}" Margin="0,10,0,0"/>
+        <!-- NO hairline under the header (2026-09-27). The 2026-08-14 note below is kept because
+             its finding still holds and still constrains us - there must never be TWO rules here,
+             and the composer's own top border is the one that survives when it opens:
+
+                 "ONE hairline under the header. There used to be two: this one, and a second on
+                  the composer's own top border 12px below it, which drew a pair of tram-lines
+                  across the panel the moment you pressed New (owner, 2026-08-14)."
+
+             Now there are none at rest. Same reason as About: a full-width rule across a 380px
+             card is a hard horizontal edge separating a heading from the content it already owns.
+             Spacing carries it instead. -->
 
         <!-- ═══ CREATE / EDIT, as a MODE ═══
              This used to be a strip docked ABOVE the agenda, so its height came out of the list's -

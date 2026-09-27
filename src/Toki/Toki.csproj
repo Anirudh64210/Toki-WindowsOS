@@ -48,6 +48,20 @@
 
   <ItemGroup>
     <Resource Include="Assets\toki.ico" />
+    <!-- BUNDLED TYPEFACES. Toki no longer sets its UI in a system font: Segoe UI Variable is the
+         face every Windows utility is set in, and the owner asked for the register the reference
+         notetakers read in (2026-09-27). Both families are SIL Open Font License 1.1, which permits
+         bundling inside an application and requires the licence travel with them - the .txt files
+         ship beside the fonts and the About screen credits both (lesson 11: attribution is a licence
+         obligation, not a courtesy).
+         STATIC weights, not the variable TTFs: WPF cannot address variable-font axes, so a variable
+         file renders every weight at 400 and lets WPF synthesise the rest. -->
+    <Resource Include="Fonts\Inter-Regular.ttf" />
+    <Resource Include="Fonts\Inter-Medium.ttf" />
+    <Resource Include="Fonts\Inter-SemiBold.ttf" />
+    <Resource Include="Fonts\Spectral-Regular.ttf" />
+    <Resource Include="Fonts\Inter-OFL.txt" />
+    <Resource Include="Fonts\Spectral-OFL.txt" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.SettingsView"
+﻿<UserControl x:Class="Toki.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -72,7 +72,11 @@
                 </Grid>
 
                 <!-- Everything else → the Library's Settings page. -->
-                <Border Height="1" Background="{DynamicResource Hairline}" Margin="12,0"/>
+                <!-- NO RULE HERE. It sat directly above a RowButton that paints a hover fill over
+                     the full row, so the rule was a fixed line hugging a moving highlight - and a
+                     divider between two rows 20px apart is the exact case Material 3 says to solve
+                     with white space. Owner, 2026-09-27: the separating lines "is ugly and weird". -->
+                <Border Height="8"/>
                 <!-- ONE rounded button, not a row with an arrow beside it. It used to hang past both
                      edges on negative margins, so its hover box read as a full-width rectangle rather
                      than a button, and the chevron on the right looked like the thing you were meant to

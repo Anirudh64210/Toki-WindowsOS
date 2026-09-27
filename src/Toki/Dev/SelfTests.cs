@@ -1536,8 +1536,36 @@ static class SelfTests
 
             // Hiding must park everything shut: Windows retains a layered window's LAST composed
             // frame and the next Show() presents it until a new frame lands.
+            // LET THE ENTRANCE FINISH before testing the exit. Every check above reads `arm`, which
+            // is a value snapshot taken at Show(), so pumping here cannot disturb them - and without
+            // it the content has not faded IN yet, so the retract probe below would be measuring a
+            // card that was never visible rather than one being cut. (Cost an hour: the probe failed
+            // against the FIXED code for this reason, which is the harness being wrong, not the fix.)
+            Pump(400);
+
+            // MUTATION PROBE for the content CUT (2026-09-27). Sample the retract IN FLIGHT.
+            //
+            // ORDER MATTERS AND IS THE WHOLE SETUP: this has to run while the last thing to have
+            // written Host.Opacity is the REVEAL's MorphContent, which leaves the LOCAL value at 0
+            // and animates up to 1. That is the precondition the bug needs -
+            // BeginAnimation(prop, null) reverts to that local 0, so the content vanished in one
+            // frame and the fade that followed ran 0 -> 0. Run a page morph in between and the
+            // local value is no longer 0, the bug cannot manifest, and the probe passes against
+            // broken code. It did exactly that for one build, which is why the corner probe below
+            // now comes AFTER this one instead of before it.
+            //
+            // Threshold deliberately near zero: the defect's signature is an exact, synchronous
+            // 0.00, so any intermediate value means a real fade is in flight. A mid-range threshold
+            // would measure the CURVE instead, and the curve is free to change (it did: when
+            // Retract became front-loaded the honest reading fell to 0.25 and a correct build
+            // failed on the Release artifact only). A probe tests the defect, not the tuning.
             state.ForceForDemo(Toki.State.PillState.Hidden);
-            Pump(500);   // the retract animation is 170ms; give it room
+            Pump(40);
+            var fading = pill.AuditContentOpacity();
+            Check("the content fades WITH the retract, it is not cut", fading > 0.02,
+                  $"opacity {fading:F2} into the close - a hard 0 means the content was cut, not faded");
+
+            Pump(500);   // the retract animation is 180ms; give it room
 
             Check("after hiding, Toki is not left showing", !pill.AuditMascotShowing(), "still visible");
             var parked = pill.AuditCardClip();
@@ -1550,6 +1578,21 @@ static class SelfTests
             // The flag is set in that deferred step, so it proves the ORDER.
             Check("the hide composed an empty frame before hiding", pill.AuditParkedEmptyFrame(),
                   "Hide() ran before an empty frame landed in the layered surface");
+
+            // MUTATION PROBE for the corner-shape pop (2026-09-27). Summon again, start a page
+            // morph, and sample the clip MID-FLIGHT: the card must still be a squircle. Until this
+            // date every clip animation ran on a RectangleGeometry with circular corner radii while
+            // the resting card wore a squircle, so the silhouette snapped shape at both ends of
+            // every transition - measured on film at 3px per side, 20px down from the top edge, and
+            // reported by the owner twice as "it still resizes for a split second".
+            // Against the unfixed code Root.Clip is a RectangleGeometry here and this fails.
+            state.ForceForDemo(Toki.State.PillState.Home);
+            Pump(400);
+            state.ForceForDemo(Toki.State.PillState.Settings);
+            Pump(60);
+            Check("the card keeps its squircle while it morphs", pill.AuditClipIsSquircle(),
+                  "the clip went back to a rounded RECTANGLE for the ride - the corner pops at both ends");
+            Pump(500);
 
             // Entering a FLOW must rewind it: onboarding is one cached view, so walk to the end,
             // leave, come back - it must be on step one. The caching IS the thing under test.

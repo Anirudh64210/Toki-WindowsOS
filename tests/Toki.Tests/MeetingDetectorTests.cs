@@ -1,4 +1,4 @@
-using Toki.Detection;
+﻿using Toki.Detection;
 
 namespace Toki.Tests;
 
@@ -43,47 +43,66 @@ public class MeetingDetectorTests
         Assert.Equal(1, count);
     }
 
+    // SUPERSEDES PromptedThenDismissed_ReSurfacesAfterCooldown_IfStillOnMic (2026-09-23). That test
+    // asserted the OPPOSITE of this one: a dismissed prompt came back once the 10-minute cooldown
+    // expired, deliberately, so that a single "Not now" did not silence a whole meeting.
+    //
+    // The owner overruled it from real use: "every 10 mins or so it re asks, it becomes redundant and
+    // pointless, if they want to they can manually do it". Time does not make a refusal stale. The
+    // old rule is kept here in words because the reasoning behind it was sound and someone will
+    // propose it again.
     [Fact]
-    public void SnoozeSuppressesForCooldownThenAllows()
+    public void A_declined_prompt_never_comes_back_during_the_same_call()
     {
-        var now = new DateTime(2026, 7, 15, 12, 0, 0, DateTimeKind.Utc);
-        var d = new MeetingDetector(() => now);
+        var d = new MeetingDetector();
         var count = 0;
         d.MeetingDetected += _ => count++;
 
-        d.Snooze(Chrome);
-        d.PollOnce([Chrome]);
-        d.PollOnce([Chrome]);
-        Assert.Equal(0, count);          // still cooling down
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);    // debounced -> the one prompt
+        Assert.Equal(1, count);
+        d.Decline(Chrome);
 
-        now = now.AddMinutes(11);        // past the 10-min cooldown
-        d.PollOnce([Chrome]);
-        d.PollOnce([Chrome]);
+        // A long meeting. The old cooldown would have re-asked several times over this.
+        for (var i = 0; i < 400; i++) d.PollOnce([Chrome]);
         Assert.Equal(1, count);
     }
 
-    // The ongoing-meeting re-surface: after a real prompt is dismissed (→ Snooze), if the call is STILL
-    // going when the cooldown expires, the prompt re-appears ONCE more - it isn't silenced for the whole
-    // mic-session after a single "Not now".
     [Fact]
-    public void PromptedThenDismissed_ReSurfacesAfterCooldown_IfStillOnMic()
+    public void A_mute_toggle_is_not_a_new_meeting()
     {
-        var now = new DateTime(2026, 7, 15, 12, 0, 0, DateTimeKind.Utc);
-        var d = new MeetingDetector(() => now);
+        // The mic drops for a moment when you mute, change headset, or the driver hiccups. Treating
+        // that as "the call ended" is what would let a refusal come straight back.
+        var d = new MeetingDetector();
         var count = 0;
         d.MeetingDetected += _ => count++;
 
-        d.PollOnce([Chrome]); d.PollOnce([Chrome]);   // debounced → the first prompt
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);
+        d.Decline(Chrome);
+
+        for (var blip = 0; blip < 5; blip++)
+        {
+            d.PollOnce([]);                            // off the mic for one poll
+            for (var i = 0; i < 10; i++) d.PollOnce([Chrome]);
+        }
         Assert.Equal(1, count);
-        d.Snooze(Chrome);                              // user dismissed (App.DismissPrompt → Snooze)
+    }
 
-        now = now.AddMinutes(2);                        // still cooling, meeting still on the mic
-        d.PollOnce([Chrome]); d.PollOnce([Chrome]);
-        Assert.Equal(1, count);                         // no nag during cooldown
+    [Fact]
+    public void A_later_call_in_the_same_app_may_ask_again()
+    {
+        // The refusal is scoped to the CALL, not to the app forever. Once the app has genuinely left
+        // the mic, the next meeting is a new question.
+        var d = new MeetingDetector();
+        var count = 0;
+        d.MeetingDetected += _ => count++;
 
-        now = now.AddMinutes(11);                       // cooldown expired, call STILL going
         d.PollOnce([Chrome]); d.PollOnce([Chrome]);
-        Assert.Equal(2, count);                         // re-surfaces once more
+        Assert.Equal(1, count);
+        d.Decline(Chrome);
+
+        for (var i = 0; i < 10; i++) d.PollOnce([]);   // call really over
+        d.PollOnce([Chrome]); d.PollOnce([Chrome]);    // a new meeting starts
+        Assert.Equal(2, count);
     }
 
     [Fact]

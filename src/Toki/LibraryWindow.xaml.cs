@@ -96,8 +96,11 @@ public partial class LibraryWindow : Window
         // arrived, then hitched. An animation never waits on a layout pass. The window can lay out
         // while it is still hidden, so this costs nothing.
         // An explicit page (assistant command) wins; a specific note → the Library page showing it;
-        // otherwise the Ask landing.
-        w.ShowPage(page ?? (focusMeetingId is not null ? "library" : "ask"), animate: false);
+        // otherwise the LIBRARY. It used to default to Ask, so a prominent pill reading "Library",
+        // tooltipped "Every meeting and note, searchable", opened a chat box - and the window is
+        // titled Library too. Three places named the archive and none of them went there. A control
+        // has to do what its label says. Ask is one click away in the rail. (2026-09-27)
+        w.ShowPage(page ?? "library", animate: false);
         if (wasHidden)
         {
             w._originRect = fromRect;
@@ -253,8 +256,8 @@ public partial class LibraryWindow : Window
             g.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromArgb(180, 255, 60, 60)), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false });
             col.Children.Add(g);
         }
-        Add(new Button { Content = "Copy", Style = (Style)w.FindResource("PillButton"), Padding = new Thickness(14, 7, 14, 7), FontSize = 11.5, MinWidth = 120 });
-        Add(new Button { Content = "Delete", Style = (Style)w.FindResource("PillButton"), Foreground = (Brush)w.FindResource("Danger"), Padding = new Thickness(13, 6, 13, 6), FontSize = 11.5, MinWidth = 120 });
+        Add(new Button { Content = "Copy", Style = (Style)w.FindResource("PillButton"), Padding = new Thickness(14, 7, 14, 7), FontSize = 13.5, MinWidth = 120 });
+        Add(new Button { Content = "Delete", Style = (Style)w.FindResource("PillButton"), Foreground = (Brush)w.FindResource("Danger"), Padding = new Thickness(13, 6, 13, 6), FontSize = 13.5, MinWidth = 120 });
         Add(new Button { Content = "+  New note", Style = (Style)w.FindResource("WhiteButton"), Padding = new Thickness(0, 9, 0, 9), MinWidth = 220, HorizontalContentAlignment = HorizontalAlignment.Center });
         Add(w.BuildBackButtonProbe());
         probe.Child = col;
@@ -487,7 +490,8 @@ public partial class LibraryWindow : Window
     LibraryWindow()
     {
         InitializeComponent();
-        BackBtn.Content = BackButtonInner();   // composed chevron+label so the "‹" sits centered, not low
+        // BackBtn no longer takes Content: it is a chevron chip in the title row and draws its own
+        // stroked Path. (BackButtonInner still serves the labelled back button inside the note pane.)
         // Stick-to-bottom for the chat thread: auto-follow the newest text only while already parked
         // at the bottom, so a streaming answer never yanks the reader down. A user scroll
         // (ExtentHeightChange == 0) updates the flag; ~120px threshold (a tight one is hair-trigger
@@ -502,6 +506,7 @@ public partial class LibraryWindow : Window
         SourceInitialized += (_, _) =>
         {
             StyleChrome();
+            SyncCaptionButtons();
             // REAL DWM acrylic works on this window and was shipped 2026-09-03; the research and the
             // exact API live in Theme/WindowBackdrop.cs. It is OFF because the owner rejected the
             // result on sight: a translucent window lets the desktop tint the page, and in the LIGHT
@@ -510,7 +515,7 @@ public partial class LibraryWindow : Window
             // Re-enable only on an explicit owner decision, and only with a near-opaque scrim.
         };
         // Soften the maximise/restore snap: ease the content into the new size instead of a hard pop.
-        StateChanged += (_, _) => PlayStateSettle();
+        StateChanged += (_, _) => { SyncCaptionButtons(); PlayStateSettle(); };
         // Code-built UI (list cards, note detail, nav, templates) captures brushes → rebuild on a theme swap.
         Toki.Theme.ThemeManager.ThemeChanged += () => Dispatcher.BeginInvoke(() =>
         {
@@ -624,9 +629,15 @@ public partial class LibraryWindow : Window
         var toSelect = focus ?? _selected;
         // An explicit focus (e.g. "open this note") counts as user intent; re-selecting the previous
         // note keeps its sticky user/auto status; the silent first-card fallback is NOT user-viewed.
+        // NOTHING OPENS ITSELF. The Library used to select the newest meeting on every open, so the
+        // window greeted you with a wall of somebody else's decisions before you had asked for any of
+        // it. Owner, 2026-09-26: "it makes it feel overwhelming ... instead, have a resting toki
+        // state". A reading pane is for something you chose to read.
+        //
+        // An explicit focus ("open this note") and a previously-read note still restore, because both
+        // are the user's own intent - only the silent first-card fallback is gone.
         if (toSelect is long id && App.Store.Get(id) is not null) Select(id, byUser: focus is not null);
-        else if (_items.Count > 0) Select(_items[0].Id, byUser: false);
-        else DetailBody.Content = Placeholder("Select a meeting or note, or make a new one.");
+        else { _selected = null; HighlightSelectedCard(); DetailBody.Content = RestingToki(); }
     }
 
     // ══════════════════════ Hub: sidebar nav · Ask landing · Templates · mascot ══════════════════════
@@ -678,12 +689,12 @@ public partial class LibraryWindow : Window
         // A real Button, never a Border with a mouse handler (--hittest only audits ButtonBase).
         var icon = new TextBlock
         {
-            Text = glyph.ToString(), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 17,
+            Text = glyph.ToString(), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 20,
             VerticalAlignment = VerticalAlignment.Center, Width = 24, TextAlignment = TextAlignment.Center,
         };
         var text = new TextBlock
         {
-            Text = label, FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 16,
+            Text = label, FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 20,
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
         };
         var row = new StackPanel { Orientation = Orientation.Horizontal };
@@ -1127,7 +1138,7 @@ public partial class LibraryWindow : Window
         var b = new Button
         {
             Content = text, Style = (Style)FindResource("PillButton"),
-            FontSize = 11.5, FontWeight = FontWeights.Normal,
+            FontSize = 13.5, FontWeight = FontWeights.Normal,
             Padding = new Thickness(15, 8, 15, 9), Margin = new Thickness(4, 0, 4, 8),
             // Equal-width in the uniform grid; text centred so every chip reads the same.
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -1327,9 +1338,9 @@ public partial class LibraryWindow : Window
         };
         foreach (var c in convos.Take(20))
         {
-            var title = new TextBlock { Text = c.Title, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 230 };
+            var title = new TextBlock { Text = c.Title, FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 230 };
             title.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-            var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 9.5, Margin = new Thickness(0, 1, 0, 0) };
+            var when = new TextBlock { Text = Ago(c.Updated), Style = St("Dim"), FontSize = 12, Margin = new Thickness(0, 1, 0, 0) };
             var textCol = new StackPanel { Children = { title, when } };
             // The cross is the house PATH, not a "✕" character - a font glyph's weight and size come
             // from whichever font the machine falls back to, and this one sat beside a 1.6px stroked
@@ -1602,7 +1613,7 @@ public partial class LibraryWindow : Window
         if (ans.Sources.Count > 0)
         {
             var chips = new WrapPanel { Margin = new Thickness(0, 11, 0, 0) };
-            chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+            chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
             foreach (var s in ans.Sources) chips.Children.Add(SourceChip(s));
             stack.Children.Add(chips);
         }
@@ -1649,7 +1660,7 @@ public partial class LibraryWindow : Window
                     return;
                 }
                 chips.Children.Clear();
-                chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
+                chips.Children.Add(new TextBlock { Text = "From", Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) });
                 foreach (var s in srcs) chips.Children.Add(SourceChip(s));
                 chips.Visibility = Visibility.Visible;
             },
@@ -1669,7 +1680,7 @@ public partial class LibraryWindow : Window
     FrameworkElement BuildLoader()
     {
         var stack = new StackPanel { MinWidth = 200 };
-        var status = new TextBlock { Text = LoaderWords[0], FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 12.5, Margin = new Thickness(0, 0, 0, 9) };
+        var status = new TextBlock { Text = LoaderWords[0], FontFamily = (FontFamily)FindResource("UiFont"), FontSize = 13.5, Margin = new Thickness(0, 0, 0, 9) };
         status.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
         stack.Children.Add(status);
 
@@ -1698,7 +1709,7 @@ public partial class LibraryWindow : Window
 
     Border SourceChip(Llm.NotesQa.Source s)
     {
-        var t = new TextBlock { Text = s.Title, FontSize = 10.5, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 };
+        var t = new TextBlock { Text = s.Title, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 190 };
         t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
         var c = new Border { CornerRadius = new CornerRadius(7), Padding = new Thickness(9, 3, 9, 4), Margin = new Thickness(0, 0, 6, 6), Cursor = Cursors.Hand, Child = t };
         c.SetResourceReference(Border.BackgroundProperty, "Chip");
@@ -1734,7 +1745,7 @@ public partial class LibraryWindow : Window
         // you cannot tell what "Auto-detect" sets without one - but an all-caps grey band above a single
         // control is a label compensating for a layout, and Title Case On Every Label reads as a
         // template. Left margin 0, so it starts on the page's one gutter.
-        defRow.Children.Add(new TextBlock { Text = "Default shape for new meetings", Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 6) });
+        defRow.Children.Add(new TextBlock { Text = "Default shape for new meetings", Style = St("Dim"), FontSize = 13.5, Margin = new Thickness(0, 0, 0, 6) });
         var defDrop = new Views.SearchableDropdown { Width = 240, HorizontalAlignment = HorizontalAlignment.Left };
         defDrop.SetItems(new[] { "Auto-detect" }.Concat(Llm.NoteTemplates.All.Select(t => t.Name)),
             Llm.AppSettings.Current.DefaultTemplate ?? "Auto-detect");
@@ -1783,7 +1794,7 @@ public partial class LibraryWindow : Window
         // A tag whose value actually changes, which is the one kind worth drawing.
         if (isDefault)
         {
-            var tag = new TextBlock { Text = "Default", FontSize = 10, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
+            var tag = new TextBlock { Text = "Default", FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
             tag.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
             var pill = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 2, 7, 3), Margin = new Thickness(9, 1, 0, 0), Child = tag };
             pill.SetResourceReference(Border.BackgroundProperty, "Chip");
@@ -1794,13 +1805,13 @@ public partial class LibraryWindow : Window
         stack.Children.Add(new TextBlock
         {
             Text = char.ToUpper(t.When[0]) + t.When[1..] + ".",
-            Style = St("Dim"), FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0),
+            Style = St("Dim"), FontSize = 13.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0),
         });
 
         var sections = new TextBlock
         {
             Text = string.Join("  ·  ", new[] { "Summary" }.Concat(t.Sections).Concat(new[] { "Action items" })),
-            FontSize = 11, FontFamily = (FontFamily)FindResource("UiFont"),
+            FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"),
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 0),
         };
         sections.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
@@ -1829,7 +1840,7 @@ public partial class LibraryWindow : Window
         var btn = new Button
         {
             Style = (Style)FindResource("PillButton"),
-            Padding = new Thickness(12, 6, 11, 6), FontSize = 11.5, Margin = new Thickness(0, 0, 8, 0),
+            Padding = new Thickness(12, 6, 11, 6), FontSize = 13.5, Margin = new Thickness(0, 0, 8, 0),
             Content = $"Template · {m.Notes.Template ?? "General"}   ▾",
         };
         btn.Click += (_, _) =>
@@ -1904,8 +1915,14 @@ public partial class LibraryWindow : Window
         if (_myNotesOnly) items = items.Where(m => m.Kind == MeetingKind.Manual).ToList();
         items = SortItems(items);
 
-        CountLabel.Text = items.Count.ToString();
-        // The scope reads only when a filter is ON; unfiltered, the count speaks for itself.
+        // THE COUNT ONLY APPEARS WHEN IT IS AN ANSWER. Standing beside the word "Library" it read
+        // "85" - the number of meetings ever recorded, which nobody asked for and which cannot be
+        // acted on. When a search or a filter is active it becomes a different number entirely,
+        // "how many matched", and that one IS the answer to what the user just did.
+        // Owner, 2026-09-27: "minimise the text ... even an average joe can traverse through it".
+        var filtered = _myNotesOnly || SearchBox.Text.Trim().Length > 0;
+        CountLabel.Text = filtered ? items.Count.ToString() : "";
+        CountLabel.Visibility = filtered ? Visibility.Visible : Visibility.Collapsed;
         ScopeLabel.Text = _myNotesOnly ? "my notes" : "";
         ScopeLabel.Visibility = CountRule.Visibility = _myNotesOnly ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1917,10 +1934,17 @@ public partial class LibraryWindow : Window
         _cardFills.Clear();   // rebuilt rows register fresh inner-card fills; stale ones must not linger
         Cards.ItemsSource = items;
 
+        // EMPTY STATES SAY WHAT WILL FILL THEM, or that nothing is wrong. A bare "Nothing yet."
+        // tells the user only that the screen is blank, which they can see. Apple's own shape for
+        // this (ContentUnavailableView) is a noun phrase plus one forward-looking sentence.
+        // "tap" was also plain wrong on a Windows desktop.
         CardsEmpty.Text =
-            _myNotesOnly ? "No hand-written notes yet - tap + to write one."
-            : _sort == LibrarySort.OpenTasks ? "No meetings with open tasks."
-            : string.IsNullOrWhiteSpace(SearchBox.Text) ? "Nothing yet." : "No matches.";
+            _myNotesOnly ? "No hand-written notes yet.\nUse + to write one."
+            // The one place warmth is earned: nothing open is good news, not an absence.
+            : _sort == LibrarySort.OpenTasks ? "Nothing open.\nEvery action from your meetings is ticked off."
+            : string.IsNullOrWhiteSpace(SearchBox.Text)
+                ? "No meetings yet.\nToki saves a note here after every meeting it records."
+                : "No matches.\nTry a shorter word, or drop the you: / them: prefix.";
         CardsEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -2038,20 +2062,42 @@ public partial class LibraryWindow : Window
         // TITLE, THEN THE OUTCOME, THEN THE FACTS. The outcome answers "which one was this?", which
         // is the only question a list is ever asked; the app and the timing are how you confirm it
         // afterwards, so they sit under it rather than between it and the title.
+        // A ROW, NOT A POSTER. Until 2026-09-27 this was a 20px semibold title that wrapped to two
+        // lines, a two-line wrapped snippet under it, and a four-fact meta line: up to five lines of
+        // text per meeting, eighty-five times down the list. The owner's verdict on that pass was
+        // exact - "you just increased its size basically of all the text and made it ugly ...
+        // minimise the text" - and the fault was mine: asked to REMOVE text I had enlarged it.
+        //
+        // The title is now the same size as the note body it opens (15), because a list of titles is
+        // not a page of headlines; the snippet is ONE line, which is all a reader uses to answer the
+        // only question a list is ever asked ("which one was this?"); and the meta line carries the
+        // date and the duration and nothing else.
+        // NoWrap is set EXPLICITLY on both, and it has to be: the shared Body and Dim styles turn
+        // wrapping on, so dropping the local TextWrapping=Wrap did not give one line, it gave one
+        // line's worth of trimming that never fired. Every row is exactly three lines now, whatever
+        // the note says, which is what lets the list be scanned by shape instead of read.
         var content = new StackPanel();
-        content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
+        content.Children.Add(new TextBlock { Text = m.Title, Style = St("Body"), FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) });
         if (!string.IsNullOrWhiteSpace(m.Tldr))
-            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12.5, TextWrapping = TextWrapping.Wrap, MaxHeight = 36, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 5, 0, 0) });
+            content.Children.Add(new TextBlock { Text = m.Tldr, Style = St("Dim"), FontSize = 12.5, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) });
         content.Children.Add(new TextBlock
         {
-            Text = CardMeta(m), Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 6, 0, 0),
+            // The open count appears ONLY when the list is sorted by it. Everywhere else it is a
+            // number nobody asked for, on a line that already has a job; when it IS the sort key,
+            // leaving it out would make the ordering look arbitrary.
+            Text = CardMeta(m) + (_sort == LibrarySort.OpenTasks && m.OpenActions > 0 ? $"  ·  {m.OpenActions} open" : ""),
+            Style = St("Dim"), FontSize = 11.5, Margin = new Thickness(0, 4, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
 
-        var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0) };
-        if (m.OpenActions > 0) chips.Children.Add(Chip($"{m.OpenActions} open", "Amber", "AmberDark"));
-        if (m.PeopleCount > 0) chips.Children.Add(Chip($"{m.PeopleCount} {(m.PeopleCount == 1 ? "person" : "people")}", "TextDim", "Chip"));
-        if (chips.Children.Count > 0) content.Children.Add(chips);
+        // NO CHIP ROW. Two boxed pills on a second line, under a meta line that is already muted
+        // text, made every card four rows tall and the list a field of speckle - twenty pills at
+        // twenty x-positions with no column to align to. Every product surveyed renders an
+        // outstanding count as a plain numeral beside its noun ("In Progress 5", "Overdue 4"), and
+        // a pill is the convention for something CLICKABLE, which this is not.
+        // The count now joins CardMeta on the line that already exists; the people count is dropped
+        // entirely - who was in a meeting is legible from the note itself, and it never changed a
+        // decision anyone made from a list. (2026-09-27)
 
         var inner = new Grid();
         inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2101,14 +2147,18 @@ public partial class LibraryWindow : Window
     {
         Background = (Brush)FindResource(bgKey), CornerRadius = new CornerRadius(5),
         Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(0, 0, 6, 0),
-        Child = new TextBlock { Text = text, Foreground = (Brush)FindResource(fgKey), FontSize = 9, FontWeight = FontWeights.SemiBold },
+        Child = new TextBlock { Text = text, Foreground = (Brush)FindResource(fgKey), FontSize = 12, FontWeight = FontWeights.SemiBold },
     };
 
     static string CardMeta(MeetingSummary m)
     {
-        var parts = new List<string> { m.Kind == MeetingKind.Manual ? "Note" : (m.App ?? "Meeting") };
+        // WHEN, then HOW LONG. The host app led this line until 2026-09-27 ("Chrome · 24 min ·
+        // Sept 17"), which put the least useful fact in the most prominent position: every meeting
+        // on this machine says Chrome, so the word did no work at all beyond distinguishing a typed
+        // note, and a typed note is already obvious from having no duration.
+        var parts = new List<string> { TimeAgo(m.StartedAt) };
         if (m.DurationMs > 0) parts.Add($"{Math.Max(1, m.DurationMs / 60000)} min");
-        parts.Add(TimeAgo(m.StartedAt));
+        else if (m.Kind == MeetingKind.Manual) parts.Add("Note");
         return string.Join(" · ", parts);
     }
 
@@ -2164,6 +2214,34 @@ public partial class LibraryWindow : Window
 
     void OnBack(object sender, RoutedEventArgs e) => HideToPill(); // hide (stay warm) + bring the pill back
 
+    // ═══════════════════════ Toki's own window chrome ═══════════════════════
+    // The three caption buttons, plus the two things a hand-rolled title bar always gets wrong:
+    // a maximise button whose glyph never changes, and a maximised window that covers the taskbar.
+
+    void OnMinimise(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    void OnMaximiseRestore(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    // Close means HIDE, exactly as the old back button did. Toki lives in the tray with a warm model
+    // and (possibly) a live recording behind it; disposing this window on a close click would throw
+    // away the warm Library and, worse, read as "I quit Toki" when Toki is still recording.
+    void OnCloseWindow(object sender, RoutedEventArgs e) => HideToPill();
+
+    /// <summary>Keep the maximise button honest: glyph and tooltip both follow the window state.</summary>
+    void SyncCaptionButtons()
+    {
+        var max = WindowState == WindowState.Maximized;
+        MaxBtn.Content = max ? "" : "";   // restore / maximise (Fluent chrome glyphs)
+        MaxBtn.ToolTip = max ? "Restore" : "Maximise";
+    }
+
+    // NOTE: the "maximised window covers the taskbar" problem that WindowStyle=None normally
+    // introduces is ALREADY solved here - StyleChrome installs WndProc, which answers
+    // WM_GETMINMAXINFO with the monitor's work area. It was added for a per-monitor-DPI maximise
+    // glitch and happens to be exactly the fix owning the frame requires, so there is nothing to
+    // add. (Checked rather than assumed: a second hook would have double-corrected the bounds.)
+
     void RenderMeeting(MeetingRecord m)
     {
         // The action toolbar rides at the TOP of the scroll document, so the whole note - toolbar,
@@ -2191,7 +2269,7 @@ public partial class LibraryWindow : Window
         {
             var tb = new TextBlock
             {
-                Text = glyph, FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13,
+                Text = glyph, FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13.5,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             };
             // Foreground on the GLYPH (not the button) survives the style's hover recolour -
@@ -2209,7 +2287,7 @@ public partial class LibraryWindow : Window
             var was = copyBtn.Content;
             copyBtn.Content = new TextBlock
             {
-                Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13,
+                Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 13.5,
                 Foreground = (Brush)FindResource("Green"),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             };
@@ -2228,17 +2306,30 @@ public partial class LibraryWindow : Window
             items.Add(("Reveal note file", () => RevealNoteFile(m)));
             ShowMenu(groupShell, items);
         };
-        ToolIcon("", "Delete this meeting", "Danger").Click += (_, _) => Delete(m.Id);
+        // NOT RED AT REST. A red bin sat in a row of three grey icons at the top of every note,
+        // making the most destructive and least used control the brightest thing on the page - and
+        // colour here carries one meaning each ("one meaning one colour", CLAUDE.md), with red
+        // already spoken for by Stop-a-recording. The reference toolbar has no colour in it at all.
+        // Delete still confirms, and the CONFIRM dialog is where the red belongs, because that is
+        // the moment the warning is actually load-bearing.
+        ToolIcon("", "Delete this meeting", "TextDim").Click += (_, _) => Delete(m.Id);
 
         DockPanel.SetDock(groupShell, Dock.Right);
         row.Children.Add(groupShell);
 
-        var status = new TextBlock { Style = St("Dim"), FontSize = 10.5, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+        var status = new TextBlock { Style = St("Dim"), FontSize = 12, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         if (m.Kind == MeetingKind.Meeting && m.Transcript.Count > 0)
         {
             var tmpl = TemplatePicker(m, status);
             DockPanel.SetDock(tmpl, Dock.Left);
             row.Children.Add(tmpl);
+        }
+        // The sticky-note toggle joins the note's other controls instead of interrupting its body.
+        if (_sticky is not null)
+        {
+            var stickyBtn = _sticky.ToggleButton;
+            DockPanel.SetDock(stickyBtn, Dock.Left);
+            row.Children.Add(stickyBtn);
         }
         toolbar.Children.Add(row);
         toolbar.Children.Add(status);
@@ -2255,6 +2346,24 @@ public partial class LibraryWindow : Window
             },
             // "Try again" regenerated the notes with the model: re-read and rebuild the pane.
             refreshNotes: () => { if (App.Store.Get(m.Id) is { } fresh) RenderMeeting(fresh); });
+        // CAP THE LINE LENGTH. The reading pane is 800-1000px wide and the note had no limit, so
+        // body text ran 118-148 characters per line - against Microsoft's own typography guidance of
+        // 50-60 and Bringhurst's ideal of 66. Long measure is the single biggest reason a page of
+        // text feels like work, and it is a large part of "theres just so much text".
+        // LEFT-aligned, not centred: RenderManual already records that a centred column read as
+        // "detached from the page". 560px is about 60 characters at this size.
+        // CENTRED, not left-pinned. Capping the measure was right - the note ran 118-148 characters
+        // per line against Microsoft's own 50-60 - but pinning that column to the LEFT of a maximised
+        // pane leaves the note hugging one edge with a field of empty white beside it. Owner,
+        // 2026-09-27: "the maximise doesn't resize the notes, its like stuck to half of the window
+        // only, its ugly". Every reading surface that caps its measure centres the column: Granola,
+        // Notion, Medium. The earlier note about a centred column feeling "detached from the page"
+        // was written for a NARROW pane, where centring 560 in 700 just adds a lopsided gutter; at
+        // full width the opposite is true.
+        // 680, not 560: this pane is the one place the note is read at length, and 680 is ~72
+        // characters at 15px - inside WCAG's 80 ceiling, and it stops a maximised window looking
+        // like a phone layout.
+        if (body is FrameworkElement fe) { fe.MaxWidth = 680; fe.HorizontalAlignment = HorizontalAlignment.Center; }
         DetailBody.Content = body;
         // Start at the very TOP once laid out (a fresh RichTextBox occasionally came up scrolled down).
         if (body is RichTextBox rtb)
@@ -2283,12 +2392,12 @@ public partial class LibraryWindow : Window
             Text = m.Title == "Untitled note" ? "" : m.Title,
             Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             Foreground = (Brush)FindResource("Text"), CaretBrush = (Brush)FindResource("Text"),
-            FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)FindResource("UiFont"),
+            FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)FindResource("UiFont"),
             Padding = new Thickness(0), TextWrapping = TextWrapping.Wrap,
         };
         var placeholder = new TextBlock
         {
-            Text = "Untitled note", FontSize = 22, FontWeight = FontWeights.SemiBold,
+            Text = "Untitled note", FontSize = 26, FontWeight = FontWeights.SemiBold,
             FontFamily = (FontFamily)FindResource("UiFont"), Foreground = (Brush)FindResource("TextDim"),
             Opacity = 0.45, IsHitTestVisible = false, Margin = new Thickness(2, 0, 0, 0),
             Visibility = titleBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed,
@@ -2348,7 +2457,7 @@ public partial class LibraryWindow : Window
         // The footer: save state on the left, the destructive action on the right.
         var status = new TextBlock
         {
-            Style = St("Dim"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
+            Style = St("Dim"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0, Text = "Saved",
         };
         var footer = new Grid { Margin = new Thickness(0, 14, 0, 8) };
@@ -2457,7 +2566,7 @@ public partial class LibraryWindow : Window
     {
         var mainLabel = new TextBlock
         {
-            Text = "Copy", FontSize = 11.5, FontWeight = FontWeights.SemiBold,
+            Text = "Copy", FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             FontFamily = (FontFamily)FindResource("UiFont"),
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
@@ -2466,7 +2575,7 @@ public partial class LibraryWindow : Window
         var main = SeamButton(mainLabel, new Thickness(15, 0, 13, 0), new CornerRadius(13, 0, 0, 13));
         var caretGlyph = new TextBlock
         {
-            Text = "▾", FontSize = 10, FontFamily = (FontFamily)FindResource("UiFont"),
+            Text = "▾", FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"),
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
         caretGlyph.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
@@ -2559,7 +2668,7 @@ public partial class LibraryWindow : Window
         {
             // A real Button, not a Border+MouseLeftButtonUp: Click fires reliably inside a
             // StaysOpen=false popup; a Border's mouse-up gets swallowed when the popup closes.
-            var t = new TextBlock { Text = label, FontSize = 12, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
+            var t = new TextBlock { Text = label, FontSize = 13.5, FontFamily = (FontFamily)FindResource("UiFont"), VerticalAlignment = VerticalAlignment.Center };
             t.SetResourceReference(TextBlock.ForegroundProperty, "Text");
             FrameworkElement content = t;
             if (selected is not null)
@@ -2568,7 +2677,7 @@ public partial class LibraryWindow : Window
                 if (isSel) t.FontWeight = FontWeights.SemiBold;
                 var tick = new TextBlock
                 {
-                    Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 10,
+                    Text = "", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 12,
                     Width = 16, VerticalAlignment = VerticalAlignment.Center,
                     Opacity = isSel ? 1 : 0,   // reserve the column so labels align
                 };
@@ -2652,7 +2761,7 @@ public partial class LibraryWindow : Window
         sp.Children.Add(new TextBlock
         {
             Text = "", FontFamily = (FontFamily)Application.Current.FindResource("IconFont"),
-            FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+            FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
         });
         sp.Children.Add(new TextBlock { Text = "Back to Toki", VerticalAlignment = VerticalAlignment.Center });
         return sp;
@@ -2662,7 +2771,7 @@ public partial class LibraryWindow : Window
     internal Button BuildBackButtonProbe() => new()
     {
         Content = BackButtonInner(), Style = St("PillButton"), Background = (Brush)FindResource("SurfaceHi"),
-        Padding = new Thickness(13, 9, 13, 9), FontSize = 11.5, MinWidth = 220, HorizontalContentAlignment = HorizontalAlignment.Center,
+        Padding = new Thickness(13, 9, 13, 9), FontSize = 13.5, MinWidth = 220, HorizontalContentAlignment = HorizontalAlignment.Center,
     };
 
     FrameworkElement SmallButton(string label, Action onClick, bool primary = false, bool danger = false)
@@ -2671,7 +2780,7 @@ public partial class LibraryWindow : Window
         {
             Content = label, Style = (Style)FindResource(primary ? "CoralButton" : "PillButton"),
             // Height matched to the split Copy button so a toolbar row lines up instead of stepping.
-            Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(15, 0, 15, 0), Height = 32, FontSize = 11.5,
+            Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(15, 0, 15, 0), Height = 32, FontSize = 13.5,
         };
         // Destructive = red TEXT on the same neutral button as Copy (not a loud red-filled pill) - clean,
         // still clearly a delete. Red fill is reserved for the final confirm dialog.
@@ -2680,9 +2789,43 @@ public partial class LibraryWindow : Window
         return b;
     }
 
+    /// <summary>The reading pane at rest: Toki, and one line telling you what to do. Shown when the
+    /// window opens with nothing chosen, and after the selected note is deleted.
+    ///
+    /// He is BIG and the line is small. The pane is otherwise empty, so the character is the whole
+    /// composition, and a large calm shape reads as "nothing is wrong here" where a small one plus
+    /// centred grey text reads as an error state.</summary>
+    FrameworkElement RestingToki()
+    {
+        var stack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 40),   // optical: sits a little above true centre
+        };
+        stack.Children.Add(new Viewbox
+        {
+            Width = 104, Height = 92, Opacity = 0.9,
+            Child = new Controls.TokiBlob(),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+
+        var line = new TextBlock
+        {
+            Text = _items.Count == 0
+                ? "Your meetings will appear here."
+                : "Open a meeting to read its notes.",
+            Style = St("Body"), FontSize = 13.5, TextAlignment = TextAlignment.Center,
+            Margin = new Thickness(0, 22, 0, 0),
+        };
+        line.SetResourceReference(TextBlock.ForegroundProperty, "TextSoft");
+        stack.Children.Add(line);
+        return stack;
+    }
+
     TextBlock Placeholder(string text) => new()
     {
-        Text = text, Style = St("Dim"), FontSize = 12, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 24, 0, 0),
+        Text = text, Style = St("Dim"), FontSize = 13.5, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 24, 0, 0),
     };
 
     static string Meta(MeetingRecord m) => Views.TimeText.FullMeta(m);

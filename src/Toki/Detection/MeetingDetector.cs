@@ -1,4 +1,4 @@
-using System.Windows.Threading;
+﻿using System.Windows.Threading;
 
 namespace Toki.Detection;
 
@@ -8,15 +8,27 @@ namespace Toki.Detection;
 /// a candidate and exclude the known non-meetings. Conservative on purpose - a
 /// spurious prompt is dismissible; a missed meeting is lost forever.
 ///
-/// Debounce 2 polls (~5s) before prompting; a dismissed app is suppressed 10 min;
-/// while recording, if the target frees the mic for 3 polls (~7.5s) the call ended.
+/// Debounce 2 polls (~5s) before prompting. ONE "no" per call: a declined app is not offered
+/// again until it has been off the mic long enough that the next time is a different meeting.
+/// While recording, if the target frees the mic for 3 polls (~7.5s) the call ended.
 /// </summary>
 public sealed class MeetingDetector
 {
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2.5);
     const int DebouncePolls = 2;
     const int AutoStopPolls = 3;
-    static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(10);
+
+    /// <summary>How long an app must be OFF the mic before its next appearance counts as a NEW call.
+    ///
+    /// This is the whole anti-nag mechanism, and it is deliberately NOT a clock. A 10-minute cooldown
+    /// used to re-offer the same call over and over - the owner, 2026-09-23: "every 10 mins or so it
+    /// re asks, it becomes redundant and pointless". Time does not make a refusal stale; a new
+    /// meeting does. So the question is only ever asked once per call.
+    ///
+    /// 6 polls is ~15 seconds, comfortably longer than a mute toggle, a headset switch or a brief
+    /// device glitch, any of which would otherwise read as "the call ended" and earn a fresh prompt.
+    /// It is shorter than any real gap between two meetings.</summary>
+    const int SessionEndPolls = 6;
 
     // Substring match, case-insensitive. Everything else is a meeting candidate.
     static readonly string[] Denylist =
@@ -31,8 +43,9 @@ public sealed class MeetingDetector
 
     readonly DispatcherTimer _timer = new() { Interval = PollInterval };
     readonly Dictionary<string, int> _consecutive = new();
-    readonly Dictionary<string, DateTime> _cooldownUntil = new();
-    readonly HashSet<string> _prompted = new();   // apps already offered this mic-session
+    readonly HashSet<string> _prompted = new();   // apps already offered this call
+    readonly HashSet<string> _declined = new();   // apps the user said no to, for this call
+    readonly Dictionary<string, int> _absent = new();   // consecutive polls each tracked app has been off the mic
     readonly Func<DateTime> _now;
     readonly Func<IReadOnlyList<DetectedApp>> _readActive;
 
@@ -66,12 +79,15 @@ public sealed class MeetingDetector
 
     public void EndRecording() => _recordingTarget = null;
 
-    /// <summary>Suppress an app for the cooldown window (user dismissed its prompt). Also clears
-    /// the "already offered" mark so an ongoing call re-prompts once when the cooldown expires.</summary>
-    public void Snooze(DetectedApp app)
+    /// <summary>The user said no. Toki does not ask about THIS call again - not in ten minutes, not
+    /// at all. Starting a recording by hand is always available and costs one click; being asked the
+    /// same question repeatedly during a meeting is not.</summary>
+    public void Decline(DetectedApp app)
     {
-        _cooldownUntil[app.Id] = _now() + Cooldown;
-        _prompted.Remove(app.Id);
+        _declined.Add(app.Id);
+        _prompted.Add(app.Id);
+        _absent[app.Id] = 0;
+        App.Log($"detect: '{app.DisplayName}' declined - not asking again until this call ends");
     }
 
     public static bool IsDenylisted(DetectedApp app)
@@ -103,8 +119,20 @@ public sealed class MeetingDetector
             _consecutive[c.Id] = _consecutive.GetValueOrDefault(c.Id) + 1;
         foreach (var id in _consecutive.Keys.Where(k => !liveIds.Contains(k)).ToList())
             _consecutive.Remove(id);
-        // Once an app leaves the mic, forget we prompted it - a fresh call later re-prompts.
-        _prompted.RemoveWhere(id => !liveIds.Contains(id));
+
+        // HAS THIS CALL ENDED? Count how long each tracked app has been off the mic. A SINGLE absent
+        // poll is not the end of anything - muting, switching headset or a driver hiccup all drop the
+        // mic for a moment, and treating that as a new meeting is how a declined prompt came straight
+        // back. Only a sustained absence clears what we offered and what was refused.
+        foreach (var id in _prompted.Concat(_declined).Distinct().ToList())
+            _absent[id] = liveIds.Contains(id) ? 0 : _absent.GetValueOrDefault(id) + 1;
+        foreach (var id in _absent.Where(kv => kv.Value >= SessionEndPolls).Select(kv => kv.Key).ToList())
+        {
+            if (_declined.Contains(id)) App.Log($"detect: '{id}' left the mic - a later call may ask again");
+            _prompted.Remove(id);
+            _declined.Remove(id);
+            _absent.Remove(id);
+        }
 
         // Auto-stop: is the recording target still on the mic?
         if (_recordingTarget is not null)
@@ -126,8 +154,7 @@ public sealed class MeetingDetector
         foreach (var c in candidates)
         {
             if (_consecutive[c.Id] < DebouncePolls) continue;
-            if (_prompted.Contains(c.Id)) continue; // already offered this session
-            if (_cooldownUntil.TryGetValue(c.Id, out var until) && _now() < until) continue;
+            if (_prompted.Contains(c.Id)) continue;  // already offered, or refused, for this call
             _prompted.Add(c.Id);
             App.Log($"detect: prompting for '{c.DisplayName}'");
             MeetingDetected?.Invoke(c);

@@ -87,8 +87,20 @@ Toki itself is not open source; the components below are, under their own licenc
 | Microsoft.Recognizers.Text | Microsoft | MIT | https://github.com/microsoft/Recognizers-Text |
 | System.Security.Cryptography.ProtectedData | Microsoft (.NET) | MIT | https://github.com/dotnet/runtime |
 
-Fonts (Segoe UI Variable, Segoe Fluent Icons) are provided by Windows and are not
-redistributed by Toki.
+## Typefaces
+
+Toki BUNDLES the two families below inside the executable. Both are licensed under the
+SIL Open Font License 1.1, which permits bundling a font with an application and requires
+that the licence travel with it. The full OFL text for each ships as a resource beside the
+font files in `src/Toki/Fonts/` and is reproduced by the "Built with" screen in the app.
+
+| Typeface | Author | Licence | Source |
+|---|---|---|---|
+| Inter | Rasmus Andersson | OFL-1.1 | https://github.com/rsms/inter |
+| Spectral | Production Type | OFL-1.1 | https://github.com/productiontype/Spectral |
+
+Segoe Fluent Icons (and the Segoe MDL2 Assets fallback) remain Windows-provided system
+fonts and are NOT redistributed by Toki - they are referenced by name only.
 
 ---
 

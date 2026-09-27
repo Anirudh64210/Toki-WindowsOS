@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.AboutView"
+﻿<UserControl x:Class="Toki.Views.AboutView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -15,7 +15,11 @@
                 <TextBlock Style="{StaticResource Caption}" Text="The open source that makes Toki run"/>
             </StackPanel>
         </Grid>
-        <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource Hairline}" Margin="0,10,0,0"/>
+        <!-- NO RULE UNDER THE HEADER. Owner, 2026-09-27: "even the little seperating lines
+             between text in the notch is ugly and weird". A 380px hairline drawn straight across
+             the card cuts it in two, and it was separating a heading from the list that heading
+             already owns - Material 3 is explicit that a divider belongs only where elements
+             "cannot be separated using white space". Air does it: the list below pads instead. -->
 
         <!-- Credits list, populated in code so each row can open its source/licence link. -->
         <ScrollViewer VerticalScrollBarVisibility="Auto" controls:SmoothScroll.Enabled="True" Margin="0,4,0,0">

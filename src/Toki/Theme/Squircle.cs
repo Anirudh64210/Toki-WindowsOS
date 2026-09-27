@@ -5,10 +5,26 @@ namespace Toki.Theme;
 
 /// <summary>
 /// The card's corner as a continuous curve (Figma's exact squircle parameterisation; smoothing 0
-/// degrades to a plain rounded rectangle). At r24/0.6 it departs from a circular corner by under
-/// half a pixel - it changes the corner's character, not its silhouette; screenshots won't show it.
-/// Geometry is built once and FROZEN, for resting cards only: the notch's clip animations must
-/// keep their RectangleGeometry, never rebuild a squircle per frame.
+/// degrades to a plain rounded rectangle).
+///
+/// TWO CLAIMS THIS HEADER USED TO MAKE WERE WRONG, and between them they cost the owner two rounds
+/// of "it still resizes for a split second" (2026-09-27). Corrected here rather than deleted,
+/// because both are the kind of thing that gets asserted again:
+///
+///   "At r24/0.6 it departs from a circular corner by under half a pixel - it changes the corner's
+///    character, not its silhouette; screenshots won't show it."
+///   True only of the maximum deviation measured along the corner DIAGONAL. Smoothing starts the
+///   curve (1 + s) * r = 38px from the corner, where a circular arc starts at 24px, so measured on
+///   film 20px down from the top edge the squircle sits THREE PIXELS further out per side. It is
+///   plainly visible - and it was visible twice per transition for as long as the morph wore an arc
+///   while the resting card wore this.
+///
+///   "Geometry is built once and FROZEN, for resting cards only: the notch's clip animations must
+///    keep their RectangleGeometry, never rebuild a squircle per frame."
+///   Untested when written. PillWindow.DriveClip now rebuilds one on every frame of every reveal,
+///   retract and morph; across repeated --fpstest runs the content cost stays at 2-3% and about 7
+///   dropped frames per transition, indistinguishable from before. A StreamGeometry of a dozen
+///   segments is nothing beside the layout pass the clip exists to avoid.
 /// </summary>
 public static class Squircle
 {

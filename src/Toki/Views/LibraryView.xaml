@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.LibraryView"
+﻿<UserControl x:Class="Toki.Views.LibraryView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -22,10 +22,20 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Border Background="{DynamicResource SurfaceHi}" CornerRadius="10" Padding="11,0">
-                <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
-                         Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
-                         VerticalContentAlignment="Center" Height="34" FontSize="12"
-                         FontFamily="{StaticResource UiFont}" TextChanged="OnSearchChanged"/>
+                <Grid>
+                    <!-- A SEARCH FIELD HAS TO SAY IT IS ONE. Empty, this was a bare rectangle with
+                         nothing in it - on the dark card a black void beside the New note button.
+                         The tip line underneath explains the you:/them: syntax, but only to someone
+                         who already knows the box is for searching. Behind the TextBox, hidden the
+                         moment anything is typed. -->
+                    <TextBlock x:Name="SearchHint" Text="Search your meetings" FontSize="12"
+                               FontFamily="{StaticResource UiFont}" IsHitTestVisible="False"
+                               Foreground="{DynamicResource TextDim}" VerticalAlignment="Center"/>
+                    <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0"
+                             Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
+                             VerticalContentAlignment="Center" Height="34" FontSize="12"
+                             FontFamily="{StaticResource UiFont}" TextChanged="OnSearchChanged"/>
+                </Grid>
             </Border>
             <Button Grid.Column="1" Style="{StaticResource WhiteButton}" Margin="8,0,0,0" Padding="12,7"
                     Content="+ New note" Click="OnNewNote"/>

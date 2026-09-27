@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -41,6 +41,24 @@ public partial class App : Application
     }
 
     static string _summarizeStage = "Tidying up your notes";
+
+    /// <summary>The meeting's TITLE, the moment the model has written it - which is about two seconds
+    /// into a final pass that runs for fourteen. The note itself cannot be shown until the whole
+    /// generation is parsed, but the title is the first line the model emits, so the wait stops being
+    /// blank long before it ends. Null until known; cleared at the start of every summarize so a new
+    /// meeting never wears the last one's title.</summary>
+    public static string? SummarizeTitle
+    {
+        get => _summarizeTitle;
+        set
+        {
+            if (_summarizeTitle == value) return;
+            _summarizeTitle = value;
+            Current?.Dispatcher.BeginInvoke(new Action(() => SummarizeStageChanged?.Invoke(null, EventArgs.Empty)));
+        }
+    }
+
+    static string? _summarizeTitle;
     public static event EventHandler? SummarizeStageChanged;
 
     /// <summary>Set by the pill: opens the Toki peek into the remembered page (click on the peek).</summary>
@@ -408,10 +426,15 @@ public partial class App : Application
         // Dev/demo: `--state home` opens directly in a state; `--state summarizing,notes` walks a PATH,
         // one hop every 3s - some behaviour only lives in a transition and needs a way to drive one.
         var i = Array.IndexOf(e.Args, "--state");
+        // Filter on the PARSE, not on the value. The old form mapped an unparseable name to Hidden
+        // and then dropped every Hidden - which did discard typos, but also made `Hidden` itself
+        // unreachable, so the one transition this seam exists to drive (the notch retracting into
+        // the top edge) was the one transition it could not drive. Found while trying to film the
+        // close the owner reported as "it just cuts back up" (2026-09-27).
         var hops = i >= 0 && i + 1 < e.Args.Length
             ? e.Args[i + 1].Split(',')
-                .Select(part => Enum.TryParse<PillState>(part, ignoreCase: true, out var st) ? st : PillState.Hidden)
-                .Where(st => st != PillState.Hidden).ToArray()
+                .Select(part => (ok: Enum.TryParse<PillState>(part, ignoreCase: true, out var st), st))
+                .Where(p => p.ok).Select(p => p.st).ToArray()
             : Array.Empty<PillState>();
         if (hops.Length > 0)
         {
@@ -624,7 +647,7 @@ public partial class App : Application
     /// <summary>User dismissed the prompt - snooze that app for 10 minutes.</summary>
     public static void DismissPrompt()
     {
-        if (CurrentApp is not null) _detector?.Snooze(CurrentApp);
+        if (CurrentApp is not null) _detector?.Decline(CurrentApp);
         CurrentApp = null;
         State.TryGo(PillState.Hidden);
     }
@@ -916,226 +939,252 @@ public partial class App : Application
         // Show the loader immediately; finalize capture + transcribe + save entirely
         // off the UI thread (never freeze the pill), then advance when done.
         State.TryGo(PillState.Summarizing);
+        SummarizeTitle = null;   // a new meeting must never wear the last one's title
         SummarizeStage = "Transcribing";
         System.Threading.Tasks.Task.Run(() =>
         {
-            var folder = "";
-            IReadOnlyList<TranscriptSegment>? live = null;
-            try { folder = session?.Stop() ?? ""; live = session?.LiveTranscript; }
-            catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
-
+            // THE EXIT IS UNCONDITIONAL. Nothing below moves the notch out of Summarizing except the
+            // dispatcher call in the `finally`, so it must never be reachable-only-on-success. A path
+            // that skips it - an early return, a throw from a step that is not itself wrapped - strands
+            // the loader spinning forever over notes that were already written and saved. That shipped
+            // once (2026-09-04: the thin-input `return` below) and cost the owner 15 minutes watching a
+            // progress bar count up. transcript and meeting are hoisted so the finally can advance on
+            // whatever the pipeline managed to produce before it gave up.
             IReadOnlyList<TranscriptSegment>? transcript = null;
-            IReadOnlyList<Storage.TextFix> corrections = [];
-            var minShow = System.Threading.Tasks.Task.Delay(1200); // let the loader be seen
+            MeetingRecord? meeting = null;
             try
             {
-                // Prefer the live transcript (the fast path). Fall back to the whole-file pass when
-                // live produced nothing OR lost windows to decode errors - an unflagged multi-minute
-                // hole is worse than making the user wait.
-                var lostSec = session?.LiveLostSeconds ?? 0;
-                if (live is { Count: > 0 } && lostSec > 8 && folder.Length > 0)
-                {
-                    Log($"live transcript lost {lostSec:F0}s to decode errors - running the whole-file pass instead");
-                    live = null;
-                }
-                if (live is { Count: > 0 })
-                {
-                    // The live path merged turns inside LiveTranscriber.Stop but never went through
-                    // Process, so it still needs its names repaired.
-                    transcript = TranscriptionService.Instance.PolishNames(live, attendeeNames);
-                    corrections = TranscriptionService.Instance.LastCorrections;
-                    Log($"using live transcript ({live.Count} segments) - no stop-time ASR");
-                }
-                else if (folder.Length > 0)
-                {
-                    transcript = TranscriptionService.Instance.Process(folder, attendeeNames);
-                    corrections = TranscriptionService.Instance.LastCorrections;
-                }
-            }
-            catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
+                var folder = "";
+                IReadOnlyList<TranscriptSegment>? live = null;
+                try { folder = session?.Stop() ?? ""; live = session?.LiveTranscript; }
+                catch (Exception ex) { Log($"stop recording (bg): {ex.Message}"); }
 
-            // An accidental tap must not become a hollow Library entry with a bogus summary:
-            // drop anything with too few words OR a very short duration.
-            var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
-            var tooTrivial = transcript is { Count: > 0 } && (words < 12 || durationMs < 4000);
-            if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) - accidental tap");
-
-            // A discarded recording must not leave orphaned audio behind - but only delete when the
-            // transcript RAN and said "nothing here". A null transcript means the ASR was missing or
-            // failed; then the audio is the only artifact and must be kept for the recovery sweep.
-            if (transcript is not null && (transcript.Count == 0 || tooTrivial) && folder.Length > 0)
-            {
-                try { Directory.Delete(folder, true); Log($"deleted empty/trivial recording folder {folder}"); }
-                catch (Exception ex) { Log($"folder cleanup: {ex.Message}"); }
-                folder = "";
-            }
-
-            MeetingRecord? meeting = null;
-            if (transcript is { Count: > 0 } && !tooTrivial)
-            {
+                IReadOnlyList<Storage.TextFix> corrections = [];
+                var minShow = System.Threading.Tasks.Task.Delay(1200); // let the loader be seen
                 try
                 {
-                    var notes = NoteExtractor.Extract(transcript);
-                    meeting = new MeetingRecord
+                    // Prefer the live transcript (the fast path). Fall back to the whole-file pass when
+                    // live produced nothing OR lost windows to decode errors - an unflagged multi-minute
+                    // hole is worse than making the user wait.
+                    var lostSec = session?.LiveLostSeconds ?? 0;
+                    if (live is { Count: > 0 } && lostSec > 8 && folder.Length > 0)
                     {
-                        Kind = MeetingKind.Meeting,
-                        App = app,
-                        StartedAt = startedAt.ToLocalTime(),
-                        DurationMs = durationMs,
-                        Folder = folder,
-                        Transcript = transcript.ToList(),
-                        Corrections = corrections.ToList(),
-                        Notes = notes,
-                        Title = NoteExtractor.Title(notes, app, startedAt.ToLocalTime()),
-                    };
-                    Store.Save(meeting);
-                    MarkdownMirror.Write(meeting);
-                    // Attach the sticky note that was open during it - only when something was
-                    // actually written (an empty note is a button that opens nothing).
-                    if (stickyId is { } sid && Store.GetSticky(sid) is { Body.Length: > 0 })
-                    {
-                        Store.LinkStickyToMeeting(meeting.Id, sid);
-                        Log($"sticky note {sid} attached to meeting {meeting.Id}");
+                        Log($"live transcript lost {lostSec:F0}s to decode errors - running the whole-file pass instead");
+                        live = null;
                     }
-                    LibraryWindow.MarkDirty();
-                    Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
-                }
-                catch (Exception ex)
-                {
-                    // The row does not exist - carrying on with Id 0 would make every later write a
-                    // silent no-op. Null routes the pill to the empty state; the audio is KEPT so
-                    // the recovery sweep can rebuild the meeting on next launch.
-                    Log($"save meeting failed - audio kept for recovery: {ex.Message}");
-                    meeting = null;
-                }
-            }
-            minShow.Wait();
-
-            // TELL THE SPEAKERS APART FIRST (owner decision 2026-08-25). Running diarisation before the
-            // notes lets the writer see real names, attribute to-dos to the right person, and recognise a
-            // roll-call as introductions rather than tasks. It tags meeting.Transcript in place, which is
-            // what the note writer reads below. ~50s/hour; the loader names the stage.
-            if (meeting is not null && transcript is { Count: > 0 })
-            {
-                SummarizeStage = "Identifying speakers";
-                try { TagSpeakers(meeting, attendeeNames); }
-                catch (Exception ex) { Log($"speaker tagging (non-fatal, notes stay You/Them): {ex.Message}"); }
-            }
-
-            // Write the AI notes BEFORE revealing the Notes screen, so the heuristic draft never
-            // flashes. A timeout guards a stuck generation so the pill can never hang; we're on a
-            // background thread, so blocking on the result is safe.
-            if (meeting is not null && transcript is { Count: > 0 })
-            {
-                SummarizeStage = "Writing your notes";
-                try
-                {
-                    // THE THIN-INPUT GATE. Some meetings are real enough to keep but too thin to
-                    // write a structured note about, and handing the writer a shape it cannot fill
-                    // is how a single sentence became three Options considered and a Decision.
-                    // Deciding this arithmetically, before the model is consulted, is the whole
-                    // point: a model asked to judge whether it has enough to say answers yes.
-                    // See LlmNoteWriter.ThinInputWords for the calibration against the real Library.
-                    var substantive = Llm.LlmNoteWriter.SubstantiveWords(meeting.Transcript);
-                    if (substantive < Llm.LlmNoteWriter.ThinInputWords)
+                    if (live is { Count: > 0 })
                     {
-                        Log($"notes: thin input ({substantive} substantive words, floor is " +
-                            $"{Llm.LlmNoteWriter.ThinInputWords}) - honest minimal note, model not consulted");
-                        meeting.Notes = Llm.LlmNoteWriter.LowSubstanceNote();
-                        Store.ReplaceNotes(meeting.Id, meeting.Notes);
-                        Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
-                        Storage.MarkdownMirror.Write(meeting);
-                        return;
+                        // The live path merged turns inside LiveTranscriber.Stop but never went through
+                        // Process, so it still needs its names repaired.
+                        transcript = TranscriptionService.Instance.PolishNames(live, attendeeNames);
+                        corrections = TranscriptionService.Instance.LastCorrections;
+                        Log($"using live transcript ({live.Count} segments) - no stop-time ASR");
                     }
-
-                    // Map-reduce makes several short LLM calls for a long meeting; give it room,
-                    // but stay bounded so a stuck generation can never hang the pill.
-                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
-                    // The TRANSCRIPT is the only input. The user's sticky note is deliberately not
-                    // fed in (owner decision) - it sits beside the summary, it doesn't shape it.
-                    // meeting.Transcript, not the local `transcript`: TagSpeakers tagged the former in
-                    // place, so the writer sees the real names.
-                    var llmNotes = LlmService.Instance
-                        .WriteNotesAsync(meeting.Transcript, cts.Token, null, MeetingFacts(meeting, prepForNotes))
-                        .GetAwaiter().GetResult();
-                    // Only a note the MODEL wrote may replace the saved one - the heuristic
-                    // fallback is already in the row.
-                    if (llmNotes is { FromModel: true })
+                    else if (folder.Length > 0)
                     {
-                        // The REAL title must exist before the carry-forward runs: it matches
-                        // previous occurrences BY TITLE, and the heuristic placeholder (the
-                        // meeting's first words) can match an unrelated meeting.
-                        meeting.Notes = llmNotes;
-                        meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
+                        transcript = TranscriptionService.Instance.Process(folder, attendeeNames);
+                        corrections = TranscriptionService.Instance.LastCorrections;
+                    }
+                }
+                catch (Exception ex) { Log($"transcription failed (non-fatal): {ex.Message}"); }
 
-                        // The Library was usable during the LLM wait, and the user's edits WIN:
-                        // ticks carry onto matching new tasks, and a typed title is not overwritten.
-                        var fresh = Store.Get(meeting.Id);
-                        if (fresh is not null)
+                // An accidental tap must not become a hollow Library entry with a bogus summary:
+                // drop anything with too few words OR a very short duration.
+                var words = transcript?.Sum(s => s.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length) ?? 0;
+                var tooTrivial = transcript is { Count: > 0 } && (words < 12 || durationMs < 4000);
+                if (tooTrivial) Log($"discarding trivial recording ({durationMs}ms, {words} words) - accidental tap");
+
+                // A discarded recording must not leave orphaned audio behind - but only delete when the
+                // transcript RAN and said "nothing here". A null transcript means the ASR was missing or
+                // failed; then the audio is the only artifact and must be kept for the recovery sweep.
+                if (transcript is not null && (transcript.Count == 0 || tooTrivial) && folder.Length > 0)
+                {
+                    try { Directory.Delete(folder, true); Log($"deleted empty/trivial recording folder {folder}"); }
+                    catch (Exception ex) { Log($"folder cleanup: {ex.Message}"); }
+                    folder = "";
+                }
+
+                if (transcript is { Count: > 0 } && !tooTrivial)
+                {
+                    try
+                    {
+                        var notes = NoteExtractor.Extract(transcript);
+                        meeting = new MeetingRecord
                         {
-                            var done = fresh.Notes.Actions.Where(a => a.Done).Select(a => TaskKey(a.Text)).ToHashSet();
-                            foreach (var a in llmNotes.Actions)
-                                if (done.Contains(TaskKey(a.Text))) a.Done = true;
-                            var placeholder = NoteExtractor.Title(NoteExtractor.Extract(transcript), meeting.App, meeting.StartedAt);
-                            if (fresh.Title != placeholder && !string.IsNullOrWhiteSpace(fresh.Title))
+                            Kind = MeetingKind.Meeting,
+                            App = app,
+                            StartedAt = startedAt.ToLocalTime(),
+                            DurationMs = durationMs,
+                            Folder = folder,
+                            Transcript = transcript.ToList(),
+                            Corrections = corrections.ToList(),
+                            Notes = notes,
+                            Title = NoteExtractor.Title(notes, app, startedAt.ToLocalTime()),
+                        };
+                        Store.Save(meeting);
+                        MarkdownMirror.Write(meeting);
+                        // Attach the sticky note that was open during it - only when something was
+                        // actually written (an empty note is a button that opens nothing).
+                        if (stickyId is { } sid && Store.GetSticky(sid) is { Body.Length: > 0 })
+                        {
+                            Store.LinkStickyToMeeting(meeting.Id, sid);
+                            Log($"sticky note {sid} attached to meeting {meeting.Id}");
+                        }
+                        LibraryWindow.MarkDirty();
+                        Log($"saved meeting '{meeting.Title}' (id {meeting.Id})");
+                    }
+                    catch (Exception ex)
+                    {
+                        // The row does not exist - carrying on with Id 0 would make every later write a
+                        // silent no-op. Null routes the pill to the empty state; the audio is KEPT so
+                        // the recovery sweep can rebuild the meeting on next launch.
+                        Log($"save meeting failed - audio kept for recovery: {ex.Message}");
+                        meeting = null;
+                    }
+                }
+                minShow.Wait();
+
+                // TELL THE SPEAKERS APART FIRST (owner decision 2026-08-25). Running diarisation before the
+                // notes lets the writer see real names, attribute to-dos to the right person, and recognise a
+                // roll-call as introductions rather than tasks. It tags meeting.Transcript in place, which is
+                // what the note writer reads below. ~50s/hour; the loader names the stage.
+                if (meeting is not null && transcript is { Count: > 0 })
+                {
+                    SummarizeStage = "Identifying speakers";
+                    try { TagSpeakers(meeting, attendeeNames); }
+                    catch (Exception ex) { Log($"speaker tagging (non-fatal, notes stay You/Them): {ex.Message}"); }
+                }
+
+                // Write the AI notes BEFORE revealing the Notes screen, so the heuristic draft never
+                // flashes. A timeout guards a stuck generation so the pill can never hang; we're on a
+                // background thread, so blocking on the result is safe.
+                if (meeting is not null && transcript is { Count: > 0 })
+                {
+                    SummarizeStage = "Writing your notes";
+                    try
+                    {
+                        // THE THIN-INPUT GATE. Some meetings are real enough to keep but too thin to
+                        // write a structured note about, and handing the writer a shape it cannot fill
+                        // is how a single sentence became three Options considered and a Decision.
+                        // Deciding this arithmetically, before the model is consulted, is the whole
+                        // point: a model asked to judge whether it has enough to say answers yes.
+                        // See LlmNoteWriter.ThinInputWords for the calibration against the real Library.
+                        var substantive = Llm.LlmNoteWriter.SubstantiveWords(meeting.Transcript);
+                        if (substantive < Llm.LlmNoteWriter.ThinInputWords)
+                        {
+                            Log($"notes: thin input ({substantive} substantive words, floor is " +
+                                $"{Llm.LlmNoteWriter.ThinInputWords}) - honest minimal note, model not consulted");
+                            meeting.Notes = Llm.LlmNoteWriter.LowSubstanceNote();
+                            Store.ReplaceNotes(meeting.Id, meeting.Notes);
+                            Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
+                            Storage.MarkdownMirror.Write(meeting);
+                            LibraryWindow.MarkDirty();
+                        }
+                        // NEVER `return` from here. This lambda ends by advancing the notch out of
+                        // Summarizing, and an early return strands the loader spinning forever over a
+                        // note that was already written and saved (bug, 2026-09-04). Skipping the model
+                        // is an `else`, not an exit.
+                        else
+                        {
+                            // Map-reduce makes several short LLM calls for a long meeting; give it room,
+                            // but stay bounded so a stuck generation can never hang the pill.
+                            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(300));
+                            // The TRANSCRIPT is the only input. The user's sticky note is deliberately not
+                            // fed in (owner decision) - it sits beside the summary, it doesn't shape it.
+                            // meeting.Transcript, not the local `transcript`: TagSpeakers tagged the former in
+                            // place, so the writer sees the real names.
+                            var llmNotes = LlmService.Instance
+                                .WriteNotesAsync(meeting.Transcript, cts.Token, null, MeetingFacts(meeting, prepForNotes))
+                                .GetAwaiter().GetResult();
+                            // Only a note the MODEL wrote may replace the saved one - the heuristic
+                            // fallback is already in the row.
+                            if (llmNotes is { FromModel: true })
                             {
-                                Log($"user retitled meeting {meeting.Id} during the LLM wait - keeping their title");
-                                meeting.Title = fresh.Title;
+                                // The REAL title must exist before the carry-forward runs: it matches
+                                // previous occurrences BY TITLE, and the heuristic placeholder (the
+                                // meeting's first words) can match an unrelated meeting.
+                                meeting.Notes = llmNotes;
+                                meeting.Title = NoteExtractor.Title(llmNotes, meeting.App, meeting.StartedAt);
+
+                                // The Library was usable during the LLM wait, and the user's edits WIN:
+                                // ticks carry onto matching new tasks, and a typed title is not overwritten.
+                                var fresh = Store.Get(meeting.Id);
+                                if (fresh is not null)
+                                {
+                                    var done = fresh.Notes.Actions.Where(a => a.Done).Select(a => TaskKey(a.Text)).ToHashSet();
+                                    foreach (var a in llmNotes.Actions)
+                                        if (done.Contains(TaskKey(a.Text))) a.Done = true;
+                                    var placeholder = NoteExtractor.Title(NoteExtractor.Extract(transcript), meeting.App, meeting.StartedAt);
+                                    if (fresh.Title != placeholder && !string.IsNullOrWhiteSpace(fresh.Title))
+                                    {
+                                        Log($"user retitled meeting {meeting.Id} during the LLM wait - keeping their title");
+                                        meeting.Title = fresh.Title;
+                                    }
+                                }
+
+                                // Carry forward what the last occurrence left unfinished. Deterministic and
+                                // instant - no second model pass. Silent for a one-off.
+                                if (Llm.OpenFromLastTime.Build(meeting, Store) is { } carried)
+                                {
+                                    llmNotes.Sections = llmNotes.Sections.Prepend(carried).ToList();
+                                    Log($"carried {carried.Bullets.Count} open item(s) forward into meeting {meeting.Id}");
+                                }
+                                Store.ReplaceNotes(meeting.Id, llmNotes);
+                                Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
+                                MarkdownMirror.Write(meeting);
+                                LibraryWindow.MarkDirty();
+                                Log($"notes written by LLM for meeting {meeting.Id}");
                             }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"LLM notes failed (kept heuristic): {ex.Message}");
+                        // Re-sync the in-memory record with the DB so later views/mirror writes cannot
+                        // show a note the store never accepted.
+                        if (meeting is not null && Store.Get(meeting.Id) is { } dbTruth) meeting = dbTruth;
+                    }
 
-                        // Carry forward what the last occurrence left unfinished. Deterministic and
-                        // instant - no second model pass. Silent for a one-off.
-                        if (Llm.OpenFromLastTime.Build(meeting, Store) is { } carried)
-                        {
-                            llmNotes.Sections = llmNotes.Sections.Prepend(carried).ToList();
-                            Log($"carried {carried.Bullets.Count} open item(s) forward into meeting {meeting.Id}");
-                        }
-                        Store.ReplaceNotes(meeting.Id, llmNotes);
-                        Store.UpdateTitleAndBody(meeting.Id, meeting.Title, meeting.Body);
-                        MarkdownMirror.Write(meeting);
-                        LibraryWindow.MarkDirty();
-                        Log($"notes written by LLM for meeting {meeting.Id}");
+                    // Speakers were resolved BEFORE the notes; now attribute the to-do OWNERS from the
+                    // tagged transcript (needs the written action items, so it runs here). Guarded: the
+                    // catch above can null `meeting` out, and this is the path that must never throw.
+                    if (meeting is not null) InferOwners(meeting);
+
+                    // Low-memory: drop the 2.5GB model and re-warm the small recognizer so idle Toki
+                    // is light and the next meeting is ready to record.
+                    if (LowMemoryMode)
+                    {
+                        LlmService.Instance.Release();
+                        TranscriptionService.Instance.Warm();
                     }
                 }
-                catch (Exception ex)
-                {
-                    Log($"LLM notes failed (kept heuristic): {ex.Message}");
-                    // Re-sync the in-memory record with the DB so later views/mirror writes cannot
-                    // show a note the store never accepted.
-                    if (meeting is not null && Store.Get(meeting.Id) is { } dbTruth) meeting = dbTruth;
-                }
-
-                // Speakers were resolved BEFORE the notes; now attribute the to-do OWNERS from the
-                // tagged transcript (needs the written action items, so it runs here).
-                InferOwners(meeting);
-
-                // Low-memory: drop the 2.5GB model and re-warm the small recognizer so idle Toki
-                // is light and the next meeting is ready to record.
-                if (LowMemoryMode)
-                {
-                    LlmService.Instance.Release();
-                    TranscriptionService.Instance.Warm();
-                }
             }
-
-            Current.Dispatcher.BeginInvoke(() =>
+            catch (Exception ex)
             {
-                LastTranscript = transcript;
-                CurrentMeeting = meeting;
-                // No saved meeting (silence, trivial tap, or no ASR model) → empty state.
-                var target = meeting is null ? PillState.NoSpeech : PillState.Notes;
-                if (!State.TryGo(target))
+                // Reaching here means a step outside every inner guard threw. The notes may already be
+                // saved; what matters is that the finally still runs and the notch still advances.
+                Log($"summarize pipeline failed: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                Current.Dispatcher.BeginInvoke(() =>
                 {
-                    // The user forced the pill away mid-summarize. Never leave a dead Summarizing
-                    // loader behind: retarget the remembered context, and reveal now only from
-                    // neutral states - a page the user deliberately navigated to is not stomped.
-                    ResultMissed?.Invoke(target);
-                    if (State.Current is PillState.Hidden or PillState.Summarizing or PillState.Collapsed)
-                        State.ForceForDemo(target);
-                    else Log($"summarize result ready but pill busy ({State.Current}) - saved to Library");
-                }
-            });
+                    LastTranscript = transcript;
+                    CurrentMeeting = meeting;
+                    // No saved meeting (silence, trivial tap, or no ASR model) → empty state.
+                    var target = meeting is null ? PillState.NoSpeech : PillState.Notes;
+                    if (!State.TryGo(target))
+                    {
+                        // The user forced the pill away mid-summarize. Never leave a dead Summarizing
+                        // loader behind: retarget the remembered context, and reveal now only from
+                        // neutral states - a page the user deliberately navigated to is not stomped.
+                        ResultMissed?.Invoke(target);
+                        if (State.Current is PillState.Hidden or PillState.Summarizing or PillState.Collapsed)
+                            State.ForceForDemo(target);
+                        else Log($"summarize result ready but pill busy ({State.Current}) - saved to Library");
+                    }
+                });
+            }
         });
     }
 

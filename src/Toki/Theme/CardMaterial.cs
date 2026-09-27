@@ -1,3 +1,4 @@
+﻿using System;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -29,9 +30,17 @@ public sealed class CardMaterial : Grid
     /// <summary>Concentric with the card: outer radius 24 minus the ~1px rim it sits inside.</summary>
     public const double InnerRadius = 23;
 
-    /// <summary>How tall the top glow is. A FIXED band, not a fraction of the card: spread the same
-    /// amount of light over a 400px panel and it stops reading as an edge catching it.</summary>
+    /// <summary>How tall the top glow is on a card with room for it. A FIXED band, not a fraction:
+    /// spread the same light over a 400px panel and it stops reading as an edge catching it.
+    ///
+    /// CAPPED on short cards, 2026-09-23. The fixed band was never bounded, so on the 52px recording
+    /// bar a 48px sheen covered 92% of the card and the whole bar read as one glossy gradient rather
+    /// than an edge catching light. That is the "fake shine" the owner rejected. A highlight may own
+    /// the top third of a surface; past that it stops being a highlight and becomes the surface.</summary>
     const double SheenHeight = 48;
+
+    /// <summary>Most of a card the sheen may ever cover.</summary>
+    const double SheenMaxFraction = 0.34;
 
     readonly Border _sheen;
     readonly Border _top;
@@ -74,5 +83,17 @@ public sealed class CardMaterial : Grid
         Children.Add(sheen);
         Children.Add(top);
         Children.Add(bottom);
+
+        // The card's height is not known until it is arranged, and it CHANGES on every morph, so the
+        // cap has to be re-applied rather than set once.
+        SizeChanged += (_, e) =>
+        {
+            if (e.HeightChanged) _sheen.Height = SheenFor(e.NewSize.Height);
+        };
     }
+
+    /// <summary>The sheen's height on a card of <paramref name="cardHeight"/>. Never more than a
+    /// third of it: see SheenHeight.</summary>
+    internal static double SheenFor(double cardHeight) =>
+        cardHeight <= 0 ? SheenHeight : Math.Min(SheenHeight, cardHeight * SheenMaxFraction);
 }

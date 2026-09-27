@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -37,8 +37,8 @@ public partial class LibraryView : UserControl
                 Style = (Style)FindResource("Dim"), FontSize = 11, Margin = new Thickness(2, 16, 0, 0),
                 TextAlignment = TextAlignment.Center,
                 Text = string.IsNullOrWhiteSpace(SearchBox.Text)
-                    ? "No meetings yet. Record one, or make a new note."
-                    : "No matches.",
+                    ? "No meetings yet.\nToki saves a note here after every meeting it records."
+                    : "No matches.\nTry a shorter word, or drop the you: / them: prefix.",
             });
             return;
         }
@@ -65,8 +65,10 @@ public partial class LibraryView : UserControl
             body.Children.Add(new TextBlock { Text = m.Tldr, Style = (Style)FindResource("Dim"), FontSize = 10.5, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap, MaxHeight = 32, TextTrimming = TextTrimming.CharacterEllipsis });
 
         var tags = new StackPanel { Orientation = Orientation.Horizontal };
-        if (m.OpenActions > 0) tags.Children.Add(TagChip($"{m.OpenActions} open", "AmberDark", "Amber"));
-        if (m.PeopleCount > 0) tags.Children.Add(TagChip($"{m.PeopleCount} {(m.PeopleCount == 1 ? "voice" : "people")}", "Chip", "TextDim"));
+        // NOT AMBER. A filled amber pill rendered as a pale yellow lozenge in the light theme and
+        // put the loudest colour in the list on its least important fact (owner, 2026-09-26: "the
+        // yellow 3 open, i do not like"). The count is metadata; it reads as the neutral chip.
+        // See LibraryWindow: the count is plain text on the meta line, and the people count is gone.
         if (tags.Children.Count > 0) body.Children.Add(tags);
         Grid.SetColumn(body, 1);
         grid.Children.Add(body);
@@ -118,7 +120,13 @@ public partial class LibraryView : UserControl
         Reload();
     }
 
-    void OnSearchChanged(object sender, TextChangedEventArgs e) { _searchDebounce.Stop(); _searchDebounce.Start(); }
+    void OnSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        // The hint belongs to EMPTINESS, not to focus: a focused empty box still needs to say what it
+        // is, and a caret sitting on top of the placeholder reads fine.
+        SearchHint.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _searchDebounce.Stop(); _searchDebounce.Start();
+    }
 
     void OnNewNote(object sender, RoutedEventArgs e) => App.NewManualNote();
 

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -501,7 +501,12 @@ static class CalendarRows
     {
         var b = new Button
         {
-            Style = (Style)Application.Current.Resources[imminent ? "StarButton" : "WhiteButton"],
+            // ONE Join button, always the primary. The imminent one used to be an amber-filled pill
+            // (StarButton), which put TWO urgency signals side by side - the amber "in 8 min" text is
+            // right beside it - and in the light theme the fill rendered as a pale cream lozenge the
+            // owner called out as ugly yellow. The countdown carries the urgency; the button stays a
+            // button. (2026-09-23)
+            Style = (Style)Application.Current.Resources["WhiteButton"],
             Content = "Join", Padding = new Thickness(12, 5, 12, 5), FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
         };

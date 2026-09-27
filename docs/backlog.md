@@ -1,4 +1,261 @@
-# Toki - backlog & "what's next" (living doc)
+﻿# Toki - backlog & "what's next" (living doc)
+
+## ✅ FIXED 2026-09-04: every meeting now summarises in under a minute
+
+Owner's bar: "as fast as possible, every other notetaker, even the fully local ones, take less than a
+minute ... no compromise in quality." Met, measured on the owner's own stored meetings:
+
+| meeting | length | was | now | |
+|---|---|---|---|---|
+| 107 | 22.3 min | 176.2s | **45.6s** | 3.9x |
+| 128 | 12.7 min | 130.6s | **22.2s** | 5.9x |
+| 126 | 1.4 min | 81.0s | **9.9s** | 8.2x |
+
+**The change: the map step picks lines instead of rewriting them.** It emits only the transcript line
+numbers worth keeping and Toki copies those lines verbatim; a window drops from ~430 generated tokens
+to ~70. Quality measured both ways with `--regentest 5` (precision 100.0% to 96.8%, recall 38.9% to
+33.3%, provenance 68% to 69%, facts claimed 22 to 31 - all within 3 facts at n=5), and action owners
+came out equal or better. `TOKI_MAP=extract` restores the old path.
+
+Guarded by `MapSelectionTests` (8), `GpuTierTests` (7). Suite 2209/2209.
+
+## Optional
+
+Two ways to make Toki faster still. **Neither is recommended and neither is needed** - every meeting
+in the Library already summarises in under a minute. Both are here so the option is recorded, not
+because anything is waiting on them. Owner was walked through both on 2026-09-04 and the answer was
+to skip them.
+
+### Optional 1: use the whole GPU instead of 32 of 37 layers
+
+**Buys:** ~10 seconds on a long meeting (measured 35.9s vs 24.7s on meeting 107, and 43.0s vs 28.9s
+on meeting 128 across 3 runs each).
+
+**Costs:** llama.cpp reports 3370 MiB free and a full offload allocates model 2375.91 + KV 576.00 +
+compute 301.75 + host 18.01 = ~3254 MiB. That is a **116 MiB margin**, on the same card a video call
+would reach for. A native VRAM OOM is not an exception - it is an uncatchable crash that kills Toki
+mid-summary and lands the user on the heuristic floor, the worst note Toki can produce.
+
+**Only take this behind real free-VRAM gating** (`VK_EXT_memory_budget`, or DXGI
+`QueryVideoMemoryInfo` whose `Budget` is exactly "how much you may use right now"). `DetectVramBytes`
+reads the card's TOTAL size and has never known what is free. That gating is a SHIP BLOCKER for M8
+regardless, because a 4GB card that IS driving a display cannot take this.
+
+### Optional 2: map the transcript DURING the meeting
+
+**Buys:** the map phase (~21s of a 37s wait) disappears from the wait entirely, leaving classify +
+note + title. Roughly **16s regardless of meeting length** - a two-hour call would cost what a
+ten-minute one does. It is the only remaining change that removes real time rather than moving it
+around, which the three reverts above established.
+
+**Costs, and they are why it is optional:**
+- The 2.5GB model must stay resident on the GPU for the whole call, fighting `LlmService.Release()`
+  in LowMemoryMode and contending with the video call being recorded. On the owner's machine that is
+  probably fine (display is on the AMD iGPU, 0 MiB in use on the 3050) but it is exactly the
+  situation Optional 1 is refused over.
+- **It would likely cost the action owners.** Mapping mid-meeting runs BEFORE diarisation, so digests
+  would carry "Them:" where they now carry real names - and owner attribution is precisely what the
+  SELECT map improved. Fixable (cite indices, resolve names at the end) but it is work, not a flip.
+
+**If it is ever built:** map independent windows early, but the reduce must STILL see all digests at
+once. Do not turn it into a running summary - BooookScore (arXiv 2310.00785) measured incremental
+*updating* costing coherence badly (78.6 to 90.9 from step count alone). `LiveTranscriber` already
+raises `SegmentFinalized` live and the app already prefers the live transcript at stop, so the
+plumbing exists.
+
+### ❌ TRIED 2026-09-04 AND REVERTED - three micro-optimisations that bought nothing
+
+I claimed the per-call overhead was "11 seconds of 37, doing nothing". **That was wrong.** Measured
+directly (`llm: one context costs Nms`): a context costs **628ms** to build and drop, so 7 passes pay
+**4.4s, about 12%** - not 30%. Rewriting the inference core off `StatelessExecutor` for 4.4s on a
+load-bearing path is a bad trade, and it is no longer recommended.
+
+Two follow-ups from the same wrong premise also failed, each measured as medians of 3 runs on
+meeting 107 (single runs on this workload vary ~25%, so anything less is noise):
+
+| change | median | verdict |
+|---|---|---|
+| unchanged | 38.7s | - |
+| map windows widened 5491 to 7031 chars (5 windows to 4) | 38.8s | no gain |
+| map token cap halved (8 to 4 tokens per line) | 36.9s | within noise |
+
+**What this establishes:** the map phase is neither call-bound nor cap-bound. Its cost tracks the
+transcript it has to READ, and rearranging the windows just moves the same work around - one fewer
+call saves 628ms and a wider window spends it again on a longer prompt with more lines to list. The
+note pass (~330 generated tokens at ~25 tok/s) is likewise irreducible without writing less.
+
+**~37s for a 22-minute meeting is close to the floor for this pipeline on this hardware.** The
+remaining levers are structural or hardware, not tuning. All three reverts kept their findings as
+comments so the arithmetic is not re-derived: the arithmetic was right every time and the wall clock
+did not care.
+
+### ⏭️ NEXT, in the order I would do them
+
+**1. See "Optional" below** - the two remaining speed levers both carry real risk and neither is
+needed to hit the target. Moved out of NEXT deliberately.
+
+<!-- retained for the detail: -->
+**Map DURING the meeting (~37s to ~16s on a long meeting).**
+`LiveTranscriber` already raises `SegmentFinalized` live and the app already prefers the live
+transcript at stop (`using live transcript (N segments) - no stop-time ASR`), so windows can be
+mapped as they fill. At stop only classify + note + title remain - roughly 21s **regardless of
+meeting length**, which is what makes this scale to a 2-hour call.
+*Blocked on a decision:* it means holding the 2.5GB model resident during the call, on the GPU. On
+this machine that is likely fine (display is on the AMD iGPU, 0 MiB in use on the 3050), but it
+fights `LlmService.Release()` in LowMemoryMode and could contend with a video call. Needs the owner's
+call, or free-VRAM gating first.
+*Do NOT turn this into a running summary:* map independent windows early, but the reduce must still
+see all digests at once. BooookScore (arXiv 2310.00785) measured incremental *updating* costing
+coherence badly (78.6 to 90.9 from step count alone).
+
+**2. ~~Stream the final pass into the notch~~ - DONE 2026-09-04.** The final pass now streams and the
+notch shows the meeting's TITLE the moment its line closes, in place of "Writing your notes".
+Measured on meeting 128: title known at 23:20:09, note ready at 23:20:18 - **9.1 seconds early**, the
+last third of the wait. Note the correction: this is 2s into the FINAL pass, not 2s into the wait, so
+the earlier "title after about 2 seconds" claim was wrong. The title cannot come sooner without
+reordering the pipeline, because it is written from the digests.
+Guarded by `TitleRevealTests` (3), including that streaming does not change the note.
+Still worth doing here later: abort a degenerate generation in its first 30 characters instead of
+paying for a full wasted pass and retrying.
+
+**3. Batch the map calls (`BatchedExecutor`), ~1.6-1.8x on the map phase.**
+Verified present in LLamaSharp 0.27.0 (`LLama.Batched.BatchedExecutor`, `Conversation.Fork()`).
+Gotchas: `SeqMax` defaults to 1 and must be raised; `ContextSize` is a SHARED pool across
+conversations, so N windows need N x the room or you get `NoKvSlot` - the exact error that used to
+drop meetings silently onto the heuristic floor. Lower priority now that selection made each map call
+cheap; it would matter again if #1 is rejected.
+
+**4. Free-VRAM gating (SHIP BLOCKER for M8, unchanged).** `DetectVramBytes` reads the card's TOTAL
+size. Full offload is 33% faster and currently refused only because the margin is 116 MiB. Gate on
+`VK_EXT_memory_budget` or DXGI `QueryVideoMemoryInfo` and it can be taken automatically when free.
+
+### Measured and REJECTED (do not revisit without new evidence)
+
+- **KV cache quantisation.** q8_0 for K is documented at KLD 0.00094 and would fund #3. Measured here:
+  **99s vs 28.9s, 2.3x SLOWER** on Vulkan. The arithmetic says yes, the hardware says no.
+- **CUDA backend.** Vulkan is at parity or ahead for *generation* on Ampere (RTX 3080: 139.15 vs
+  131.01 tg t/s). CUDA wins 15-25% on prefill only, which is ~6% of the wait, for a 213MB vs 19MB
+  NVIDIA-only package.
+- **Speculative decoding.** LLamaSharp 0.27.0 exposes no draft-model API at all.
+- **Single-pass over the whole transcript.** Positional-recall ablation on 2.6-9.2B local models
+  (Frontiers 2025, 10.3389/frai.2025.1604034): map 92/91/88% by position vs stuff 39/48/87%. Stuffing
+  loses the beginning and middle.
+- **A smaller model for the map.** Two resident models will not fit 4GB, and completeness is exactly
+  what small models lose on meetings.
+
+### Worth knowing
+
+Nobody commercial does on-device summarisation. Granola's own help centre says summarisation is
+"primarily OpenAI and Anthropic"; it is fast because streaming cloud ASR finishes the transcript
+during the call and one frontier-model call runs at stop. The open-source local tools (Anarlog,
+Meetily) summarise only at stop, sequentially, and publish no latency numbers. Also: every local tool
+surveyed budgets context at ~4 chars/token (Vibe, Reflect) or 2.857 (Meetily). Toki measured 2.6 and
+set 2.2, so their pipelines are overflowing quietly the way Toki's did before `NoKvSlot` was made
+loud. Keep the measured constant and the loud failure.
+
+## ✅ FIXED 2026-09-04: summaries were 2.7x slower than the hardware allows
+
+Owner: "we had faster summaries before the fixes we made yesterday." Nothing timed the model calls,
+so `TextPass` is now instrumented (prompt chars, token cap, output chars, ms per pass).
+
+**Generation is the entire wait.** A 12-token pass over a 3.4k-char prompt costs 2-3s; a 430-token
+pass costs 20-58s. ~1000 generated tokens per note at 8-11 tok/s. Prompt size barely matters.
+
+Generation rate is set by the share of the model on the GPU, and the 4GB tier offloaded **20
+layers** - never timed, a defensive guess against an uncatchable native OOM. Measured on the owner's
+RTX 3050 4GB, total model time for one note: 20 layers **121.8s**, 28 layers 75.7s, **32 layers
+45.8s (shipped)**, 34 layers 47.5s/48.7s, full offload 44.7s.
+
+32 is the knee: 2.7x, within 3% of full offload, over a gigabyte still free for the desktop and the
+call. Full offload refused on purpose - the failure mode is process death with nothing to catch.
+
+Guarded by `GpuTierTests` (6); `LlmRuntime.Tier` extracted as a pure function. Suite 2200/2200.
+
+### Measured against the owner's REAL past meetings, not one replay
+
+The owner pushed back on the first comparison ("don't compare yesterday's, compare the past
+recordings, the long ones too"). They were right to: the first pass dismissed the fast old summaries
+as "short meetings", and meeting 107 disproves that - 22.3 minutes and 20,573 chars, the largest in
+the Library, at 8.6s per 1k chars, the BEST ratio of any meeting. Length was never the explanation.
+
+Joining the log's `saved meeting` -> `notes written by LLM` deltas against `duration_ms` and
+transcript size in the store, then replaying the same meetings through the new build:
+
+| meeting | length | transcript | was | now (model time) | |
+|---|---|---|---|---|---|
+| 107 | 22.3 min | 20,573 ch | 176.2s | **109.2s** (7 passes) | 1.6x |
+| 121 | 19.5 min | 4,842 ch | 91.5s | **42.6s** (4 passes) | 2.1x |
+| 128 | 12.7 min | 6,800 ch | 130.6s | **45.8s** (4 passes) | 2.9x |
+| 126 | 1.4 min | 970 ch | 81.0s | **9.2s** (2 passes) | 8.8x |
+
+The "was" column is end to end from the log and the "now" column is model time only; both carry the
+same 8-17s of diarisation and model load, which the log shows separately. Every historical meeting is
+now faster than it has ever been, and the gain is largest where it was most embarrassing: 126 is a
+84-second meeting that took 81 seconds to summarise and now takes 9.
+
+107 stays the slowest at 109s because 20k chars genuinely needs four map windows, and the map passes
+are 20-22s each. That is 84s of its 109s. Cutting it further means generating fewer digest tokens,
+which is a note-quality trade and is not being made on speed grounds alone.
+
+**The variance in the old numbers was never about meeting length.** A 1.4-minute meeting cost 81s
+while a 22-minute one cost 176s. What actually moved was generated tokens and whether the model had
+to be reloaded, neither of which anyone could see before this instrumentation existed.
+
+**On the owner's claim:** partly right. Yesterday's budgets do generate more tokens, which is the
+expensive axis. But the comparison was confounded - the fast old summaries were short meetings, and
+the longest ones were "fast" because they were failing into the heuristic floor. At 32 layers a full
+14-bullet note costs less than the old capped 7-bullet one.
+
+### ⏭️ NEXT (recommended): size offload from FREE VRAM, not the card's total size
+
+`DetectVramBytes` reads `HardwareInformation.qwMemorySize` - the card's TOTAL size. Nothing in Toki
+has ever known how much VRAM is actually free at load time, which is why the tier has to be a
+conservative constant and why full offload cannot be taken safely.
+
+**Recommendation:** DXGI `IDXGIAdapter3::QueryVideoMemoryInfo`, whose `Budget` is exactly "how much
+you may use right now". Size layers as `(Budget - kv - compute - desktop reserve) / perLayer`, with
+`perLayer` derived from the GGUF file size rather than hardcoded. Idle machine gets full offload
+(~45s, another 3%); busy machine backs off automatically instead of crashing. ~70 lines of COM
+interop, and the vtable layout must be exact because a mistake here is an access violation.
+
+Rejected alternative: the `GPU Adapter Memory` performance counter. Instances are keyed by adapter
+LUID with no reliable mapping to the adapter llama.cpp picked; on the owner's machine it reported
+2035 MiB in use on an adapter where full offload demonstrably fit.
+
+Also worth doing while in here: pass 3 is a 12-token "pick" call costing 2-3s (~6% of the wait) and
+may not need the model at all.
+
+## ✅ FIXED 2026-09-04: the Summarizing loader could never end (owner-reported, 15 minutes)
+
+The owner stopped a ~50s recording and the notch summarized for fifteen minutes, progress bar reading
+**1275m 37s**. The notes had been written, saved and mirrored **8 seconds after the stop**. Two bugs:
+
+**1. The exit was on the happy path.** The thin-input gate (below 70 substantive words: skip the
+model, write an honest minimal note) ended with a bare `return;`. That lambda's last act is the
+dispatcher call moving the notch out of `Summarizing`, and `AppState` allows no other exit and no
+timeout. `return` meant "abandon the pipeline", not "skip the model".
+
+Fixed structurally, not at the branch: **the advance now runs from a `finally`**, so any future
+unguarded throw still ends the loader. The gate uses `else`; `InferOwners` is null-guarded (the catch
+above it can null the record out). Nothing caught this because the gate only fires on a near-silent
+meeting; every test meeting took the model path.
+
+**2. The clock measured process uptime.** `readonly DateTime _started = DateTime.UtcNow` is stamped
+at construction, and `PillWindow` caches one view per state for the process lifetime. 21h15m = 1275m
+exactly. Now stamped on `Loaded`. Same file: `_elapsedTimer.Tick +=` inside `Loaded` stacked one
+handler per meeting on the cached view; moved to the constructor.
+
+Guarded by `SummarizeExitTests` (9: five detectors + four mutation probes feeding them the pre-fix
+code). Suite 2194/2194. Published and running.
+
+**Worth a sweep, not yet done:** are there other long-lived cached views whose constructors assume
+"once per appearance"? `PillWindow._views` caches all sixteen. Only `SummarizingView` has a clock,
+but the subscription-in-`Loaded` shape could exist elsewhere.
+
+**Observation, not a bug I can pin:** this recording logged `you peak 0%, them peak 99%` - Toki heard
+the call through Chrome and heard nothing from the owner's mic, which is why 21 words. The log
+history shows the mic working in plenty of other recordings (99%, 74%, 68%), so this reads as muted
+or listening rather than a capture fault. Only the owner can confirm whether they spoke.
 
 ## ✅ FIXED 2026-09-03: the note body could never exceed SEVEN bullets
 
@@ -29,9 +286,9 @@ beside the fact count. Facts should rise; if precision falls with them, the extr
 filled with invention and the ladder comes back down. Not yet measured, because the owner is taking
 the build to real meetings first, which is the better test.
 
-**One debt:** this fix has no guard test yet (`BulletBudgetTests`, asserting the budget scales with
-what was said, stays tight on a short meeting, and stays finite). The old digest-length formula would
-fail it. Add it before touching this area again.
+**Debt cleared 2026-09-04:** `BulletBudgetTests` exists and passes (budget scales with what was
+said, stays tight on a short meeting, stays finite; the old digest-length formula fails two of its
+cases). The earlier note here said it was outstanding - it was not.
 
 **Still open, deliberately:** "Key points" as a single junk-drawer section. Even 14 bullets in one
 unnamed heap is worse than three named things, and the owner-approved note page says so. That IS the

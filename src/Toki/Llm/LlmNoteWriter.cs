@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using Toki.Storage;
 using Toki.Transcription;
@@ -38,7 +38,10 @@ public sealed class LlmNoteWriter
         var heuristic = NoteExtractor.Extract(transcript);
         if (!_llm.Ready || transcript.Count == 0) return heuristic;
 
-        var chunks = Chunk(transcript, MaxChunkChars());
+        var chunks = Chunk(transcript, MapWindowChars());
+        // The shape of the wait: window count decides how many MAP calls run, and map calls are the
+        // bulk of a long meeting's generation. Logged so a slow note can be attributed without a rerun.
+        App.Log($"notes: {transcript.Count} segments -> {chunks.Count} window(s) of up to {MapWindowChars()} chars");
 
         // Decide what the final pass reads. One window → read it raw (best fidelity for a short
         // meeting). Many windows → MAP each to a digest first, so the final pass fits in context.
@@ -65,6 +68,7 @@ public sealed class LlmNoteWriter
             for (var i = 0; i < chunks.Count; i++)
             {
                 var d = await MapChunk(chunks[i].Text, i + 1, chunks.Count, ct);
+                if (Mode == MapMode.Select) d = Materialise(d, transcript, chunks[i].First, chunks[i].Last);
                 if (d is null) { failed++; continue; }
                 if (string.IsNullOrWhiteSpace(d) || IsNothing(d)) continue;
 
@@ -207,8 +211,55 @@ public sealed class LlmNoteWriter
     }
 
     // ── MAP: one window → a compact factual digest (or NOTHING) ──
+    /// <summary>How the map step reports what a window contains.
+    ///
+    /// EXTRACT (the original): the model rewrites each point in the speaker's own words, prefixed
+    /// with the transcript line it came from. ~30 tokens a line, ~430 tokens a window.
+    ///
+    /// SELECT: the model emits ONLY the line numbers worth keeping, and Toki copies those lines out
+    /// of the transcript verbatim. ~4 tokens a line, ~70 tokens a window. Generation is the entire
+    /// wait (measured), so this is where a long meeting's time actually is - the map phase was 85% of
+    /// meeting 107. Grounding should also RISE, because a copied line cannot drift from its citation
+    /// and the "window came back uncited" fallback cannot fire. Precedent: "Attribute First, then
+    /// Generate" (arXiv 2403.17104).
+    ///
+    /// The cost to watch is that the digest is now raw speech rather than the model's tidied version,
+    /// so the final pass has more to do and the digest is longer. Measure before trusting it.</summary>
+    internal enum MapMode { Extract, Select }
+
+    /// <summary>SELECT is the default, measured 2026-09-04. Meeting 107 (22 min, 5 windows) 60.6s to
+    /// 25.1s of model time, meeting 128 28.2s to 12.4s. Grounding unchanged over 5 meetings
+    /// (--regentest: pooled precision 100.0% to 96.8%, recall 38.9% to 33.3%, provenance 68% to 69%,
+    /// facts claimed 22 to 31 - every difference is 3 facts or fewer at n=5). Action OWNERS are equal
+    /// or better: on meeting 107 EXTRACT named nobody across 6 actions while SELECT named 3-4 across
+    /// 5, twice running, because raw speech carries "Kashish, can you get Koshi?" and a rewrite drops
+    /// it. TOKI_MAP=extract restores the old behaviour for an A/B.</summary>
+    internal static MapMode Mode =>
+        Environment.GetEnvironmentVariable("TOKI_MAP")?.Trim().ToLowerInvariant() == "extract"
+            ? MapMode.Extract : MapMode.Select;
+
+    /// <summary>Turn a SELECT answer (line numbers) into the same shape an EXTRACT answer has, by
+    /// copying the cited lines out of the transcript. Everything downstream - ValidateDigest,
+    /// TrimToFit, provenance - then works unchanged, because the format is identical.</summary>
+    internal static string? Materialise(string? picked, IReadOnlyList<TranscriptSegment> transcript,
+                                        int windowFirst, int windowLast)
+    {
+        if (string.IsNullOrWhiteSpace(picked) || IsNothing(picked)) return picked;
+        var ids = new List<int>();
+        foreach (Match m in Regex.Matches(picked, @"\[(\d+)\]"))
+            if (int.TryParse(m.Groups[1].Value, out var id)
+                && id >= windowFirst && id <= windowLast && id < transcript.Count
+                && !ids.Contains(id))
+                ids.Add(id);
+        if (ids.Count == 0) return null;   // no usable citation: treated as a failed window
+        ids.Sort();
+        // Label included: it is what lets the writer attribute a to-do to the person who took it.
+        return string.Join("\n", ids.Select(i => $"[{i}] {transcript[i].Label}: {transcript[i].Text}"));
+    }
+
     async Task<string?> MapChunk(string chunk, int part, int total, CancellationToken ct)
     {
+        if (Mode == MapMode.Select) return await SelectChunk(chunk, part, total, ct);
         // EXTRACT, DO NOT ABSTRACT. This step used to emit paraphrased dash bullets, and that was the
         // point where invention entered: by the time the writer ran, the transcript was gone and it
         // had nothing left to check itself against. A note for a 40-minute meeting was written from a
@@ -248,6 +299,28 @@ public sealed class LlmNoteWriter
         // and the ceiling stays under the 760 the final pass uses, which is what ReserveTokens is
         // sized against - a map pass that outgrew the reserve would bring back NoKvSlot.
         return await TextPass(prompt, Math.Min(700, DigestLines(chunk.Length) * 30 + 100), ct);
+    }
+
+    /// <summary>The SELECT map: pick the line numbers, write nothing. See MapMode.</summary>
+    async Task<string?> SelectChunk(string chunk, int part, int total, CancellationToken ct)
+    {
+        var want = DigestLines(chunk.Length);
+        var prompt =
+            $"This is part {part} of {total} of a meeting transcript. Every line is numbered.\n\n"
+            + $"Choose the {want / 2} to {want} numbered lines that carry the real content of this part, "
+            + "and reply with ONLY their numbers in square brackets, one per line, like this:\n\n"
+            + "[4]\n[9]\n[17]\n\n"
+            + "Write NOTHING ELSE. No words, no explanation, no summary. Only the numbers.\n\n"
+            + "Choose the lines that carry: topics, decisions and the reason given for them, tasks and "
+            + "follow-ups (including who took them and any due date), and important facts, names, "
+            + "numbers and dates. Skip greetings, filler, logistics and audio checks.\n\n"
+            + "Prefer the line where something is actually stated over one that merely refers to it. "
+            + "If a point spans two lines, choose both.\n\n"
+            + $"Reply with exactly {NothingMarker} ONLY if this part is purely greetings, small talk or "
+            + "connection checks with no real topic at all.\n\n"
+            + $"Transcript part:\n{chunk}";
+        // ~4 tokens a citation, against ~30 for a rewritten line. This cap is the whole speed win.
+        return await TextPass(prompt, Math.Min(200, want * 8 + 40), ct);
     }
 
     // ── template classification: which note shape fits this meeting ──
@@ -331,7 +404,19 @@ public sealed class LlmNoteWriter
                 + "\n\nIMPORTANT: use the EXACT section headers named above (TITLE, SUMMARY, "
                 + string.Join(", ", template.Sections.Select(s => s.ToUpperInvariant()))
                 + ", ACTION ITEMS), each alone on its own line, never as a bullet.";
-            var raw = await TextPass(ask, 760, ct);
+            // The title is the FIRST thing this prompt asks for, so it lands seconds into a pass that
+            // runs for a quarter of a minute. Parsed with the same ParseNote the finished note uses,
+            // so the notch can never show a title the note then disagrees with.
+            var titled = false;
+            var raw = await TextPass(ask, 760, ct, partial =>
+            {
+                if (titled) return;
+                var t = ParseNote(partial, template).Title;
+                if (string.IsNullOrWhiteSpace(t)) return;
+                titled = true;
+                App.SummarizeTitle = t;
+                App.Log($"notes: title known, showing it while the rest is written: \"{t}\"");
+            });
             if (raw is null) return null;
             if (IsNothing(raw)) return new FinalNoteResult { Summary = NothingMarker };
 
@@ -484,6 +569,10 @@ public sealed class LlmNoteWriter
     /// <summary>Context budget for a chunk, in characters, sized from the model's context window.</summary>
     static int MaxChunkChars() => MaxChunkChars((int)LlmRuntime.ContextSize);
 
+    /// <summary>The window size the MAP step reads. Same as the note's budget - see the note on
+    /// MapReserveTokens for why widening it was tried and bought nothing.</summary>
+    static int MapWindowChars() => MaxChunkChars();
+
     /// <summary>
     /// HOW MANY BULLETS A SECTION MAY HOLD, FROM THE SIZE OF THE MEETING.
     ///
@@ -543,6 +632,21 @@ public sealed class LlmNoteWriter
     /// </summary>
     internal static int MaxChunkChars(int ctx) =>
         Math.Max(1200, (int)((ctx - ReserveTokens) * ChunkCharsPerToken));
+
+    /// <summary>TRIED AND REVERTED 2026-09-04, kept as a warning. A SELECT map emits ~128 tokens
+    /// while ReserveTokens is sized for the note pass's 760, so charging the note's reserve to the
+    /// map looks like ~40% of every window wasted, and cutting meeting 107 into 5 windows where 4
+    /// would fit looks like a free model call saved.
+    ///
+    /// It saved nothing. Medians of 3 runs on meeting 107: 38.7s at the note's reserve, 38.8s with
+    /// windows widened to 7031 chars. Halving the map's token cap was the same story (36.9s). The map
+    /// is not call-bound and not cap-bound - its cost tracks the transcript it has to READ, which no
+    /// amount of rearranging changes. One fewer call is worth ~628ms of context construction, and a
+    /// wider window spends that again on a longer prompt and more lines to list.
+    ///
+    /// Do not re-derive this from the arithmetic. The arithmetic is right and the wall clock does not
+    /// care.</summary>
+    internal const int MapReserveTokens = ReserveTokens;
 
     /// <summary>
     /// Fit the digests inside the budget by DROPPING the least informative lines, keeping the rest
@@ -1128,12 +1232,27 @@ public sealed class LlmNoteWriter
 
     // ── passes (validated, retried once, else null → caller falls back) ──
 
-    async Task<string?> TextPass(string user, int maxTokens, CancellationToken ct)
+    /// <summary>Model time, per pass, for the meeting being written. WHERE THE WAIT GOES was
+    /// unmeasurable until 2026-09-04: the owner asked why summaries had slowed and neither of us could
+    /// answer, because nothing timed the calls. Prompt size and token budget are logged beside the
+    /// duration, since those are the two levers that change it.</summary>
+    int _passes; long _passMs;
+
+    /// <summary>Reset and report by the caller that owns a whole note.</summary>
+    internal void BeginTiming() { _passes = 0; _passMs = 0; }
+    internal void ReportTiming(string what) =>
+        App.Log($"notes: {what} took {_passMs / 1000.0:0.0}s of model time over {_passes} pass(es)");
+
+    /// <param name="onLine">Called with everything generated so far, each time a LINE completes.
+    /// Only whole lines, because a half-written title is worse than no title. Given a handler this
+    /// streams instead of buffering; the result is identical either way.</param>
+    async Task<string?> TextPass(string user, int maxTokens, CancellationToken ct, Action<string>? onLine = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
             string outp;
-            try { outp = (await _llm.CompleteAsync(System, user, maxTokens, ct)).Trim(); }
+            var t0 = global::System.Diagnostics.Stopwatch.GetTimestamp();
+            try { outp = (await Generate(user, maxTokens, ct, onLine)).Trim(); }
             catch (OperationCanceledException) { return null; }
             catch (Exception ex)
             {
@@ -1146,6 +1265,10 @@ public sealed class LlmNoteWriter
                 App.Log($"notes: model call FAILED ({maxTokens} tok, attempt {attempt + 1}): {ex.GetType().Name}: {ex.Message}");
                 return null;
             }
+            var ms = (global::System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000 / global::System.Diagnostics.Stopwatch.Frequency;
+            _passes++; _passMs += ms;
+            App.Log($"notes: pass {_passes} {user.Length} chars in, cap {maxTokens} tok, {outp.Length} chars out, {ms}ms");
+
             // Every line of every written note funnels through here - the one place that turns the
             // model's em dashes into plain hyphens (the prompt alone is not enough; a 4B model
             // still slips one in). IsEmptyMarker still recognises a bare "-".
@@ -1153,6 +1276,32 @@ public sealed class LlmNoteWriter
             if (!TextValidator.IsDegenerate(outp)) return outp;
         }
         return null;
+    }
+
+    /// <summary>One generation. Buffered when nobody is watching, streamed when somebody is - the
+    /// streamed path exists so the notch can show the title ~2s into a 14s pass rather than after it.
+    /// Never let a display concern change the ANSWER: both paths return the same completed text.</summary>
+    async Task<string> Generate(string user, int maxTokens, CancellationToken ct, Action<string>? onLine)
+    {
+        if (onLine is null) return await _llm.CompleteAsync(System, user, maxTokens, ct);
+
+        var sb = new StringBuilder();
+        var announced = 0;
+        await foreach (var piece in _llm.StreamAsync(System, user, maxTokens, ct).WithCancellation(ct))
+        {
+            sb.Append(piece);
+            // Only on a newline, and only when a NEW line has actually closed - a token stream can
+            // deliver several pieces inside one line and this must not fire per token. That was the
+            // notch-flicker bug: a flush 14 times a second regrew the window under the user.
+            if (!piece.Contains('\n')) continue;
+            var lines = 0;
+            for (var i = 0; i < sb.Length; i++) if (sb[i] == '\n') lines++;
+            if (lines <= announced) continue;
+            announced = lines;
+            try { onLine(sb.ToString()); }
+            catch (Exception ex) { App.Log($"notes: title observer threw (ignored): {ex.Message}"); }
+        }
+        return sb.ToString();
     }
 
     // A window/note the model reported nothing for ("NOTHING", "none", "(nothing substantive)"...).
