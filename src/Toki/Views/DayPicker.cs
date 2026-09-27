@@ -102,7 +102,7 @@ public static class DayPicker
     {
         var text = new TextBlock
         {
-            Text = glyph, FontSize = 10,
+            Text = glyph, FontSize = 12,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         text.SetResourceReference(TextBlock.FontFamilyProperty, "IconFont");
@@ -129,7 +129,7 @@ public static class DayPicker
         {
             var t = new TextBlock
             {
-                Text = names[(first + i) % 7], FontSize = 10.5,
+                Text = names[(first + i) % 7], FontSize = 12,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 2),
             };
@@ -162,7 +162,7 @@ public static class DayPicker
 
         var text = new TextBlock
         {
-            Text = day.Day.ToString(CultureInfo.CurrentCulture), FontSize = 12,
+            Text = day.Day.ToString(CultureInfo.CurrentCulture), FontSize = 13.5,
             FontWeight = isSelected || isToday ? FontWeights.SemiBold : FontWeights.Normal,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
@@ -204,7 +204,7 @@ public static class DayPicker
     {
         var text = new TextBlock
         {
-            Text = "Today", FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Text = "Today", FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
         };
         text.SetResourceReference(TextBlock.FontFamilyProperty, "UiFont");

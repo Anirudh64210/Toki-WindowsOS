@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -29,7 +29,7 @@ public sealed class NotesReadyView : UserControl
         };
         var label = new TextBlock
         {
-            Text = "Notes ready", FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Text = "Notes ready", FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             FontFamily = (FontFamily)Application.Current.Resources["UiFont"],
             VerticalAlignment = VerticalAlignment.Center,
         };

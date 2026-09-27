@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -136,7 +136,7 @@ public partial class AskView : UserControl
         if (_curStack.Children.Count > 0 && _curStack.Children[0] is TextBlock { Tag: "scope" }) return;
         var t = new TextBlock
         {
-            Text = $"About: {title}", FontFamily = Ui, FontSize = 10.5,
+            Text = $"About: {title}", FontFamily = Ui, FontSize = 12,
             Margin = new Thickness(0, 0, 0, 3), Tag = "scope", TextTrimming = TextTrimming.CharacterEllipsis,
         };
         t.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
@@ -284,7 +284,7 @@ public partial class AskView : UserControl
     // Progressive disclosure as an inline link: "See full answer in Library →".
     FrameworkElement MoreLink()
     {
-        var link = new TextBlock { Text = "See full answer in Library  →", FontSize = 12, FontFamily = Ui, Cursor = Cursors.Hand, Margin = new Thickness(0, 7, 0, 1) };
+        var link = new TextBlock { Text = "See full answer in Library  →", FontSize = 13.5, FontFamily = Ui, Cursor = Cursors.Hand, Margin = new Thickness(0, 7, 0, 1) };
         link.SetResourceReference(TextBlock.ForegroundProperty, "Pink");
         link.MouseLeftButtonUp += (_, _) => OnMore();
         return link;

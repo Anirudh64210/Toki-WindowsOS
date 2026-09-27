@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -55,13 +55,13 @@ public sealed class SearchableDropdown : Border
         _valueText.VerticalAlignment = VerticalAlignment.Center;
         _valueText.TextTrimming = TextTrimming.CharacterEllipsis;
         _valueText.FontFamily = Res<FontFamily>("UiFont");
-        _valueText.FontSize = 11.5;
+        _valueText.FontSize = 12;
         _valueText.SetResourceReference(TextBlock.ForegroundProperty, "Text");
 
         var chevron = new TextBlock
         {
             Text = "▾", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
-            FontSize = 10,
+            FontSize = 12,
         };
         chevron.SetResourceReference(TextBlock.ForegroundProperty, "TextDim");
         Grid.SetColumn(chevron, 1);
@@ -82,7 +82,7 @@ public sealed class SearchableDropdown : Border
         _search.SetResourceReference(Control.ForegroundProperty, "Text");
         _search.SetResourceReference(TextBoxBase.CaretBrushProperty, "Text");
         _search.FontFamily = Res<FontFamily>("UiFont");
-        _search.FontSize = 11.5;
+        _search.FontSize = 12;
         _search.VerticalContentAlignment = VerticalAlignment.Center;
         _search.TextChanged += (_, _) => RebuildRows(_search.Text);
         _searchBox.Child = _search;
@@ -162,7 +162,7 @@ public sealed class SearchableDropdown : Border
         var isSel = string.Equals(item, _selected, StringComparison.OrdinalIgnoreCase);
         var text = new TextBlock
         {
-            Text = item, FontFamily = Res<FontFamily>("UiFont"), FontSize = 11.5,
+            Text = item, FontFamily = Res<FontFamily>("UiFont"), FontSize = 12,
             FontWeight = isSel ? FontWeights.SemiBold : FontWeights.Normal,
             Foreground = Res<Brush>("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
         };

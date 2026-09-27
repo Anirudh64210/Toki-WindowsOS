@@ -1,4 +1,4 @@
-<UserControl x:Class="Toki.Views.RecordingOpenView"
+﻿<UserControl x:Class="Toki.Views.RecordingOpenView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Toki.Controls">
@@ -44,7 +44,7 @@
                  widths, so 0:09 to 0:10 changed the timer's width and nudged everything beside it
                  once a second for the whole meeting. Tabular numerals are why clocks do not wobble. -->
             <TextBlock x:Name="Timer" Grid.Column="0" Text="0:00"
-                       FontFamily="{StaticResource UiFont}" FontSize="13" FontWeight="SemiBold"
+                       FontFamily="{StaticResource UiFont}" FontSize="13.5" FontWeight="SemiBold"
                        Typography.NumeralAlignment="Tabular"
                        Foreground="{DynamicResource Amber}" VerticalAlignment="Center"/>
 
@@ -60,7 +60,7 @@
             <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                 <!-- Mid-meeting door to the prep card + its scratchpad. Only when this meeting HAS a
                      card; it lives in the expanded form, where the frame has room for it. -->
-                <Button x:Name="PrepButton" Style="{StaticResource PillButton}" FontSize="11"
+                <Button x:Name="PrepButton" Style="{StaticResource PillButton}" FontSize="12"
                         MinHeight="24" Padding="10,0" Margin="0,0,8,0" Visibility="Collapsed"
                         Content="Prep card" Click="OnPrep"
                         ToolTip="Your prep notes for this meeting - jot things down while you talk"/>
@@ -91,7 +91,7 @@
                         Visibility="Collapsed" VerticalAlignment="Center">
                 <Ellipse x:Name="LiveDot" Width="6" Height="6" Fill="{DynamicResource Coral}"
                          VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBlock Text="Live" FontSize="9.5" FontWeight="SemiBold" VerticalAlignment="Center"
+                <TextBlock Text="Live" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
                            FontFamily="{StaticResource UiFont}" Foreground="{DynamicResource TextDim}"/>
             </StackPanel>
 

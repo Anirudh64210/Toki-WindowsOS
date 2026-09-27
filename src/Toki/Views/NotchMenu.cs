@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -31,7 +31,7 @@ static class NotchMenu
             {
                 Content = label, Cursor = System.Windows.Input.Cursors.Hand, Focusable = false,
                 HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 6, 14, 6),
-                FontFamily = (FontFamily)Application.Current.Resources["UiFont"], FontSize = 11.5,
+                FontFamily = (FontFamily)Application.Current.Resources["UiFont"], FontSize = 12,
                 Background = Brushes.Transparent,
                 Template = ItemTemplate(),
             };

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -33,7 +33,7 @@ public sealed class ThinkingDots : StackPanel
 
         var text = new TextBlock
         {
-            Text = caption, FontSize = 11, Margin = new Thickness(5, 0, 0, 0),
+            Text = caption, FontSize = 12, Margin = new Thickness(5, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
             FontFamily = (FontFamily)Application.Current.FindResource("UiFont"),
         };

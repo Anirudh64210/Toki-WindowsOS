@@ -22,13 +22,13 @@
         <TextBlock x:Name="Hint" IsHitTestVisible="False"
                    Text="Write, or press / for commands"
                    Foreground="{DynamicResource TextLow}" FontFamily="{StaticResource UiFont}"
-                   FontSize="13" Margin="4,0,0,0" VerticalAlignment="Top"/>
+                   FontSize="13.5" Margin="4,0,0,0" VerticalAlignment="Top"/>
 
         <RichTextBox x:Name="Editor"
                      Background="Transparent" BorderThickness="0" Padding="0"
                      Foreground="{DynamicResource Text}" CaretBrush="{DynamicResource Text}"
                      SelectionBrush="{DynamicResource Pink}" SelectionOpacity="0.3"
-                     FontFamily="{StaticResource UiFont}" FontSize="13"
+                     FontFamily="{StaticResource UiFont}" FontSize="13.5"
                      AcceptsReturn="True" AcceptsTab="True"
                      VerticalScrollBarVisibility="Auto"
                      controls:SmoothScroll.Enabled="True"

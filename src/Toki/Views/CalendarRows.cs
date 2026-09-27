@@ -98,13 +98,13 @@ static class CalendarRows
         date.Children.Add(new TextBlock
         {
             Text = e.StartLocal.Day.ToString(CultureInfo.InvariantCulture),
-            FontFamily = Ui, FontSize = 16, FontWeight = FontWeights.Black,
+            FontFamily = Ui, FontSize = 17, FontWeight = FontWeights.Black,
             Foreground = Br("TextHi"), HorizontalAlignment = HorizontalAlignment.Center,
         });
         date.Children.Add(new TextBlock
         {
             Text = e.StartLocal.ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant(),
-            FontFamily = Ui, FontSize = 8, FontWeight = FontWeights.Bold,
+            FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.Bold,
             Foreground = Br("TextMid"), HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 1, 0, 0),
         });
@@ -126,12 +126,12 @@ static class CalendarRows
         var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
-            Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Text = e.Summary, FontFamily = Ui, FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             Foreground = Br("TextHi"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
         mid.Children.Add(new TextBlock
         {
-            Text = TimeRange(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Medium,
+            Text = TimeRange(e), FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.Medium,
             Foreground = Br("TextLow"), Margin = new Thickness(0, 2, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
@@ -168,7 +168,7 @@ static class CalendarRows
         var soon = until.TotalMinutes <= 30 && until.TotalMinutes > -5;
         var label = new TextBlock
         {
-            Text = Countdown(e), FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.Bold,
+            Text = Countdown(e), FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.Bold,
             VerticalAlignment = VerticalAlignment.Center,
         };
         label.SetResourceReference(TextBlock.ForegroundProperty, soon ? "TextHi" : "TextMid");
@@ -178,7 +178,7 @@ static class CalendarRows
         {
             var joinText = new TextBlock
             {
-                Text = "Join", FontFamily = Ui, FontSize = 10, FontWeight = FontWeights.SemiBold,
+                Text = "Join", FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             };
             joinText.SetResourceReference(TextBlock.ForegroundProperty, "JoinPillText");
@@ -216,7 +216,7 @@ static class CalendarRows
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         row.Children.Add(new TextBlock
         {
-            Text = text, FontFamily = Ui, FontSize = 10, Foreground = Br("TextDim"),
+            Text = text, FontFamily = Ui, FontSize = 12, Foreground = Br("TextDim"),
             TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
         });
         var others = e.Attendees.Where(a => !a.IsSelf).ToList();
@@ -270,7 +270,7 @@ static class CalendarRows
         var mid = new StackPanel { Margin = new Thickness(9, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         mid.Children.Add(new TextBlock
         {
-            Text = e.Summary, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Text = e.Summary, FontFamily = Ui, FontSize = 13.5, FontWeight = FontWeights.SemiBold,
             Foreground = Br("Text"), TextTrimming = TextTrimming.CharacterEllipsis,
         });
         var sub = SubtitleText(e);
@@ -311,7 +311,7 @@ static class CalendarRows
     /// <summary>The amber "in N min" countdown that flanks Join on an imminent row.</summary>
     static TextBlock ImminentHint(CalEvent e, bool trailing = true) => new()
     {
-        Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5, FontWeight = FontWeights.SemiBold,
+        Text = RelativeTime(e), FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
         Foreground = Br("Amber"), VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(0, 0, trailing ? 8 : 0, 0),
     };
@@ -385,7 +385,7 @@ static class CalendarRows
         var restKey = danger ? "Danger" : "TextDim";
         var tb = new TextBlock
         {
-            Text = label, FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Text = label, FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
             Foreground = Br(restKey),
         };
         var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
@@ -402,7 +402,7 @@ static class CalendarRows
     {
         var tb = new TextBlock
         {
-            Text = "Copy link", FontFamily = Ui, FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Text = "Copy link", FontFamily = Ui, FontSize = 12, FontWeight = FontWeights.SemiBold,
             Foreground = Br("TextDim"),
         };
         var box = HitTarget.Wrap(tb, corner: 7, padX: 6, padY: 4);
@@ -432,7 +432,7 @@ static class CalendarRows
         var tb = new TextBlock
         {
             Text = "",   // Fluent: Copy
-            FontFamily = Icons, FontSize = 12, Foreground = Br("TextDim"),
+            FontFamily = Icons, FontSize = 13.5, Foreground = Br("TextDim"),
         };
         // A 12px glyph is a very small thing to aim at. The box around it is the button.
         var box = HitTarget.Wrap(tb, corner: 8, padX: 7, padY: 5, tooltip: "Copy Meet link");
@@ -490,7 +490,7 @@ static class CalendarRows
         }
         return new TextBlock
         {
-            Text = RelativeTime(e), FontFamily = Ui, FontSize = 10.5,
+            Text = RelativeTime(e), FontFamily = Ui, FontSize = 12,
             Foreground = Imminent(e) ? Br("Amber") : Br("TextDim"),
             FontWeight = Imminent(e) ? FontWeights.SemiBold : FontWeights.Normal,
             VerticalAlignment = VerticalAlignment.Center,
@@ -507,7 +507,7 @@ static class CalendarRows
             // owner called out as ugly yellow. The countdown carries the urgency; the button stays a
             // button. (2026-09-23)
             Style = (Style)Application.Current.Resources["WhiteButton"],
-            Content = "Join", Padding = new Thickness(12, 5, 12, 5), FontSize = 11,
+            Content = "Join", Padding = new Thickness(12, 5, 12, 5), FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
         };
         b.Click += (_, ev) => { ev.Handled = true; OpenUrl(e.MeetLink); App.State.ForceForDemo(State.PillState.Hidden); };

@@ -1069,6 +1069,33 @@
                             <Setter TargetName="Hl" Property="Background" Value="{DynamicResource PressOverlay}"/>
                             <Setter TargetName="Hl" Property="Opacity" Value="1"/>
                         </Trigger>
+                        <!-- CLOSE GOES RED ON HOVER, opt-in per button via Tag="danger" (owner,
+                             2026-09-27: "the x button for closing the library needs to have a red
+                             hover"). This supersedes my note of the same morning arguing it must not,
+                             on the grounds that CLAUDE.md reserves Apple system red for Stop. The
+                             reasoning was sound and the conclusion was not mine to draw: a red close
+                             affordance is the single most universal convention in Windows chrome,
+                             every user already reads it, and it appears only ON HOVER - it is never
+                             sitting on screen competing with a recording indicator. Red at REST
+                             stays reserved for Stop.
+                             White glyph, because #E81123 at full strength fails contrast with the
+                             dim ink that sits on it otherwise. -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="danger"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Hl" Property="Background" Value="#E81123"/>
+                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="#FFFFFF"/>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="danger"/>
+                                <Condition Property="IsPressed" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Hl" Property="Background" Value="#C50F1F"/>
+                            <Setter TargetName="Bd" Property="TextElement.Foreground" Value="#FFFFFF"/>
+                        </MultiTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

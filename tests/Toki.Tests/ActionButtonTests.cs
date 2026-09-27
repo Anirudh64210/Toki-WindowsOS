@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using Toki;
@@ -206,17 +206,26 @@ public sealed class ActionButtonTests
     // ── 7. the send disc's glyph sits on the disc's centre ──
 
     [Fact]
-    public void The_send_glyph_is_nudged_off_its_box_centre()
+    public void The_send_glyph_is_geometry_so_it_needs_no_nudge()
     {
-        // The plane carries its mass at the tail, so a box-centred one reads as sitting left of the
-        // disc's middle. It has to be a RENDER transform: a margin inside a centre-aligned
-        // ContentPresenter widens the content box and re-centres it, so a 1px margin moves the glyph
-        // half a pixel and layout rounding then eats it (measured in the render, it moved nothing).
+        // SUPERSEDES The_send_glyph_is_nudged_off_its_box_centre (2026-09-27). That test pinned a
+        // 1px TranslateTransform correcting the font glyph's uneven side bearings, and its reasoning
+        // was right about the cause: a glyph is centred INCLUDING whitespace that differs left and
+        // right, and a margin cannot fix it because a centre-aligned ContentPresenter just re-centres
+        // the widened box. What it got wrong is that a hand-measured constant was the answer. The
+        // owner still read the button as off-centre afterwards.
+        //
+        // A Path has no bearings: its bounding box IS the drawn shape, so Stretch=Uniform in a fixed
+        // box centres it exactly at every DPI with nothing to drift. So the invariant is no longer
+        // "the nudge is present", it is "there is nothing here that would NEED a nudge" - same
+        // reasoning the play triangle and the back chevron already follow.
         var xaml = Src("src", "Toki", "LibraryWindow.xaml");
         var send = xaml[xaml.IndexOf("x:Name=\"AskBtn\"", StringComparison.Ordinal)..];
         send = send[..send.IndexOf("</Button>", StringComparison.Ordinal)];
-        Assert.Contains("<TranslateTransform X=\"1\"/>", send);
-        Assert.DoesNotContain("Content=\"&#xE724;\"", send);
+        Assert.Contains("<Path", send);
+        Assert.Contains("Stretch=\"Uniform\"", send);
+        Assert.DoesNotContain("&#xE724;", send);              // no font glyph
+        Assert.DoesNotContain("TranslateTransform", send);    // and therefore no correction for one
     }
 
     // ── 8. the Library list never colours a row by its id ──

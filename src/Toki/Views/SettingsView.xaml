@@ -22,7 +22,7 @@
             <Button Style="{StaticResource IconButton}" Content="&#xE76B;" Click="OnBack"/>
             <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="Settings" Style="{StaticResource PanelTitle}"/>
-                <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="9.5"/>
+                <TextBlock Text="Toki 1.0" Style="{StaticResource Dim}" FontSize="12"/>
             </StackPanel>
             <!-- Global toggles, shown ONCE in the header: screen-recording visibility (ghost) + light/dark. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -91,7 +91,18 @@
                      This is NOT the 2026-08-06 regression the comment above warns about: that one hung
                      past the CARD's edges and lost its rounded box; this stops at the card's inner pad
                      and keeps radius 12. -->
-                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings" Padding="12,10">
+                <!-- A VISIBLE BUTTON AT REST, matching the Library button on Home (owner, 2026-09-27:
+                     "all other settings in the notch needs to have a hovered button look like library
+                     button does"). It was a bare label and a chevron on the plate: the hover fill
+                     existed and worked, but a control whose only affordance appears once you are
+                     already pointing at it is a control you have to discover by accident.
+                     ChipOnCard, not Chip: Chip is tuned against the Library window's Surface, which
+                     is far darker than the notch plate, and on the card it lands within a couple of
+                     points of its own background - the exact bug the owner found on NoSpeech, where
+                     "Okay" looked like a line of text. RowButton's hover overlay still fades in on
+                     top of this, so the row now has a resting state AND a hover state. -->
+                <Button Style="{StaticResource RowButton}" Click="OnOpenLibrarySettings" Padding="12,10"
+                        Background="{DynamicResource ChipOnCard}">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

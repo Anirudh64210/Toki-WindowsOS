@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -86,7 +86,7 @@ public static class SpeakerChips
 
         var box = new TextBox
         {
-            Text = seed, Width = 170, FontSize = 12.5, Height = 30,
+            Text = seed, Width = 170, FontSize = 13.5, Height = 30,
             VerticalContentAlignment = VerticalAlignment.Center,
             Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             Padding = new Thickness(8, 0, 8, 0),
@@ -108,7 +108,7 @@ public static class SpeakerChips
         var save = new Button
         {
             Style = (Style)Application.Current.FindResource("PillButton"),
-            Content = "Rename", FontSize = 11.5, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6),
+            Content = "Rename", FontSize = 12, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6),
         };
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10) };

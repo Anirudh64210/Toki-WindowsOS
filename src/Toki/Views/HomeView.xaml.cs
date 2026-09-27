@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Toki.Calendar;
@@ -123,7 +123,7 @@ public partial class HomeView : UserControl
         {
             ComingUp.Children.Add(new TextBlock
             {
-                Text = "Nothing coming up.", Style = (Style)FindResource("Dim"), FontSize = 11,
+                Text = "Nothing coming up.", Style = (Style)FindResource("Dim"), FontSize = 12,
                 Margin = new Thickness(2, 2, 0, 2),
             });
         }

@@ -1,4 +1,4 @@
-using Toki.Storage;
+﻿using Toki.Storage;
 using Toki.Transcription;
 
 namespace Toki.Llm;
@@ -68,7 +68,18 @@ public sealed class LlmService
             App.Log($"API notes unavailable: {why} - keeping heuristic notes");
             return null;
         }
-        if (s.NotesMode == NotesMode.HeuristicOnly) return null;
+        // SAY WHY. This returned null in silence, and every caller then reported a MODEL problem:
+        // WriteNotesAsync hands back null, the notes fall to the heuristic floor, and --llmtest
+        // prints "LLM returned no notes (model unavailable?)" - which sent me hunting a loading
+        // failure for a machine that was simply set to Heuristic (2026-09-27). The setting is a
+        // perfectly good answer; being unable to tell it apart from a broken model is not.
+        // Same rule as the heuristic-floor finding: a fallback good enough to ship is good enough
+        // to hide the failure that triggered it, so it has to be LOUD.
+        if (s.NotesMode == NotesMode.HeuristicOnly)
+        {
+            App.Log("notes mode is Heuristic - the model is not being asked (this is a setting, not a fault)");
+            return null;
+        }
         return EnsureLocal();
     }
 
@@ -162,7 +173,10 @@ public sealed class LlmService
         CancellationToken ct = default, NoteTemplate? force = null, string? about = null)
     {
         var llm = Active();
-        if (llm is null || !llm.Ready) return null;
+        // Active() logs its own reason for a null; this adds the one it cannot see - a model that
+        // resolved but is not Ready.
+        if (llm is null) return null;
+        if (!llm.Ready) { App.Log($"LLM not ready ({llm.GetType().Name}) - notes fall back to heuristic"); return null; }
         force ??= DefaultForced();   // honour the user's "always use X" default when no explicit override
         try { return await new LlmNoteWriter(llm).WriteAsync(transcript, ct, force, about); }
         catch (Exception ex) { App.Log($"LLM notes failed (non-fatal): {ex.Message}"); return null; }

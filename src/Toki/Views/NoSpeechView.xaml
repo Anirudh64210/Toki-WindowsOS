@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StackPanel Margin="16,12" VerticalAlignment="Center">
         <TextBlock Text="Nothing was said - nothing saved." Style="{StaticResource Body}"
-                   FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                   FontSize="13.5" FontWeight="SemiBold" HorizontalAlignment="Center"/>
         <TextBlock Text="Silent meetings never clutter your Library." Style="{StaticResource Dim}"
                    HorizontalAlignment="Center" Margin="0,3,0,0"/>
         <!-- ChipOnCard, not the default Chip: on the notch's plate the default lands within a few

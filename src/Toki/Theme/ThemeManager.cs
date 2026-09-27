@@ -232,9 +232,24 @@ public static class ThemeManager
         // the plate is the same sheet as the Library window rather than a separate putty.
         ("CardPlate",       Grad.Down,      "#F2313133 #F5272729", "#F2FCFCFB #F5F5F4F0"),
         ("CardPlateOpaque", Grad.Down,      "#FF313133 #FF272729", "#FFFCFCFB #FFF5F4F0"),
-        // THE RIM, brighter at the top (specular cue). In light it also separates a near-white
-        // card from a near-white app behind it, so it ends on a dark hairline.
-        ("CardRim",         Grad.Down,      "#33FFFFFF #26FFFFFF #1AFFFFFF", "#8CFFFFFF #3DFFFFFF #22000000"),
+        // A BOUNDARY THAT NEVER DISAPPEARS. Owner, 2026-09-27: "the whole fading boundaries from
+        // down up, like the lines and even the panel boundaries dissapearing when we go from bottom
+        // up is not good ... instead have a clean mellow easy on eyes boundaries that seperate
+        // content and promotes readability".
+        //
+        // This was a specular cue: brightest at the top, because light comes from above. That is the
+        // right idea for a glass card floating over a dark desktop, and it became wrong the moment
+        // the light theme's page turned near-white. The light value ran #8CFFFFFF (55% WHITE) at the
+        // top down to #22000000 (13% black) at the bottom - so on a #FCFCFB page the top of every
+        // panel edge was white on white, i.e. no edge at all, and the border only became visible as
+        // it travelled downward. Every card looked like it dissolved into the page.
+        //
+        // Now near-uniform in both themes: still a touch stronger at the top, so the surface keeps a
+        // direction and does not read as a flat outline, but never below the threshold of being
+        // seen. Light is a soft BLACK throughout (on #FCFCFB the top stop lands around #DBDBDB,
+        // which is the reference's own #DAD9D5 rule); dark stays white, lifted so the bottom of a
+        // card is as legible as its top.
+        ("CardRim",         Grad.Down,      "#38FFFFFF #30FFFFFF #2AFFFFFF", "#26000000 #22000000 #1F000000"),
         // THE SHEEN: a soft radial glow at the top centre. The light theme sits at ~75% of the
         // dark value - white on a white plate does almost nothing whatever the alpha.
         ("CardSheen",       Grad.RadialTop, "#14FFFFFF #00FFFFFF", "#0FFFFFFF #00FFFFFF"),
